@@ -252,12 +252,20 @@ def package_theme(pkg: Package) -> ThemeInfo:
 
 
 def template_theme(src: Path | str) -> ThemeInfo:
-    """Тема шаблона по файлу (пустая, если файл не читается)."""
+    """Тема шаблона по файлу (пустая, если файл не читается); кэш по файлу."""
+    key = file_key(src)
+    if key is not None and key in _THEMES:
+        return _THEMES[key]
     try:
-        return package_theme(Package(src))
+        theme = package_theme(Package(src))
     except Exception as e:  # noqa: BLE001
         log.warning("theme unreadable: %s", e)
-        return ThemeInfo()
+        theme = ThemeInfo()
+    if key is not None:
+        if len(_THEMES) > 32:
+            _THEMES.clear()
+        _THEMES[key] = theme
+    return theme
 
 
 # ============================================================================================ пары «текст — фон»
@@ -275,26 +283,53 @@ class TextPair:
 
 
 _PAIRS: dict[tuple, list[TextPair]] = {}
+_IRS: dict[tuple, object] = {}
+_THEMES: dict[tuple, ThemeInfo] = {}
+
+
+def file_key(src: Path | str) -> Optional[tuple]:
+    """(путь, время изменения, размер) — ключ кэшей по файлу шаблона; None — файла нет."""
+    p = Path(src)
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    return str(p.resolve()), st.st_mtime_ns, st.st_size
+
+
+def source_ir(src: Path | str):
+    """IR аудита для файла шаблона (рамки заполнителей — через макет и мастер, слои макета и мастера, фон, картинки),
+    кэш по файлу; None — не строится."""
+    key = file_key(src)
+    if key is None:
+        return None
+    if key not in _IRS:
+        try:
+            from verstka.audit.ir import build_deck_ir
+
+            _IRS[key] = build_deck_ir(Path(src), with_images=True)
+        except Exception as e:  # noqa: BLE001
+            log.warning("deck IR unavailable: %s", e)
+            _IRS[key] = None
+        while len(_IRS) > 8:
+            _IRS.pop(next(iter(_IRS)))
+    return _IRS[key]
 
 
 def text_pairs(src: Path | str, manifest: Optional[TemplateManifest] = None) -> list[TextPair]:
     """Пары «текст — фон» всех текстов образцов шаблона (как аудит `contrast_low`: фон — карточка, полоса макета,
     картинка или фон слайда; крупный текст — от 18 пт или полужирный от 14 пт). Кэш по файлу."""
-    p = Path(src)
-    try:
-        st = p.stat()
-    except OSError:
+    key = file_key(src)
+    if key is None:
         return []
-    key = (str(p.resolve()), st.st_mtime_ns, st.st_size)
     if key in _PAIRS:
         return _PAIRS[key]
     out: dict[tuple, TextPair] = {}
     try:
         from verstka.audit.checks.common import composite_hex, fill_alpha, ground_of, text_elements
-        from verstka.audit.ir import build_deck_ir
 
-        ir = build_deck_ir(p, with_images=True)
-        for s in ir.slides:
+        ir = source_ir(src)
+        for s in ir.slides if ir is not None else []:
             dark = getattr(s.family, "value", s.family) == "dark"
             role = "background.dark" if dark else "background.light"
             bg_slide = s.background_hex or (manifest.tokens.color_for(role) if manifest else None) or ("000000" if dark else "FFFFFF")
@@ -378,6 +413,18 @@ class ColorPlan:
         if t in ("dark", "grey", "light") and self.neutral_ref and lab_chroma(h) >= 4.0:
             return tinted_like(h, self.neutral_ref)
         return h
+
+    def map_strict(self, value: str) -> str:
+        """Как `map`, но насыщенный цвет вне палитры шаблона (стили таблиц: зелёная, коричневая шапка) тоже получает
+        цвет бренда — ближайший по тону из цветов диаграмм, своей светлоты."""
+        h = self.map(value)
+        if h != value.upper() or not self.enabled or not self.anchors or h in self.keep or tone(h) != "chromatic":
+            return h
+        plain = [c for c in self.chart_order if c not in self.brand_accents] or self.chart_order
+        if not plain:
+            return h
+        near = min(plain, key=lambda c: hue_dist(hue(c), hue(h)))
+        return at_lightness(near, lightness(h))
 
     def kept(self, h: str, reason: str, target: Optional[str] = None) -> None:
         was = self.table.pop(h, None)
@@ -518,15 +565,15 @@ def plan_colors(
                 plan.table.setdefault(dk1, b_text)  # слот текста темы — тоже текст
         else:
             plan.text_pair = (t_text, t_text)
-            plan.kept(t_text, "polarity")
+            plan.kept(t_text, "polarity", b_text)
     if t_bg and b_bg:
         text_now = plan.table.get(t_text or "", t_text or "000000")
         if (lightness(t_bg) > 50) != (lightness(b_bg) > 50):
             plan.background_pair = (t_bg, t_bg)
-            plan.kept(t_bg, "polarity")
+            plan.kept(t_bg, "polarity", b_bg)
         elif contrast_ratio(text_now, b_bg) < 3.0:
             plan.background_pair = (t_bg, t_bg)
-            plan.kept(t_bg, "contrast")
+            plan.kept(t_bg, "contrast", b_bg)
         else:
             plan.table[t_bg] = b_bg
             plan.background_pair = (t_bg, b_bg)
@@ -568,7 +615,7 @@ def plan_colors(
             if a not in plan.table:
                 plan.kept(a, "no_brand_colors")
     else:
-        _assign_accents(plan, manifest, brand, chrom)
+        _assign_accents(plan, manifest, brand, chrom, {theme.slots[k] for k in ("hlink", "folHlink") if k in theme.slots})
         for s, b in plan.stock_slots.items():
             plan.table.setdefault(theme.slots[s], b)
     _guard_neutrals(plan, manifest, theme)
@@ -576,6 +623,9 @@ def plan_colors(
         _guard_contrast(plan, pairs)
     for h in list(plan.kept_reason):
         role = "Текст" if plan.text_pair and plan.text_pair[0] == h else ("Фон" if plan.background_pair and plan.background_pair[0] == h else None)
+        target = plan.kept_target.get(h)
+        if target and delta_e(h, target) <= NEUTRAL_DE:
+            continue  # для человека это тот же цвет — предупреждать не о чем
         if role and plan.kept_reason[h] in ("polarity", "guard", "contrast"):
             if h in plan.keep:
                 plan.warnings.append(f"{role} шаблона #{h} оставлен: {kept_reason_text(plan, h)}.")
@@ -585,7 +635,7 @@ def plan_colors(
     return plan
 
 
-def _assign_accents(plan: ColorPlan, manifest: TemplateManifest, brand: BrandSpec, chrom: list[tuple[str, str]]) -> None:
+def _assign_accents(plan: ColorPlan, manifest: TemplateManifest, brand: BrandSpec, chrom: list[tuple[str, str]], links: set[str] = frozenset()) -> None:
     by_hex = dict(chrom)
     primary = _brand_hex(brand, "primary")
     if primary not in by_hex:
@@ -600,8 +650,9 @@ def _assign_accents(plan: ColorPlan, manifest: TemplateManifest, brand: BrandSpe
             b = a
         elif twin is not None:
             b = plan.brand_of[twin]  # тот же цвет шаблона, записанный иначе, — тот же цвет бренда
-        elif i == 0 or ground:
-            b = primary  # главный цвет и цвета фона — основной цвет бренда (тёмный фон — его тёмный оттенок)
+        elif i == 0 or ground or a in links:
+            # главный цвет, цвета фона и ссылки — основной цвет бренда (тёмный фон — его тёмный оттенок)
+            b = primary
         else:
             d = {h: hue_dist(hue(a), hue(h)) for h, _ in chrom}
             near = [h for h in plain if d[h] <= 60]
@@ -611,8 +662,12 @@ def _assign_accents(plan: ColorPlan, manifest: TemplateManifest, brand: BrandSpe
                 near += [h for h, r in chrom if r == "accent" and d[h] <= 30 and abs(lightness(a) - lightness(h)) <= 20]
             if near:
                 b = min(near, key=lambda h: (d[h] + 40.0 * uses[h] + (10.0 if by_hex[h] == "accent" else 0.0), order.index(h) if h in order else 9))
+            elif lightness(a) < 45:
+                # тёмное без близкого тона (фиолетовые карточки) — тёмный оттенок основного: одна семья цветов,
+                # а не бирюза из затемнённого голубого
+                b = primary
             else:
-                b = min(order, key=lambda h: (uses[h], order.index(h)))
+                b = min(order, key=lambda h: (abs(lightness(h) - lightness(a)), order.index(h)))  # ближайший по светлоте
         uses[b] += 1
         plan.brand_of[a] = b
         final = b

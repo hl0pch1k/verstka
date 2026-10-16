@@ -396,18 +396,23 @@ def test_no_template_logo_brand_rule_adds_logo(tmp_path, fonts_here):
     assert "Логотип Облако" not in _all(out2, r"ppt/slideLayouts/.*\.xml$")
 
 
-def test_added_logo_skips_covered_corner(tmp_path, fonts_here):
-    """Угол занят содержимым образцов шаблона (логотип макета лёг бы под него) — логотип не ставится, с объяснением."""
+def test_added_logo_takes_one_fallback_corner(tmp_path, fonts_here):
+    """Угол из брендбука занят содержимым у всех образцов — логотип встаёт в одно запасное место для всего шаблона
+    (тот же край, другая сторона), ни с чем не сталкиваясь, и это сказано словами."""
     src = build_template(tmp_path, logo=False)
     prs = Presentation(str(src))
     for s in prs.slides:
-        _card(s, int(W * 0.7), "1F6FEB").top = Emu(int(H * 0.7))
+        card = _card(s, int(W * 0.5), "1F6FEB")  # вся правая половина низа занята
+        card.top, card.width, card.height = Emu(int(H * 0.62)), Emu(int(W * 0.48)), Emu(int(H * 0.36))
     prs.save(src)
     m = _analyze(src, tmp_path / "ws")
-    res = apply_brand(src, tmp_path / "out.pptx", _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
-    assert res.logos_added == 0
-    assert any("нет свободного места" in w and "2 слайда" in w for w in res.warnings)  # содержательных образцов — два
-    assert "Логотип Облако" not in _all(tmp_path / "out.pptx", r"ppt/(slides|slideLayouts)/.*\.xml$")
+    out = tmp_path / "out.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1 and res.logo_covered == res.logo_samples
+    assert any("соседнем углу" in w for w in res.warnings)
+    boxes = _logo_boxes(out)
+    assert {round(x / W, 2) for _, (x, _y, _cx, _cy) in boxes} and all(x < W * 0.5 for _, (x, _y, _cx, _cy) in boxes)
+    assert _ir_collisions(out) == []
 
 
 def test_added_logo_goes_over_background_pictures(tmp_path, fonts_here):
@@ -428,7 +433,8 @@ def test_added_logo_goes_over_background_pictures(tmp_path, fonts_here):
     assert res.logos_added >= 1
     slides = _parts(out, r"ppt/slides/slide\d+\.xml$")
     assert any("Логотип Облако" in x for x in slides.values())
-    assert "Логотип Облако" not in _all(out, r"ppt/slideLayouts/.*\.xml$")
+    # на макет образцов логотип не лёг (он оказался бы под фоновой картинкой слайдов)
+    assert "Логотип Облако" not in _parts(out, r"ppt/slideLayouts/slideLayout7\.xml$")["ppt/slideLayouts/slideLayout7.xml"]
 
 
 # ---------------------------------------------------------------------------------------------- приоритет
@@ -787,7 +793,7 @@ def test_white_text_on_purple_card_stays_readable(tmp_path, fonts_missing):
     out = tmp_path / "purple-brand.pptx"
     res = apply_brand(src, out, _vk_cloud(), manifest=m, brand_dir=BRAND_EXAMPLE)
     card = res.colors["#753A93"].lstrip("#")
-    assert pal.hue_dist(pal.hue(card), 212) <= 15
+    assert pal.hue_dist(pal.hue(card), pal.hue("0077FF")) <= 8  # тёмный оттенок основного, не бирюза
     assert contrast_ratio("FFFFFF", card) >= 4.5
 
 
@@ -802,6 +808,20 @@ def test_link_on_light_card_stays_readable(tmp_path, fonts_missing):
     link = res.colors.get("#0563C1", "#0563C1").lstrip("#")
     ground = res.colors.get("#EEF2F7", "#EEF2F7").lstrip("#")
     assert contrast_ratio(link, ground) >= 4.5
+
+
+def _slide_logo_media(pptx: Path) -> list[str]:
+    """Картинки логотипов бренда на самих слайдах (не на макетах)."""
+    out = []
+    with zipfile.ZipFile(pptx) as z:
+        for n in z.namelist():
+            if re.match(r"ppt/slides/slide\d+\.xml$", n):
+                xml = z.read(n).decode("utf-8")
+                rels = z.read(n.replace("slides/", "slides/_rels/") + ".rels").decode("utf-8")
+                for m in re.finditer(r'name="Логотип[^"]*".*?r:embed="([^"]+)"', xml, re.S):
+                    t = re.search(rf'Id="{m.group(1)}"[^>]*Target="([^"]+)"', rels) or re.search(rf'Target="([^"]+)"[^>]*Id="{m.group(1)}"', rels)
+                    out.append(t.group(1))
+    return out
 
 
 def _logo_boxes(pptx: Path) -> list[tuple[str, tuple[int, int, int, int]]]:
@@ -819,12 +839,14 @@ def test_added_logo_avoids_footer_text(tmp_path, fonts_here):
     m = _analyze(src, tmp_path / "ws")
     out = tmp_path / "foot-brand.pptx"
     res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
-    foot = (int(W * 0.84), int(H * 0.9), int(W * 0.12), int(H * 0.06))
-    boxes = _logo_boxes(out)
-    assert boxes or any("нет свободного места" in w for w in res.warnings)
-    for _, (x, y, cx, cy) in boxes:
-        assert not (x < foot[0] + foot[2] and foot[0] < x + cx and y < foot[1] + foot[3] and foot[1] < y + cy), "логотип на номере страницы"
-        assert y > H * 0.75 and x > W * 0.5  # у того же края и угла
+    assert res.logo_covered >= 1 or any("нет свободного места" in w for w in res.warnings)
+    assert _ir_collisions(out) == []  # в том числе с номером страницы
+    from verstka.audit.ir import build_deck_ir
+
+    for s in build_deck_ir(out).slides:
+        for e in list(s.elements) + list(s.template_elements):
+            if (e.name or "").startswith("Логотип"):
+                assert e.bbox.y > H * 0.75 and e.bbox.x > W * 0.5  # у того же края и угла, рядом с номером
 
 
 def test_added_logo_variant_by_real_ground(tmp_path, fonts_here):
@@ -834,7 +856,7 @@ def test_added_logo_variant_by_real_ground(tmp_path, fonts_here):
     out = tmp_path / "darkpic-brand.pptx"
     res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
     assert res.logos_added >= 1
-    media = [n for n in zipfile.ZipFile(out).namelist() if n.startswith("ppt/media/brand-logo-")]
+    media = _slide_logo_media(out)
     assert media and all("white" in n for n in media)
 
 
@@ -874,7 +896,8 @@ def test_theme_object_defaults_and_table_styles_rewritten(synthetic, fonts_here,
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
         'def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"><a:tblStyle styleId="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}" styleName="Brand">'
         '<a:wholeTbl><a:tcTxStyle><a:font><a:latin typeface="Georgia"/></a:font><a:srgbClr val="1F2937"/></a:tcTxStyle>'
-        '<a:tcStyle><a:fill><a:solidFill><a:srgbClr val="1F6FEB"/></a:solidFill></a:fill></a:tcStyle></a:wholeTbl></a:tblStyle></a:tblStyleLst>'
+        '<a:tcStyle><a:fill><a:solidFill><a:srgbClr val="1F6FEB"/></a:solidFill></a:fill></a:tcStyle></a:wholeTbl>'
+        '<a:firstRow><a:tcStyle><a:fill><a:solidFill><a:srgbClr val="5AC831"/></a:solidFill></a:fill></a:tcStyle></a:firstRow></a:tblStyle></a:tblStyleLst>'
     )
     _zip_put(src, {"ppt/theme/theme1.xml": theme.encode("utf-8"), "ppt/tableStyles.xml": styles.encode("utf-8")})
     out = tmp_path / "defaults.pptx"
@@ -884,6 +907,10 @@ def test_theme_object_defaults_and_table_styles_rewritten(synthetic, fonts_here,
     assert 'val="0077FF"' in od and 'typeface="Brand Text"' in od
     ts = _parts(out, r"ppt/tableStyles\.xml$")["ppt/tableStyles.xml"]
     assert 'val="0077FF"' in ts and 'val="0B1220"' in ts and 'typeface="Brand Text"' in ts
+    # цвет стиля таблиц вне палитры шаблона (зелёная шапка) — тоже цвет бренда, своей светлоты
+    assert "5AC831" not in ts
+    green = re.search(r'<a:firstRow>.*?srgbClr val="([0-9A-F]{6})"', ts, re.S).group(1)
+    assert abs(pal.lightness(green) - pal.lightness("5AC831")) < 2 and min(pal.hue_dist(pal.hue(green), pal.hue(b)) for b in ("0077FF", "2787F5", "00C2FF")) <= 8
 
 
 def test_image_probe_cache_keyed_by_hash(synthetic):
@@ -908,3 +935,299 @@ def test_conflicts_module_uses_public_api_only():
     tree = ast.parse((ROOT / "verstka" / "brand" / "conflicts.py").read_text(encoding="utf-8"))
     private = [a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("verstka.brand") for a in n.names if a.name.startswith("_")]
     assert private == []
+
+
+# ============================================================================================== правки после ревью, круг 2
+# Оракул столкновений — независимый от `verstka.brand.logos`: IR аудита (рамки заполнителей из макета и мастера, слои
+# макета и мастера), как `collide_ir.py` ревьюера.
+
+
+def _xml_lines(pptx: Path, part: str) -> list[tuple[float, float, float, float]]:
+    """Линии нулевой толщины и соединители части (IR аудита их не видит): рамки (x, y, w, h) с допуском."""
+    with zipfile.ZipFile(pptx) as z:
+        try:
+            xml = z.read(part).decode("utf-8")
+        except KeyError:
+            return []
+    out = []
+    for m in re.finditer(r"<p:(?:cxnSp|sp)>(.*?)</p:(?:cxnSp|sp)>", xml, re.S):
+        body = m.group(1)
+        if "<p:ph" in body or "grpSp" in body:
+            continue
+        x = re.search(r'<a:off x="(-?\d+)" y="(-?\d+)"/><a:ext cx="(\d+)" cy="(\d+)"/>', body)
+        if not x or "<a:ln" not in body:
+            continue
+        bx, by, bw, bh = (int(v) for v in x.groups())
+        if bw == 0 or bh == 0 or 'prst="line"' in body or m.group(0).startswith("<p:cxnSp"):
+            t = W * 0.004
+            out.append((bx - t, by - t, bw + 2 * t, bh + 2 * t))
+    return out
+
+
+def _ir_collisions(pptx: Path) -> list[tuple]:
+    from verstka.audit.ir import build_deck_ir
+
+    ir = build_deck_ir(pptx, with_images=True)
+    sw, sh = ir.slide_w, ir.slide_h
+    hits = []
+    with zipfile.ZipFile(pptx) as z:
+        names = set(z.namelist())
+        master_of = {}
+        for n in names:
+            if re.match(r"ppt/slideLayouts/slideLayout\d+\.xml$", n):
+                rel = z.read(n.replace("slideLayouts/", "slideLayouts/_rels/") + ".rels").decode("utf-8")
+                mm = re.search(r'Target="\.\./slideMasters/(slideMaster\d+\.xml)"', rel)
+                master_of[n] = "ppt/slideMasters/" + mm.group(1) if mm else None
+    for s in ir.slides:
+        if s.layout_part:
+            for lx, ly, lw, lh in _xml_lines(pptx, s.layout_part) + (_xml_lines(pptx, master_of.get(s.layout_part)) if master_of.get(s.layout_part) else []):
+                for e in list(s.elements) + list(s.template_elements):
+                    if (e.name or "").startswith("Логотип") and min(e.bbox.x + e.bbox.w, lx + lw) - max(e.bbox.x, lx) > 0 and min(e.bbox.y + e.bbox.h, ly + lh) - max(e.bbox.y, ly) > 0:
+                        hits.append((s.index, "line", "layout/master", "", ""))
+        allel = list(s.elements) + list(s.template_elements)
+        for lg_el in [e for e in allel if (e.name or "").startswith("Логотип")]:
+            la = lg_el.bbox.w * lg_el.bbox.h or 1
+            for e in allel:
+                if e is lg_el or (e.name or "").startswith("Логотип"):
+                    continue
+                ix = max(0, min(lg_el.bbox.x + lg_el.bbox.w, e.bbox.x + e.bbox.w) - max(lg_el.bbox.x, e.bbox.x))
+                iy = max(0, min(lg_el.bbox.y + lg_el.bbox.h, e.bbox.y + e.bbox.h) - max(lg_el.bbox.y, e.bbox.y))
+                if ix * iy <= 0.03 * la:
+                    continue
+                if e.type == "shape" and e.line_hex and not e.fill_hex and e.geometry != "custom":
+                    # рамка-контур (и во весь слайд): столкновение — только с её краями
+                    t = 0.004 * sw
+                    x, y, w, h = e.bbox.x, e.bbox.y, e.bbox.w, e.bbox.h
+                    lx, ly, lw, lh = lg_el.bbox.x, lg_el.bbox.y, lg_el.bbox.w, lg_el.bbox.h
+                    crosses = any(
+                        min(lx + lw, ex + ew) - max(lx, ex) > 0 and min(ly + lh, ey + eh) - max(ly, ey) > 0
+                        for ex, ey, ew, eh in ((x - t, y - t, w + 2 * t, 2 * t), (x - t, y + h - t, w + 2 * t, 2 * t), (x - t, y - t, 2 * t, h + 2 * t), (x + w - t, y - t, 2 * t, h + 2 * t))
+                    )
+                    if crosses:
+                        hits.append((s.index, "frame-edge", e.source, e.name, ""))
+                    continue
+                if e.bbox.w * e.bbox.h >= 0.85 * sw * sh:
+                    continue  # фон слайда
+                if e.type == "shape" and not e.fill_hex and not e.line_hex:
+                    continue  # пустая рамка
+                hits.append((s.index, e.type, e.source, e.name, e.text[:20]))
+    return hits
+
+
+def _layout_with_low_body(prs) -> object:
+    """Макет «Заголовок и объект» с рамкой текста до самого низа и правого края: заполнители слайдов её наследуют."""
+    lay = prs.slide_layouts[1]
+    body = lay.placeholders[1]
+    body.left, body.top, body.width, body.height = Emu(int(W * 0.05)), Emu(int(H * 0.25)), Emu(int(W * 0.92)), Emu(int(H * 0.72))
+    return lay
+
+
+def test_inherited_placeholder_frames_are_obstacles(tmp_path, fonts_here):
+    """Заполнитель слайда без своей рамки (рамка — у макета) занимает низ слайда: логотип не встаёт на него — ни по
+    проверке IR, ни на макете, куда ляжет содержимое собранных слайдов."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    lay = _layout_with_low_body(prs)
+    for i in range(3):
+        s = prs.slides.add_slide(lay)
+        s.shapes.title.text = f"Итоги квартала {i + 1}"
+        s.placeholders[1].text = "Выручка выросла\nКлиентов стало больше\nСредний чек вырос"
+        assert s.placeholders[1]._element.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}xfrm") is None
+    src = tmp_path / "inherit.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "inherit-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1 and _ir_collisions(out) == []
+    # рамка текста отступила от логотипа (охранное поле), но не больше чем на 30 %: содержимое собранных слайдов
+    # туда не зайдёт
+    from verstka.audit.ir import build_deck_ir
+
+    for s in build_deck_ir(out).slides:
+        body = next(e for e in s.elements if e.is_placeholder and e.ph_type in ("body", "obj"))
+        assert body.bbox.h >= 0.7 * H * 0.72 - 1 and body.bbox.w >= 0.75 * W * 0.92 - 1
+
+
+def test_stroke_only_arrow_and_number_circle_are_obstacles(tmp_path, fonts_here):
+    """Стрелка-контур без заливки (произвольная фигура) и кружок с номером в правом нижнем углу — препятствия."""
+    src = build_custom(tmp_path, "arrow", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF"), ("DCE8FD", "1F2937"), ("1F6FEB", "FFFFFF")])
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        ff = s.shapes.build_freeform(int(W * 0.70), int(H * 0.93), scale=1.0)
+        ff.add_line_segments([(int(W * 0.97), int(H * 0.93)), (int(W * 0.95), int(H * 0.91))], close=False)
+        arrow = ff.convert_to_shape()
+        arrow.fill.background()
+        arrow.line.color.rgb = RGBColor.from_string("1F2937")
+        circle = s.shapes.add_shape(MSO_SHAPE.OVAL, Emu(int(W * 0.94)), Emu(int(H * 0.86)), Emu(int(H * 0.06)), Emu(int(H * 0.06)))
+        circle.fill.solid()
+        circle.fill.fore_color.rgb = RGBColor.from_string("1F6FEB")
+        circle.text_frame.text = "5"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "arrow-brand.pptx"
+    apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert _ir_collisions(out) == []
+
+
+def _set_slide_bg(slide, xml_inner: str) -> None:
+    from lxml import etree as _et
+
+    csld = slide._element.find("{http://schemas.openxmlformats.org/presentationml/2006/main}cSld")
+    old = csld.find("{http://schemas.openxmlformats.org/presentationml/2006/main}bg")
+    if old is not None:
+        csld.remove(old)
+    bg = _et.fromstring(
+        '<p:bg xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        f'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:bgPr>{xml_inner}<a:effectLst/></p:bgPr></p:bg>'
+    )
+    csld.insert(0, bg)
+
+
+def test_photo_background_gets_white_logo(tmp_path, fonts_here):
+    """Фон слайда — тёмное фото через `p:bg` (как у ЛЦТ): логотип бренда — белый, по настоящим точкам под ним."""
+    photo = tmp_path / "src" / "purple.png"
+    photo.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 180), (60, 20, 100)).save(photo)
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _, rid = s.part.get_or_add_image_part(str(photo))
+        _set_slide_bg(s, f'<a:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>')
+        _text(s, f"Итоги {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "FFFFFF")
+        _text(s, "Выручка выросла на 23 %", int(W * 0.05), int(H * 0.3), int(W * 0.5), int(H * 0.1), "Verdana", 16, "FFFFFF")
+    src = tmp_path / "photo.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "photo-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1
+    media = _slide_logo_media(out) + [n for n in re.findall(r'Target="\.\./media/(brand-logo-[^"]+)"', _all(out, r"ppt/slideLayouts/_rels/slideLayout7\.xml\.rels$"))]
+    assert media and all("white" in n for n in media)
+
+
+def test_light_tint_of_theme_colour_gets_dark_logo(tmp_path, fonts_here):
+    """Фон — цвет темы с модификаторами (accent6, lumMod 20 % + lumOff 80 % — почти белый, как у «Классики»): логотип
+    бренда — основной (тёмный), а не белый на светлом."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _set_slide_bg(s, '<a:solidFill><a:schemeClr val="accent6"><a:lumMod val="20000"/><a:lumOff val="80000"/></a:schemeClr></a:solidFill>')
+        _text(s, f"Итоги {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "1F2937")
+        _text(s, "Выручка выросла на 23 %", int(W * 0.05), int(H * 0.3), int(W * 0.5), int(H * 0.1), "Verdana", 16, "1F2937")
+    src = tmp_path / "tint.pptx"
+    prs.save(src)
+    _set_theme(src, {"accent6": "1F4E79"})
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "tint-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1
+    media = [n for n in zipfile.ZipFile(out).namelist() if n.startswith("ppt/media/brand-logo-")]
+    assert media and all("primary" in n for n in media)
+
+
+def test_dark_cards_and_links_stay_in_primary_family(tmp_path, fonts_missing):
+    """Тёмные фиолетовые карточки и ссылка без близкого тона у бренда — тёмные оттенки основного цвета, одна семья,
+    а не бирюза из затемнённого голубого (ЛЦТ, слайд 3)."""
+    src = build_custom(tmp_path, "violet", bg="F3F4F5", text="1C1D22", cards=[("753A93", "FFFFFF"), ("520977", "FFFFFF")],
+                       theme={"accent1": "FF0053", "accent2": "FFD6E3", "accent3": "753A93", "accent4": "520977", "accent5": "8A83D1",
+                              "accent6": "2D1451", "hlink": "0000EE"})
+    m = _analyze(src, tmp_path / "ws")
+    plan = ap.brand_plan(src, m, _vk_cloud()).colors
+    for h in ("753A93", "520977", "0000EE"):
+        got = plan.map(h)
+        assert pal.hue_dist(pal.hue(got), pal.hue("0077FF")) <= 8, (h, got)
+
+
+def test_font_swap_keeps_one_line_in_its_frame(tmp_path, fonts_missing):
+    """Большая цифра, которая помещалась в свою рамку одной строкой, после смены шрифта тоже помещается: кегль
+    уменьшается в пределах 20 %, а не переносится («16M» у MyBrand)."""
+    from verstka.rendering.fonts import text_width_pt
+
+    old = text_width_pt("118M", "Trebuchet MS", 82.5)
+    new = text_width_pt("118M", "Play", 82.5)
+    if new <= old * 1.02:
+        pytest.skip("замена не шире шрифта шаблона на этой машине")
+    inner = (old + new) / 2
+    src = build_custom(tmp_path, "num", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        tb = _text(s, "118M", int(W * 0.5), int(H * 0.3), int(inner * 12700 + 2 * 91440), int(H * 0.3), "Trebuchet MS", 82.5, "1F2937")
+        tb.name = "Число"
+        tb.text_frame.word_wrap = True
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "num-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.refit >= 1
+    xml = _parts(out, r"ppt/slides/slide1\.xml$")["ppt/slides/slide1.xml"]
+    rpr = re.search(r'name="Число".*?<a:rPr[^>]*sz="(\d+)"[^>]*>.*?typeface="([^"]+)"', xml, re.S)
+    size, family = int(rpr.group(1)) / 100, rpr.group(2)
+    assert text_width_pt("118M", family, size) <= inner + 0.5
+
+
+def test_second_brand_conflicts_call_uses_caches(tmp_path, fonts_missing, monkeypatch):
+    """Второй вызов расхождений на том же файле не перечитывает пакет (тема, логотипы, пары «текст — фон» — из кэша)."""
+    src = build_custom(tmp_path, "cache", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], logos=[("Logo ACME", 0.04)])
+    m = _analyze(src, tmp_path / "ws")
+    brand_conflicts(m, _vk_cloud(), source=src, brand_dir=BRAND_EXAMPLE)
+    made = []
+    real = ap.Package
+
+    class Counting(real):
+        def __init__(self, *a, **k):
+            made.append(1)
+            super().__init__(*a, **k)
+
+    monkeypatch.setattr(lg, "Package", Counting)
+    monkeypatch.setattr(pal, "Package", Counting)
+    import time
+
+    t = time.time()
+    brand_conflicts(m, _vk_cloud(), source=src, brand_dir=BRAND_EXAMPLE)
+    assert made == [] and time.time() - t < 0.5
+
+
+def test_near_identical_kept_background_makes_no_warning(synthetic, fonts_here, monkeypatch):
+    """Фон шаблона оставлен ради контраста, но он для человека тот же, что фон бренда (ΔE ≤ 15), — предупреждения нет."""
+    src, m, _ = synthetic
+    monkeypatch.setattr(pal, "contrast_ratio", lambda a, b: 2.0)
+    plan = plan_colors(m, _brand(), "brand", pal.template_theme(src))
+    assert "F7F7F7" in plan.keep and plan.kept_reason["F7F7F7"] == "contrast"
+    assert not any("F7F7F7" in w for w in plan.warnings)
+
+
+def test_logo_does_not_cross_a_frame_edge(tmp_path, fonts_here):
+    """Рамка-контур во весь слайд (как у «Классики»): логотип не встаёт на её край — внутри рамки или вне её."""
+    src = build_custom(tmp_path, "frame", bg="F8F4EC", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        fr = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Emu(int(W * 0.015)), Emu(int(H * 0.02)), Emu(int(W * 0.97)), Emu(int(H * 0.93)))
+        fr.fill.background()
+        fr.line.color.rgb = RGBColor.from_string("1F2937")
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "frame-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1
+    assert _ir_collisions(out) == []
+
+
+def test_logo_does_not_sit_on_a_layout_line(tmp_path, fonts_here):
+    """Линия нулевой толщины на макете поперёк низа слайда (линейка «Классики»; IR её не видит) — логотип не на ней."""
+    src = build_custom(tmp_path, "rule", bg="F8F4EC", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    with zipfile.ZipFile(src) as z:
+        lay = z.read("ppt/slideLayouts/slideLayout7.xml").decode("utf-8")
+    line = (
+        '<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="90" name="Линейка"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm>'
+        f'<a:off x="0" y="{int(H * 0.93)}"/><a:ext cx="{W}" cy="0"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom>'
+        '<a:ln w="12700"><a:solidFill><a:srgbClr val="1F2937"/></a:solidFill></a:ln></p:spPr></p:cxnSp>'
+    )
+    lay = lay.replace("</p:spTree>", line + "</p:spTree>", 1)
+    _zip_put(src, {"ppt/slideLayouts/slideLayout7.xml": lay.encode("utf-8")})
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "rule-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1
+    assert _ir_collisions(out) == []

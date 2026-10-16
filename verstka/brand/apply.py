@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "2"
+APPLY_VERSION = "3"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -193,7 +193,7 @@ def font_result(font: BrandFont, written: str, fallback: bool) -> str:
 # ============================================================================================ цвета и шрифты в частях
 
 
-def _recolor(root: etree._Element, plan: ColorPlan, counter: Counter) -> bool:
+def _recolor(root: etree._Element, plan: ColorPlan, counter: Counter, strict: bool = False) -> bool:
     # картинки не перекрашиваются (элементы держатся в списке: lxml сохраняет их обёртки, пока на них есть ссылки)
     inside = [c for b in root.iter(f"{{{A}}}blip", f"{{{A}}}clrScheme") for c in b.iter(SRGB)]
     skip = set(inside)
@@ -202,7 +202,7 @@ def _recolor(root: etree._Element, plan: ColorPlan, counter: Counter) -> bool:
         if el in skip:
             continue
         v = (el.get("val") or "").upper()
-        nv = plan.map(v)
+        nv = plan.map_strict(v) if strict else plan.map(v)
         if nv != v:
             el.set("val", nv)
             counter[(v, nv)] += 1
@@ -286,19 +286,73 @@ class _Roles:
         return "body"
 
 
-def _refont(root: etree._Element, fp: FontPlan, counter: Counter) -> bool:
-    """Шрифты по роли текста; начертание (полужирный, курсив) — как у шаблона."""
+def _refont(root: etree._Element, fp: FontPlan, counter: Counter, swapped: Optional[dict] = None) -> bool:
+    """Шрифты по роли текста; начертание (полужирный, курсив) — как у шаблона. `swapped` — свойства текста, где шрифт
+    сменился, → прежний шрифт (для проверки, помещается ли строка)."""
     roles = _Roles(fp)
     changed = False
     for lat in list(root.iter(_LATIN)):
         if any(a.tag == f"{{{A}}}fontScheme" for a in lat.iterancestors()):
             continue  # шрифты темы — `_retheme`
-        new = fp.target(lat.get("typeface"), roles.role(lat))
+        old = lat.get("typeface")
+        new = fp.target(old, roles.role(lat))
         if new:
-            counter[(lat.get("typeface"), new)] += 1
+            counter[(old, new)] += 1
             lat.set("typeface", new)
             changed = True
+            if swapped is not None and lat.getparent() is not None:
+                swapped[lat.getparent()] = old
     return changed
+
+
+_SLIDE_LIKE_RE = re.compile(r"^ppt/(?:slides/slide\d+|slideLayouts/slideLayout\d+)\.xml$")
+
+
+def _refit(root: etree._Element, swapped: dict, res: "ApplyResult") -> None:
+    """Строка образца шаблона, которая помещалась в свою рамку, после смены семейства тоже помещается: кегль
+    уменьшается (не больше чем на 20 %), иначе у этой строки остаётся шрифт шаблона («16M» не переносится)."""
+    from verstka.rendering.fonts import text_width_pt
+
+    for sp in root.iter(f"{{{P}}}sp"):
+        xfrm = sp.find(f"{{{P}}}spPr/{{{A}}}xfrm")
+        body = sp.find(f"{{{P}}}txBody")
+        ext = xfrm.find(f"{{{A}}}ext") if xfrm is not None else None
+        if body is None or ext is None:
+            continue
+        bpr = body.find(f"{{{A}}}bodyPr")
+        if bpr is not None and bpr.get("wrap") == "none":
+            continue
+        ins = lambda k, d=91440: int(bpr.get(k)) if bpr is not None and (bpr.get(k) or "").lstrip("-").isdigit() else d  # noqa: E731
+        inner = (int(ext.get("cx", "0")) - ins("lIns") - ins("rIns")) / 12700.0
+        if inner <= 0:
+            continue
+        for par in body.iter(f"{{{A}}}p"):
+            runs = [r for r in par.iter(f"{{{A}}}r") if (r.findtext(f"{{{A}}}t") or "")]
+            rprs = [r.find(f"{{{A}}}rPr") for r in runs]
+            if not runs or not any(rp is not None and rp in swapped for rp in rprs):
+                continue
+            if any(rp is None or not (rp.get("sz") or "").isdigit() for rp in rprs):
+                continue  # кегль наследуется — подгонку делает конвейер
+            def width(use_old: bool) -> float:
+                total = 0.0
+                for r, rp in zip(runs, rprs):
+                    lat = rp.find(_LATIN)
+                    fam = swapped.get(rp) if use_old and rp in swapped else (lat.get("typeface") if lat is not None else None)
+                    total += text_width_pt(r.findtext(f"{{{A}}}t") or "", fam, int(rp.get("sz")) / 100.0, rp.get("b") == "1")
+                return total
+            before, after = width(True), width(False)
+            if before > inner or after <= inner:
+                continue
+            k = inner / after * 0.98
+            if k >= 0.8:
+                for rp in rprs:
+                    rp.set("sz", str(int(int(rp.get("sz")) * k)))
+                res.refit += 1
+            else:
+                for rp in rprs:
+                    if rp in swapped:
+                        rp.find(_LATIN).set("typeface", swapped[rp])
+                res.refit += 1
 
 
 # ============================================================================================ применение
@@ -316,6 +370,9 @@ class ApplyResult:
     logos_replaced: int = 0
     logos_removed: int = 0  # второй логотип шаблона на той же части (партнёр, соседняя марка)
     logos_added: int = 0
+    logo_samples: int = 0  # содержательных образцов шаблона
+    logo_covered: int = 0  # из них с добавленным логотипом бренда
+    refit: int = 0  # строк образцов, подогнанных после смены шрифта
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -386,8 +443,11 @@ def apply_brand(
             root = pkg.xml(name)
             if root is None:
                 continue
-            a = _recolor(root, cp, colors)
-            b = _refont(root, fp, fonts)
+            a = _recolor(root, cp, colors, strict=name == "ppt/tableStyles.xml")
+            swapped: dict = {}
+            b = _refont(root, fp, fonts, swapped)
+            if swapped and _SLIDE_LIKE_RE.match(name):
+                _refit(root, swapped, res)
             if a or b:
                 pkg.dirty.add(name)
 
@@ -402,7 +462,8 @@ def apply_brand(
         if priority == "brand" and images:
             res.logos_replaced, res.logos_removed = replace_logos(pkg, lockups, images, brand.name, res.warnings, brand.logo_place)
     elif images:
-        res.logos_added = add_logos(pkg, manifest, brand, images, res.warnings, slots)
+        rep = add_logos(pkg, manifest, brand, images, res.warnings, src)
+        res.logos_added, res.logo_samples, res.logo_covered = rep.added, rep.samples, rep.covered
 
     res.colors = {f"#{a}": f"#{b}" for (a, b) in sorted(colors)}
     res.font_swaps = {a: b for (a, b) in sorted(fonts)}

@@ -155,7 +155,7 @@ def image_probe(data: bytes) -> Optional[tuple]:
         return _PROBES[key]
     res = _probe(data)
     _PROBES[key] = res
-    while len(_PROBES) > 256:
+    while len(_PROBES) > 4096:  # ЛЦТ — 815 мелких картинок: кэш не должен вытеснять их по кругу
         _PROBES.popitem(last=False)
     return res
 
@@ -221,8 +221,44 @@ def _iou(a: Box, b: Box) -> float:
 _CLR_MAP = {"bg1": "lt1", "tx1": "dk1", "bg2": "lt2", "tx2": "dk2"}
 
 
+def _with_mods(h: Optional[str], el: etree._Element) -> Optional[str]:
+    """Модификаторы цвета (lumMod, lumOff, satMod, tint, shade) — как их применяет PowerPoint (accent6 с lumMod 20 %
+    и lumOff 80 % — почти белый, а не цвет акцента)."""
+    if not h or not re.fullmatch(r"[0-9A-Fa-f]{6}", h):
+        return h
+    import colorsys
+
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    hh, ll, ss = colorsys.rgb_to_hls(r, g, b)
+    rgb = (r, g, b)
+    for ch in el:
+        tag, val = etree.QName(ch).localname, ch.get("val")
+        try:
+            v = int(val) / 100000.0 if val is not None else None
+        except ValueError:
+            v = None
+        if v is None:
+            continue
+        if tag == "lumMod":
+            ll = max(0.0, min(1.0, ll * v))
+            rgb = colorsys.hls_to_rgb(hh, ll, ss)
+        elif tag == "lumOff":
+            ll = max(0.0, min(1.0, ll + v))
+            rgb = colorsys.hls_to_rgb(hh, ll, ss)
+        elif tag == "satMod":
+            ss = max(0.0, min(1.0, ss * v))
+            rgb = colorsys.hls_to_rgb(hh, ll, ss)
+        elif tag == "tint":
+            rgb = tuple(c * v + (1 - v) for c in rgb)
+            hh, ll, ss = colorsys.rgb_to_hls(*rgb)
+        elif tag == "shade":
+            rgb = tuple(c * v for c in rgb)
+            hh, ll, ss = colorsys.rgb_to_hls(*rgb)
+    return "".join(f"{max(0, min(255, int(round(c * 255)))):02X}" for c in rgb)
+
+
 def _fill_hex(el: Optional[etree._Element], slots: dict[str, str]) -> Optional[str]:
-    """Цвет заливки: srgbClr или цвет темы; градиент — по первой точке; картинка — None."""
+    """Цвет заливки: srgbClr или цвет темы с модификаторами; градиент — по первой точке; картинка — None."""
     if el is None:
         return None
     for c in el.iter(_SRGB, f"{{{A}}}schemeClr", f"{{{A}}}sysClr", f"{{{A}}}blipFill"):
@@ -230,12 +266,29 @@ def _fill_hex(el: Optional[etree._Element], slots: dict[str, str]) -> Optional[s
         if tag == "blipFill":
             return None
         if tag == "srgbClr":
-            return (c.get("val") or "").upper() or None
+            return _with_mods((c.get("val") or "").upper() or None, c)
         if tag == "sysClr":
-            return (c.get("lastClr") or "").upper() or None
+            return _with_mods((c.get("lastClr") or "").upper() or None, c)
         v = c.get("val") or ""
-        return slots.get(_CLR_MAP.get(v, v))
+        return _with_mods(slots.get(_CLR_MAP.get(v, v)), c)
     return None
+
+
+_FILLS = ("solidFill", "gradFill", "blipFill", "pattFill")
+
+
+def _filled(sp: etree._Element) -> bool:
+    """У фигуры есть видимая заливка (своя или из стиля темы)."""
+    pr = sp.find(f"{{{P}}}spPr")
+    if pr is not None:
+        for ch in pr:
+            name = etree.QName(ch).localname
+            if name in _FILLS:
+                return True
+            if name == "noFill":
+                return False
+    ref = sp.find(f"{{{P}}}style/{{{A}}}fillRef")
+    return ref is not None and (ref.get("idx") or "0") not in ("0", "")
 
 
 def part_bg(pkg: Package, part: str, slots: dict[str, str], depth: int = 0) -> Optional[str]:
@@ -319,6 +372,9 @@ def ground_under(pkg: Package, part: str, box: Box, slots: dict[str, str]) -> st
                 h = _fill_hex(el.find(f"{{{P}}}spPr"), slots)
                 if h and re.fullmatch(r"[0-9A-F]{6}", h):
                     return "dark" if lightness(h) < 55 else "light"
+    photo = _bg_photo_under(pkg, part, box)
+    if photo is not None:
+        return photo.ground
     bg = part_bg(pkg, part, slots)
     if bg and re.fullmatch(r"[0-9A-F]{6}", bg):
         return "dark" if lightness(bg) < 55 else "light"
@@ -415,16 +471,28 @@ def find_template_logos(pkg: Package, manifest: Optional[TemplateManifest] = Non
     return lockups
 
 
+_HAS_LOGO: dict[tuple, bool] = {}
+
+
 def has_template_logo(src: Path | str, manifest: Optional[TemplateManifest] = None) -> bool:
-    """В шаблоне есть логотип-картинка (для расхождений)."""
+    """В шаблоне есть логотип-картинка (для расхождений); кэш по файлу и разбору."""
+    from verstka.brand.palette import file_key, package_theme
+
+    key = file_key(src)
+    mkey = (key, manifest.template_id if manifest else None)
+    if key is not None and mkey in _HAS_LOGO:
+        return _HAS_LOGO[mkey]
     try:
         pkg = Package(src)
-        from verstka.brand.palette import package_theme
-
-        return any(not lk.duplicate for lk in find_template_logos(pkg, manifest, package_theme(pkg).slots))
+        got = any(not lk.duplicate for lk in find_template_logos(pkg, manifest, package_theme(pkg).slots))
     except Exception as e:  # noqa: BLE001
         log.warning("template logos not found: %s", e)
-        return bool(manifest and any(a.kind == "logo" for a in manifest.assets))
+        got = bool(manifest and any(a.kind == "logo" for a in manifest.assets))
+    if key is not None:
+        if len(_HAS_LOGO) > 64:
+            _HAS_LOGO.clear()
+        _HAS_LOGO[mkey] = got
+    return got
 
 
 # ============================================================================================ логотипы бренда
@@ -693,129 +761,374 @@ def replace_logos(pkg: Package, lockups: list[Lockup], images: list[BrandImage],
 
 
 # ============================================================================================ добавление логотипа
+# Препятствия и фон — по IR аудита исходного шаблона (`verstka.audit.ir`): рамки заполнителей там уже взяты из макета и
+# мастера, у слоёв макета и мастера — их настоящая краска (градиент, картинка, «пёстрость» фото), у фона — цвет с
+# модификаторами. Тот же IR смотрит и независимая проверка столкновений.
 
-
-_FILLS = ("solidFill", "gradFill", "blipFill", "pattFill")
 _FOOTER_PH = ("sldNum", "ftr", "dt")
-_LINE_GEOMS = re.compile(r"^(?:line|straightConnector\d*|bentConnector\d*|curvedConnector\d*)$")
-
-
-def _filled(sp: etree._Element) -> bool:
-    """У фигуры есть видимая заливка (своя или из стиля темы)."""
-    pr = sp.find(f"{{{P}}}spPr")
-    if pr is not None:
-        for ch in pr:
-            name = etree.QName(ch).localname
-            if name in _FILLS:
-                return True
-            if name == "noFill":
-                return False
-    ref = sp.find(f"{{{P}}}style/{{{A}}}fillRef")
-    return ref is not None and (ref.get("idx") or "0") not in ("0", "")
-
-
-def _has_text(sp: etree._Element) -> bool:
-    return any((t.text or "").strip() for t in sp.iter(f"{{{A}}}t")) or sp.find(f".//{{{A}}}fld") is not None
-
-
-def _is_line(el: etree._Element, b: Box) -> bool:
-    if etree.QName(el).localname == "cxnSp":
-        return True
-    geom = el.find(f"{{{P}}}spPr/{{{A}}}prstGeom")
-    return (geom is not None and bool(_LINE_GEOMS.match(geom.get("prst") or ""))) or b[2] < 1 or b[3] < 1
+BUSY_STD = 40.0  # «пёстрое» фото (как у IR: стандартное отклонение яркости точек > 40) — логотип на нём не читается
+BUSY_CELLS = 20.0  # то же по сетке IR (среднее отклонение клеток в рамке): конфеты lo_candy — 30, спокойный фон — < 10
 
 
 @dataclass
-class Obstacle:
-    box: Box
-    kind: str  # text | line | fill | picture | frame | group
-    el: etree._Element
-    part: str
+class Spot:
+    """Что лежит под рамкой логотипа: светлота (L*), пёстрость, и можно ли туда ставить."""
+
+    lightness: float
+    busy: bool = False
+
+    @property
+    def ground(self) -> str:
+        return "dark" if self.lightness < 55 else "light"
 
 
-def obstacles(pkg: Package, part: str, *, only_marks: bool = False) -> list[Obstacle]:
-    """Что занимает место на части: текст (и пустые заполнители номера слайда, колонтитула, даты), линии, залитые
-    фигуры, картинки, таблицы и диаграммы, группы. `only_marks` — только текст и линии (рисунок макета и мастера
-    лежит под логотипом и ему не мешает)."""
+def _ebox(e) -> Box:
+    return float(e.bbox.x), float(e.bbox.y), float(e.bbox.w), float(e.bbox.h)
+
+
+def _full(e, sw: float, sh: float) -> bool:
+    return e.bbox.w * e.bbox.h >= 0.85 * sw * sh
+
+
+def _cells_under(e, box: Box) -> Optional[Spot]:
+    """Светлота и пёстрость картинки (или градиента) IR в рамке — по сетке `cells`."""
+    c = getattr(e, "cells", None)
+    if c is None or not c.w or not c.h or not c.hex:
+        return None
+    ex, ey, ew, eh = _ebox(e)
+    cw, ch = ew / c.w, eh / c.h
+    acc = [0.0, 0.0, 0.0]
+    wsum = std = 0.0
+    for j in range(c.h):
+        for i in range(c.w):
+            k = j * c.w + i
+            o = overlap((ex + i * cw, ey + j * ch, cw, ch), box)
+            if o <= 0 or k >= len(c.hex):
+                continue
+            a = c.alpha[k] if k < len(c.alpha) else 1.0
+            wgt = o * a
+            if wgt <= 0:
+                continue
+            h = c.hex[k]
+            for t in range(3):
+                acc[t] += int(h[2 * t:2 * t + 2], 16) * wgt
+            std += (c.std[k] if k < len(c.std) else 0.0) * wgt
+            wsum += wgt
+    if wsum <= 0 or wsum < 0.5 * box[2] * box[3]:
+        return None
+    hexv = "".join(f"{int(round(v / wsum)):02X}" for v in acc)
+    return Spot(lightness(hexv), busy=std / wsum > BUSY_CELLS)
+
+
+def _bg_photo_under(pkg: Package, part: str, box: Box) -> Optional[Spot]:
+    """Фон-фото (`p:bg` с картинкой) части, её макета или мастера — настоящие точки под рамкой."""
+    sw, sh = pkg.slide_size()
+    for p in _chain(pkg, part):
+        root = pkg.xml(p)
+        bg = root.find(f"{{{P}}}cSld/{{{P}}}bg") if root is not None else None
+        if bg is None:
+            continue
+        blip = bg.find(f".//{{{A}}}blip")
+        if blip is None:
+            return None  # свой фон без картинки — его цвет даёт IR
+        rid = blip.get(f"{{{R}}}embed")
+        media = pkg.rels(p).get(rid or "", ("", None))[1]
+        if not media or not pkg.has(media):
+            return None
+        import numpy as np
+
+        cache = pkg.__dict__.setdefault("_bg_images", {})
+        if media not in cache:
+            try:
+                from PIL import Image
+
+                im = Image.open(io.BytesIO(pkg.read(media))).convert("RGB")
+                im.thumbnail((640, 640))
+                cache[media] = im
+            except Exception:  # noqa: BLE001
+                cache[media] = None
+        im = cache[media]
+        if im is None:
+            return None
+        x, y, w, h = box
+        crop = im.crop((int(x / sw * im.width), int(y / sh * im.height), max(int(x / sw * im.width) + 1, int((x + w) / sw * im.width)),
+                        max(int(y / sh * im.height) + 1, int((y + h) / sh * im.height))))
+        arr = np.asarray(crop, dtype=float).reshape(-1, 3)
+        mean = arr.mean(axis=0)
+        lum = arr @ np.array([0.299, 0.587, 0.114])
+        return Spot(lightness("".join(f"{int(round(v)):02X}" for v in mean)), busy=float(lum.std()) > BUSY_STD)
+    return None
+
+
+def _spot(pkg: Package, part: str, slide, box: Box, *, with_slide: bool) -> Spot:
+    """Что под рамкой: верхний слой во весь слайд (картинка, градиент, заливка — слайда, если логотип на слайде, затем
+    макета и мастера), иначе фон-фото, иначе цвет фона слайда (с модификаторами цвета темы)."""
+    sw, sh = pkg.slide_size()
+    layers = (list(slide.elements) if with_slide else []) + list(slide.template_elements)
+    for e in sorted((e for e in layers if _full(e, sw, sh) or overlap(_ebox(e), box) >= 0.9 * box[2] * box[3]), key=lambda e: (e.source == "slide", e.z), reverse=True):
+        got = _cells_under(e, box)
+        if got is not None:
+            return got
+        if e.fill_hex and getattr(e, "opaque", True) and e.type in ("shape", "text", "picture"):
+            return Spot(lightness(e.fill_hex), busy=bool(getattr(e, "busy", False)))
+    got = _bg_photo_under(pkg, part, box)
+    if got is not None:
+        return got
+    if slide.background_hex:
+        return Spot(lightness(slide.background_hex), busy=False)
+    return Spot(95.0)
+
+
+_HARD_PH = ("title", "ctrTitle", "sldNum", "ftr", "dt")
+
+
+def _ir_obstacles(slide, sw: float, sh: float, *, under_slide: bool) -> tuple[list[Box], list[tuple[Box, str]]]:
+    """(жёсткие препятствия, заполнители содержимого) под рамку логотипа. Жёсткие — тексты, линии, контуры, фигуры,
+    картинки, таблицы, диаграммы, группы слайда и его макета и мастера, заголовки и колонтитулы; заполнители
+    содержимого (текст, объект, картинка, таблица; рамка — из макета и мастера) логотип может «подвинуть»: их рамка
+    уменьшается, оставляя логотипу охранное поле. Фон во весь слайд — не препятствие, если логотип лежит поверх
+    (`under_slide=False`); логотип макета лежит под фигурами слайда — тогда непрозрачная картинка или заливка слайда во
+    весь слайд его закрывает."""
+    hard: list[Box] = []
+    soft: list[tuple[Box, str]] = []
+    for e in list(slide.elements) + list(slide.template_elements):
+        own = e.source == "slide"
+        if e.type == "shape" and e.line_hex and not e.fill_hex and e.geometry != "custom" and not (own and e.is_placeholder):
+            # рамка-контур (в том числе во весь слайд, как у «Классики»): мешают её края, а не то, что внутри
+            hard += _edges(_ebox(e), sw)
+            continue
+        if _full(e, sw, sh):
+            if under_slide and own and (e.fill_hex or e.type == "picture") and getattr(e, "opaque", True):
+                hard.append(_ebox(e))
+            continue
+        if own and e.is_placeholder and (e.ph_type or "body") not in _HARD_PH and e.type in ("text", "shape"):
+            # рамка текста отступает; таблица, диаграмма, картинка в заполнителе — уже содержимое, препятствие
+            soft.append((_ebox(e), e.id))
+            continue
+        if e.type == "shape" and not e.fill_hex and not e.line_hex and e.geometry != "custom":
+            continue  # пустая рамка без заливки и обводки (контур — `line_hex`, произвольная фигура — препятствие всегда)
+        hard.append(_ebox(e))
+    return hard, soft
+
+
+def _edges(b: Box, sw: float) -> list[Box]:
+    """Четыре края рамки — тонкие полосы (с допуском толщины линии)."""
+    t = 0.004 * sw
+    x, y, w, h = b
+    return [(x - t, y - t, w + 2 * t, 2 * t), (x - t, y + h - t, w + 2 * t, 2 * t), (x - t, y - t, 2 * t, h + 2 * t), (x + w - t, y - t, 2 * t, h + 2 * t)]
+
+
+def _shrunk(frame: Box, logo: Box, sh: float) -> Optional[Box]:
+    """Рамка заполнителя, отступившая от логотипа (охранное поле) — сверху, снизу или сбоку; не больше чем на 30 %
+    высоты или 25 % ширины. None — так не получится."""
+    if overlap(frame, logo) <= 0.03 * logo[2] * logo[3]:
+        return frame
+    gap = 0.012 * sh
+    x, y, w, h = frame
+    lx, ly, lw, lh = logo
+    opts = []
+    if ly >= y + 0.4 * h and ly - gap - y >= 0.7 * h:
+        opts.append((x, y, w, ly - gap - y))
+    if ly + lh <= y + 0.6 * h and y + h - (ly + lh + gap) >= 0.7 * h:
+        opts.append((x, ly + lh + gap, w, y + h - (ly + lh + gap)))
+    if lx >= x + 0.4 * w and lx - gap - x >= 0.75 * w:
+        opts.append((x, y, lx - gap - x, h))
+    if lx + lw <= x + 0.6 * w and x + w - (lx + lw + gap) >= 0.75 * w:
+        opts.append((lx + lw + gap, y, x + w - (lx + lw + gap), h))
+    return max(opts, key=lambda b: b[2] * b[3]) if opts else None
+
+
+def _set_frame(sp: etree._Element, box: Box) -> None:
+    """Своя рамка заполнителя (вместо унаследованной или прежней)."""
+    pr = sp.find(f"{{{P}}}spPr")
+    if pr is None:
+        pr = etree.SubElement(sp, f"{{{P}}}spPr")
+        sp.insert(1, pr)
+    xfrm = pr.find(f"{{{A}}}xfrm")
+    if xfrm is None:
+        xfrm = etree.Element(f"{{{A}}}xfrm")
+        pr.insert(0, xfrm)
+        etree.SubElement(xfrm, f"{{{A}}}off")
+        etree.SubElement(xfrm, f"{{{A}}}ext")
+    off, ext = xfrm.find(f"{{{A}}}off"), xfrm.find(f"{{{A}}}ext")
+    off.set("x", str(int(round(box[0]))))
+    off.set("y", str(int(round(box[1]))))
+    ext.set("cx", str(max(1, int(round(box[2])))))
+    ext.set("cy", str(max(1, int(round(box[3])))))
+
+
+def _sp_by_id(pkg: Package, part: str, sid: str) -> Optional[etree._Element]:
     root = pkg.xml(part)
+    tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
+    if tree is None:
+        return None
+    for nv in tree.iter(f"{{{P}}}cNvPr"):
+        if nv.get("id") == sid:
+            sp = nv.getparent().getparent()
+            return sp if etree.QName(sp).localname == "sp" else None
+    return None
+
+
+def _resolved_frame(pkg: Package, part: str, sp: etree._Element) -> Optional[Box]:
+    """Рамка заполнителя: своя, иначе — заполнителя мастера того же типа (номер, колонтитул, дата)."""
+    b = shape_box(sp)
+    if b is not None:
+        return b
+    ph = sp.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+    if ph is None:
+        return None
+    master = pkg.related(part, "slideMaster")
+    root = pkg.xml(master) if master else None
+    tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
+    if tree is None:
+        return None
+    want_type, want_idx = ph.get("type") or "body", ph.get("idx")
+    for el in tree.iter(f"{{{P}}}sp"):
+        mph = el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+        if mph is not None and ((mph.get("type") or "body") == want_type or (want_idx and mph.get("idx") == want_idx)):
+            return shape_box(el)
+    return None
+
+
+def _layout_obstacles(pkg: Package, layout: str) -> tuple[list[Box], list[tuple[Box, etree._Element]]]:
+    """(жёсткие, заполнители содержимого макета): туда ляжет содержимое собранных слайдов (текст, картинка, таблица,
+    кружок с номером); колонтитулы и заголовки макета и мастера — жёсткие. Рамки — у мастера, если своих нет."""
+    hard: list[Box] = []
+    soft: list[tuple[Box, etree._Element]] = []
+    for part in (layout, pkg.related(layout, "slideMaster")):
+        root = pkg.xml(part) if part else None
+        tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
+        if tree is None:
+            continue
+        for sp in tree.iter(f"{{{P}}}sp"):
+            ph = sp.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+            kind = (ph.get("type") or "body") if ph is not None else None
+            if ph is None or (part != layout and kind not in _FOOTER_PH):
+                continue
+            b = _resolved_frame(pkg, part, sp)
+            if b is None:
+                continue
+            if part == layout and kind not in _HARD_PH:
+                soft.append((b, sp))
+            else:
+                hard.append(b)
+    return hard, soft
+
+
+def _clear(box: Box, obstacles: list[Box]) -> bool:
+    return not any(overlap(o, box) > 0.03 * box[2] * box[3] for o in obstacles)
+
+
+def _candidates(place: LogoPlace, w: float, h: float, margin: float, sw: float, sh: float) -> list[tuple[str, Box]]:
+    """(угол, рамка): угол из брендбука (шагами вдоль края к середине, затем над полосой колонтитула), потом — тот же
+    край с другой стороны, другой край и противоположный угол: одно запасное место на весь шаблон, если угол брендбука
+    занят."""
+    out: list[tuple[str, Box]] = []
+    corners = [place]
+    v, hside = place.split("_")
+    other_h = "left" if hside == "right" else "right"
+    other_v = "top" if v == "bottom" else "bottom"
+    corners += [f"{v}_{other_h}", f"{other_v}_{hside}", f"{other_v}_{other_h}"]
+    for corner in corners:
+        left, top = corner.endswith("left"), corner.startswith("top")
+        y0 = margin if top else sh - margin - h
+        xs = []
+        for k in range(0, 7):
+            x = margin + k * 0.5 * w if left else sw - margin - w - k * 0.5 * w
+            if x < margin - 1 or x + w > sw - margin + 1 or (left and x + w > 0.5 * sw) or (not left and x < 0.5 * sw):
+                break
+            xs.append(x)
+        out += [(corner, (x, y0, w, h)) for x in xs]
+        for j in range(1, 5):
+            y = y0 + j * 0.6 * h if top else y0 - j * 0.6 * h
+            if (top and y + h > 0.2 * sh) or (not top and y < 0.8 * sh):
+                break
+            out += [(corner, (x, y, w, h)) for x in xs[:3]]
+    return out
+
+
+def package_slots(pkg: Package) -> dict[str, str]:
+    from verstka.brand.palette import package_theme
+
+    return package_theme(pkg).slots
+
+
+def _part_shapes(pkg: Package, part: Optional[str]) -> list[Box]:
+    """Видимые фигуры части без заполнителей (рисунок макета или мастера): заливка, обводка, текст, картинка, линия,
+    таблица, группа; фон во весь слайд — нет."""
+    root = pkg.xml(part) if part else None
     tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
     if tree is None:
         return []
     sw, sh = pkg.slide_size()
-    tol = 0.004 * sw
-    out: list[Obstacle] = []
+    out: list[Box] = []
     for el in tree:
         tag = etree.QName(el).localname
+        if tag not in ("sp", "pic", "cxnSp", "graphicFrame", "grpSp"):
+            continue
+        if tag == "sp" and el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph") is not None:
+            continue
         b = shape_box(el)
+        if not b:
+            continue
+        if tag == "sp":
+            ln = el.find(f"{{{P}}}spPr/{{{A}}}ln")
+            stroked = ln is not None and ln.find(f"{{{A}}}noFill") is None and len(ln)
+            text = any((t.text or "").strip() for t in el.iter(f"{{{A}}}t"))
+            custom = el.find(f"{{{P}}}spPr/{{{A}}}custGeom") is not None
+            if stroked and not _filled(el) and not text and not custom:
+                out += _edges(b, sw)  # рамка-контур: мешают её края
+                continue
+            if not (_filled(el) or stroked or text or custom):
+                continue
+        if b[2] * b[3] >= 0.85 * sw * sh:
+            continue
+        if b[2] < 1 or b[3] < 1:
+            tol = 0.004 * sw
+            b = (b[0] - tol, b[1] - tol, b[2] + 2 * tol, b[3] + 2 * tol)
+        out.append(b)
+    return out
+
+
+def part_lines(pkg: Package, part: Optional[str]) -> list[Box]:
+    """Линии части (в том числе внутри групп и нулевой толщины — IR их пропускает) и края рамок-контуров — тонкими
+    полосами: логотип не встаёт на линию макета или мастера («Классика»: рамка и линейки вокруг слайда)."""
+    root = pkg.xml(part) if part else None
+    tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
+    if tree is None:
+        return []
+    sw, _ = pkg.slide_size()
+    tol = 0.004 * sw
+    out: list[Box] = []
+    for el in tree.iter(f"{{{P}}}sp", f"{{{P}}}cxnSp"):
+        if el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph") is not None:
+            continue
+        b = xfrm_box(el.find(f"{{{P}}}spPr/{{{A}}}xfrm"))
         if b is None:
-            # заполнитель макета или мастера без своей рамки — номер слайда и колонтитулы мастера
             continue
-        ph = el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph") if tag == "sp" else None
-        if ph is not None and "/slides/" not in part and (ph.get("type") or "body") not in _FOOTER_PH:
-            continue  # заполнитель макета или мастера с подсказкой («Образец текста») — место содержимого слайда, а не текст
-        if tag in ("sp", "cxnSp") and _is_line(el, b):
-            out.append(Obstacle((b[0] - tol, b[1] - tol, b[2] + 2 * tol, b[3] + 2 * tol), "line", el, part))
-        elif tag == "sp" and ((ph is not None and (ph.get("type") or "") in _FOOTER_PH) or _has_text(el)):
-            out.append(Obstacle(b, "text", el, part))
-        elif only_marks:
+        b = to_abs(b, [a for a in el.iterancestors() if a.tag == f"{{{P}}}grpSp"])
+        ln = el.find(f"{{{P}}}spPr/{{{A}}}ln")
+        styled = el.find(f"{{{P}}}style/{{{A}}}lnRef") is not None and (el.find(f"{{{P}}}style/{{{A}}}lnRef").get("idx") or "0") != "0"
+        stroked = (ln is not None and ln.find(f"{{{A}}}noFill") is None and (len(ln) or styled)) or (ln is None and styled)
+        if not stroked:
             continue
-        elif tag == "sp" and _filled(el):
-            out.append(Obstacle(b, "fill", el, part))
-        elif tag == "pic":
-            out.append(Obstacle(b, "picture", el, part))
-        elif tag in ("graphicFrame", "grpSp"):
-            out.append(Obstacle(b, "frame" if tag == "graphicFrame" else "group", el, part))
+        geom = el.find(f"{{{P}}}spPr/{{{A}}}prstGeom")
+        is_line = etree.QName(el).localname == "cxnSp" or b[2] < 1 or b[3] < 1 or (geom is not None and _LINE_GEOM_RE.match(geom.get("prst") or ""))
+        if is_line:
+            out.append((b[0] - tol, b[1] - tol, b[2] + 2 * tol, b[3] + 2 * tol))
+        elif not _filled(el) and el.find(f"{{{P}}}spPr/{{{A}}}custGeom") is None:
+            out += _edges(b, sw)
     return out
 
 
-def _blocks(pkg: Package, ob: Obstacle, box: Box, *, under_ok: bool) -> bool:
-    """Препятствие заходит на рамку логотипа (больше 3 % её площади). `under_ok` — логотип встанет поверх: фон во
-    весь слайд и картинка, прозрачная в этом месте, не мешают."""
-    if overlap(ob.box, box) <= 0.03 * box[2] * box[3]:
-        return False
-    if ob.kind in ("text", "line", "frame", "group", "fill"):
-        if under_ok and ob.kind == "fill":
-            sw, sh = pkg.slide_size()
-            return ob.box[2] * ob.box[3] < 0.85 * sw * sh
-        return True
-    if ob.kind == "picture":
-        sw, sh = pkg.slide_size()
-        if under_ok and ob.box[2] * ob.box[3] >= 0.85 * sw * sh:
-            return False
-        got = _picture_under(pkg, ob.part, ob.el, ob.box, box)
-        return got is None or got[1] >= 0.3
-    return True
+_LINE_GEOM_RE = re.compile(r"^(?:line|straightConnector\d*|bentConnector\d*|curvedConnector\d*)$")
 
 
-def _candidates(place: LogoPlace, w: float, h: float, margin: float, sw: float, sh: float) -> list[Box]:
-    """Угол из брендбука, затем — шагами вдоль того же края к середине, затем — чуть выше (ниже) края, над полосой
-    колонтитула, не дальше пятой части слайда от края."""
-    left, top = place.endswith("left"), place.startswith("top")
-    y0 = margin if top else sh - margin - h
-    xs = []
-    for k in range(0, 7):
-        x = margin + k * 0.5 * w if left else sw - margin - w - k * 0.5 * w
-        if x < margin - 1 or x + w > sw - margin + 1 or (left and x + w > 0.5 * sw) or (not left and x < 0.5 * sw):
-            break
-        xs.append(x)
-    out = [(x, y0, w, h) for x in xs]
-    for j in range(1, 5):
-        y = y0 + j * 0.6 * h if top else y0 - j * 0.6 * h
-        if (top and y + h > 0.2 * sh) or (not top and y < 0.8 * sh):
-            break
-        out += [(x, y, w, h) for x in xs[:3]]
-    return out
-
-
-def _content_samples(manifest: TemplateManifest) -> dict[int, tuple[str, str]]:
-    """Содержательные образцы разбора: номер слайда → (макет, фон light / dark); у шаблона без них — все образцы."""
-    every = {p.source_slide: (p.layout_part, getattr(p.family, "value", p.family)) for p in manifest.patterns if p.layout_part and not p.reference}
-    content = {
-        p.source_slide: every[p.source_slide]
-        for p in manifest.patterns
-        if p.source_slide in every and getattr(p.kind, "value", p.kind) not in ("title", "section", "thanks")
-    }
-    return content or every
+def _content_samples(manifest: TemplateManifest) -> list[int]:
+    """Номера содержательных образцов разбора; у шаблона без них — все образцы."""
+    every = [p.source_slide for p in manifest.patterns if not p.reference]
+    content = [p.source_slide for p in manifest.patterns if not p.reference and getattr(p.kind, "value", p.kind) not in ("title", "section", "thanks")]
+    return sorted(set(content or every))
 
 
 def _place_pic(pkg: Package, part: str, media: Media, img: BrandImage, box: Box, brand_name: str) -> None:
@@ -830,72 +1143,177 @@ def _place_pic(pkg: Package, part: str, media: Media, img: BrandImage, box: Box,
     pkg.dirty.add(part)
 
 
-def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images: list[BrandImage], warnings: list[str], slots: Optional[dict[str, str]] = None) -> int:
-    """Логотипа в шаблоне нет, а брендбук велит место — логотип бренда на содержательные слайды: на их макет, если там
-    свободно и у макета, и у мастера, и у всех образцов на нём (логотип макета лежит под фигурами слайда); иначе —
-    поверх образцов со свободным местом. Место одно на макет; некуда — не ставится, с объяснением."""
+@dataclass
+class AddReport:
+    added: int = 0  # картинок логотипа (на макетах и слайдах)
+    samples: int = 0  # содержательных образцов
+    covered: int = 0  # из них с логотипом
+    place: Optional[str] = None  # где встал: угол брендбука или запасной
+
+
+def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images: list[BrandImage], warnings: list[str], src: Path | str) -> AddReport:
+    """Логотипа в шаблоне нет, а брендбук велит место — логотип бренда на содержательные слайды. Одно место на весь
+    шаблон: угол брендбука, если он свободен хотя бы у половины образцов, иначе — запасной угол, свободный у
+    большинства. Свободно — значит ни текст, ни заголовок, ни колонтитул (рамки — из макета и мастера), ни линия, ни
+    контур, ни фигура, ни картинка туда не заходят и фон под ним не пёстрый; заполнители содержимого отступают,
+    оставляя охранное поле (не больше чем на 30 % высоты или 25 % ширины), — тогда и содержимое собранных слайдов
+    туда не зайдёт. На макет — если так получается у макета, мастера и всех слайдов на нём (логотип макета лежит под
+    фигурами слайда); иначе — поверх образцов, где получается. Вариант логотипа — по настоящему цвету под ним."""
+    from verstka.brand.palette import source_ir
     from verstka.data.words import plural
 
+    rep = AddReport()
     if not brand.logo_place or not images:
-        return 0
-    slots = slots or {}
+        return rep
+    ir = source_ir(src)
+    if ir is None:
+        warnings.append("Логотип бренда не поставлен: не удалось разобрать раскладку шаблона.")
+        return rep
     sw, sh = pkg.slide_size()
     margin = (brand.margins_px / 1920.0 * sw) if brand.margins_px and 0 < brand.margins_px <= 200 else 0.04 * sw
-    media = Media(pkg)
     order = pkg.slide_order()
-    by_layout: dict[str, list[str]] = {}
-    for idx, (lp, _fam) in _content_samples(manifest).items():
-        if 0 < idx <= len(order):
-            by_layout.setdefault(lp, []).append(order[idx - 1])
-    users: dict[str, list[str]] = {}
-    for part in order:
-        lp = pkg.related(part, "slideLayout")
-        if lp:
-            users.setdefault(lp, []).append(part)
+    slides = {s.index: s for s in ir.slides}
+    samples = [i for i in _content_samples(manifest) if i in slides and 0 < i <= len(order)]
+    rep.samples = len(samples)
+    if not samples:
+        return rep
     wordmark = pick_logo(images, "light", mark=False) or images[0]
     h = (0.06 if wordmark.mark else 0.045) * sh
     w = h * wordmark.aspect
+    lines_cache: dict[str, list[Box]] = {}
 
-    def marks_of(part: str) -> list[Obstacle]:
-        out = []
-        for p in _chain(pkg, part)[1:]:
-            out += obstacles(pkg, p, only_marks=True)
+    def lines_of(part: Optional[str]) -> list[Box]:
+        """Линии слайда, его макета и мастера (IR пропускает линии нулевой толщины)."""
+        out: list[Box] = []
+        for p in _chain(pkg, part) if part else []:
+            if p not in lines_cache:
+                lines_cache[p] = part_lines(pkg, p)
+            out += lines_cache[p]
         return out
 
-    def free_on_layout(lp: str, box: Box) -> bool:
-        own = obstacles(pkg, lp, only_marks=True) + marks_of(lp)
-        if any(_blocks(pkg, ob, box, under_ok=False) for ob in own):
-            return False
-        # логотип макета лежит под фигурами слайда: место должно быть свободно у всех образцов на этом макете
-        return not any(any(_blocks(pkg, ob, box, under_ok=False) for ob in obstacles(pkg, sp)) for sp in users.get(lp, []))
+    def with_lines(obst: tuple[list[Box], list], part: str) -> tuple[list[Box], list]:
+        return obst[0] + lines_of(part), obst[1]
 
-    def free_on_slide(sp: str, box: Box) -> bool:
-        return not any(_blocks(pkg, ob, box, under_ok=True) for ob in obstacles(pkg, sp) + marks_of(sp))
+    on_top = {i: with_lines(_ir_obstacles(slides[i], sw, sh, under_slide=False), order[i - 1]) for i in samples}
+    by_layout: dict[str, list[int]] = {}
+    for i in samples:
+        by_layout.setdefault(slides[i].layout_part or pkg.related(order[i - 1], "slideLayout") or "", []).append(i)
+    users: dict[str, list[int]] = {}
+    for s in ir.slides:
+        if s.layout_part:
+            users.setdefault(s.layout_part, []).append(s.index)
+    under = {j: with_lines(_ir_obstacles(slides[j], sw, sh, under_slide=True), order[j - 1]) for lp in by_layout for j in users.get(lp, by_layout[lp])}
+    lay_obst = {lp: with_lines(_layout_obstacles(pkg, lp), lp) for lp in by_layout if lp and pkg.xml(lp) is not None}
+    # макеты без образцов (по ним собирает слайды синтез: «Заголовок и объект», пустой макет…); обложки и разделы — нет
+    title_layouts = {p.layout_part for p in manifest.patterns if p.layout_part and getattr(p.kind, "value", p.kind) in ("title", "section", "thanks")}
+    unused: dict[str, tuple[list[Box], list[tuple[Box, etree._Element]]]] = {}
+    for lp in sorted(n for n in pkg.names() if re.match(r"^ppt/slideLayouts/slideLayout\d+\.xml$", n)):
+        root = pkg.xml(lp)
+        if lp in by_layout or lp in users or lp in title_layouts or root is None or (root.get("type") or "") in ("title", "secHead"):
+            continue
+        hard, soft = _layout_obstacles(pkg, lp)
+        master = pkg.related(lp, "slideMaster")
+        hard = hard + _part_shapes(pkg, lp) + part_lines(pkg, lp)
+        if root.get("showMasterSp") not in ("0", "false"):
+            hard += _part_shapes(pkg, master) + part_lines(pkg, master)
+        unused[lp] = (hard, soft)
+    spot_cache: dict[tuple, Spot] = {}
 
-    added = skipped = 0
-    for lp, slides in sorted(by_layout.items()):
-        if pkg.xml(lp) is None:
-            continue
-        cands = _candidates(brand.logo_place, w, h, margin, sw, sh)
-        box = next((b for b in cands if free_on_layout(lp, b)), None)
-        if box is not None:
-            img = pick_logo(images, ground_under(pkg, lp, box, slots), mark=False) or wordmark
-            _place_pic(pkg, lp, media, img, box, brand.name)
-            added += 1
-            continue
-        # одно место на все образцы макета, иначе — своё у каждого
-        common = next((b for b in cands if all(free_on_slide(sp, b) for sp in slides)), None)
-        for sp in slides:
-            b = common if common is not None else next((c for c in cands if free_on_slide(sp, c)), None)
-            if b is None:
-                skipped += 1
+    def spot(i: int, box: Box, with_slide: bool) -> Spot:
+        key = (i, box, with_slide)
+        if key not in spot_cache:
+            spot_cache[key] = _spot(pkg, order[i - 1], slides[i], box, with_slide=with_slide)
+        return spot_cache[key]
+
+    def fits(hard: list[Box], soft, box: Box) -> bool:
+        return _clear(box, hard) and all(_shrunk(b, box, sh) is not None for b, _ in soft)
+
+    def free_on(i: int, box: Box) -> bool:
+        return fits(*on_top[i], box) and not spot(i, box, True).busy
+
+    def on_layout(lp: str, box: Box) -> Optional[Spot]:
+        """Логотип на макет: свободно у его заголовков и колонтитулов (и мастера) и у всех слайдов на нём (логотип
+        макета лежит под фигурами слайда; заполнители содержимого отступают); фон под ним у всех слайдов один и тот же
+        и не пёстрый. Что под логотипом, или None."""
+        if lp not in lay_obst or not fits(*lay_obst[lp], box):
+            return None
+        everyone = users.get(lp, by_layout[lp])
+        if not all(fits(*under[j], box) for j in everyone):
+            return None
+        spots = [spot(j, box, False) for j in everyone]
+        if not spots or any(sp.busy for sp in spots) or len({sp.ground for sp in spots}) != 1:
+            return None
+        return spots[0]
+
+    def coverage(box: Box) -> tuple[float, float]:
+        """(сколько содержательных слайдов получат логотип и сколько пустых макетов — с весом ¼: какие из них возьмёт
+        сборка, заранее не известно; всего)."""
+        got = 0.0
+        for lp, idxs in by_layout.items():
+            got += len(idxs) if on_layout(lp, box) is not None else sum(free_on(i, box) for i in idxs)
+        got += 0.25 * sum(fits(*unused[lp], box) for lp in unused)
+        return got, len(samples) + 0.25 * len(unused)
+
+    # одно место на весь шаблон: первое (по порядку) место, где логотип получат хотя бы 60 % содержательных слайдов и
+    # пустых макетов (по ним собираются слайды колоды), иначе — где больше всего
+    best, best_n, corner = None, 0, None
+    for cn, c in _candidates(brand.logo_place, w, h, margin, sw, sh):
+        n, total = coverage(c)
+        if n > best_n:
+            best, best_n, corner = c, n, cn
+        if n >= 0.6 * total:
+            break
+    if best is None:
+        warnings.append("Логотип бренда не поставлен: у краёв слайдов шаблона нет свободного места.")
+        return rep
+    rep.place = "brand" if corner == brand.logo_place else "fallback"
+    media = Media(pkg)
+
+    def shrink(part: str, items, by_sid: bool) -> None:
+        for b, ref in items:
+            nb = _shrunk(b, best, sh)
+            if nb == b:
                 continue
-            img = pick_logo(images, ground_under(pkg, sp, b, slots), mark=False) or wordmark
-            _place_pic(pkg, sp, media, img, b, brand.name)
-            added += 1
-    if skipped:
+            sp = _sp_by_id(pkg, part, ref) if by_sid else ref
+            if sp is not None and (not by_sid or shape_box(sp) is not None or part.startswith("ppt/slides/")):
+                _set_frame(sp, nb)
+                pkg.dirty.add(part)
+
+    covered: set[int] = set()
+    for lp, idxs in sorted(by_layout.items()):
+        sp_layout = on_layout(lp, best)
+        if sp_layout is not None:
+            shrink(lp, lay_obst[lp][1], by_sid=False)
+            for j in users.get(lp, idxs):
+                # у слайдов со своей рамкой заполнителя — своя отступившая рамка (унаследованные отступят с макетом)
+                own = [(b, sid) for b, sid in under[j][1] if (el := _sp_by_id(pkg, order[j - 1], sid)) is not None and shape_box(el) is not None]
+                shrink(order[j - 1], own, by_sid=True)
+            _place_pic(pkg, lp, media, pick_logo(images, sp_layout.ground, mark=False) or wordmark, best, brand.name)
+            rep.added += 1
+            covered.update(idxs)
+            continue
+        for i in idxs:
+            if not free_on(i, best):
+                continue
+            shrink(order[i - 1], on_top[i][1], by_sid=True)
+            _place_pic(pkg, order[i - 1], media, pick_logo(images, spot(i, best, True).ground, mark=False) or wordmark, best, brand.name)
+            rep.added += 1
+            covered.add(i)
+    slots = package_slots(pkg)
+    for lp, (hard, soft) in unused.items():
+        if not fits(hard, soft, best):
+            continue
+        shrink(lp, soft, by_sid=False)
+        _place_pic(pkg, lp, media, pick_logo(images, ground_under(pkg, lp, best, slots), mark=False) or wordmark, best, brand.name)
+        rep.added += 1
+    rep.covered = len(covered)
+    missing = rep.samples - rep.covered
+    where = "в углу из брендбука" if rep.place == "brand" else "в соседнем углу: угол из брендбука у образцов занят"
+    if missing:
         warnings.append(
-            f"Логотип бренда не поставлен на {skipped} {plural(skipped, 'слайд', 'слайда', 'слайдов')} шаблона: "
-            "у края, где ему место по брендбуку, нет свободного места."
+            f"Логотип бренда стоит {where} — на {rep.covered} из {rep.samples} {plural(rep.samples, 'содержательного слайда', 'содержательных слайдов', 'содержательных слайдов')} "
+            f"шаблона; на {missing} {plural(missing, 'слайде', 'слайдах', 'слайдах')} там нет свободного места."
         )
-    return added
+    elif rep.place != "brand":
+        warnings.append(f"Логотип бренда стоит {where}.")
+    return rep
