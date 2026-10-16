@@ -147,6 +147,7 @@ def _comparison(d: Data) -> list[_Cand]:
     agg = cv.note
     same = [x for x in d.parallel if x is not m]
     grouped = bool(same)
+    plan_fact = d.plan_fact is not None and m in d.plan_fact
     # ранжированные полосы
     bar = _Cand("bar", 0.7 + (0.15 if long_ else 0.0) + (0.1 if C > 7 else 0.0),
                 title="Ранжированные горизонтальные столбцы" if cv.ranked else "Горизонтальные столбцы", aggregation=agg)
@@ -171,9 +172,15 @@ def _comparison(d: Data) -> list[_Cand]:
         col.score += 0.1
         col.reasons.append("Подписи по порядку (интервалы, ступени) — столбцы сохраняют этот порядок.")
     out.append(col)
-    if grouped:
-        k = len(same) + 1
+    if grouped and plan_fact:
         gk: VizKind = "grouped_bar" if long_ or C > 7 else "grouped_column"
+        out.append(_Cand(gk, 0.97, title="Сгруппированные столбцы: план и факт",
+                         reasons=[f"План и факт рядом для {count_words(C, 'категории', 'категорий', 'категорий')} — "
+                                  f"видно исполнение каждой."],
+                         why_not="План и факт рядом, но столбцов вдвое больше."))
+    elif grouped:
+        k = len(same) + 1
+        gk = "grouped_bar" if long_ or C > 7 else "grouped_column"
         out.append(_Cand(gk, 0.9, title="Сгруппированные полосы" if gk == "grouped_bar" else "Сгруппированные столбцы",
                          reasons=[f"{upper_first(count_words(k, 'метрика', 'метрики', 'метрик'))} в одних единицах для "
                                   f"{count_words(C, 'категории', 'категорий', 'категорий')} — сравнение рядом."],
@@ -188,7 +195,9 @@ def _comparison(d: Data) -> list[_Cand]:
         bar.reasons.insert(0, f"Иерархия «{d.cols[child].name} → {cv.dim}»: {by_parent} — сумма {by_child}.")
         kc = d.cat_view(m, dim=child)
         nchild = kc.distinct if kc is not None else d.n
-        out.append(_Cand("bar", 0.6, title=f"Столбцы {by_child}" + (", топ-11" if nchild > 12 else ""), dim=child,
+        top_txt = f", топ-{kc.n - 1}" if kc is not None and kc.others else f", первые {kc.n}" if kc is not None and \
+            kc.distinct > kc.n else ""
+        out.append(_Cand("bar", 0.6, title=f"Столбцы {by_child}{top_txt}", dim=child,
                          key="child", aggregation=kc.note if kc is not None else None,
                          reasons=[f"Детальнее: {count_words(nchild, 'строка', 'строки', 'строк')} {by_child}."],
                          why_not=f"Детальнее, но {count_words(nchild, 'длинное название', 'длинных названия', 'длинных названий')}"
@@ -204,7 +213,12 @@ def _comparison(d: Data) -> list[_Cand]:
     shares = cv.shares
     if m is None or m.additive:
         pie = _Cand("pie", 0.0, title="Круговая диаграмма")
-        if shares is None:
+        if d.funnel or plan_fact:
+            pie.score, pie.feasible = 0.05, False
+            pie.reasons.append("Показывает части целого.")
+            pie.why_not = ("Этапы воронки — не доли одного целого." if d.funnel else
+                           "План и факт — не части одного целого.")
+        elif shares is None:
             pie.score, pie.feasible = 0.05, False
             pie.reasons.append("Показывает части целого.")
             pie.why_not = "Есть отрицательные значения — это не доли целого."

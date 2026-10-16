@@ -115,7 +115,7 @@ def test_ordinal_shares_leader_by_value():
 def test_ordinal_comparison_highlights_the_max():
     t = _t(["Возраст", "Клиентов"], [["до 25", 150], ["25–34", 350], ["35–44", 300], ["45 и старше", 200]])
     p = _plan(t)
-    assert _sp(p.headline) == "25–34 даёт 35% клиентов: 350 из 1 000"
+    assert _sp(p.headline) == "25–34 — 35% клиентов: 350 из 1 000"
     assert p.plain_headline == "Число клиентов по возрастам"
     assert chart_spec_of(p, t).highlight_index == 1
 
@@ -138,21 +138,25 @@ def test_hourly_series_is_not_year_over_year():
     t0 = datetime(2026, 1, 1)
     t = _t(["Время", "Запросов"], [[(t0 + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M"), 100 + i] for i in range(30)])
     p = _plan(t)
-    assert "за год" not in p.headline and "год к году" not in _facts(p)["change"].text
+    assert "за год" not in p.headline and "год к году" not in " ".join(f.text for f in p.headline_facts)
     spec = chart_spec_of(p, t)
     assert len(spec.categories) == 30 and not spec.gaps  # полночь — час 00:00, а не пропуск
-    assert p.headline == "Число запросов выросло на 29% за 29 часов"
+    # почасовой ряд: пик суток, а не «первый час против последнего»
+    assert p.headline.startswith("Число запросов: пик 129, в среднем")
 
 
 def test_hourly_data_over_days_resampled_to_days():
     t0 = datetime(2026, 3, 2)
-    rows = [[(t0 + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M"), 10] for i in range(24 * 5)]
+    # до недели — часами (суточный цикл виден); дольше — днями, сумма всех 24 часов
+    week = _t(["Время", "Запросов"], [[(t0 + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M"), 10] for i in range(24 * 5)])
+    assert len(chart_spec_of(_plan(week), week).categories) == 120
+    rows = [[(t0 + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M"), 10] for i in range(24 * 10)]
     t = _t(["Время", "Запросов"], rows)
     p = _plan(t)
     spec = chart_spec_of(p, t)
-    assert spec.categories == ["2 мар 2026", "3 мар 2026", "4 мар 2026", "5 мар 2026", "6 мар 2026"]
-    assert spec.series[0].values == [240.0] * 5  # все 24 часа каждого дня, сумма
-    assert p.options[0].aggregation.startswith("по дням: 120 часов → 5 дней, сумма")
+    assert spec.categories[:2] == ["2 мар 2026", "3 мар 2026"] and len(spec.categories) == 10
+    assert spec.series[0].values == [240.0] * 10
+    assert p.options[0].aggregation.startswith("по дням: 240 часов → 10 дней, сумма")
     assert "за год" not in p.headline and p.headline == "Число запросов держится на уровне 240"
 
 

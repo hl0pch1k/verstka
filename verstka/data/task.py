@@ -58,7 +58,9 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
 
     m = d.main
     # структура долей
-    if d.parts_measure is not None:
+    if d.funnel:
+        pass  # этапы воронки — не части одного целого
+    elif d.parts_measure is not None:
         s["shares"] = 0.92
     elif d.composition and cats is not None and not has_time:
         s["shares"] = 0.88  # несколько частей одного целого по категориям (формы обучения по направлениям)
@@ -96,10 +98,12 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     if d.xy is not None and not has_time and d.xy.n >= 8 and not d.parallel:
         r = min(1.0, abs(d.xy.r))
         strong = r >= 0.5
-        # сильная связь двух разных величин — главное в данных; слабая — запасной путь
-        s["relationship"] = round(0.4 + (0.5 if strong else 0.3) * r, 3)
-        if cats is not None and d.label is not None:
-            s["relationship"] -= 0.05
+        if d.label is not None and n <= 60:
+            # именованные строки (регионы, менеджеры, статьи бюджета): их сравнивают; связь — только по цели
+            s["relationship"] = round(min(0.5, 0.4 + 0.3 * r), 3)
+        else:
+            # много безымянных наблюдений (коды, опыты): сильная связь — главное в данных
+            s["relationship"] = round(0.4 + (0.5 if strong else 0.3) * r, 3)
 
     # справочник
     if n > 30 and len(d.cols) >= 4:
@@ -209,8 +213,11 @@ def _why(task: TaskKind, d: Data) -> str:
         return f"{upper_first(nums)} — важны сами значения."
     if task == "relationship" and d.xy is not None:
         xy = d.xy
+        xp, yp = metric_phrase(xy.x.name, xy.x.type), metric_phrase(xy.y.name, xy.y.type)
+        xn = lower_first(xp.nom if xp is not None else xy.x.name)
+        yn = lower_first(yp.nom if yp is not None else xy.y.name)
         return (f"Две метрики без оси времени, {count_words(xy.n, 'точка', 'точки', 'точек')} — важно, связаны ли "
-                f"{lower_first(xy.x.name)} и {lower_first(xy.y.name)}.")
+                f"{xn} и {yn}.")
     return f"Задача — {TASK_TITLES[task].lower()}."
 
 

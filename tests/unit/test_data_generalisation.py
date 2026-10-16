@@ -19,7 +19,7 @@ from verstka.data.plan import NotBuilt, assign_goals, chart_spec_of, plan_datase
 from verstka.data.profile import profile_table
 from verstka.data.readers import read_file
 from verstka.data.words import each_unit, phrase, verb_agree
-from verstka.schemas.data import DatasetPlan, Table, VizOption
+from verstka.schemas.data import DatasetPlan, Outlier, Table, VizOption
 from verstka.schemas.outline import ChartSpec, TableData
 
 SCIENCE = Path(__file__).resolve().parents[2] / "examples" / "data-science-2026"
@@ -110,8 +110,16 @@ def test_change_column_is_not_a_second_measure():
 
 
 # ── M5, M11: несколько частей и рядов ─────────────────────────────────────────────────────────────────────────────────
+def test_parts_need_evidence_of_a_whole():
+    # общее первое слово в названиях — не признак целого: без группы шапки и без итога — сравнение
+    p = _plan(_intake())
+    assert p.task.task != "shares" and all(o.kind not in ("stacked_bar", "stacked_column") for o in p.options)
+
+
 def test_parts_under_one_header_are_a_composition():
-    for t in (_intake(), _intake(total=True)):
+    marked = _intake()
+    marked.column_groups = [None, "Форма обучения", "Форма обучения", "Форма обучения"]
+    for t in (marked, _intake(total=True)):
         p = _plan(t)
         assert p.task.task == "shares", t.columns
         assert p.options[0].kind == "stacked_bar"
@@ -357,7 +365,9 @@ def test_expected_outliers_named_in_caption_never_as_outliers():
              300.0 if i == 0 else 250.0 if i == 1 else round(5 + i / 20, 1)] for i in range(60)]
     t = _t(["Клиент", "Отрасль", "Регион", "Выручка"], rows, [None, None, None, "млн ₽"])
     prof = profile_table(t)
-    assert prof.expected_outliers and not prof.outliers
+    # классификацию «ожидаемое / похожее на ошибку» делает профиль; здесь проверяется только, как анализ её говорит
+    exp = [Outlier(column="Выручка", row=0, value=300.0), Outlier(column="Выручка", row=1, value=250.0)]
+    prof = prof.model_copy(update={"expected_outliers": exp, "outliers": []})
     p = plan_dataset(prof, t)
     assert p.task.task == "reference"
     assert "Крупнейший клиент — Клиент 000: 300 млн ₽." in _sp(p.caption)

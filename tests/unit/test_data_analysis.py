@@ -235,15 +235,19 @@ def test_long_format_series_by_category():
 
 
 def test_relationship_scatter():
-    t = _t(["Магазин", "Расходы на рекламу", "Выручка"],
-           [[f"Магазин {i + 1}", i * 10, 3 * i * 10 + 50 + (i % 5) * 20] for i in range(20)],
+    # безымянные наблюдения (коды) — взаимосвязь; одна единица у обеих осей — без «каждый X даёт Y», только связь
+    t = _t(["Кампания", "Расходы на рекламу", "Выручка"],
+           [[f"К-{100 + i}", i * 10, 3 * i * 10 + 50 + (i % 5) * 20] for i in range(20)],
            units=[None, "тыс. ₽", "тыс. ₽"])
     p = _plan(t)
     assert p.task.task == "relationship" and p.options[0].kind == "scatter"
-    # наклон в заголовке: на каждую тысячу рублей рекламы — около +3,1 тыс. ₽ выручки
-    assert p.headline.replace("\u00a0", " ") == "Каждая тысяча рублей расходов на рекламу — около +3,1 тыс. ₽ к выручке"
+    assert p.headline == "Расходы на рекламу и выручка связаны: r = 0,99"
     spec = chart_spec_of(p, t)
     assert spec.type == "scatter" and len(spec.xy[0].x) == 20 and spec.x_title == "Расходы на рекламу, тыс. ₽"
+    # именованные строки (магазины) — сравнение, а не взаимосвязь
+    named = _t(["Магазин", "Расходы на рекламу", "Выручка"], [[f"Магазин {chr(1040 + i)}", r[1], r[2]]
+                                                             for i, r in enumerate(t.rows)], units=[None, "тыс. ₽", "тыс. ₽"])
+    assert plan_dataset(profile_table(named), named).task.task == "comparison"
 
 
 def test_melted_kpi_table_still_gives_cards():
@@ -263,7 +267,7 @@ def test_counts_by_category_without_numbers():
     t = _t(["Обращение", "Канал"], [[f"A-{i}", ["Почта", "Чат", "Телефон"][i % 3 if i % 7 else 0]] for i in range(60)])
     p = _plan(t)
     assert p.task.task == "comparison"
-    assert p.headline == "Почта даёт 43% обращений: 26 из 60"
+    assert p.headline == "Почта — 43% обращений: 26 из 60"  # «даёт» — только про выручку
 
 
 # ── цель ──────────────────────────────────────────────────────────────────────────────────────────────────────────────

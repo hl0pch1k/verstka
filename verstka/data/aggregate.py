@@ -26,10 +26,10 @@ from typing import Any, Optional
 
 import numpy as np
 
-from verstka.data.parse import is_total_label, parse_quantity, period_iso, period_parts, quantity
+from verstka.data.parse import is_total_label, parse_quantity, period_iso, period_parts, quantity, split_unit
 from verstka.data.words import (
     PERIOD_WORDS, count_words, fmt_exact, fmt_num, fmt_value, head_word, is_counter, join_and, lower_first,
-    period_label, period_text, phrase, plural, stems_match, upper_first,
+    metric_phrase, period_label, period_text, phrase, plural, stems_match, upper_first,
 )
 from verstka.schemas.data import ColumnProfile, DatasetProfile, Table
 
@@ -55,8 +55,17 @@ _LEVEL = re.compile(
 )
 _STOCK = re.compile(r"клиент|пользовател|сотрудник|абонент|подписчик|остат|баланс|численност|штат|запас|база", re.I)
 # индексы и доли: изменение — в пунктах, а не в процентах («NPS +6 п.», «конверсия +0,5 п.п.»)
-INDEX_NAME = re.compile(r"nps|csat|ces\b|индекс|рейтинг|оценк|балл|конверси|доля|процент|удовлетвор|загрузк|маржин|"
-                        r"рентабельн|охват|вовлечённ|вовлеченн|отток|retention|churn", re.I)
+# индексы и оценки по шкале — изменение в пунктах; проверяется по главному слову названия и только без единицы
+# (у денег и счёта изменение — всегда в процентах: «Оценка стоимости бизнеса, млн ₽» — не индекс)
+INDEX_NAME = re.compile(r"^(?:nps|enps|csat|ces|индекс\w*|рейтинг\w*|оценк\w*|балл\w*|доля|доли|конверси\w*|"
+                        r"удовлетвор\w*|лояльн\w*)$", re.I)
+# естественные причины для оси X рассеяния: время и усилия, цена и деньги на входе, дозы и условия опыта
+_DRIVER = re.compile(r"час|подготов|занят|трениров|стаж|опыт работы|возраст|цен[аы]|стоимост|тариф|скидк|расход|"
+                     r"затрат|инвестиц|реклам|бюджет|доз|концентрац|температур|давлени|площад|расстояни|время|"
+                     r"длительн|частот|количество часов", re.I)
+# оценочные метрики — главнее счёта размера («Средний балл» важнее «Учеников»)
+_EVAL_NAME = re.compile(r"балл|оценк|рейтинг|выручк|доход|прибыл|качеств|успеваем|удовлетвор|nps|конверси|удержан|"
+                        r"результат|эффективн|продаж", re.I)
 _TIME_NAME = {
     "мин": "мин", "минут": "мин", "минуты": "мин", "час": "ч", "часов": "ч", "часа": "ч", "ч": "ч", "дней": "дн.",
     "день": "дн.", "дня": "дн.", "дн": "дн.", "сек": "с", "секунд": "с",
@@ -73,37 +82,48 @@ def unit_short(unit: Optional[str]) -> Optional[str]:
     return unit or None
 
 
-def _common_prefix_words(names: list[str]) -> str:
-    """Общие первые слова всех названий, если у каждого после них что-то остаётся: «Форма обучения Бюджет»,
-    «Форма обучения Платное» → «Форма обучения» (заголовок группы над колонками)."""
-    toks = [n.split() for n in names]
-    k = 0
-    while all(len(t) > k + 1 for t in toks) and len({t[k].lower() for t in toks}) == 1:
-        k += 1
-    return " ".join(toks[0][:k]) if k else ""
-
-
 def _common_suffix(names: list[str]) -> str:
     """Общее дополнение после запятой: «Scopus, статей», «РИНЦ, статей» → «статей»."""
     tails = {n.split(",", 1)[1].strip().lower() if "," in n else "" for n in names}
     return next(iter(tails)) if len(tails) == 1 and "" not in tails else ""
 
 
-def _name_kin(a: str, b: str) -> bool:
-    """Названия из одной группы: общий заголовок спереди или общее дополнение после запятой."""
-    return bool(_common_prefix_words([a, b]) or _common_suffix([a, b]))
+_PLAN = re.compile(r"(?:^|[^а-яёa-z])(?:план\w*|plan|цел[ьи]|target|прогноз)(?:[^а-яёa-z]|$)", re.I)
+_FACT = re.compile(r"(?:^|[^а-яёa-z])(?:факт\w*|fact|actual|исполнен\w*|выполнен\w*)(?:[^а-яёa-z]|$)", re.I)
 
 
-def _leaf_names(names: list[str]) -> dict[str, str]:
-    pre = _common_prefix_words(names)
-    suf = _common_suffix(names)
-    out = {}
-    for n in names:
-        leaf = n[len(pre):].strip() if pre else n
-        if suf and "," in leaf:
-            leaf = leaf.rsplit(",", 1)[0].strip()
-        out[n] = upper_first(leaf) if leaf else n
-    return out
+def _period_name(name: str) -> bool:
+    """Колонка названа периодом («2025», «Выручка 2026», «III кв. 2026», «Январь»)."""
+    return bool(re.search(r"(?:^|\D)(?:19|20)\d\d(?:\D|$)", name)) or period_parts(name.strip()) is not None
+
+
+def _period_key(name: str) -> tuple[int, int]:
+    """Порядок колонок-периодов: год и номер внутри года из названия («Выручка 2026» → (2026, 0))."""
+    y = re.search(r"(?:19|20)\d\d", name)
+    pp = period_parts(name.strip())
+    if pp is not None:
+        return pp[1], 0
+    return (int(y.group(0)) if y else 0), 0
+
+
+def _parts_ok(group: list[Measure]) -> bool:
+    """Годы и периоды, план и факт — не части одного целого."""
+    if any(_period_name(x.name) for x in group):
+        return False
+    return not (any(_PLAN.search(x.name) for x in group) and any(_FACT.search(x.name) for x in group))
+
+
+def _kind(m: Measure) -> str:
+    """Род величины: деньги, проценты, индекс, счётчик («Клиентов») или просто число."""
+    if m.type == "money":
+        return "money"
+    if m.type == "percent":
+        return "percent"
+    if INDEX_NAME.search(head_word(m.name) or ""):
+        return "index"
+    if is_counter(m.name):
+        return "counter"
+    return "plain"
 
 
 def _num(cell: Any) -> Optional[float]:
@@ -116,11 +136,19 @@ def _num(cell: Any) -> Optional[float]:
     return None if q is None else q.full
 
 
+def is_index(name: str) -> bool:
+    """Безразмерный индекс или оценка по шкале по главному слову названия: «NPS», «Индекс удовлетворённости»,
+    «Средний балл»."""
+    return bool(INDEX_NAME.match(head_word(split_unit(name)[0] or name) or ""))
+
+
 def kpi_change(label: str, cur: float, prev: float, unit: Optional[str]) -> Optional[tuple[float, str]]:
-    """Изменение показателя: проценты — в п.п., индексы и доли (NPS, конверсия) — в пунктах, остальное — в %."""
-    if unit == "%" or (unit or "").startswith("п.п"):
+    """Изменение показателя. Сначала единица: проценты — в п.п.; любая другая единица (деньги, люди, штуки) — в %;
+    без единицы — индекс или оценка по шкале (NPS, балл) в пунктах, остальное в %."""
+    u = unit or split_unit(label)[1]
+    if u == "%" or (u or "").startswith("п.п"):
         return cur - prev, "п.п."
-    if INDEX_NAME.search(label or ""):
+    if not u and is_index(label):
         return cur - prev, "п."
     if prev > 0:
         return (cur / prev - 1) * 100, "%"
@@ -200,6 +228,8 @@ class TimeView:
     others: int = 0  # сколько категорий ушло в «Остальные»
     column_type: str = "date"
     partial: int = 0  # неполных крайних периодов не показано (сумма за них занижена)
+    partial_txt: list[str] = field(default_factory=list)  # «февраль 2026 — 22 из 28 дней»
+    cat_moves: dict[str, tuple[float, float]] = field(default_factory=dict)  # категория → (первое, последнее)
 
     @property
     def points(self) -> int:
@@ -242,8 +272,17 @@ class TimeView:
         s = (f"{by}: {count_words(self.source_points, src[0], src[1], src[2])} → "
              f"{count_words(self.points, dst[0], dst[1], dst[2])}, {how}")
         if self.partial:
-            s += f"; {'неполный крайний период не показан' if self.partial == 1 else 'неполные крайние периоды не показаны'}"
+            what = "неполный период не показан" if self.partial == 1 else "неполные периоды не показаны"
+            s += f"; {what}" + (f" ({'; '.join(self.partial_txt)})" if self.partial_txt else "")
         return s
+
+    @property
+    def axis_title(self) -> str:
+        """Подпись оси времени: после ресэмплинга — новый период («Неделя», «Месяц»), а не исходная «Дата»."""
+        if self.resampled:
+            return {"week": "Неделя", "month": "Месяц", "quarter": "Квартал", "year": "Год", "day": "День"}.get(
+                self.freq, self.column)
+        return self.column
 
 
 @dataclass
@@ -423,6 +462,8 @@ class XYView:
     intercept: float = 0.0
     group: Optional[str] = None  # колонка-группа для цвета точек (≤ 5 значений)
     groups: list[str] = field(default_factory=list)  # группа каждой точки
+    driver: bool = False  # X — естественная причина (часы, цена, расходы): можно говорить «каждый X — +Y»
+    label_name: Optional[str] = None  # подпись точек (имя или код строки)
 
     @property
     def n(self) -> int:
@@ -460,6 +501,44 @@ def _to_freq(gran: str, ordinal: int, freq: str) -> Optional[int]:
     if gran == "quarter" and freq == "year":
         return ordinal // 4
     return None
+
+
+def _period_days(target: str, k: int) -> list[int]:
+    """Дни (порядковые номера) периода `target` с номером `k`."""
+    if target == "day":
+        return [k]
+    if target == "week":
+        return [k * 7 + 1 + d for d in range(7)]
+    if target == "month":
+        y, mth = divmod(k, 12)
+        first = date(y, mth + 1, 1)
+        nxt = date(y + (mth + 1) // 12, (mth + 1) % 12 + 1, 1)
+        return list(range(first.toordinal(), nxt.toordinal()))
+    if target == "quarter":
+        y, q = divmod(k, 4)
+        return [d for mm in range(3) for d in _period_days("month", y * 12 + q * 3 + mm)]
+    if target == "year":
+        return list(range(date(k, 1, 1).toordinal(), date(k + 1, 1, 1).toordinal()))
+    return []
+
+
+def _calendar_count(gran: str, target: str, k: int) -> int:
+    """Сколько исходных точек `gran` в полном периоде `target`: 28–31 день месяца, 7 дней недели, 24 часа суток,
+    понедельники недель месяца, 3 месяца квартала, 12 месяцев года, 4 квартала года. 0 — неизвестно."""
+    if gran == "month":
+        return {"quarter": 3, "year": 12}.get(target, 0)
+    if gran == "quarter":
+        return 4 if target == "year" else 0
+    days = _period_days(target, k)
+    if not days:
+        return 0
+    if gran == "day":
+        return len(days)
+    if gran == "hour":
+        return 24 * len(days)
+    if gran == "week":
+        return sum(1 for d in days if date.fromordinal(d).weekday() == 0)
+    return 0
 
 
 def resample_freq(freq: str, points: int, span: dict[str, int]) -> str:
@@ -628,14 +707,24 @@ class Data:
             for m in ms:
                 if stems_match(self.subject, m.name):
                     return m
+        def latest(m: Measure) -> Measure:
+            """Колонки-периоды («Выручка 2025 · Выручка 2026»): главная — последний период."""
+            if not _period_name(m.name):
+                return m
+            sib = [x for x in ms if _period_name(x.name) and (x.unit or "") == (m.unit or "") and not x.change]
+            return max(sib, key=lambda x: (_period_key(x.name), x.j)) if len(sib) >= 2 else m
+
         for pred in (
             lambda m: m.type == "money" and not m.change and not m.mixed,
+            # оценочная метрика (балл, качество, выручка) главнее счёта размера (учеников, пользователей)
+            lambda m: not m.change and not m.mixed and bool(_EVAL_NAME.search(m.name)),
+            lambda m: not m.change and not m.mixed and not is_counter(m.name),
             lambda m: not m.change and not m.mixed,
             lambda m: not m.change,
         ):
             for m in ms:
                 if pred(m):
-                    return m
+                    return latest(m)
         return ms[0]
 
     @cached_property
@@ -663,62 +752,130 @@ class Data:
         return next((m for m in self.measures if is_total_label(m.name)), None)
 
     @cached_property
+    def funnel(self) -> bool:
+        """Воронка: колонка этапов («Этап/Стадия/Шаг/Воронка») и значения строго убывают по порядку файла. Одного
+        убывания мало — так выглядит любая таблица, отсортированная по убыванию. Этапы — не части одного целого: их не
+        складывают и не делят на сумму."""
+        m, j = self.main, self.label
+        if m is None or j is None or not m.additive:
+            return False
+        vals = [m.values[i] for i in self.rows_idx]
+        if len(vals) < 3 or any(v is None for v in vals):
+            return False
+        dec = all(a > b for a, b in zip(vals, vals[1:]))  # type: ignore[operator]
+        named = bool(re.search(r"этап|стади|шаг|воронк|funnel|stage", self.cols[j].name, re.I))
+        return dec and named
+
+    def _group_of(self, j: int) -> Optional[str]:
+        groups = getattr(self.table, "column_groups", None) or []
+        return groups[j] if j < len(groups) else None
+
+    @cached_property
+    def part_group(self) -> list[Measure]:
+        """Части одного целого — только по признакам в данных:
+        - профиль нашёл колонку-итог, равную сумме частей (`part_columns`);
+        - чтение отметило группу двухэтажной шапки (`column_groups`: «Форма обучения» над «Бюджет · Платное ·
+          Целевое») — берётся вся группа, а не только похожие на главную;
+        - в каждой строке колонки одной единицы складываются в 100 (ответы по шкале, доли в процентах).
+        Годы и периоды, план и факт — не части никогда. Без признака — пусто: тогда сравнение, а не состав."""
+        ms = [m for m in self.measures if not m.change and not m.mixed and m is not self.total_metric]
+        parts = [self.measure(nm) for nm in (getattr(self.profile, "part_columns", None) or [])]
+        parts = [x for x in parts if x is not None and not x.change]
+        if len(parts) >= 2 and _parts_ok(parts):
+            return sorted(parts, key=lambda x: x.j)
+        m = self.main
+        if m is not None and self._group_of(m.j):
+            g = self._group_of(m.j)
+            grp = [x for x in ms if self._group_of(x.j) == g and (x.unit or "") == (m.unit or "")]
+            if len(grp) >= 2 and _parts_ok(grp) and all(x.additive and x.nonneg for x in grp):
+                return sorted(grp, key=lambda x: x.j)
+        # строки по 100: все колонки одной единицы (без единицы или %) от 0 до 100, сумма в каждой строке ≈ 100
+        by_unit: dict[str, list[Measure]] = {}
+        for x in ms:
+            if (x.unit or "%") == "%" and x.present and min(x.present) >= 0 and max(x.present) <= 100:
+                by_unit.setdefault(x.unit or "", []).append(x)
+        for grp in by_unit.values():
+            if len(grp) < 3 or not _parts_ok(grp):
+                continue
+            sums = []
+            for i in self.rows_idx:
+                vals = [x.values[i] for x in grp]
+                if all(v is not None for v in vals):
+                    sums.append(sum(vals))  # type: ignore[arg-type]
+            if len(sums) >= 2 and all(97 <= v <= 103 for v in sums):
+                return sorted(grp, key=lambda x: x.j)
+        return []
+
+    @cached_property
+    def plan_fact(self) -> Optional[tuple[Measure, Measure]]:
+        """Пара «план — факт» (цель — исполнение) одной единицы; колонка «Исполнение, %» — не факт, а их отношение."""
+        cands = [m for m in self.measures if not m.change and not m.mixed and m.type != "percent"]
+        plans = [m for m in cands if _PLAN.search(m.name)]
+        facts = [m for m in cands if _FACT.search(m.name) and m not in plans]
+        for pl in plans:
+            for fa in facts:
+                if (pl.unit or "") == (fa.unit or ""):
+                    return pl, fa
+        return None
+
+    @cached_property
     def parallel(self) -> list[Measure]:
-        """Метрики одного рода с главной (несколько рядов или частей): одна единица и общая часть названия
-        («Форма обучения Бюджет / Платное / Целевое», «Scopus, статей / РИНЦ, статей»), или одна единица рядом с
-        колонкой-итогом («Бюджет, Платное, Целевое, Всего»), или одна единица на общей оси времени («План, млн ₽ /
-        Факт, млн ₽» по месяцам). Изменения, колонки с разными единицами и итог («Всего») — не ряды. До 5."""
+        """Ряды одного рода с главной: части целого (`part_group`); план и факт; на оси времени — колонки одной единицы
+        и одного рода (без единицы тоже: «ИТ · Продажи · Маркетинг» по месяцам); по категориям — колонки с общим
+        дополнением («…, статей») или колонки-периоды («Выручка 2025 · Выручка 2026») — рядом, а не в сумме."""
         m = self.main
         if m is None or m.change or m.mixed:
             return []
-        parts = [self.measure(nm) for nm in (getattr(self.profile, "part_columns", None) or [])]
-        parts = [x for x in parts if x is not None]
-        if m in parts and len(parts) >= 2:
-            # части целого по профилю (сумма частей = «Всего» в каждой строке)
-            return sorted(parts, key=lambda x: x.j)[:MAX_SERIES]
+        if self.part_group and m in self.part_group:
+            return list(self.part_group)
+        pf = self.plan_fact
+        if pf is not None and m in pf:
+            return list(pf)
         group = [m]
         for x in self.measures:
             if x is m or x.change or x.mixed or x is self.total_metric:
                 continue
-            if (x.unit or "") != (m.unit or ""):
+            if (x.unit or "") != (m.unit or "") or _kind(x) != _kind(m):
                 continue
-            kin = _name_kin(m.name, x.name)
-            # родство: общая часть названия; или рядом колонка-итог (части суммы); или общая ось времени и единица
-            # (план и факт по месяцам). Две денежные колонки по магазинам без этого — взаимосвязь, а не ряды
-            sibling = self.total_metric is not None or (self.time_col is not None and bool(m.unit))
-            if not kin and not (sibling and x.type == m.type):
-                continue
-            group.append(x)
+            if self.time_col is not None:
+                group.append(x)
+            elif _common_suffix([m.name, x.name]) or (_period_name(m.name) and _period_name(x.name)):
+                group.append(x)
         group.sort(key=lambda x: x.j)
         return group[:MAX_SERIES] if len(group) >= 2 else []
 
     @cached_property
     def series_names(self) -> dict[str, str]:
-        """Короткие имена рядов без общей части: «Форма обучения Платное» → «Платное», «Scopus, статей» → «Scopus»."""
-        return _leaf_names([m.name for m in self.parallel]) if self.parallel else {}
+        """Имена рядов для легенды: без общего дополнения-единицы («Scopus, статей» → «Scopus») и без отмеченной
+        чтением группы шапки в начале; угаданный общий префикс не отрезается."""
+        g = self.parallel
+        if not g:
+            return {}
+        suf = _common_suffix([x.name for x in g])
+        out = {}
+        for x in g:
+            nm = x.name
+            grp = self._group_of(x.j)
+            if grp and nm.lower().startswith(grp.lower() + " "):
+                nm = nm[len(grp):].strip()
+            if suf and "," in nm:
+                nm = nm.rsplit(",", 1)[0].strip()
+            out[x.name] = upper_first(nm) if nm else x.name
+        return out
 
     @cached_property
     def composition(self) -> bool:
-        """Ряды — части одного целого (их можно складывать): есть колонка-итог, общий заголовок группы
-        («Форма обучения …») или профиль нашёл части целого; и все ряды суммируемые и неотрицательные."""
-        g = self.parallel
-        if len(g) < 2 or not all(x.additive and x.nonneg for x in g):
-            return False
-        if set(getattr(self.profile, "part_columns", None) or []) >= {x.name for x in g}:
-            return True
-        prefix = _common_prefix_words([x.name for x in g])
-        return self.total_metric is not None or bool(prefix) or bool(self.group_name) or bool(self.profile.parts_of_whole)
+        """Ряды — части одного целого, только по признаку в данных (`part_group`)."""
+        return bool(self.part_group) and self.main in self.part_group
 
     @cached_property
     def group_name(self) -> Optional[str]:
-        """Общая группа рядов из двухэтажной шапки (`Table.column_groups`: «Форма обучения» над «Бюджет · Платное ·
-        Целевое») или общий заголовок в их названиях; None — группы нет."""
+        """Группа рядов из двухэтажной шапки (`Table.column_groups`: «Форма обучения»); None — чтение группу не отметило."""
         g = self.parallel
-        groups = getattr(self.table, "column_groups", None) or []
-        names = {groups[x.j] if x.j < len(groups) else None for x in g}
-        if len(names) == 1 and None not in names:
+        names = {self._group_of(x.j) for x in g}
+        if g and len(names) == 1 and None not in names:
             return next(iter(names))
-        return _common_prefix_words([x.name for x in g]) or None
+        return None
 
     def parent_of(self, j: int) -> Optional[int]:
         """Родитель колонки в иерархии профиля («Кафедра → Институт»), если у него 2–12 значений."""
@@ -803,9 +960,10 @@ class Data:
         def how_of(mm: Optional[Measure]) -> str:
             return "sum" if mm is None else ("mean" if mm.change else mm.how)
 
-        # ресэмплинг
+        # ресэмплинг; почасовой ряд до недели (168 точек) остаётся часами — суточный цикл виден только так
         target = src_freq
-        if src_points > max_points:
+        limit = 168 if src_freq == "hour" else max_points
+        if src_points > limit:
             spans = {}
             for f in _FREQ_ORDER[_FREQ_ORDER.index(src_freq) + 1:]:
                 ks = [_to_freq(gran, t[1], f) for _, t in cells]
@@ -817,16 +975,25 @@ class Data:
             keyed = [(i, k) for i, k in keyed if k is not None]
             uniq = sorted({k for _, k in keyed})
             irregular = False
+        partial_txt: list[str] = []
         if target != src_freq and how_of(m) == "sum":
-            # неполные крайние периоды (месяц, за который есть 5 дней из 30) — сумма за них занижена: не показываем
+            # период полон только по календарю (все дни недели, месяца, квартала): сумма за неполный крайний период
+            # занижена — такой период не показывается и не участвует в выводе
             per: dict[int, set] = {}
             for _, t in cells:
                 k = _to_freq(gran, t[1], target)
                 if k is not None:
                     per.setdefault(k, set()).add(t[1])
-            full = sorted(len(v) for v in per.values())
-            med = full[len(full) // 2] if full else 0
-            drop = {k for k in (uniq[0], uniq[-1]) if len(uniq) > 3 and len(per.get(k, ())) < 0.7 * med}
+            drop = set()
+            for k in {uniq[0], uniq[-1]}:
+                need = _calendar_count(gran, target, k)
+                have = len(per.get(k, ()))
+                if need and have < need and len(uniq) > 2:
+                    drop.add(k)
+                    unit_w = {"day": ("день", "дня", "дней"), "hour": ("час", "часа", "часов"),
+                              "week": ("неделя", "недели", "недель"), "month": ("месяц", "месяца", "месяцев"),
+                              "quarter": ("квартал", "квартала", "кварталов")}.get(gran, ("точка", "точки", "точек"))
+                    partial_txt.append(f"{period_text(_iso(target, k))} — {have} из {count_words(need, *unit_w)}")
             if drop:
                 keyed = [(i, k) for i, k in keyed if k not in drop]
                 uniq = [k for k in uniq if k not in drop]
@@ -843,6 +1010,7 @@ class Data:
 
         # ряды: длинный формат — по категориям, иначе метрика (и метрики в тех же единицах)
         dupes = len(keyed) > len({k for _, k in keyed})
+        cat_moves: dict[str, tuple[float, float]] = {}
         series: list[SeriesV] = []
         dim_name = None
         others = 0
@@ -875,6 +1043,11 @@ class Data:
                     if m.mixed:
                         g_units.setdefault(lab, []).append(m.row_units[i] or "")
                 tot = {g: sum(sum(x) for x in d.values()) for g, d in groups.items()}
+                for g, dd in groups.items():
+                    seq = [agg(dd[p_], how) for p_ in sorted(dd)]
+                    seq = [v for v in seq if v is not None]
+                    if len(seq) >= 2:
+                        cat_moves[g] = (seq[0], seq[-1])
                 names = sorted(groups, key=lambda g: (-tot[g], g)) if m.additive else list(groups)
                 keep = names
                 if len(names) > MAX_SERIES:
@@ -886,15 +1059,21 @@ class Data:
                     if m.mixed and g_units.get(g):
                         gu = max(set(g_units[g]), key=g_units[g].count) or None
                     series.append(SeriesV(g, gu, vals))
-                if others and m.additive:
-                    rest: dict[int, list[float]] = {}
-                    for g in names[len(keep):]:
-                        for p, xs in groups[g].items():
-                            rest.setdefault(p, []).extend(xs)
-                    series.append(SeriesV(f"Остальные {others}", m.unit_text,
-                                          [agg(rest.get(p, []), how) for p in range(len(order))]))
-                elif others:
-                    others = 0
+                if others:
+                    # «Остальные N»: сначала значение каждой категории за период (сумма, последнее, среднее),
+                    # потом сумма по категориям (уровень — среднее по ним, это и сказано в подписи)
+                    rest_vals = []
+                    for p_ in range(len(order)):
+                        per_cat = [agg(groups[g].get(p_, []), how) for g in names[len(keep):]]
+                        per_cat = [v for v in per_cat if v is not None]
+                        if not per_cat:
+                            rest_vals.append(None)
+                        elif m.additive or m.stock:
+                            rest_vals.append(float(sum(per_cat)))
+                        else:
+                            rest_vals.append(float(sum(per_cat) / len(per_cat)))
+                    label = f"Остальные {others}" if (m.additive or m.stock) else f"Остальные {others} (среднее)"
+                    series.append(SeriesV(label, m.unit_text, rest_vals))
         if not series:
             if m is None:
                 counts = [0] * len(order)
@@ -923,18 +1102,27 @@ class Data:
         return TimeView(
             column=self.cols[tj].name, freq=out_freq, periods=periods, labels=labels, series=series, measure=meas,
             source_freq="irregular" if ax.freq == "irregular" else src_freq, source_points=src_points, how=how,
-            dim=dim_name, others=others, column_type=self.cols[tj].type, partial=partial,
+            dim=dim_name, others=others, column_type=self.cols[tj].type, partial=partial, partial_txt=partial_txt,
+            cat_moves=cat_moves,
         )
 
     @cached_property
     def cats(self) -> Optional[CatView]:
+        if self.composition and self._rows100:
+            return self.cat_view(self.main, rank=False)  # строки по 100: порядок — как в файле
         return self.cat_view(self.main, rank_with=self.parallel if self.composition else None)
+
+    @cached_property
+    def _rows100(self) -> bool:
+        g = self.part_group
+        sums = [sum(x.values[i] for x in g) for i in self.rows_idx if all(x.values[i] is not None for x in g)]
+        return bool(g) and bool(sums) and all(97 <= v <= 103 for v in sums)
 
     def cat_dim(self) -> Optional[int]:
         """Колонка категорий для сравнения: подпись строки (≤ 60, если есть метрика) или измерение с повторами (2–60
         значений). Без метрики сравнивают число строк — подпись, у которой каждая строка своя, для этого не годится."""
         if self.label is not None and self.n <= 60 and self.main is not None:
-            parent = self.parent_of(self.label)
+            parent = self.parent_of(self.label) if self._rollable else None
             return parent if parent is not None and self.n > MAX_CATS - 4 else self.label
         cands = [j for j in self.dims if 2 <= self.cols[j].distinct <= 60]
         if self.subject:
@@ -945,8 +1133,15 @@ class Data:
             return None
         # самое «крупное» деление, которое ещё различает строки: меньше всего значений, но больше одного
         best = sorted(cands, key=lambda j: (self.cols[j].distinct > 12, j))[0]
-        parent = self.parent_of(best)
+        parent = self.parent_of(best) if self._rollable else None
         return parent if parent is not None and self.cols[best].distinct > MAX_CATS - 4 else best
+
+    @property
+    def _rollable(self) -> bool:
+        """К родителю иерархии сворачивается только суммируемая метрика (сумма по кафедрам); средний чек городов не
+        складывается, а среднее средних — неверное число."""
+        m = self.main
+        return m is None or m.additive or m.stock
 
     def cat_view(self, m: Optional[Measure], top: int = MAX_CATS, dim: Optional[int] = None,
                  rank: bool = True, rank_with: Optional[list[Measure]] = None) -> Optional[CatView]:
@@ -983,7 +1178,7 @@ class Data:
         extra_ms = [mm for mm in self.measures if mm is not m and not mm.mixed]
         extra = {mm.name: [value_of(mm, groups[g]) for g in labels] for mm in extra_ms}
         ordinal = sum(1 for x in labels if _ORDINAL_LABEL.match(x)) >= 0.8 * len(labels)
-        ranked = rank and not ordinal
+        ranked = rank and not ordinal and not (dj == self.label and self.funnel)
         order = list(range(len(labels)))
         key_vals = list(values)
         if rank_with:
@@ -1054,12 +1249,14 @@ class Data:
         ms = [m for m in self.measures if not m.mixed and not m.change]
         if len(ms) < 2:
             return None
-        y = next((m for m in ms if re.search(r"выручк|продаж|прибыл|доход|оценк|балл|nps|конверси|результат|успеваем",
-                                             m.name, re.I)), None)
-        if y is None:
+        # ось X — естественная причина (часы, цена, расходы, доза, концентрация), Y — результат; без причины —
+        # порядок колонок, и заголовок не говорит «каждый X даёт Y»
+        x = next((m for m in ms if _DRIVER.search(m.name)), None)
+        y = next((m for m in ms if m is not x), None) if x is not None else None
+        driver = x is not None
+        if x is None or y is None:
             x, y = ms[0], ms[1]
-        else:
-            x = next(m for m in ms if m is not y)
+        lab_j = self.label if self.label is not None else self.id_col
         xs, ys, labels = [], [], []
         for i in self.rows_idx:
             a, b = x.values[i], y.values[i]
@@ -1067,7 +1264,7 @@ class Data:
                 continue
             xs.append(float(a))
             ys.append(float(b))
-            labels.append(self.text(i, self.label) if self.label is not None else "")
+            labels.append(self.text(i, lab_j) if lab_j is not None else "")
         if len(xs) < 3:
             return None
         ax, ay = np.array(xs), np.array(ys)
@@ -1080,7 +1277,8 @@ class Data:
         if gj is not None:
             groups = [self.text(i, gj) for i in self.rows_idx if x.values[i] is not None and y.values[i] is not None]
         return XYView(x=x, y=y, xs=xs, ys=ys, labels=labels, r=r, slope=slope, intercept=icpt,
-                      group=self.cols[gj].name if gj is not None else None, groups=groups)
+                      group=self.cols[gj].name if gj is not None else None, groups=groups, driver=driver,
+                      label_name=self.cols[lab_j].name if lab_j is not None else None)
 
     # ── свойства для задачи
     @cached_property
@@ -1208,7 +1406,9 @@ def _kpi_view(d: Data) -> Optional[KpiView]:
         for m in d.measures:
             vt = _value_text(d.cell(i, m.j), m.unit_text)
             if vt is not None:
-                items.append(KpiItem(label=m.name, value=vt[0], value_text=vt[1], unit=vt[2]))
+                # счётчик-заголовок («Заказов») на карточке — «Число заказов»
+                lab = metric_phrase(m.name, m.type).nom if is_counter(m.name) and metric_phrase(m.name, m.type) else m.name
+                items.append(KpiItem(label=lab, value=vt[0], value_text=vt[1], unit=vt[2]))
         return KpiView(items=items, mixed_units=len({it.unit for it in items}) > 1) if items else None
     lab_j = d.label
     if lab_j is None:

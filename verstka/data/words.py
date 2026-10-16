@@ -21,7 +21,8 @@ __all__ = [
     "by_group", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
     "period_text", "period_dative", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
-    "stem", "stems_of", "same_stem", "stems_match", "file_title",
+    "stem", "stems_of", "same_stem", "stems_match", "file_title", "period_acc", "period_in", "fmt_count",
+    "fmt_pct_any", "round_pct_any",
 ]
 
 NBSP = " "
@@ -92,8 +93,53 @@ def fmt_signed(x: float, unit: str = "") -> str:
     return f"{sign}{body}{unit}" if unit == "%" else f"{sign}{body}{NBSP}{unit}"
 
 
-def fmt_value(x: float, unit: Optional[str]) -> str:
-    """Значение с единицей: «1 433 млн ₽», «46%», «52»."""
+# единицы-счётчики из шапки («Scopus, статей»): формы при числе — именительный (1 статья, 2 статьи, 5 статей) и
+# родительный («с 42 статей до 381 статьи»)
+_COUNT_UNITS = {
+    "статей": ("статья", "статьи", "статей"), "публикаций": ("публикация", "публикации", "публикаций"),
+    "заявок": ("заявка", "заявки", "заявок"), "заказов": ("заказ", "заказа", "заказов"),
+    "сделок": ("сделка", "сделки", "сделок"), "клиентов": ("клиент", "клиента", "клиентов"),
+    "студентов": ("студент", "студента", "студентов"), "сотрудников": ("сотрудник", "сотрудника", "сотрудников"),
+    "обращений": ("обращение", "обращения", "обращений"), "пользователей": ("пользователь", "пользователя",
+                                                                           "пользователей"),
+    "проектов": ("проект", "проекта", "проектов"), "патентов": ("патент", "патента", "патентов"),
+    "мест": ("место", "места", "мест"), "звонков": ("звонок", "звонка", "звонков"),
+    "человек": ("человек", "человека", "человек"), "штук": ("штука", "штуки", "штук"),
+}
+
+
+def fmt_count(x: float, unit: Optional[str], case: str = "nom") -> Optional[str]:
+    """«381 статья», «2 статьи»; родительный («с … до …»): «42 статей», «381 статьи». None — единица не счётчик."""
+    forms = _COUNT_UNITS.get((unit or "").strip().lower())
+    if forms is None:
+        return None
+    if case == "gen":
+        w = forms[1] if float(x).is_integer() and plural(int(x), 1, 2, 2) == 1 else forms[2]
+    else:
+        w = plural(x, *forms)
+    return f"{fmt_num(x)}{NBSP}{w}"
+
+
+def fmt_pct_any(p: float) -> str:
+    """Процент любого размера: «23», «4,2», «0,06» (меньше 1 — две значащие цифры, не «0»)."""
+    if abs(p) >= 1 or p == 0:
+        return fmt_pct(p)
+    k = max(1, -int(math.floor(math.log10(abs(p)))) + 1)
+    return fmt_num(round(p, k), k)
+
+
+def round_pct_any(p: float) -> float:
+    if abs(p) >= 1 or p == 0:
+        return round_pct(p)
+    k = max(1, -int(math.floor(math.log10(abs(p)))) + 1)
+    return round(p, k)
+
+
+def fmt_value(x: float, unit: Optional[str], case: str = "nom") -> str:
+    """Значение с единицей: «1 433 млн ₽», «46%», «52», «381 статья» (счётчик — по числу; case="gen" — после «с/до»)."""
+    c = fmt_count(x, unit, case)
+    if c is not None:
+        return c
     s = fmt_num(x)
     if not unit:
         return s
@@ -375,6 +421,8 @@ def phrase(name: Optional[str]) -> Optional[Phrase]:
     while h < len(toks) - 1 and _is_adj(low[h]):
         h += 1
     head = low[h]
+    if re.search(r"(?:лось|лся|лась|лись)$", head):
+        return None  # «Уволилось», «Пришло» — глагол, а не название величины
     if is_counter(s) and h == 0:
         return None  # «Клиентов», «Довольных клиентов» — не именительный падеж; см. metric_phrase
     if not _CYR.match(head.replace("ё", "е")):
@@ -441,6 +489,8 @@ def is_counter(name: Optional[str]) -> bool:
         return False
     if first in _COUNTER_OK:
         return True
+    if re.search(r"(?:лось|лись)$", first):
+        return True  # «Уволилось», «Пришли» — счёт событий
     return len(first) >= 5 and first.endswith(("ов", "ев", "ых", "их", "елей", "телей", "лей"))
 
 
@@ -603,6 +653,8 @@ _MONTHS_DAT = ["январю", "февралю", "марту", "апрелю", "
                "декабрю"]
 _MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
                "декабря"]
+_MONTHS_PREP = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре",
+                "ноябре", "декабре"]
 _MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 _ROMAN = ["I", "II", "III", "IV"]
 
@@ -667,35 +719,65 @@ def times_word(r: float) -> str:
 
 
 def period_gen(iso: str) -> str:
-    """Период в родительном: «января 2025», «IV кв. 2024», «2025 года»."""
+    """Период в родительном: «января 2025», «IV кв. 2024», «2025 года», «10-й недели 2026»."""
     if m := _ISO_M.match(iso):
         return f"{_MONTHS_GEN[int(m.group(2)) - 1]} {m.group(1)}"
     if m := _ISO_Y.match(iso):
         return f"{m.group(1)} года"
+    if m := _ISO_W.match(iso):
+        return f"{int(m.group(2))}-й недели {m.group(1)}"
+    return period_text(iso)
+
+
+def period_acc(iso: str) -> str:
+    """Период в винительном («по …»): «сентябрь 2026», «2025 год», «22-ю неделю 2026»."""
+    if m := _ISO_W.match(iso):
+        return f"{int(m.group(2))}-ю неделю {m.group(1)}"
+    return period_text(iso)
+
+
+def period_in(iso: str) -> str:
+    """«в сентябре 2026», «в 2019 году», «в III кв. 2026», «на 10-й неделе 2026», «31 января 2025»."""
+    if m := _ISO_M.match(iso):
+        return f"в {_MONTHS_PREP[int(m.group(2)) - 1]} {m.group(1)}"
+    if m := _ISO_Y.match(iso):
+        return f"в {m.group(1)} году"
+    if m := _ISO_Q.match(iso):
+        return f"в {_ROMAN[int(m.group(2)) - 1]} кв. {m.group(1)}"
+    if m := _ISO_W.match(iso):
+        return f"на {int(m.group(2))}-й неделе {m.group(1)}"
     return period_text(iso)
 
 
 def period_dat_full(iso: str) -> str:
-    """Период в дательном с годом: «сентябрю 2025», «III кв. 2025», «2025 году»."""
+    """Период в дательном с годом: «сентябрю 2025», «III кв. 2025», «2025 году», «10-й неделе 2026»."""
     if m := _ISO_M.match(iso):
         return f"{_MONTHS_DAT[int(m.group(2)) - 1]} {m.group(1)}"
     if m := _ISO_Y.match(iso):
         return f"{m.group(1)} году"
+    if m := _ISO_W.match(iso):
+        return f"{int(m.group(2))}-й неделе {m.group(1)}"
     return period_text(iso)
 
 
 # ── доли и длительности ───────────────────────────────────────────────────────────────────────────────────────────────
 _FRACTIONS = [  # (от, до, слова) — доля словами рядом с числом
-    (95, 100.01, "почти всё"), (70, 95, None), (66, 70, "две трети"), (55, 66, "больше половины"),
+    (95, 100.01, None), (70, 95, None), (66, 70, "две трети"), (55, 66, "больше половины"),
     (50, 55, "половину"), (43, 50, "почти половину"), (34, 43, None), (32, 34, "треть"), (29, 32, "почти треть"),
     (25.5, 29, "больше четверти"), (24.5, 25.5, "четверть"), (22, 24.5, "почти четверть"),
 ]
 
 
-def fraction_words(p: float) -> Optional[str]:
+_FRACTION_NOM = {"почти половину": "почти половина", "половину": "половина", "почти треть": "почти треть",
+                 "треть": "треть", "четверть": "четверть", "почти четверть": "почти четверть"}
+
+
+def fraction_words(p: float, case: str = "acc") -> Optional[str]:
+    """Доля словами: после глагола — винительный («приносит почти половину»), после тире — именительный («— почти
+    половина»)."""
     for lo, hi, w in _FRACTIONS:
         if lo <= p < hi:
-            return w
+            return _FRACTION_NOM.get(w, w) if (case == "nom" and w) else w
     return None
 
 

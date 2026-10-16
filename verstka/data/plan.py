@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import facts_for
 from verstka.data.goals import Goal, goal_match, goals_of, stems_of
+from verstka.data.words import same_stem
 from verstka.data.headline import compose
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, decide_task, task_scores
@@ -108,8 +109,14 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
 
 
 def _file_match(g: Goal, d: Data) -> bool:
-    """Цель называет датасет по имени файла («на что ушёл бюджет НИОКР» → «Бюджет НИОКР.csv»)."""
-    return bool(g.subject) and goal_match(g, d.profile.model_copy(update={"columns": []})) >= 1.0
+    """Цель называет датасет целиком: каждое слово предмета есть в имени файла или в колонках, и хотя бы одно — в имени
+    файла («на что ушёл бюджет НИОКР» → «Бюджет НИОКР.csv»; «сравни классы по среднему баллу» — не «Средний чек»)."""
+    if not g.subject:
+        return False
+    if goal_match(g, d.profile.model_copy(update={"columns": []})) < 1.0:
+        return False
+    words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(c.name for c in d.profile.columns))
+    return all(any(same_stem(s, w) for w in words) for s in g.subject)
 
 
 def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal]]:
@@ -282,7 +289,7 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
     unit = tv.measure.unit_text if tv.measure.j >= 0 else None
     yname = tv.measure.name if tv.measure.j >= 0 else "Число строк"
     if opt.kind == "table":
-        cols = [tv.column] + [_col_title(s.name, s.unit) for s in tv.series]
+        cols = [tv.axis_title] + [_col_title(s.name, s.unit) for s in tv.series]
         rows = [[lab] + [_cell(s.values[i]) for s in tv.series] for i, lab in enumerate(tv.labels)]
         bad = _pages_ok(rows, part)
         return bad if bad is not None else TableData(columns=cols, rows=_part(rows, part), unit=unit)
@@ -296,7 +303,7 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
         kind = "line" if kind in ("stacked_column", "grouped_column") else kind
     return ChartSpec(type=kind, categories=list(tv.labels), series=series, unit=None if tv.split else unit,
                      highlight_index=last if kind in ("line", "column", "area") and len(series) == 1 else None,
-                     x_title=tv.column, y_title=yname if (len(series) == 1 or tv.dim) and not tv.split else None,
+                     x_title=tv.axis_title, y_title=yname if (len(series) == 1 or tv.dim) and not tv.split else None,
                      gaps=tv.gaps, source=src, split=tv.split)
 
 
@@ -441,7 +448,8 @@ def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan
     vals = [round(x, 1) for x in shares]
     lead = _argmax(vals[:-1] + [None]) if labels[-1].startswith("Остальные ") else _argmax(vals)
     if opt.kind == "table":
-        return TableData(columns=[cv.dim, "Доля, %"], rows=_part([[a, fmt_num(b, 1)] for a, b in zip(labels, vals)], part))
+        rows = [[a, fmt_num(b, 1)] for a, b in zip(labels, vals)]
+        return _pages_ok(rows, part) or TableData(columns=[cv.dim, "Доля, %"], rows=_part(rows, part))
     if opt.kind in ("stacked_column", "stacked_bar"):
         return ChartSpec(type=opt.kind, categories=[plan.plain_headline or "Доли"],
                          series=[InlineSeries(name=a, values=[b], unit="%") for a, b in zip(labels, vals)], unit="%",
@@ -468,8 +476,8 @@ def _spec_distribution(d: Data, opt: VizOption, src: str, part: int, plan: Datas
         return out
     b = dv.bins
     if opt.kind == "table":
-        return TableData(columns=[_col_title(m.name, m.unit), count_name],
-                         rows=_part([[lab, fmt_num(c)] for lab, c in zip(b.labels, b.counts)], part))
+        rows = [[lab, fmt_num(c)] for lab, c in zip(b.labels, b.counts)]
+        return _pages_ok(rows, part) or TableData(columns=[_col_title(m.name, m.unit), count_name], rows=_part(rows, part))
     return ChartSpec(type="histogram", categories=list(b.labels),
                      series=[InlineSeries(name=count_name, values=[float(c) for c in b.counts])], unit=None,
                      x_title=_col_title(m.name, m.unit), y_title=count_name, source=src)
@@ -552,9 +560,9 @@ def _spec_relationship(d: Data, opt: VizOption, src: str, part: int, plan: Datas
         return ChartSpec(type="scatter", xy=series, x_title=_col_title(xy.x.name, xy.x.unit_text), y_title=xy.y.name,
                          unit=xy.y.unit_text, source=src)
     if opt.kind == "table":
-        rows = [[lab or str(k + 1), fmt_num(a), fmt_num(b)] for k, (lab, a, b) in enumerate(zip(xy.labels, xy.xs, xy.ys))]
-        return TableData(columns=[d.entity or "№", _col_title(xy.x.name, xy.x.unit_text),
-                                  _col_title(xy.y.name, xy.y.unit_text)], rows=_part(rows, part))
+        rows = [[lab or str(k + 1), _cell(a), _cell(b)] for k, (lab, a, b) in enumerate(zip(xy.labels, xy.xs, xy.ys))]
+        return _pages_ok(rows, part) or TableData(columns=[xy.label_name or "№", _col_title(xy.x.name, xy.x.unit_text),
+                                                           _col_title(xy.y.name, xy.y.unit_text)], rows=_part(rows, part))
     cv = d.cat_view(xy.y, rank=True)
     if cv is None:
         return None
