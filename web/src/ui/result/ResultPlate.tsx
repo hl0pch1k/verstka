@@ -43,7 +43,7 @@ import { NotePill, NoteRow, type NoteActions } from "./NotePill";
 import { PictureCard, PictureSpots } from "./PictureCard";
 import { RemarksPanel } from "./RemarksPanel";
 import {
-  agentLines, deckPreset, docLine, docTitle, eyesCard, fileBase, latestWithModel, noDeckText, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
+  agentLines, deckBrand, deckPreset, deckTemplate, docLine, docTitle, eyesCard, fileBase, whyFile, latestWithModel, noDeckText, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
   retryLeft, retryTick, retryWaitTitle, rewriteText, scoreOf, slideForKey, slideHeadline, slideSrc, slidesOf, switchShots, variantSegs, whyText,
   WORK_GEO, workGeo,
 } from "./resultView";
@@ -326,7 +326,7 @@ function ResultBody({ g }: { g: Generation }) {
   const name = strategyTitle(v.strategy);
   const aside: AsideData = {
     title,
-    line: docLine(templateLabel(g.template_id, g.template_file), total, fmtWhen(g.created_at)),
+    line: docLine(templateLabel(deckTemplate(g), g.template_file), total, fmtWhen(g.created_at), deckBrand(g)),
     score: score === null ? null : Math.round(score),
     variants: variantSegs(g, strategyTitle).map((s) => {
       const hint = variantHint(s.key, strategies.find((x) => x.name === s.key)?.description);
@@ -337,7 +337,7 @@ function ResultBody({ g }: { g: Generation }) {
     pdf: v.files["deck.pdf"] ?? null,
     fileBase: fileBase(title, name),
     pptxTitle: `Вариант ${g.variants.indexOf(v) + 1} · ${name}`,
-    cards: { quality: qualityCard(g, v), agent, why: whyText(v, n), eyes: eyesCard(v, n), slide: n, variant: v.strategy },
+    cards: { quality: qualityCard(g, v), agent, why: whyText(v, n), whyFile: whyFile(v, n), eyes: eyesCard(v, n), slide: n, variant: v.strategy },
   };
   const h = headline(n);
   // компактный вид (помощник открыт): те же данные, итоги проверки — узкой колонкой; колонка шире, пока на её месте

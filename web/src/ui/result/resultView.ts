@@ -12,6 +12,8 @@ import { variantRev, withRev } from "../../lib/rev";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
 import type { Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
+import { brandStrip, dataKind } from "../create/dataRules";
+import { fileIcon, type DsIconName } from "../create/dsKit";
 import type { IconName } from "../kit/icons";
 import { isStage } from "./marks";
 
@@ -67,9 +69,21 @@ export function noDeckText(error: string | null | undefined): string {
   return `Не получилось собрать презентацию. ${why ? `${why}.` : "Измените текст и соберите заново"}`;
 }
 
-/** Строка под названием (V2 `docLine`): «VK Tech · 12 слайдов · сегодня, 17:38»; `when` — `fmtWhen(created_at)`. */
-export function docLine(template: string, total: number, when: string): string {
-  return [template, total > 0 ? plural(total, "слайд", "слайда", "слайдов") : null, when || null].filter(Boolean).join(" · ");
+/** Строка под названием (V2 `docLine`): «VK Tech · 12 слайдов · сегодня, 17:38»; `when` — `fmtWhen(created_at)`;
+ *  `brand` — брендбук презентации (вторая ступень: «VK Tech · брендбук VK Cloud · 9 слайдов · только что»). */
+export function docLine(template: string, total: number, when: string, brand: string | null = null): string {
+  return [template, brand, total > 0 ? plural(total, "слайд", "слайда", "слайдов") : null, when || null].filter(Boolean).join(" · ");
+}
+
+/** Шаблон презентации для людей (строка под названием, полоса 01): у колоды с брендбуком она свёрстана на
+ *  брендированной копии (`template_id`), а выбирали исходный — `base_template_id`. */
+export const deckTemplate = (g: Pick<GenerationMeta, "template_id" | "base_template_id">): string => g.base_template_id || g.template_id;
+
+/** Брендбук презентации словами полосы и строки под названием: «брендбук VK Cloud» (generation.json `brandbook`);
+ *  без брендбука — null. */
+export function deckBrand(g: Pick<GenerationMeta, "brandbook">): string | null {
+  const b = g.brandbook;
+  return b && (b.name || b.file) ? brandStrip({ name: b.name }, b.file ?? "") : null;
 }
 
 /** Полоса 02 на результате (V2 `docTitle` · `docSub`): название и откуда текст. */
@@ -151,6 +165,15 @@ export function agentLines(v: Variant | null | undefined): { step: string; text:
 }
 
 /** «Почему так»: довод дизайнера о слайде `n` словами интерфейса (`plainWords`); довода нет — null, карточки нет. */
+/** Файл с данными слайда `n` под карточкой «Почему так» (V2 v105 `ds-rfile`): «Регионы.xlsx · сравнение» и значок
+ *  формата; слайд не из файла — null. */
+export function whyFile(v: Variant | null | undefined, n: number): { text: string; icon: DsIconName } | null {
+  const d = v?.outline?.slides[n - 1]?.data;
+  if (!d?.file) return null;
+  const nature = d.nature_label.trim().toLowerCase();
+  return { text: nature ? `${d.file} · ${nature}` : d.file, icon: fileIcon(dataKind(d.file)) };
+}
+
 export function whyText(v: Variant | null | undefined, n: number): string | null {
   // пустой довод дизайнера — как его нет: говорит план
   const raw = v?.design?.find((d) => d.index === n)?.rationale?.trim() || v?.outline?.slides[n - 1]?.rationale || null;

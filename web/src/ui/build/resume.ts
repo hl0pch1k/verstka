@@ -64,7 +64,8 @@ export interface AskPreset {
  *  несёт текст обрезанным — запрос берётся из меты самой презентации. */
 export function requestOf(g: GenerationMeta): GenerateRequest {
   return {
-    template_id: g.template_id, brief: g.brief ?? "", audience: g.audience ?? null, purpose: g.purpose ?? null, slides: g.slides ?? null,
+    // брендбук: колода свёрстана на брендированной копии, а собирать ещё раз — с исходного шаблона и тем же брендбуком
+    template_id: g.base_template_id || g.template_id, brief: g.brief ?? "", audience: g.audience ?? null, purpose: g.purpose ?? null, slides: g.slides ?? null,
     language: g.language, extra_instructions: g.extra_instructions ?? null, strategies: g.strategies,
     use_models: g.use_models ?? true, audit_models: !!g.audit_models, autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
     pictures: g.pictures ?? null, eyes: g.eyes ?? null, improved_from: g.improved_from ?? null,
@@ -84,7 +85,11 @@ export function completeAsk(ask: PendingBuild | null, g: GenerationMeta): Pendin
 
 /** О чём говорят полосы 01/02 экрана «Сборка»: шаблон (`template`, `templateFile` — имя файла шаблона, которого нет в
  *  библиотеке) и тема (`brief`) самой сборки, «Улучшить готовую» (`improved`), пишет ли текст агент (`useModels`). */
-export interface BuildTopic { template: string | null; templateFile: string | null; brief: string | null; useModels: boolean; improved: ImprovedFrom | null }
+export interface BuildTopic {
+  template: string | null; templateFile: string | null; brief: string | null; useModels: boolean; improved: ImprovedFrom | null;
+  /** Файлов с данными у сборки (полоса 02: «7 файлов данных»); нет — поля нет. */
+  data?: number;
+}
 
 /** Тема и шаблон сборки на экране «Сборка» (`job`): её запрос (`ask` — свой запрос страницы или собранный из меты
  *  при подключении), только если он этой сборки; иначе — мета её презентации (`decks`: открытая и список), шаблон — из
@@ -98,11 +103,13 @@ export function buildTopic(
   const own = ask && gid && ask.gid === gid ? ask.request : null;
   const deck = gid ? decks.find((g) => g?.id === gid) ?? null : null;
   const req = own ?? (deck ? requestOf(deck) : null);
-  const template = job?.template ?? req?.template_id ?? null;
+  // колода с брендбуком свёрстана на брендированной копии шаблона: полоса 01 — о шаблоне, который выбирали
+  const template = deck?.base_template_id || (job?.template ?? req?.template_id ?? null);
   if (!req && !template) return null;
+  const data = req?.dataset_ids?.length ?? 0;
   return {
     template, templateFile: deck?.template_file ?? null, brief: req ? req.brief : null, useModels: req?.use_models ?? true,
-    improved: req?.improved_from ?? null,
+    improved: req?.improved_from ?? null, ...(data ? { data } : {}),
   };
 }
 

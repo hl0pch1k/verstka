@@ -1,6 +1,8 @@
 // Карточки колонки результата (R-aside `ra-card`): «Качество», «Как работал агент», «Почему так», «Взгляд дизайнера».
 // Каждая открывает лист «Подробнее» на своей вкладке. Данные — resultView: карточки без данных нет, пустых карточек не
 // бывает. Сменились вариант или слайд — меняющийся текст проявляется заново (ra-xf 240 мс), сама карточка стоит.
+// У слайда с данными под «Почему так» — его файл и природа данных (V2 v105 `ds-rfile`).
+import { DsIcon, type DsIconName } from "../create/dsKit";
 import type { SheetTab } from "../deck/geometry";
 import { Icon, type IconName } from "../kit/Icon";
 import { ScoreRing } from "../kit/ScoreRing";
@@ -13,6 +15,8 @@ export interface AsideCardsData {
   quality: QualityView | null;
   agent: { step: string; text: string; icon: IconName }[];
   why: string | null;
+  /** Файл с данными слайда (resultView `whyFile`); слайд не из файла — null. */
+  whyFile?: { text: string; icon: DsIconName } | null;
   eyes: EyesView | null;
   /** Текущий слайд (с 1) и вариант — ключи смены текста. */
   slide: number;
@@ -26,7 +30,7 @@ export function AsideCards({ data, open }: { data: AsideCardsData; open(tab: She
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 24 }}>
       {quality && <QualityCard q={quality} variant={data.variant} onOpen={() => open("quality")} />}
       {agent.length > 0 && <AgentCard lines={agent} variant={data.variant} onOpen={() => open("agent")} />}
-      {why && <WhyCard text={why} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("why")} />}
+      {why && <WhyCard text={why} file={data.whyFile ?? null} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("why")} />}
       {eyes && <EyesCard e={eyes} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("quality")} />}
     </div>
   );
@@ -81,7 +85,7 @@ function AgentCard({ lines, variant, onOpen }: { lines: AsideCardsData["agent"];
   );
 }
 
-function WhyCard({ text, slide, k, onOpen }: { text: string; slide: number; k: string; onOpen(): void }) {
+function WhyCard({ text, file, slide, k, onOpen }: { text: string; file: AsideCardsData["whyFile"]; slide: number; k: string; onOpen(): void }) {
   const swapped = useChanged(k);
   return (
     <button type="button" className="ra-card" onClick={onOpen}>
@@ -93,6 +97,7 @@ function WhyCard({ text, slide, k, onOpen }: { text: string; slide: number; k: s
         style={{ display: "-webkit-box", marginTop: 8, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
         {text}
       </span>
+      {file && <span key={`f/${k}`} className={swapped ? "ds-rfile ra-xf" : "ds-rfile"} title={file.text}><DsIcon name={file.icon} size={14} /><span>{file.text}</span></span>}
     </button>
   );
 }

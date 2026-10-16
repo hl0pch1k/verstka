@@ -4,6 +4,9 @@
 // заново лесенкой (p2-in); стрелки ←/→ листают, пока вкладка на экране. Нет довода у слайда — объяснение сервера.
 // Помощник сужает колоду (V2 версии 100): первая колонка 526 → 416, вторая — остальное; текст — стопки (kit/Tx: w-why,
 // w-dd, w-form, w-crit — первая колонка; w-sim, w-ok, подписи образца и макетов — вторая).
+// Слайд с данными (вторая ступень, V2 v105 `dlWD`): в тех же колонках — «Данные», «Задача», «Варианты визуализации» с
+// мини-графиками и «Пересобрать слайд так», «Заголовок-вывод» (DataWhy); в навигации — форма выбранного варианта.
+// Слайд без данных — как было.
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../../api";
 import { errText } from "../../../lib/narrate";
@@ -15,12 +18,18 @@ import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { Spinner } from "../../kit/Spinner";
 import { Tx } from "../../kit/Tx";
+import { liveWork, variantLiveJob } from "../../result/slideJob";
 import { ownsKeys, slideForKey } from "../../result/resultView";
+import { useStale } from "../../shell/StaleLine";
+import { dataWhyCap } from "../../../lib/dataWhy";
+import { miniColors } from "../../../lib/miniChart";
 import { Shot } from "../parts";
 import { SEV } from "../quality";
 import { headerLayerOpen } from "../sheetView";
+import { useRebuild } from "../useRebuild";
 import type { DeckManifest } from "../useDeckManifest";
 import { explainError, explainPlan, explainWhy, whyView, type SampleSource } from "../why";
+import { DataWhy } from "./DataWhy";
 
 const asked = new Map<string, string | null>();
 
@@ -71,13 +80,25 @@ export function WhyTerms({ dl }: { dl: { t: string; d: string }[] }) {
   );
 }
 
+/** Пересобрать слайд нельзя: шаблона презентации больше нет. */
+const TEMPLATE_GONE_REBUILD = "Шаблона этой презентации больше нет в библиотеке — пересобрать слайд нельзя";
+
 export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck: DeckManifest; active: boolean }) {
-  const { selectedSlide, setSelectedSlide, setActiveStrategy, strategyTitle, dispatch, ui } = useApp();
+  const { selectedSlide, setSelectedSlide, setActiveStrategy, strategyTitle, dispatch, ui, liveJobs } = useApp();
   const w = whyView(g, v, Math.min(Math.max(1, selectedSlide), Math.max(1, v.slides.length || v.outline?.slides.length || 1)), deck.manifest, strategyTitle, SOURCE[deck.state]);
   const n = w.n;
   const rev = variantRev(v);
-  const ex = useExplain(g.id, v.strategy, n, rev, w.ask, deck.state === "gone");
+  // слайд с данными: профиль, задача, варианты визуализации — свои колонки (объяснение сервера не нужно)
+  const slide = v.outline?.slides[n - 1] ?? null;
+  const data = slide?.data ?? null;
+  const ex = useExplain(g.id, v.strategy, n, rev, w.ask && !data, deck.state === "gone");
   const why = w.why ?? ex.text;
+  const rebuild = useRebuild(g.id, v.strategy);
+  const refresh = useStale(g.id);
+  const other = rebuild.taken ? variantLiveJob(liveJobs, g.id, v.strategy, rebuild.run?.jobId ?? null) : null;
+  const lock = deck.state === "gone" ? { off: true, why: TEMPLATE_GONE_REBUILD }
+    : rebuild.taken ? { off: true, why: other ? liveWork(other).why : null } : { off: false, why: null };
+  const cap = data ? dataWhyCap(w, data) : w.cap;
 
   // ←/→ листают слайды, пока вкладка на экране и поверх листа ничего не открыто (слой «Слайд N шаблона», раздел шапки,
   // просмотр или удаление шаблона)
@@ -102,7 +123,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
         <nav className="dd-box p2-in" aria-label="Слайды презентации" style={{ display: "flex", alignItems: "center", gap: 16, height: 72, padding: "12px 16px", animationDelay: "240ms" }}>
           <button type="button" className="p2-rbl" aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" disabled={n <= 1} onClick={() => setSelectedSlide(n - 1)}><Icon name="chevron-left" size={18} /></button>
           <div key={`${n}|${v.strategy}`} className="p2-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0, textAlign: "center" }}>
-            <span className="dd-cap">{w.cap}</span>
+            <span className="dd-cap">{cap}</span>
             <h3 className="dd-h" title={w.title} style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.title}</h3>
           </div>
           <button type="button" className="p2-rbl" aria-label="Следующий слайд" title="Следующий слайд (→)" disabled={n >= w.total} onClick={() => setSelectedSlide(n + 1)}><Icon name="chevron-right" size={18} /></button>
@@ -110,6 +131,9 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
       </div>
 
       <div key={`${n}|${v.strategy}|${rev}`} className="dd-g dw-g">
+        {data && slide ? (
+          <DataWhy v={v} n={n} slide={slide} d={data} colors={miniColors(deck.manifest)} rebuild={rebuild} lock={lock} refresh={refresh} />
+        ) : <>
         <section className="dd-box p2-in" aria-labelledby="dw-h-form" style={{ display: "flex", flexDirection: "column", minWidth: 0, animationDelay: "0ms" }}>
           <h3 id="dw-h-form" className="dd-h">Почему такая форма</h3>
           {w.src && <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0 0", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Icon name="file-text" size={16} />{w.src}</p>}
@@ -208,6 +232,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
             </section>
           )}
         </div>
+        </>}
 
         {w.check && (
           <button type="button" className="dw-chk p2-in" onClick={() => dispatch({ type: "sheet", tab: "quality" })} aria-label={`Проверка слайда: ${w.check.text} — открыть вкладку «Качество»`} style={{ gridColumn: "1 / -1", animationDelay: "120ms" }}>

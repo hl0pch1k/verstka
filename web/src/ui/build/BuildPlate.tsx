@@ -53,7 +53,7 @@ export function BuildPlate() {
 function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolean }) {
   const {
     strategies, strategyTitle, templates, manifest, notices, retryBuild: storeRetry, dispatch, buildAsk, ownBuild, editText, loadGeneration, clearNotice,
-    selectTemplate, ui,
+    selectTemplate, ui, generations,
   } = useApp();
   const replay = useContext(BuildReplay);
   const retryBuild = replay?.retry ?? storeRetry;
@@ -78,7 +78,11 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   // строка неудачи области «Сборка» этой сборки (переживает задачу); прежняя сборка своей строки сюда не приносит
   const note = notices.build;
   const error = note && note.kind === "error" && note.at >= j.startedAt ? note.text : null;
-  const view = useMemo(() => buildView(j, previews, { variant: shown, now, error, titleOf: strategyTitle }), [j, previews, shown, now, error, strategyTitle]);
+  // сборка с файлами данных (её запрос, если он этой сборки, или мета её презентации; иначе — строки аналитика данных):
+  // «Изучаю данные» и «Аналитик данных» с самого начала
+  const asked = !!j.generation && (buildAsk?.gid === j.generation ? !!buildAsk.request.dataset_ids?.length
+    : !!generations.find((g) => g.id === j.generation)?.dataset_ids?.length);
+  const view = useMemo(() => buildView(j, previews, { variant: shown, now, error, titleOf: strategyTitle, data: asked }), [j, previews, shown, now, error, strategyTitle, asked]);
 
   const namesKey = names.join("|");
   const segs: VariantSeg[] = useMemo(() => {
@@ -173,7 +177,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   return (
     <div key={epoch} className={cls("p2-two bd-two", morph.tight && "bd-tight", (leaving || retry) && "bd-out")}
       style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652, ...vars }}>
-      <Phases phase={view.phase} morph={morph} />
+      <Phases phase={view.phase} morph={morph} data={view.data} />
       <div className="bd-body" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
         <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, height: 24, marginTop: 16, animationDelay: "80ms" }}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>

@@ -2,7 +2,7 @@
 // works behind the Vite dev proxy and when FastAPI serves web/dist directly.
 import type {
   BrandConflict, BrandSpec, ChatResponse, CheckSpec, DatasetSummary, DiffResponse, ExplainResponse, FixRequest, GenerateRequest, GenerateResponse,
-  Generation, GenerationMeta, Health, Job, ModelsStatus, PictureChangeRequest, SkillsResponse, SlideFixRequest, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
+  Generation, GenerationMeta, Health, Job, ModelsStatus, PictureChangeRequest, RebuildRequest, SkillsResponse, SlideFixRequest, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
 } from "./types";
 import { parseManifest, type ExampleManifest } from "./ui/create/dataRules";
 
@@ -98,6 +98,10 @@ export const api = {
   /** Fixes the remarks of one slide (and follows the person's wishes); only that slide of the deck changes. */
   fixSlide: (gid: string, strategy: string, n: number, body: SlideFixRequest) =>
     request<{ job_id: string }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/slides/${n}/fix`, json(body)),
+  /** «Пересобрать слайд так»: слайд с данными другим вариантом визуализации (`option` — с 0, номер в
+   *  `OutlineSlide.data.options`). Ответ — задача; неподходящий вариант — 422 с причиной, файла с данными нет — 409. */
+  rebuildSlide: (gid: string, strategy: string, n: number, option: number) =>
+    request<{ job_id: string }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/slides/${n}/rebuild`, json({ option } satisfies RebuildRequest)),
   /** An edit of the variant in words («верни как было» undoes the last change exactly). */
   changePicture: (gid: string, strategy: string, n: number, body: PictureChangeRequest) =>
     request<{ job_id: string }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/slides/${n}/image`, json(body)),

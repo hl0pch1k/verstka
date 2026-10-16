@@ -236,3 +236,17 @@ test("вторая ступень: «Собрать ещё раз» по мет�
   const back = backToText({ gid: "A", request: r, expected: null }, "B", "A");
   assert.deepEqual([back?.preset.datasetIds, back?.preset.brandbookId, back?.preset.brandPriority], [["d1", "d2"], "b1", "template"]);
 });
+
+test("вторая ступень: колода с брендбуком свёрстана на брендированной копии — полоса 01 и «Собрать ещё раз» об исходном шаблоне; полоса 02 — сколько файлов данных", () => {
+  const branded = meta("g3", { template_id: "copy1", base_template_id: "t1", dataset_ids: ["d1", "d2", "d3"], brandbook_id: "b1" });
+  assert.equal(requestOf(branded).template_id, "t1");
+  assert.equal(requestOf(meta("g4")).template_id, "t1");
+  // чужая сборка (из «Мои презентации», реплей): шаблон — исходный, файлов данных — по мете
+  const t = buildTopic({ generation: "g3", template: "copy1" }, null, [branded]);
+  assert.equal(t?.template, "t1");
+  assert.equal(t?.data, 3);
+  // своя сборка — по её запросу; без файлов данных поля нет
+  const own: PendingBuild = { gid: "g1", request: { ...REQ, dataset_ids: ["d1", "d2"] }, expected: 9 };
+  assert.equal(buildTopic({ generation: "g1", template: "t1" }, own, [])?.data, 2);
+  assert.equal("data" in (buildTopic({ generation: "g1", template: "t1" }, { gid: "g1", request: REQ, expected: 5 }, []) ?? {}), false);
+});

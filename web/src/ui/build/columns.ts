@@ -6,10 +6,10 @@
 // что от ширины окна зависит: обе раскладки считаются сразу, по ширине обёртки колоды (`hp-wrap` не анимируется: закрыт
 // помощник — колода во всю обёртку, открыт — на 416 у́же), и ставятся переменными CSS. Посреди хода ничего из этого не
 // меняется — меняется только окно.
-import { BOARD_GAP, fitColumns, STAGE_TITLE } from "../../lib/stage";
+import { BOARD_GAP, fitColumns } from "../../lib/stage";
 import { bindShort } from "../../lib/typo";
 import { HELPER_COL, PLATE_PAD } from "../deck/layout";
-import type { BuildPhase } from "./buildView";
+import { stageTitle, type BuildPhase } from "./buildView";
 
 /** Самая узкая карточка доски (широкая раскладка). */
 export const MIN_CARD = 150;
@@ -81,10 +81,17 @@ const PHW2: Record<BuildPhase, number> = {
   queued: 235, writer: 255, analyst: 147, architect: 289, designer: 303, critic: 293, revise: 320, layout: 320,
   check: 372, eyes: 429, done: 295, failed: 318,
 };
+/** Сборка с файлами данных: фаза аналитика — «Изучаю данные» (buildView `DATA_STAGE`), замер при 36 px — 354.4, в две
+ *  строки «Изучаю / данные» — 175 (V2 `PHW` оценивал её в 349). */
+const PHW_DATA = 355;
+const PHW2_DATA = 175;
+const phw = (phase: BuildPhase, data: boolean) => (data && phase === "analyst" ? PHW_DATA : PHW[phase]);
+const phw2 = (phase: BuildPhase, data: boolean) => (data && phase === "analyst" ? PHW2_DATA : PHW2[phase]);
 
-/** Две строки фазы `phase` в узкой раскладке (копия `bd-phn`, каждая строка — без переноса). */
-export function phaseLines(phase: BuildPhase): [string, string] {
-  const words = bindShort(STAGE_TITLE[phase]).split(" ");
+/** Две строки фазы `phase` в узкой раскладке (копия `bd-phn`, каждая строка — без переноса); `data` — сборка с файлами
+ *  данных («Изучаю / данные»). */
+export function phaseLines(phase: BuildPhase, data = false): [string, string] {
+  const words = bindShort(stageTitle(phase, data)).split(" ");
   const k = PHASE_BREAK[phase];
   return [words.slice(0, k).join(" "), words.slice(k).join(" ")];
 }
@@ -174,14 +181,14 @@ export interface PhaseFit {
  *  мельче 18 px; не встаёт и при 18 — в две строки по 18/24 (в клетку с полем 4, иначе — во всю клетку). Две строки при 18
  *  не встают и во всю клетку (только «Смотрю на слайды целиком» при обёртке 1217: длинная строка 214.5 px, клетка 201) —
  *  мельчает, пока две строки не встанут (16.9 px; предлог не отрывается от слова). `font` — кегль фазы. */
-export function phaseFit(phase: BuildPhase, font: number, cell: number): PhaseFit {
-  const w = (PHW[phase] * font) / PHASE_MAX;
+export function phaseFit(phase: BuildPhase, font: number, cell: number, data = false): PhaseFit {
+  const w = (phw(phase, data) * font) / PHASE_MAX;
   const floor = PHASE_FLOOR / font;
   const fit = (cell - 4) / w;
   const r3 = (n: number) => Math.round(n * 1000) / 1000;
   if (fit >= floor) return { scale: r3(Math.min(PHASE_NARROW, fit)), two: false, width: 0, line: 0, top: 0 };
   const line = (PHASE_LINE2 * font) / PHASE_FLOOR;
-  const two = phaseLine2(phase); // длинная строка при 18 px
+  const two = phaseLine2(phase, data); // длинная строка при 18 px
   const room = two <= cell - 4 ? cell - 4 : cell;
   // scale — до тысячных вниз, когда две строки встают только мельче 18: после округления они всё равно в клетке
   const scale = two * floor <= room * floor + 1e-9 ? r3(floor) : Math.floor(((floor * room) / two) * 1000) / 1000;
@@ -189,8 +196,8 @@ export function phaseFit(phase: BuildPhase, font: number, cell: number): PhaseFi
 }
 
 /** Ширина длинной строки фазы в две строки при 18 px (замер `PHW2`). */
-export function phaseLine2(phase: BuildPhase): number {
-  return (PHW2[phase] * PHASE_FLOOR) / PHASE_MAX;
+export function phaseLine2(phase: BuildPhase, data = false): number {
+  return (phw2(phase, data) * PHASE_FLOOR) / PHASE_MAX;
 }
 
 /** Сдвиг ленты агента: роли до `upto` включительно — над нижним краем. `heights` — высоты ролей, `gap` — зазор между

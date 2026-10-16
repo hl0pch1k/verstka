@@ -10,6 +10,7 @@
 // меняются вместе со сдвигом ленты одной кривой: сдвиг считается для обеих раскладок сразу (по высотам копий; замер —
 // только когда меняются строки ленты, не каждый кадр и не каждую секунду часов), высота стопки ленты на ходу идёт от
 // широкой к узкой линейно (build.css, `--hw`, `--hdd`) — роли движутся в одну сторону, нижняя видимая стоит у края.
+// Сборка с файлами данных (V2 v105): на месте аналитика — «Аналитик данных» со значком графика (buildView `DATA_ROLE`).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { PhaseKey } from "../../lib/agent";
 import { cls } from "../kit/cls";
@@ -76,7 +77,7 @@ function Dot({ r }: { r: RoleView }) {
   return (
     <span className="p2-dot" aria-hidden="true">
       {r.status === "done" && <Icon key="done" name="check" size={14} className="p2-pop" />}
-      {r.status === "now" && <Icon key="now" name={ROLE_ICON[r.key]} size={16} className="p2-pop" />}
+      {r.status === "now" && <Icon key="now" name={r.data ? "chart" : ROLE_ICON[r.key]} size={16} className="p2-pop" />}
       {r.status === "queue" && <span className="bk-n">{r.n}</span>}
       {r.status === "error" && <Icon key="err" name="alert-mark" size={16} className="p2-pop" />}
       {r.status === "skip" && <Icon key="skip" name="minus" size={14} className="p2-pop" />}

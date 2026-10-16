@@ -8,7 +8,7 @@
 import { useContext, useEffect, useMemo, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
-import type { Generation, TemplateListItem, Variant } from "../../types";
+import type { Generation, GenerationMeta, TemplateListItem, Variant } from "../../types";
 import { BuildPlate, BuildReplay } from "../build/BuildPlate";
 import { buildStripText } from "../build/buildView";
 import { buildTopic } from "../build/resume";
@@ -38,7 +38,7 @@ import { BrandLayer } from "../layers/BrandLayer";
 import { brandStrip, briefShort, dataFilesLabel, datasetIds } from "../create/dataRules";
 import { ResultPlate } from "../result/ResultPlate";
 import { buildRunning } from "../create/params";
-import { deckStrip, docTitle, openDeck } from "../result/resultView";
+import { deckBrand, deckStrip, deckTemplate, docTitle, openDeck } from "../result/resultView";
 import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 
@@ -102,7 +102,13 @@ export function AppShell() {
   const withBrand = (st: StripData | undefined, id?: string | null): StripData | undefined =>
     st && bb && (id === undefined || id === bb.id) ? { ...st, meta: [st.meta, brandStrip(bb.spec, bb.file)].filter(Boolean).join(" · ") } : st;
   const createTpl = withBrand(templateStrip(templates.find((t) => t.template_id === templateId)));
-  const s1 = result ? (open ? improveDeckStrip(open.improved_from, open.template_id) ?? withBrand(tplStrip(open.template_id, open.template_file), open.brandbook_id ?? null) : undefined)
+  // у презентации — её исходный шаблон (свёрстана на брендированной копии) и её брендбук по мете (generation.json)
+  const deckTpl = (g: GenerationMeta): StripData | undefined => {
+    const st = tplStrip(deckTemplate(g), g.template_file);
+    const brand = deckBrand(g);
+    return st && brand ? { ...st, meta: [st.meta, brand].filter(Boolean).join(" · ") } : withBrand(st, g.brandbook_id ?? null);
+  };
+  const s1 = result ? (open ? improveDeckStrip(open.improved_from, open.template_id) ?? deckTpl(open) : undefined)
     : build ? (topic ? improveDeckStrip(topic.improved, topic.template) ?? withBrand(tplStrip(topic.template, topic.templateFile), buildAsk?.request.brandbook_id ?? null) : undefined)
     : (ui.improve && improveSource ? improveDeckStrip(improveSource, templateId) ?? createTpl : createTpl);
   const deck = result ? generation : null;
@@ -119,10 +125,9 @@ export function AppShell() {
     if (!topic || topic.brief === null) return undefined;
     const from = topic.improved;
     const improve = from ? { ...from, title: improveSource?.name === from.name ? improveSource.title : undefined } : null;
-    // файлы с данными сборки (её запрос, если он этой сборки): первая фраза брифа и сколько файлов
-    const n = buildAsk && buildAsk.gid === (shownJob?.generation ?? buildAsk.gid) ? buildAsk.request.dataset_ids?.length ?? 0 : 0;
-    return textStrip(topic.brief, { line: textLine(topic.brief, writer && topic.useModels), improve, data: n });
-  }, [topic, writer, improveSource, buildAsk, shownJob]);
+    // файлы с данными сборки (её запрос или мета её презентации — buildTopic): первая фраза брифа и сколько файлов
+    return textStrip(topic.brief, { line: textLine(topic.brief, writer && topic.useModels), improve, data: topic.data ?? 0 });
+  }, [topic, writer, improveSource]);
   const deckData = deck?.dataset_ids?.length ?? 0;
   const s2 = result ? (deck ? (deckData && !deck.improved_from ? { title: briefShort(deck.brief ?? ""), meta: dataFilesLabel(deckData) } : deckStrip(deck, activeVariant)) : undefined)
     : build ? buildText

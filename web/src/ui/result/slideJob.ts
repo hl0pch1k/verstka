@@ -199,6 +199,7 @@ export function liveWork(j: ActiveJob): { why: string; slide: number | null } {
   if (j.kind === "undo") return { why: UNDO_BUSY, slide };
   if (j.kind === "slide_fix" && slide) return { why: `Агент сейчас исправляет слайд ${slide}`, slide };
   if (j.kind === "picture" && slide) return { why: `Агент меняет изображение на слайде ${slide}`, slide };
+  if (j.kind === "rebuild" && slide) return { why: `Агент пересобирает слайд ${slide}`, slide };
   return { why: VARIANT_BUSY, slide };
 }
 

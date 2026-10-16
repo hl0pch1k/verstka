@@ -9,48 +9,56 @@
 // строки двухстрочной — явные, каждая без переноса (columns.ts `phaseLines`); «Смотрю на слайды целиком» при обёртке
 // 1217 в две строки встаёт только при 16.9 px (columns.ts `phaseFit`).
 // Короткие предлоги и союзы привязаны к следующему слову (lib/typo `bindShort`) — в конце строки не остаются.
+// Сборка с файлами данных: фаза аналитика — «Изучаю данные» (V2 v105, buildView `stageTitle`); анализ без модели — доли
+// секунды, но фаза показывается своим шагом (buildView `phaseStep`).
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { STAGE_TITLE } from "../../lib/stage";
 import { bindShort } from "../../lib/typo";
 import { cls } from "../kit/cls";
-import { PHASE_ROLL, type BuildPhase } from "./buildView";
+import { PHASE_ROLL, phaseStep, stageTitle, type BuildPhase } from "./buildView";
 import { phaseFit, phaseLines, type BuildMorph } from "./columns";
 
 const DWELL_MS = 1100;
 
-export function Phases({ phase, morph }: { phase: BuildPhase; morph: BuildMorph }) {
+export function Phases({ phase, morph, data = false }: {
+  phase: BuildPhase; morph: BuildMorph;
+  /** Сборка с файлами данных: фаза аналитика — «Изучаю данные» (buildView `stageTitle`). */
+  data?: boolean;
+}) {
   const [shown, setShown] = useState(phase);
   const since = useRef(performance.now());
   useEffect(() => {
     if (phase === shown) return;
     const end = phase === "done" || phase === "failed";
+    // сборка с данными не проходит «Изучаю данные» молча: анализ без модели — доли секунды, а фаза — шаг сборки
+    const next = phaseStep(shown, phase, data);
     const t = window.setTimeout(() => {
       since.current = performance.now();
-      setShown(phase);
+      setShown(next);
     }, end ? 0 : Math.max(0, DWELL_MS - (performance.now() - since.current)));
     return () => window.clearTimeout(t);
-  }, [phase, shown]);
+  }, [phase, shown, data]);
   const at = PHASE_ROLL.indexOf(shown);
   return (
     <div className="p2-hrow" style={{ display: "flex", alignItems: "center", gap: 32, height: 64 }}>
       <span className="p2-spc" aria-hidden="true" style={{ display: "block", width: 160, height: 64, flex: "none" }} />
       <div className="p2-phs p2-in" style={{ position: "relative", flex: 1, minWidth: 0, height: 48, animationDelay: "40ms" }}>
         {PHASE_ROLL.map((p, i) => {
-          const f = phaseFit(p, morph.font, morph.cell);
-          const [l1, l2] = f.two ? phaseLines(p) : ["", ""];
+          const f = phaseFit(p, morph.font, morph.cell, data);
+          const [l1, l2] = f.two ? phaseLines(p, data) : ["", ""];
+          const t = bindShort(stageTitle(p, data));
           return (
             <span key={p} className={cls("p2-ph bd-ph", i === at ? "p2-ph-on" : i < at ? "p2-ph-past" : "p2-ph-next")} aria-hidden="true"
               style={{ "--phs": f.scale } as CSSProperties}>
               {f.two ? (
                 <span className="hp-sw bd-ph2">
-                  <span className="hp-wo">{bindShort(STAGE_TITLE[p])}</span>
+                  <span className="hp-wo">{t}</span>
                   <span className="hp-no bd-phn" style={{ width: f.width, marginTop: f.top, lineHeight: `${f.line}px` }}><span>{l1}</span><span>{l2}</span></span>
                 </span>
-              ) : bindShort(STAGE_TITLE[p])}
+              ) : t}
             </span>
           );
         })}
-        <h1 className="p2-sr" aria-live="polite">{STAGE_TITLE[shown]}</h1>
+        <h1 className="p2-sr" aria-live="polite">{stageTitle(shown, data)}</h1>
       </div>
     </div>
   );

@@ -14,8 +14,9 @@ export type PatternKind =
 export type NoticeArea = "template" | "text" | "build" | "result" | "history";
 /** A status line: an error, a done action or a remark, and when it came (ms; the same text again restarts its fade). */
 export interface Notice { kind: "error" | "success" | "info"; text: string; at: number }
-/** `undo` — «Вернуть как было» (задача `edit` сервера с «верни как было»): экран результата отличает её от правки. */
-export type JobKind = "analyze" | "generate" | "fix" | "edit" | "undo" | "slide_fix" | "picture" | "other";
+/** `undo` — «Вернуть как было» (задача `edit` сервера с «верни как было»): экран результата отличает её от правки.
+ *  `rebuild` — «Пересобрать слайд так» (вторая ступень: слайд с данными другим вариантом визуализации). */
+export type JobKind = "analyze" | "generate" | "fix" | "edit" | "undo" | "slide_fix" | "picture" | "rebuild" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
 export interface BboxFrac { x: number; y: number; w: number; h: number }
@@ -252,8 +253,8 @@ export interface SlideDesign {
 
 // ---- outline / plan ---------------------------------------------------------------
 export interface Fact { id: string; value: string; unit: string | null; label: string; source_span: string | null }
-export interface Series { id: string; name: string; categories: string[]; values: number[]; unit: string | null }
-export interface TableData { columns: string[]; rows: string[][]; unit: string | null; caption: string | null }
+export interface Series { id: string; name: string; categories: string[]; values: number[]; unit: string | null; source_span?: string | null }
+export interface TableData { columns: string[]; rows: string[][]; unit: string | null; caption: string | null; source_span?: string | null }
 /** Точки рассеяния (вторая ступень). */
 export interface XYSeries { name: string; x: number[]; y: number[] }
 export interface ChartSpec {
@@ -265,6 +266,9 @@ export interface ChartSpec {
   split?: boolean;
   /** Вторая ступень: подписи осей, пропуски — разрывы линии, строка источника, точки рассеяния. */
   x_title?: string | null; y_title?: string | null; gaps?: boolean; source?: string | null; xy?: XYSeries[];
+  /** Вид выбран нарочно (выбранный вариант слоя данных, «Пересобрать слайд так»): столбцы с длинными подписями остаются
+   *  столбцами, а не поворачиваются в полосы. */
+  kind_locked?: boolean;
 }
 export interface SlideItem { title: string; text: string; icon_hint: string | null; number: string | null; bullets: string[] }
 export interface NumberCallout { value: string; label: string; fact_id: string | null }
@@ -429,6 +433,24 @@ export interface GenerationMeta {
   dataset_ids?: string[];
   brandbook_id?: string | null;
   brand_priority?: BrandPriority;
+  /** Брендбук приложен: `template_id` — брендированная копия шаблона (на ней свёрстана колода), исходный — здесь. */
+  base_template_id?: string | null;
+  /** Имена файлов с данными и брендбука для людей (generation.json `datasets`, `brandbook`). */
+  datasets?: GenerationDataset[];
+  brandbook?: GenerationBrandbook | null;
+  /** Итог истории из данных (verstka/data/story.py `DataStory.summary`). */
+  data_story?: DataStorySummary | null;
+}
+/** Файл с данными сборки (generation.json `datasets`). */
+export interface GenerationDataset { id: string; file: string; sheet: string | null; kind: SourceKind }
+/** Брендбук сборки (generation.json `brandbook`). */
+export interface GenerationBrandbook { id: string; name: string; file: string | null; source: BrandSpec["source"] }
+/** Что сказала история из данных: сколько наборов и слайдов, что пропущено и почему, кто формулировал. */
+export interface DataStorySummary {
+  datasets: number; slides: number;
+  skipped?: { file: string; sheet: string | null; message: string }[];
+  dropped?: unknown[];
+  planned_by?: string; model?: string | null; model_error?: string | null; rephrased?: number; rejected?: unknown[]; seconds?: number;
 }
 /** What the agent wrote from a topic (generation.json `writer`, planning/writer.py `WriterResult.meta`). */
 export interface WriterInfo {
@@ -573,6 +595,16 @@ export interface SlideFixResult {
   changed_other_slides: boolean; other_slides: number[];
   how: "model" | "rules" | "autofix"; notes: string[]; why: string | null; version: number | null; at: number | null;
 }
+/** «Пересобрать слайд так»: POST /api/generations/{gid}/{strategy}/slides/{n}/rebuild — `option` с 0, номер в
+ *  `OutlineSlide.data.options`. Неподходящий вариант — 422 с причиной анализа, файла с данными нет — 409. */
+export interface RebuildRequest { option: number }
+/** Итог задачи пересборки: `slides` — позиции новых слайдов (график ↔ таблица на несколько слайдов), `viz` и `title` —
+ *  вид и название варианта, `version` — снимок для «верни как было». */
+export interface RebuildResult {
+  reply: string; changed: boolean; applied: boolean; kind: "rebuild"; strategy: string; slide: number; slides: number[];
+  option: number; viz: VizKind; title: string; score_before: number | null; new_score: number | null;
+  errors?: number; warnings?: number; version: number | null; at: number | null;
+}
 export interface ExplainResponse { index: number; text: string }
 
 export interface DiffChange<T = unknown> { from: T; to: T }
@@ -625,14 +657,42 @@ export interface ColumnProfile {
 }
 export interface TimeAxis { column: string; freq: TimeFreq; start: string; end: string; points: number; missing_periods: string[] }
 export interface Outlier { column: string; row: number; value: number; reason: string }
+/** Таблица, прочитанная из файла (лист XLSX, ключ JSON, таблица внутри текста — каждая своя). */
+export interface Table {
+  id: string; file: string; kind: SourceKind; sheet: string | null;
+  /** Имена колонок без единиц и единицы по порядку колонок. */
+  columns: string[]; units: (string | null)[];
+  rows: Cell[][];
+  /** Заголовки, как в файле («Выручка, млн ₽»). */
+  raw_header: string[];
+  /** Текст вокруг таблицы (файл .txt/.md). */
+  notes: string;
+  /** Номера строк с итогом («Итого», «Всего:»): строка остаётся, но в графики не идёт. */
+  totals: number[];
+  /** Таблица показателей по строкам: единица каждой строки; пусто — единицы у колонок. */
+  row_units: (string | null)[];
+  /** Группа над колонкой из двухэтажной шапки, по порядку колонок; пусто — групп нет. */
+  column_groups: (string | null)[];
+}
 export interface DatasetProfile {
   table_id: string; file: string; kind: SourceKind; sheet: string | null; rows: number; cols: number;
   columns: ColumnProfile[]; time_axis: TimeAxis | null; metrics: string[]; dimensions: string[];
   /** (дочерняя, родительская) — ["город", "регион"]. */
   hierarchies: [string, string][];
-  missing_total: number; outliers: Outlier[]; parts_of_whole: boolean; size: DatasetSize; nature: Nature;
+  missing_total: number;
+  /** Выбросы, похожие на ошибку или событие — их называет карточка файла. */
+  outliers: Outlier[];
+  /** Значения далеко от остальных, но естественные для сущностей строк (Москва среди регионов) — не проблема данных. */
+  expected_outliers: Outlier[];
+  parts_of_whole: boolean;
+  /** Колонка-итог по строкам («Всего» = «Бюджет» + «Платное» + «Целевое») и её части; null / пусто — такой нет. */
+  total_column: string | null;
+  part_columns: string[];
+  size: DatasetSize; nature: Nature;
   typable: boolean; untypable_reason: string | null; summary: string;
 }
+/** Вариант не строится (отвергнут по данным): причина — для «Пересобрать слайд так» и ленты агента. */
+export interface NotBuilt { reason: string }
 export interface TaskDecision { task: TaskKind; reasons: string[]; goal: string | null; scores: Partial<Record<TaskKind, number>> }
 export interface VizOption { kind: VizKind; score: number; title: string; reasons: string[]; why_not: string | null; aggregation: string | null }
 export interface HeadlineFact { id: string; text: string; value: number; unit: string | null; kind: FactKind; explain: string }

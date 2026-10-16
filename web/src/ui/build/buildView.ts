@@ -2,6 +2,8 @@
 // слайдов — что пишет заголовок плиты 03 (фаза), часы и полоса хода, раскадровка выбранного варианта (карточка на
 // слайд: заглушка → эскиз → «Замечание» → «Переделан» → сверстан → превью), девять ролей агента со статусом и строками,
 // неудача. Чистые функции, без React; разметку и движение даёт BuildPlate (boards/V2.dc.html, модуль bd).
+// Сборка с файлами данных (вторая ступень, V2 v105 `bdDataD`): место аналитика — «Аналитик данных» (шаг `data`
+// сервера: по строке на файл — задача, вид, причина), фаза — «Изучаю данные». Без данных — всё как было.
 import { buildTimeline, eventParts, laterPhase, PHASES, phaseOfStep, phaseOrder, type PhaseKey, type TimelineEvent, type TimelineRow } from "../../lib/agent";
 import { humanError } from "../../lib/errors";
 import type { ActiveJob } from "../../lib/jobState";
@@ -47,6 +49,8 @@ export interface RoleView {
   title: string;
   /** Полная подсказка роли (лента очереди B-start). */
   hint: string;
+  /** Аналитик данных (сборка с файлами данных): значок — график. */
+  data?: boolean;
   status: RoleStatus;
   /** Строка рядом с именем: «· 3 замечания · слайды 4, 9», подсказка, пока роль впереди, или «в этой сборке не
    *  запускалась». */
@@ -61,6 +65,8 @@ export interface VariantView { name: string; status: string | null; done: boolea
 export interface BuildView {
   phase: BuildPhase;
   title: string;
+  /** Сборка с файлами данных: фаза аналитика — «Изучаю данные», роль — «Аналитик данных». */
+  data: boolean;
   /** «1:12» — от начала сборки; у законченной стоит на конце; «—» — конец неизвестен (сборка упала без страницы). */
   clock: string;
   /** Доля хода 0..1; null — хода ещё нет (бежит отрезок). */
@@ -91,7 +97,29 @@ export interface BuildViewOptions {
   error?: string | null;
   /** Название варианта по имени («structured» → «Структурный»). */
   titleOf?: (name: string) => string;
+  /** Запрос сборки шёл с файлами данных (её `dataset_ids`): аналитик данных — с самого начала, и в очереди. */
+  data?: boolean;
 }
+
+/** Сборка с файлами данных (V2 v105 `bdDataD`): фаза аналитика и его роль. */
+export const DATA_STAGE = "Изучаю данные";
+export const DATA_ROLE = { title: "Аналитик данных", hint: "изучает файлы: природа данных, задача, график" } as const;
+/** Заголовок фазы: у сборки с данными аналитик изучает данные (а не читает текст). */
+export const stageTitle = (phase: BuildPhase, data = false): string => (data && phase === "analyst" ? DATA_STAGE : STAGE_TITLE[phase]);
+/** Какую фазу заголовок показывает следующей после `shown`, когда сборка дошла до `phase`: обычно — её саму (быстрые
+ *  промежуточные не показываются, фаза держится Phases `DWELL_MS`); у сборки с данными (`data`) — сперва «Изучаю данные»,
+ *  если показанная была до неё, а сборка уже дальше (конец сборки — сразу). */
+export function phaseStep(shown: BuildPhase, phase: BuildPhase, data: boolean): BuildPhase {
+  if (!data || phase === "done" || phase === "failed") return phase;
+  const at = (p: BuildPhase) => PHASE_ROLL.indexOf(p);
+  return at(shown) < at("analyst") && at(phase) > at("analyst") ? "analyst" : phase;
+}
+/** Шаг аналитика данных в событиях сервера (verstka/data/story.py `STEP`). */
+const isDataStep = (e: AgentEvent) => (e.step ?? "").toLowerCase() === "data";
+/** Строка аналитика о файле: «„Регионы.xlsx“ — сравнение категорий, …» (первая — «Изучаю данные: 7 таблиц»). */
+const FILE_LINE = /^«[^»]+»\s+—/;
+/** Сборка идёт с файлами данных: так сказал её запрос (`data`) или сервер (строки шага `data`). */
+export const buildHasData = (job: Pick<ActiveJob, "agent">, asked = false): boolean => asked || (job.agent ?? []).some(isDataStep);
 
 /** Причины, сказанные не по-русски, — так же, как lib/narrate `failReason`. */
 const FAIL_FALLBACK = failReason(null).replace(/[.\s]+$/, "");
@@ -182,6 +210,9 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
   const done = job.status === "done";
   const failedJob = job.status === "failed";
   const running = !done && !failedJob;
+  // сборка с данными: строки аналитика — шаг `data` (сервер не называет его фазой — фаза идёт по событиям)
+  const data = buildHasData(job, opts.data);
+  const dataFiles = events.filter((e) => isDataStep(e) && FILE_LINE.test(e.message)).length;
 
   // варианты верстаются один за другим: проверка первого (и взгляд дизайнера на него) не заканчивает «Вёрстку»
   // остальных, пока сборка идёт
@@ -189,7 +220,8 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
   const laying = running && !exporting && names.some((n) => (job.variants?.[n]?.frac ?? 0) < 0.75);
   // разбор шаблона («analyze: …») идёт раньше автора: пока аналитик не сказал ни слова, а автор пишет — работает автор
   const spoken = events.reduce<PhaseKey | null>((p, e) => laterPhase(p, phaseOfStep(e.step)), null);
-  const reached = job.phase === "analyst" && spoken === "writer" ? "writer" : job.phase ?? null;
+  const said = job.phase ?? (events.some(isDataStep) ? "analyst" : null);
+  const reached = said === "analyst" && spoken === "writer" ? "writer" : said;
   const agentPhase: PhaseKey | null = (reached === "check" || reached === "eyes") && laying ? "layout" : reached;
   const phase: BuildPhase = failedJob ? "failed" : done ? "done" : agentPhase ?? "queued";
   const queued = phase === "queued";
@@ -205,14 +237,16 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
   const checkNote = agentPhase === "check" && /проверка качества|исправляю замечания|сохраняю файлы/i.test(job.message) ? job.message : undefined;
   // «Взгляд дизайнера», пропущенный сервером у каждого варианта («…пропущен: не хватило времени на сборку»), — пропущен
   // сразу, а не «сейчас» до конца сборки
-  const rows = buildTimeline({ events, phase: agentPhase, running: !done, notes: { layout: layoutNote, check: checkNote }, variants: names });
+  const dataNote = data && dataFiles ? plural(dataFiles, "файл", "файла", "файлов") : undefined;
+  const rows = buildTimeline({ events, phase: agentPhase, running: !done, notes: { layout: layoutNote, check: checkNote, ...(dataNote && { analyst: dataNote }) }, variants: names });
   const rowOf = (key: PhaseKey) => rows.find((r) => r.key === key);
   const activeKey = rows.find((r) => r.status === "active")?.key ?? (running && agentPhase ? agentPhase : null);
   const failedKey: PhaseKey | null = failedJob ? activeKey ?? agentPhase ?? "analyst" : null;
 
   const roles: RoleView[] = PHASES.map((def, i) => {
     const row = rowOf(def.key);
-    const hint = def.hint;
+    const dataRole = data && def.key === "analyst";
+    const hint = dataRole ? DATA_ROLE.hint : def.hint;
     const short = SHORT_HINT[def.key] ?? hint;
     let status: RoleStatus;
     if (queued) status = "queue";
@@ -227,7 +261,7 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
     else if (status === "skip") note = !failedKey && row?.status === "skipped" && row.note ? row.note : notRun(def.key);
     else if (status === "now") note = said || (lines.length ? "" : short);
     else note = said;
-    return { key: def.key, n: i + 1, title: def.title, hint, status, note, lines };
+    return { key: def.key, n: i + 1, title: dataRole ? DATA_ROLE.title : def.title, hint, status, note, lines, ...(dataRole && { data: true }) };
   });
   const doneRoles = roles.filter((r) => r.status === "done").length;
   const nowIdx = roles.findIndex((r) => r.status === "now" || r.status === "error");
@@ -301,7 +335,8 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
 
   return {
     phase,
-    title: STAGE_TITLE[phase],
+    title: stageTitle(phase, data),
+    data,
     clock: job.endedAt === null ? "—" : clockText(((job.endedAt ?? now) - job.startedAt) / 1000),
     progress: queued ? null : done ? 1 : clamp01(job.progress),
     doneRoles,

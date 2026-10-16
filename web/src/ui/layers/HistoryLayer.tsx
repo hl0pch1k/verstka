@@ -142,7 +142,7 @@ export function HistoryLayer() {
   const mounted = presence.mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
   const view = useMemo(
-    () => (mounted ? historyView(generations, { now: new Date(), label: (g) => templateLabel(g.template_id, g.template_file), current }) : null),
+    () => (mounted ? historyView(generations, { now: new Date(), label: (g) => templateLabel(g.base_template_id || g.template_id, g.template_file), current }) : null),
     [mounted, generations, templateLabel, current],
   );
   const byId = useMemo(() => new Map(generations.map((g) => [g.id, g])), [generations]);

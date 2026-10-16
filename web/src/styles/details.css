@@ -500,3 +500,94 @@
 .dq-cl{display:flex;flex-wrap:wrap;align-items:center;margin-left:-20px;white-space:nowrap;clip-path:inset(-4px -8px -4px 20px)}
 .dq-ci{position:relative;padding-left:20px}
 .dq-ci::before{content:"·" / "";position:absolute;left:0;width:20px;text-align:center;font-weight:500;color:#5A6272}
+
+/* «Почему так» слайда с данными (вторая ступень, boards/V2.dc.html v105, блок dx-): профиль файла, задача, варианты
+   визуализации с мини-графиками, заголовок-вывод (ui/details/tabs/DataWhy.tsx) — язык D-why */
+.dx-col{min-width:0}
+.dx-file{display:flex;align-items:center;gap:16px;margin-top:16px}
+.dx-fic{display:flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;border-radius:999px;background:#E9F1FF;color:#2563EB}
+.dx-ft{display:flex;flex-direction:column;min-width:0}
+.dx-fn{font-size:15px;font-weight:700;line-height:24px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dx-fm{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dx-cols{display:flex;flex-direction:column;margin:8px 0 0;padding:0;list-style:none}
+.dx-cr{display:grid;grid-template-columns:minmax(0,1fr) 96px 104px;column-gap:12px;align-items:center;height:40px;border-top:1px solid rgba(11,18,32,.08)}
+.dx-cn{min-width:0;font-size:14px;font-weight:600;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dx-more .dx-cn{font-weight:500;color:#5A6272}
+.dx-ty{justify-self:start}
+.dx-t-d{background:#E9F1FF;color:#2563EB}
+.dx-t-n{background:#F3F4F1;color:#0B1220}
+.dx-t-c{background:#F3F4F1;color:#5A6272}
+.dx-t-t{background:#FFFFFF;color:#5A6272;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14)}
+.dx-role{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.dx-facts{margin:8px 0 0;padding:0}
+.dx-fr{display:grid;grid-template-columns:120px minmax(0,1fr);column-gap:12px;align-items:start;margin:0 -12px;padding:8px 12px;border-radius:12px}
+.dx-fr+.dx-fr{margin-top:2px}
+.dx-fr dt{margin:0;font-size:13px;font-weight:700;line-height:20px;color:#5A6272}
+.dx-fr dd{display:flex;align-items:flex-start;gap:8px;min-width:0;margin:0;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dx-fw{background:#FFFBEB}
+.dx-fw dt,.dx-fw dd{color:#B45309}
+.dx-fw dd{font-weight:700}
+.dx-fb{background:#E9F1FF}
+.dx-fb dt,.dx-fb dd svg{color:#2563EB}
+.dx-tn{margin:12px 0 0;font-size:16px;font-weight:700;line-height:24px;color:#0B1220}
+.dx-goal{margin:8px 0 0}
+.dx-goal .dd-tag{gap:6px}
+.dx-tw{margin:8px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.dx-ks{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.dx-k{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:999px;background:#F3F4F1;color:#5A6272;font-size:13px;font-weight:600;line-height:20px;white-space:nowrap}
+.dx-k-on{background:#0B1220;color:#FFFFFF}
+.dx-vars{display:flex;flex-direction:column;margin:8px 0 0;padding:0;list-style:none}
+.dx-v{display:grid;grid-template-columns:24px 112px minmax(0,1fr);column-gap:16px;align-items:start;padding:16px 0;border-top:1px solid rgba(11,18,32,.08)}
+.dx-v:first-child{border-top:0}
+.dx-v:last-child{padding-bottom:0}
+.dx-rank{display:flex;align-items:center;justify-content:center;width:24px;height:24px;margin-top:20px;border-radius:999px;background:#F3F4F1;color:#5A6272;font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;line-height:16px;font-variant-numeric:tabular-nums}
+.dx-v-on .dx-rank{background:#2563EB;color:#FFFFFF}
+.dx-mini{display:block;width:112px;height:63px;border-radius:10px}
+.dx-vt{min-width:0}
+.dx-vn{margin:0;font-size:14px;font-weight:700;line-height:24px;color:#0B1220}
+.dx-on{margin-left:8px}
+.dx-vr{margin:2px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.dx-note{display:flex;align-items:flex-start;gap:8px;margin:8px 0 0;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dx-note svg{flex:none;margin-top:2px;color:#2563EB}
+/* место действия варианта — 40 px под доводом (V2: кнопка 4px 0 0 -16px, строка хода 40 px): кнопка, ход, отказ, «Вернуть
+   как было» сменяют друг друга в нём перекрёстным затуханием */
+.dx-slot{display:flex;align-items:center;gap:8px;min-width:0;height:40px;margin:4px 0 0}
+.dx-act{margin:0 0 0 -16px}
+.dx-act:disabled{opacity:.32;cursor:default;transform:none}
+.dx-act:disabled:hover{background:transparent}
+.dx-busy{display:flex;align-items:center;gap:8px;height:40px;margin:0;font-size:14px;font-weight:600;line-height:20px;color:#2563EB}
+.dx-uri{flex:none;background:transparent;color:#2563EB}
+.dx-hl{display:grid;grid-template-columns:160px minmax(0,1fr);column-gap:16px;align-items:start;margin-top:16px}
+.dx-hli{display:block;min-width:0;aspect-ratio:16 / 9}
+.dx-hlt{min-width:0}
+.dx-key{display:block;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:28px;line-height:36px;letter-spacing:-0.03em;color:#2563EB;white-space:nowrap}
+.dx-from{margin:4px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dx-not{display:flex;align-items:flex-start;gap:8px;margin:16px 0 0;padding-top:16px;border-top:1px solid rgba(11,18,32,.08);font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.dx-not .dd-tag{flex:none;margin-top:-2px}
+.dx-not s{text-decoration-thickness:1.5px;text-decoration-color:rgba(90,98,114,.6)}
+@media (min-width: 901px){
+  /* узкая колода: подпись «лучший по данным — первым» сжимается и гаснет; стопки текста — на сколько у́же их клетка
+     (левая колонка 526 → 416, правая — на 306; в тесной колоде 526 → 376 и на 266) */
+  .dx-capw{display:block;max-width:240px;overflow:hidden;white-space:nowrap;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .dx-capw{max-width:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  [data-tx="x-l"]{--hpd:110px}
+  :is([data-tx="x-r"],[data-tx="x-rn"],[data-tx="x-rh"],[data-tx="x-r2"]){--hpd:306px}
+  /* сайт: тесная колода — правой колонке с помощником 320: мини-графики (112 → 0) и снимок слайда (160 → 0) сжимаются и
+     гаснут на месте, тексту вариантов остаётся 216 px; «Варианты визуализации» мельчает до 0.85 (в 272 px не встаёт) */
+  .dd-tight .dx-v{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dd-tight .dx-v{grid-template-columns:24px 0px minmax(0,1fr);transition-duration:520ms}
+  /* высота эскиза и снимка — постоянная (сжимается только ширина, рисунок вписан): высота ряда идёт за текстом одним
+     ходом, а не сперва вниз за картинкой, потом вверх за текстом */
+  .dd-tight .dx-mini{width:100%;transition:opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .dx-mini{opacity:0;transition:opacity 240ms var(--ease)}
+  .dd-tight .dx-hl{transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+  .hp-nar .dd-tight .dx-hl{grid-template-columns:0px minmax(0,1fr);column-gap:0;transition-duration:520ms}
+  .dd-tight .dx-hli{aspect-ratio:auto;height:90px;transition:opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .dx-hli{opacity:0;transition:opacity 240ms var(--ease)}
+  .dd-tight .dx-vh{flex:0 1 auto;min-width:0;transform-origin:0 50%;transition:scale 340ms var(--ease)}
+  .hp-nar .dd-tight .dx-vh{scale:.85;transition-duration:520ms}
+  .dd-tight [data-tx="x-l"]{--hpd:150px}
+  .dd-tight :is([data-tx="x-r"],[data-tx="x-rn"]){--hpd:154px}
+  .dd-tight [data-tx="x-rh"]{--hpd:90px}
+  .dd-tight [data-tx="x-r2"]{--hpd:266px}
+}
