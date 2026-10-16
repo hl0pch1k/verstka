@@ -213,3 +213,54 @@ def test_slides_without_data_are_not_this_checks_business(outline):
     for s in outline.slides:
         s.data = None
     assert _issues(outline) == []
+
+
+# ── review of Task 10: the data, not the plan; the slide's own title; checks as strong as their titles ────────────
+def test_a_value_changed_in_both_plan_and_deck_is_still_caught(outline):
+    s = _slide(outline, "Регионы.xlsx")
+    s.content.chart.series[0].values[0] = 1500.0  # the plan says it, the deck draws it — the file says 1 433
+    got = [i for i in _issues(outline) if i.check_id == "chart_values_mismatch"]
+    assert len(got) == 1 and got[0].severity == "error" and "в данных 1433, на слайде 1500" in got[0].message
+
+
+def test_a_table_cell_changed_in_both_plan_and_deck_is_caught(outline):
+    s = _slide(outline, "Клиенты.xlsx")
+    s.content.table.rows[0][3] = "999"
+    got = [i for i in _issues(outline) if i.check_id == "chart_values_mismatch"]
+    assert len(got) == 1 and "другие числа" in got[0].message
+
+
+def test_the_title_the_slide_shows_is_checked_not_the_plan(outline):
+    ctx = _ctx(outline)
+    k = outline.slides.index(_slide(outline, "Регионы.xlsx"))
+    title = next(e for e in ctx.ir.slides[k].elements if e.name == "Title")
+    title.paragraphs = [IRParagraph(text="Москва даёт 45% выручки, Казань растёт быстрее всех")]
+    issues, _ = run_checks(ctx, only={"headline_figure_not_in_data"})
+    assert len(issues) == 1 and issues[0].severity == "error" and "«45»" in issues[0].message
+    # a title placeholder wins over any other text
+    title.ph_type = "title"
+    title.paragraphs = [IRParagraph(text="Выручка по регионам")]
+    issues, _ = run_checks(ctx, only={"headline_no_conclusion"})
+    assert len(issues) == 1 and "называет тему" in issues[0].message
+
+
+def test_both_axis_titles_and_a_named_source_are_required(outline):
+    ctx = _ctx(outline)
+    k = outline.slides.index(_slide(outline, "Выручка по месяцам.csv"))
+    chart = next(e.chart for e in ctx.ir.slides[k].elements if e.chart)
+    chart.x_title = None  # the value axis alone is not enough
+    foot = next(e for e in ctx.ir.slides[k].elements if e.name == "Footnote")
+    foot.paragraphs = [IRParagraph(text="Источник: внутренние данные")]  # «источник», but not the file
+    issues, _ = run_checks(ctx, only={"chart_no_units", "chart_no_source"})
+    by = {i.check_id: i.message for i in issues}
+    assert "оси категорий" in by["chart_no_units"] and "Выручка по месяцам.csv" in by["chart_no_source"]
+
+
+def test_an_aggregated_table_over_ten_rows_is_flagged_too(outline):
+    t = _slide(outline, "Клиенты.xlsx")
+    rows = [[f"Клиент {k}", "Москва", str(k)] for k in range(1, 16)]
+    t.content.table = t.content.table.model_copy(update={"columns": ["Клиент", "Регион", "Выручка"], "rows": rows})
+    t.data.prepared = None
+    assert t.data.aggregation
+    got = [i for i in _issues(outline) if i.check_id == "table_raw_dump"]
+    assert len(got) == 1 and "15 строк даже после агрегации" in got[0].message

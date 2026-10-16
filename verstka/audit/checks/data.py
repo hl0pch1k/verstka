@@ -31,31 +31,33 @@ HEADLINE_FIGURE_NOT_IN_DATA = CheckSpec(
     title="Число в заголовке не следует из данных",
     severity="error",
     category="content",
-    description="Каждое число в заголовке слайда с данными должно быть среди фактов, посчитанных по файлу (изменение, доля, "
-                "медиана, лидер…). Цифры внутри названий из данных («Филиал 1», «III кв. 2026») числами не считаются.",
+    description="Каждое число в заголовке слайда с данными — таком, каким его показывает файл презентации, — должно быть "
+                "среди фактов, посчитанных по файлу с данными (изменение, доля, медиана, лидер…). Цифры внутри названий из "
+                "данных («Филиал 1», «III кв. 2026») числами не считаются.",
 )
 CHART_VALUES_MISMATCH = CheckSpec(
     id="chart_values_mismatch",
     title="Значения на слайде не совпадают с данными файла",
     severity="error",
     category="content",
-    description="Диаграмма, таблица и карточки слайда показывают те же значения, что подготовил из файла слой данных: те же "
-                "категории и числа, пропуски — на своих местах.",
+    description="Диаграмма, таблица и карточки слайда показывают те же значения, что слой данных подготовил из файла при "
+                "сборке (они хранятся в данных слайда и не меняются правками плана): те же категории и числа, пропуски — "
+                "на своих местах, лишних строк нет.",
 )
 CHART_NO_UNITS = CheckSpec(
     id="chart_no_units",
     title="У диаграммы нет подписей осей и единиц",
     severity="warn",
     category="content",
-    description="У графика, столбцов и гистограммы подписаны оси или хотя бы ось значений с единицей («Выручка, млн ₽»); "
-                "у рассеяния — обе оси. Круговой и кольцевой хватает подписей долей.",
+    description="У графика, столбцов, полос и гистограммы подписаны обе оси: категорий («Месяц») и значений с единицей "
+                "(«Выручка, млн ₽»); у рассеяния — обе оси. У круговой и кольцевой осей нет — хватает подписей долей.",
 )
 CHART_NO_SOURCE = CheckSpec(
     id="chart_no_source",
     title="Не указан источник данных",
     severity="warn",
     category="content",
-    description="На слайде с данными из файла есть строка «Источник: файл» — в сноске или под диаграммой.",
+    description="На слайде с данными из файла есть строка «Источник: <имя файла>» — в сноске или под диаграммой.",
 )
 CHART_OVERLOADED = CheckSpec(
     id="chart_overloaded",
@@ -67,11 +69,11 @@ CHART_OVERLOADED = CheckSpec(
 )
 TABLE_RAW_DUMP = CheckSpec(
     id="table_raw_dump",
-    title="Таблица из файла целиком, без агрегации",
+    title="Таблица из файла длиннее 10 строк",
     severity="warn",
     category="content",
-    description="Таблица на слайде с данными длиннее 10 строк, и данные не сгруппированы (топ-N и «Остальные», интервалы, "
-                "разбиение по слайдам).",
+    description="Таблица на слайде с данными длиннее 10 строк — и сырая выгрузка файла, и уже сгруппированная: такую "
+                "не прочитать с экрана, нужны топ-N и «Остальные» или разбиение по слайдам.",
 )
 CHART_FROM_UNTYPABLE = CheckSpec(
     id="chart_from_untypable",
@@ -155,17 +157,45 @@ def _headline(osl: OutlineSlide) -> str:
     return _CONT_RE.sub("", osl.headline or "").strip()
 
 
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zа-яё0-9]+", _norm(text).lower()) if len(w) > 1}
+
+
+def _shown_headline(s: IRSlide, osl: OutlineSlide) -> str:
+    """The slide's heading as the deck shows it: the title placeholder, else the text near the top that says most of
+    the planned headline (the person may have edited it in the file); the plan's headline when none reads as it."""
+    plan = _headline(osl)
+    want = _words(plan)
+    H = 1.0
+    best, score = None, 0.0
+    for e in s.elements:
+        if e.type != "text" or not e.has_text or e.table is not None:
+            continue
+        text = " ".join(_norm(p.text) for p in e.paragraphs if p.text.strip())
+        if (e.ph_type or "") in ("title", "ctrTitle"):
+            return _CONT_RE.sub("", text).strip()
+        if e.bbox_frac.y > 0.45 * H:
+            continue
+        got = _words(text)
+        if not got or not want:
+            continue
+        j = len(got & want) / len(got | want)
+        if j > score:
+            best, score = text, j
+    return _CONT_RE.sub("", best).strip() if best is not None and score >= 0.4 else plan
+
+
 @check(HEADLINE_NO_CONCLUSION)
 def headline_no_conclusion(ctx: AuditContext) -> list[Issue]:
     out = []
     for s, osl in _data_slides(ctx):
-        head = _norm(_headline(osl)).lower().rstrip(".")
+        head = _norm(_shown_headline(s, osl)).lower().rstrip(".")
         d = osl.data
         topics = {_norm(x).lower() for x in (d.plain_headline, file_title(d.file), d.file) if x}
         if not head or head in topics:
             out.append(ctx.new_issue(
                 HEADLINE_NO_CONCLUSION, s.index,
-                f"Заголовок «{_headline(osl) or '—'}» называет тему, а не вывод из данных «{d.file}»",
+                f"Заголовок «{_shown_headline(s, osl) or '—'}» называет тему, а не вывод из данных «{d.file}»",
                 suggestion="Скажите в заголовке, что видно в данных, с числом из них: «Выручка выросла на 23% к сентябрю».",
             ))
     return out
@@ -177,7 +207,7 @@ def headline_figure_not_in_data(ctx: AuditContext) -> list[Issue]:
 
     out = []
     for s, osl in _data_slides(ctx):
-        head = _headline(osl)
+        head = _shown_headline(s, osl)
         facts = list(osl.data.headline_facts)
         labels = data_slide_labels(osl)
         if headline_ok(head, facts, labels):
@@ -245,13 +275,30 @@ def _val(v: Optional[float]) -> str:
     return "пропуск" if v is None else _num(round(v, 2))
 
 
-def _chart_problem(spec: ChartSpec, s: IRSlide) -> Optional[str]:
+def _prepared(osl: OutlineSlide):
+    """What the data layer prepared from the file for the slide (`SlideData.prepared`); a deck built before it was kept
+    — its plan's content."""
+    from verstka.schemas.data import PreparedValues
+
+    p = osl.data.prepared
+    if p is not None:
+        return p
+    c = osl.content
+    if c.chart is not None:
+        return PreparedValues(categories=[str(x) for x in c.chart.categories], series=[(x.name, list(x.values)) for x in c.chart.series],
+                              points=[(x.name, list(zip(x.x, x.y))) for x in c.chart.xy])
+    if c.table is not None:
+        return PreparedValues(columns=list(c.table.columns), rows=[list(r) for r in c.table.rows])
+    return PreparedValues(numbers=[n.value for n in c.numbers])
+
+
+def _chart_problem(prep, s: IRSlide) -> Optional[str]:
     charts = [e.chart for e in _charts(s)]
     if not charts:
         return "диаграммы на слайде нет"
-    if spec.type == "scatter":
-        for xs in spec.xy:
-            pts = sorted((round(x, 6), round(y, 6)) for x, y in zip(xs.x, xs.y) if x is not None and y is not None)
+    if prep.points:
+        for name, pairs in prep.points:
+            pts = sorted((round(x, 6), round(y, 6)) for x, y in pairs if x is not None and y is not None)
             found = False
             for c in charts:
                 for sr in c.series:
@@ -259,17 +306,17 @@ def _chart_problem(spec: ChartSpec, s: IRSlide) -> Optional[str]:
                     if got == pts:
                         found = True
             if not found:
-                return f"точки «{xs.name}» на слайде другие"
+                return f"точки «{name}» на слайде другие"
         return None
-    cats = [str(c) for c in spec.categories]
-    for sr in spec.series:
-        vals = [None if v is None else float(v) for v in sr.values][: len(cats)]
+    cats = list(prep.categories)
+    for name, values in prep.series:
+        vals = [None if v is None else float(v) for v in values][: len(cats)]
         vals += [None] * (len(cats) - len(vals))
         if not any(v is not None for v in vals):
             continue
-        why = _series_found(sr.name, vals, cats, charts)
+        why = _series_found(name, vals, cats, charts)
         if why is not None:
-            return (f"ряд «{sr.name}»: " if sr.name and len(spec.series) > 1 else "") + why
+            return (f"ряд «{name}»: " if name and len(prep.series) > 1 else "") + why
     return None
 
 
@@ -277,13 +324,14 @@ def _cell_numbers(text: str) -> list[float]:
     return numbers_in(_norm(text).replace("⁠", ""))
 
 
-def _table_problem(osl: OutlineSlide, s: IRSlide) -> Optional[str]:
-    t = osl.content.table
+def _table_problem(prep, s: IRSlide) -> Optional[str]:
     tables = _tables(s)
     if not tables:
         return "таблицы на слайде нет"
     have = [[_norm(c) for c in r] for e in tables for r in e.table.rows]
-    for row in t.rows:
+    if len([r for r in have if any(r)]) - len(tables) > len(prep.rows):
+        return f"на слайде строк больше, чем подготовлено из файла ({len(prep.rows)})"
+    for row in prep.rows:
         want = [_norm(c) for c in row]
         if not want:
             continue
@@ -295,13 +343,13 @@ def _table_problem(osl: OutlineSlide, s: IRSlide) -> Optional[str]:
     return None
 
 
-def _numbers_problem(osl: OutlineSlide, s: IRSlide) -> Optional[str]:
+def _numbers_problem(prep, s: IRSlide) -> Optional[str]:
     text = _slide_text(s)
     have = _cell_numbers(text)
-    for n in osl.content.numbers:
-        want = _cell_numbers(n.value)
+    for value in prep.numbers:
+        want = _cell_numbers(value)
         if want and not all(any(abs(a - b) < 1e-9 for b in have) for a in want):
-            return f"нет карточки «{_norm(n.value)}» ({_norm(n.label)})"
+            return f"нет карточки «{_norm(value)}»"
     return None
 
 
@@ -309,15 +357,15 @@ def _numbers_problem(osl: OutlineSlide, s: IRSlide) -> Optional[str]:
 def chart_values_mismatch(ctx: AuditContext) -> list[Issue]:
     out = []
     for s, osl in _data_slides(ctx):
-        c = osl.content
+        prep = _prepared(osl)
         why = None
         els: list[IRElement] = []
-        if c.chart is not None:
-            why, els = _chart_problem(c.chart, s), _charts(s)
-        elif c.table is not None:
-            why, els = _table_problem(osl, s), _tables(s)
-        elif c.numbers:
-            why = _numbers_problem(osl, s)
+        if prep.series or prep.points:
+            why, els = _chart_problem(prep, s), _charts(s)
+        elif prep.rows:
+            why, els = _table_problem(prep, s), _tables(s)
+        elif prep.numbers:
+            why = _numbers_problem(prep, s)
         if why:
             out.append(ctx.new_issue(
                 CHART_VALUES_MISMATCH, s.index, f"Данные «{osl.data.file}» на слайде показаны не так, как в файле: {why}",
@@ -342,10 +390,10 @@ def chart_no_units(ctx: AuditContext) -> list[Issue]:
                 continue
             if spec.type not in _CATEGORY_TYPES or c.type in ("pie", "doughnut"):
                 continue
-            unit_line = any(x.name.startswith(("Unit", "Chart title")) and x.has_text for x in _elements(s))
-            if not (c.x_title or c.y_title or c.title or unit_line):
+            missing = [w for w, ok in (("оси категорий", bool(c.x_title)), ("оси значений", bool(c.y_title))) if not ok]
+            if missing:
                 out.append(ctx.new_issue(
-                    CHART_NO_UNITS, s.index, f"У диаграммы «{osl.data.file}» нет подписей осей и единицы",
+                    CHART_NO_UNITS, s.index, f"У диаграммы «{osl.data.file}» нет подписи {' и '.join(missing)}",
                     suggestion="Подпишите ось значений с единицей («Выручка, млн ₽») и ось категорий.", **_bboxes([e]),
                 ))
     return out
@@ -355,9 +403,9 @@ def chart_no_units(ctx: AuditContext) -> list[Issue]:
 def chart_no_source(ctx: AuditContext) -> list[Issue]:
     out = []
     for s, osl in _data_slides(ctx):
-        text = _slide_text(s).lower()
         name = _norm(osl.data.file).lower()
-        if "источник" in text or (name and name in text):
+        lines = [_norm(e.text).lower() for e in _elements(s) if e.has_text and e.table is None]
+        if any("источник" in t and name in t for t in lines):
             continue
         out.append(ctx.new_issue(
             CHART_NO_SOURCE, s.index, f"На слайде не указан источник данных: «{osl.data.file}»",
@@ -393,10 +441,11 @@ def table_raw_dump(ctx: AuditContext) -> list[Issue]:
     out = []
     for s, osl in _data_slides(ctx):
         t = osl.content.table
-        if t is None or len(t.rows) <= _ROWS_MAX or osl.data.aggregation:
+        if t is None or len(t.rows) <= _ROWS_MAX:
             continue
+        how = "даже после агрегации" if osl.data.aggregation else "без агрегации"
         out.append(ctx.new_issue(
-            TABLE_RAW_DUMP, s.index, f"Таблица «{osl.data.file}» — {len(t.rows)} строк без агрегации",
+            TABLE_RAW_DUMP, s.index, f"Таблица «{osl.data.file}» — {len(t.rows)} строк {how}",
             suggestion="Покажите топ-10 и строку «Остальные» или разбейте таблицу на слайды по 10 строк.", **_bboxes(_tables(s)),
         ))
     return out

@@ -321,3 +321,72 @@ def test_the_context_goes_before_any_data(sales):
     o = build_data_outline(Brief(text=text, slide_count=9), sales)
     assert len(o.slides) == 9 and not any(s.id.startswith("context") for s in o.slides)
     assert len([s for s in o.slides if s.data is not None]) == 7
+
+
+# ── review of Task 10: the summary speaks of one slide, the slide count, trimmed tables ─────────────────────────────
+MISATTRIBUTED = {
+    "title": "Продажи VK Cloud: итоги девяти месяцев",
+    "headlines": [],
+    "summary_title": "Выручка выросла на 41%",  # 41% is Moscow's share
+    "summary": ["Выручка выросла на 41% к сентябрю", "Москва даёт 23% выручки", "Прямые продажи — 52% выручки"],  # 23: revenue growth, 52: NPS
+    "next_steps": ["Разобрать узкие места поддержки"],
+}
+
+
+def test_true_numbers_recombined_across_slides_are_refused(sales):
+    _, reg = _model(MISATTRIBUTED)
+    det = build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales)
+    st = build_data_story(Brief(text=SALES_BRIEF, slide_count=10), sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
+    summary = next(s for s in st.outline.slides if s.id == "summary")
+    det_summary = next(s for s in det.slides if s.id == "summary")
+    assert summary.headline == det_summary.headline == "Три главных вывода"
+    assert [(i.title, i.text) for i in summary.content.items] == [(i.title, i.text) for i in det_summary.content.items]
+    refused = {r["to"] for r in st.rejected}
+    assert {"Выручка выросла на 41%", "Выручка выросла на 41% к сентябрю", "Москва даёт 23% выручки", "Прямые продажи — 52% выручки"} <= refused
+    # a step without numbers stands on its own
+    assert next(s for s in st.outline.slides if s.id == "next-steps").content.bullets == ["Разобрать узкие места поддержки"]
+
+
+def test_a_summary_card_carries_the_topic_of_the_slide_its_line_came_from(sales):
+    lines = ["Москва даёт 41% выручки, Казань растёт быстрее всех", "Прямые продажи приносят почти половину выручки — 46%",
+             "Выручка выросла на 23% к сентябрю"]
+    _, reg = _model({"summary": lines})
+    st = build_data_story(Brief(text=SALES_BRIEF, slide_count=10), sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
+    summary = next(s for s in st.outline.slides if s.id == "summary")
+    assert [(i.title, i.text) for i in summary.content.items] == list(zip(["Выручка по регионам", "Каналы продаж", "Выручка по месяцам"], lines))
+
+
+def test_the_slide_count_without_a_brief_holds_for_the_model_too(sales):
+    _, reg = _model(ANSWER)
+    st = build_data_story(None, sales, slide_count=9, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
+    assert len(st.outline.slides) == 9 and not any(s.id == "next-steps" for s in st.outline.slides)
+
+
+def test_a_trimmed_table_says_how_many_rows_it_shows():
+    st = build_data_story(Brief(text="Справка по сотрудникам", slide_count=3), [_people()])
+    parts = [s for s in st.outline.slides if s.data is not None]
+    assert [s.data.part for s in parts] == [(1, 2), (2, 2)]
+    assert all(s.footnote == "Источник: Сотрудники.csv · показаны первые 20 строк из 25" for s in parts)
+    assert [r[0] for r in parts[0].content.table.rows][:1] == ["Сотрудник 1"]
+    assert parts[1].headline == parts[0].headline + " (продолжение)"
+
+
+def test_a_trimmed_time_series_keeps_its_latest_periods():
+    from verstka.data.plan import plan_datasets
+
+    rows = [[f"{2024 + (m - 1) // 12}-{(m - 1) % 12 + 1:02d}", 100.0 + m] for m in range(1, 22)]
+    t = Table(id="rev", file="Выручка.csv", kind="csv", columns=["Месяц", "Выручка"], units=[None, "млн ₽"], rows=rows)
+    plan = plan_datasets([t], "")[0]
+    k = next(i for i, o in enumerate(plan.options) if o.kind == "table")
+    plan = plan.model_copy(update={"chosen": k})
+    from verstka.data.plan import slides_of
+
+    plan.slides = slides_of(plan, t, k)
+    assert plan.slides == 3
+    st = build_data_story(Brief(text="Выручка по месяцам", slide_count=3), [t], plans=[plan])
+    parts = [s for s in st.outline.slides if s.data is not None]
+    assert len(parts) == 2 and [s.data.part for s in parts] == [(1, 2), (2, 2)]
+    shown = [r[0] for s in parts for r in s.content.table.rows]
+    assert shown[-1] == parts[-1].content.table.rows[-1][0] and "2025" in shown[-1]  # the latest month is on the slide
+    assert parts[0].headline == plan.headline and "(продолжение)" in parts[1].headline
+    assert all("показаны последние 11 строк из 21" in s.footnote for s in parts)

@@ -1696,7 +1696,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     foot_room = None
     if art is None:
         full = area
-        area = _clear_of_art(slide, area, title_ph, W, H, warnings, data=oslide.content.chart is not None or oslide.content.table is not None)
+        area = _clear_of_art(slide, area, title_ph, W, H, warnings, data=oslide.data is not None and (oslide.content.chart is not None or oslide.content.table is not None))
         foot_room = _foot_room(slide, full, area, title_ph, W, H)
     area = _clear_of_rules(slide, area, W, H, warnings)
     _true_ground(slide, area, pal, manifest)
@@ -2032,7 +2032,7 @@ def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: 
             if hits:
                 free = free_rect(slide, area, skip=skip)
                 if free.w >= 0.3 * W and free.h >= 0.2 * H and free.area >= 0.5 * area.area:
-                    warnings.append("the chart's area kept clear of the template's decor")
+                    warnings.append("область диаграммы отодвинута от декора шаблона")
                     return free
         except Exception:  # noqa: BLE001 - the rule below then
             log.debug("decor clearance failed", exc_info=True)

@@ -266,6 +266,19 @@ class DatasetPlan(BaseModel):
         return self.options[self.chosen] if 0 <= self.chosen < len(self.options) else None
 
 
+class PreparedValues(BaseModel):
+    """Значения слайда, как их подготовил из файла слой данных (до вёрстки и правок): аудит сверяет колоду с ними, а не
+    с планом слайда, который могли поменять. Диаграмма — категории и ряды (None — пропуск), рассеяние — точки рядов,
+    таблица — шапка и строки, карточки — значения как написаны."""
+
+    categories: list[str] = Field(default_factory=list)
+    series: list[tuple[str, list[Optional[float]]]] = Field(default_factory=list)
+    points: list[tuple[str, list[tuple[float, float]]]] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+    numbers: list[str] = Field(default_factory=list)
+
+
 class SlideData(BaseModel):
     """Данные слайда для «Почему так» (OutlineSlide.data): профиль кратко, задача, варианты и факты заголовка."""
 
@@ -293,6 +306,8 @@ class SlideData(BaseModel):
     aggregation: Optional[str] = None
     # часть k из n: датасет, разбитый на несколько слайдов
     part: tuple[int, int] = (1, 1)
+    # значения слайда из файла (для аудита данных); None — колоды, собранные до этого поля
+    prepared: Optional[PreparedValues] = None
 
     @model_validator(mode="after")
     def _label_by_nature(self) -> "SlideData":

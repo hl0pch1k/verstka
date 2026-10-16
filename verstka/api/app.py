@@ -829,6 +829,8 @@ def _brand_files(data: GenerationData, gdir: Path) -> Optional[Path]:
         return data.brand_dir
     dst = gdir / "brand"
     src = Path(data.brand_dir)
+    if src == dst:
+        return dst  # copied already (create_generation, before the job started)
     for logo in data.brand.logos:
         rel = PurePosixPath(str(logo.file or ""))
         if not rel.parts or rel.is_absolute() or ".." in rel.parts:
@@ -1924,6 +1926,9 @@ def create_generation(req: GenerateRequest) -> dict:
     except InputGone as e:
         raise HTTPException(e.status, str(e))
     gid, gdir = store.new_generation_dir()
+    # the brandbook's logos go into the build's folder now, before the job: a DELETE of the brandbook from here on
+    # cannot take them away from this deck
+    data.brand_dir = _brand_files(data, gdir)
     store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, **_request_options(req), "status": "running", "created_at": time.time()})
     job = runner.submit("generate", _generation_job(gid, gdir, req, data))
     store.merge_generation_meta(gid, {"job_id": job.id}, only_missing=True)  # visible at once, whatever the thread did
@@ -2261,6 +2266,15 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
             from verstka.planning.slide_edit import revise_slide
 
             i = req.slides[0]
+            target = outline.slides[i - 1] if 1 <= i <= total else None
+            if target is not None and target.data is not None:
+                from verstka.data.rebuild import option_for_request
+
+                k = option_for_request(req.text or body.message, target.data)
+                if k is not None:
+                    # «на слайде 4 покажи таблицей» on a slide made from a data file: the analysis's own option, built
+                    # from the file again («Пересобрать слайд так») — never the designer redrawing the figures
+                    return _data_form_change(gid, strategy, vdir, meta, manifest, outline, i, k, body.message, job)
             job.emit(f"Дизайнер переделывает слайд {i}", 0.1)
             use_models = bool(meta.get("use_models", True)) and models_configured()
             try:
@@ -2297,6 +2311,29 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
         return {"reply": reply + tail, "changed": True, "slide": focus, "strategy": strategy, "score": after, "kind": req.kind}
 
     return run
+
+
+def _data_form_change(gid: str, strategy: str, vdir: Path, meta: dict, manifest, outline: DeckOutline, n: int, option: int, message: str, job: Job) -> dict:
+    """A chat request that names another form of a data slide, done as «Пересобрать слайд так» with that option."""
+    from verstka.data.rebuild import RebuildRefused, load_rebuild, rebuild_data_slide
+
+    d = outline.slides[n - 1].data
+    if option == d.chosen:
+        title = d.options[option].title or d.options[option].kind
+        return {"reply": f"Слайд {n} уже показан так: {title.lower()}.", "changed": False, "slide": n, "strategy": strategy}
+    try:
+        rp = load_rebuild(vdir.parent, outline, n, option, store.read_dataset)
+    except RebuildRefused as e:
+        msg = str(e)
+        return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False, "slide": n, "strategy": strategy}
+    job.emit(f"Пересобираю слайд {n}: {rp.title.lower()}", 0.1)
+    res = rebuild_data_slide(
+        vdir, strategy, rp, manifest=manifest, ws=store.workspace(meta["template_id"]), template_source=store.workspace(meta["template_id"]).source,
+        workspace_root=store.root, exports=list(meta.get("exports") or []), progress=job_progress(job), request=message,
+    )
+    store.merge_variant_summary(gid, strategy, {"n_slides": res.n_slides, "score": res.score_after, "errors": res.errors, "warnings": res.warnings})
+    return {"reply": res.reply, "changed": res.applied, "slide": n, "strategy": strategy, "score": res.score_after, "kind": "rebuild",
+            "option": rp.option, "viz": rp.kind, "version": res.version}
 
 
 @app.post("/api/generations/{gid}/{strategy}/edits")
@@ -2423,8 +2460,7 @@ def rebuild_slide(gid: str, strategy: str, n: int, body: RebuildBody) -> dict:
     """«Пересобрать слайд так»: slide n's dataset shown with another visualization option (`body.option`, as «Почему
     так» lists `OutlineSlide.data.options`) — a job; the rest of the variant stays, «верни как было» undoes it. An option
     the data does not suit is refused at once (422 with its reason)."""
-    from verstka.data.rebuild import RebuildRefused, dataset_of_slide, prepare_rebuild
-    from verstka.data.story import STORY_FILE, read_story, story_plan
+    from verstka.data.rebuild import RebuildRefused, load_rebuild
 
     try:
         vdir = _variant_dir(gid, strategy)
@@ -2440,17 +2476,8 @@ def rebuild_slide(gid: str, strategy: str, n: int, body: RebuildBody) -> dict:
         outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise HTTPException(404, "Вариант не найден")
-    did = dataset_of_slide(outline, n)
-    story = read_story(vdir.parent / STORY_FILE) if did else None
-    plan = story_plan(story, did) if story and did else None
     try:
-        if did and plan is None:
-            raise RebuildRefused(409, "Разбор данных этой презентации не сохранился — соберите её заново")
-        loaded = store.read_dataset(did) if did else None
-        if did and loaded is None:
-            name = outline.slides[n - 1].data.file
-            raise RebuildRefused(409, f"Файла «{name}» больше нет на сервере — приложите его снова и соберите презентацию заново")
-        rp = prepare_rebuild(outline, n, body.option, plan, loaded[0]) if did else prepare_rebuild(outline, n, body.option, None, None)  # type: ignore[arg-type]
+        rp = load_rebuild(vdir.parent, outline, n, body.option, store.read_dataset)
     except RebuildRefused as e:
         raise HTTPException(e.status, str(e))
     key = (gid, strategy)

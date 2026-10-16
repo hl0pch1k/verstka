@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -27,7 +28,24 @@ from verstka.schemas.outline import DeckOutline, OutlineSlide
 
 log = logging.getLogger(__name__)
 
-__all__ = ["RebuildRefused", "RebuildPlan", "Rebuilt", "prepare_rebuild", "rebuild_data_slide", "dataset_of_slide"]
+__all__ = ["RebuildRefused", "RebuildPlan", "Rebuilt", "prepare_rebuild", "rebuild_data_slide", "dataset_of_slide",
+           "option_for_request", "load_rebuild"]
+
+# the form a person names in words («покажи таблицей», «вертикальными столбцами») → the visualization kinds it means
+_FORM_WORDS: list[tuple[re.Pattern, tuple[str, ...]]] = [
+    (re.compile(r"таблиц", re.I), ("table",)),
+    (re.compile(r"карточк|крупн\w*\s+(?:цифр|числ)|ключев\w*\s+показател", re.I), ("kpi_cards",)),
+    (re.compile(r"гистограм", re.I), ("histogram", "column")),
+    (re.compile(r"рассеяни|точечн", re.I), ("scatter",)),
+    (re.compile(r"накопительн", re.I), ("stacked_column", "stacked_bar")),
+    (re.compile(r"сгруппированн", re.I), ("grouped_column", "grouped_bar")),
+    (re.compile(r"кольцев|бублик", re.I), ("doughnut", "pie")),
+    (re.compile(r"кругов|пирог", re.I), ("pie", "doughnut")),
+    (re.compile(r"горизонтальн|полос", re.I), ("bar", "grouped_bar", "stacked_bar")),
+    (re.compile(r"вертикальн|столбц|столбик|столбч", re.I), ("column", "grouped_column", "stacked_column", "histogram")),
+    (re.compile(r"област", re.I), ("area",)),
+    (re.compile(r"линейн|лини[ея]й|график", re.I), ("line", "area")),
+]
 
 
 class RebuildRefused(ValueError):
@@ -63,6 +81,40 @@ class Rebuilt:
     version: Optional[int] = None
     at: Optional[float] = None
     n_slides: int = 0
+
+
+def option_for_request(request: str, data) -> Optional[int]:
+    """The option of the slide's data (`SlideData.options`) a person's words name («на слайде 4 покажи таблицей» → the
+    table), or None when they name no form or a form the data has no option for."""
+    text = request or ""
+    for rx, kinds in _FORM_WORDS:
+        if not rx.search(text):
+            continue
+        for kind in kinds:
+            k = next((i for i, o in enumerate(data.options) if o.kind == kind), None)
+            if k is not None:
+                return k
+        return None
+    return None
+
+
+def load_rebuild(gen_dir: Path, outline: DeckOutline, n: int, option: int, read_dataset: Callable[[str], Any]) -> "RebuildPlan":
+    """`prepare_rebuild` with the plan kept in the generation's data_story.json and the dataset read by `read_dataset`
+    (id → (table, profile) or None); RebuildRefused with a calm reason when either is gone."""
+    from verstka.data.story import STORY_FILE, read_story, story_plan
+
+    did = dataset_of_slide(outline, n)
+    if did is None:
+        return prepare_rebuild(outline, n, option, None, None)  # type: ignore[arg-type] — refuses with its reason
+    story = read_story(Path(gen_dir) / STORY_FILE)
+    plan = story_plan(story, did) if story else None
+    if plan is None:
+        raise RebuildRefused(409, "Разбор данных этой презентации не сохранился — соберите её заново")
+    loaded = read_dataset(did)
+    if loaded is None:
+        name = outline.slides[n - 1].data.file
+        raise RebuildRefused(409, f"Файла «{name}» больше нет на сервере — приложите его снова и соберите презентацию заново")
+    return prepare_rebuild(outline, n, option, plan, loaded[0])
 
 
 def dataset_of_slide(outline: DeckOutline, n: int) -> Optional[str]:
@@ -150,6 +202,7 @@ def rebuild_data_slide(
     workspace_root: Path,
     exports: Optional[list[str]] = None,
     progress: Optional[Callable[..., None]] = None,
+    request: Optional[str] = None,
 ) -> Rebuilt:
     """Put the rebuilt slides into the variant in `vdir` (see the module's doc). Nothing in `vdir` changes before the
     new deck is made, audited and its previews rendered: a failure leaves the variant as it was."""
@@ -176,7 +229,7 @@ def rebuild_data_slide(
     report0 = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
     deck0 = vdir / "deck.pptx"
     before = report0.summary.score
-    request = f"Пересобери слайд {rp.n} так: {rp.title.lower()}"
+    request = request or f"Пересобери слайд {rp.n} так: {rp.title.lower()}"
     exports = [e for e in (exports or []) if e in ("pdf", "html")]
 
     if len(rp.slides) != len(rp.positions):
@@ -289,7 +342,9 @@ def rebuild_data_slide(
 def _reply(rp: RebuildPlan, before: Optional[float], after: Optional[float]) -> str:
     text = f"Пересобрал слайд {rp.n}: {rp.title.lower()}."
     if len(rp.slides) != len(rp.positions):
-        text += f" Теперь данные занимают {count_words(len(rp.slides), 'слайд', 'слайда', 'слайдов')}."
+        now = count_words(len(rp.slides), 'слайд', 'слайда', 'слайдов')
+        text += (f" Теперь данные занимают {now}, поэтому вариант собран заново: следующие слайды сдвинулись, а образцы"
+                 " шаблона на других слайдах могли смениться.")
     if before is not None and after is not None and round(after) != round(before):
         text += f" Проверка качества: {before:g} → {after:g}."
     elif after is not None:

@@ -133,10 +133,22 @@ def _ground(o: DeckOutline, brief: Brief, structure) -> DeckOutline:
     """The compiler's checks without its deck-level steps (the order and count the brief asked for, the brief's
     requests for each slide, the variety pass, the cover): the person may have moved or removed slides, and their
     newest request wins over the brief's earlier one for this slide."""
+    o = o.model_copy(deep=True)
+    # the slides made from data files (OutlineSlide.data) are the data layer's: their figures come from the files
+    # (checked by audit/checks/data.py), never from the brief — and their charts keep their gaps (None)
+    held = [(k, s) for k, s in enumerate(o.slides) if s.data is not None]
+    if held:
+        o.slides = [s for s in o.slides if s.data is None]
+    o = _ground_rest(o, brief, structure)
+    for k, s in held:
+        o.slides.insert(min(k, len(o.slides)), s)
+    return o
+
+
+def _ground_rest(o: DeckOutline, brief: Brief, structure) -> DeckOutline:
     from verstka.planning import compile as C
     from verstka.planning.grounding import BriefIndex, ground_outline
 
-    o = o.model_copy(deep=True)
     run = C._Run(o, None)
     C._registry(o, structure)
     idx = BriefIndex.of(brief)
@@ -148,6 +160,38 @@ def _ground(o: DeckOutline, brief: Brief, structure) -> DeckOutline:
     o.agent_log = log_kept
     C._sync_charts(o)
     return o
+
+
+def _other_form(old: OutlineSlide, form: tuple[str, Optional[str]]) -> bool:
+    kind, chart_type = form
+    if kind != old.kind.value:
+        return True
+    ch = old.content.chart
+    return bool(chart_type and ch is not None and chart_type != ch.type)
+
+
+def keep_data(old: OutlineSlide, new: OutlineSlide) -> OutlineSlide:
+    """A redesigned slide made from a data file stays the data layer's: its chart, table or figures, their source and
+    `data` (for «Почему так» and the data checks) are kept; the designer's words stay only where every number in them
+    is one of the slide's data facts (a headline «45%» where the data say 41% keeps the old one)."""
+    from verstka.data.headline import headline_ok
+    from verstka.data.story import data_slide_labels
+
+    out = new.model_copy(deep=True)
+    out.kind = old.kind
+    out.data = old.data.model_copy(deep=True)
+    out.footnote = old.footnote
+    c = old.content
+    out.content.chart = c.chart.model_copy(deep=True) if c.chart is not None else None
+    out.content.chart2 = c.chart2.model_copy(deep=True) if c.chart2 is not None else None
+    out.content.table = c.table.model_copy(deep=True) if c.table is not None else None
+    out.content.numbers = [n.model_copy() for n in c.numbers]
+    facts, labels = old.data.headline_facts, data_slide_labels(old)
+    if not (out.headline or "").strip() or not headline_ok(out.headline, facts, labels):
+        out.headline = old.headline
+    if out.takeaway and not headline_ok(out.takeaway, facts, labels):
+        out.takeaway = old.takeaway
+    return out
 
 
 def describe_change(old: OutlineSlide, new: OutlineSlide) -> str:
@@ -238,6 +282,10 @@ def redesign_slide(
     clock = A._Clock(providers if skills is not None else None, time.monotonic() + EDIT_BUDGET_S)
     agent = A._Agent(brief, manifest, [strategy], skills, providers, tracker, clock, raw=[])
     form = requested_form(request) if request.strip() else None
+    if old.data is not None and form is not None and _other_form(old, form):
+        # a slide made from a data file changes its form only among the analysis's options («Пересобрать слайд так»)
+        titles = ", ".join(f"«{o.title.lower()}»" for o in old.data.options)
+        raise ValueError(f"слайд {index} собран из файла «{old.data.file}»: его вид меняет «Пересобрать слайд так» — можно {titles}")
     # «оставь место под фото»: the slide keeps a free place for the person's own photo (the renderer makes it — the
     # template's own photo place or a quiet frame); «убери место под фото» takes it back
     from verstka.planning.brief_structure import photo_dropped, photo_request
@@ -280,6 +328,8 @@ def redesign_slide(
                 raise ValueError("без модели могу только сменить форму слайда («таблицей», «круговой диаграммой», «карточками»), а модель сейчас недоступна")
             raise ValueError(f"содержимое слайда {index} не ложится в такую форму: для неё нет подходящих данных в тексте")
     new = keep_what_was_asked(old, new.model_copy(deep=True), request, outline)
+    if old.data is not None:
+        new = keep_data(old, new)
     new.id = old.id
     new.spec_ref = old.spec_ref
     new.content.photo_slot = photo or (None if drop_photo else old.content.photo_slot)

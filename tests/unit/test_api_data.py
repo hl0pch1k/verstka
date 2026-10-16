@@ -595,7 +595,9 @@ def test_the_build_validates_and_keeps_the_data_fields(gen, monkeypatch):
     submitted[-1](A.Job(id="j1", kind="generate"))
     data = got["data"]
     assert data.dataset_ids == [did] and data.tables[0].id == did and data.profiles[0].nature == "time_series"
-    assert data.brand.id == bid and data.brand_dir == root / "brandbooks" / bid and data.brand_priority == "template"
+    # (the brandbook's logos were copied into the build's own folder before the job started: Task 10, review minor 10)
+    gdir = store.generation_dir(r.json()["generation_id"])
+    assert data.brand.id == bid and data.brand_dir == gdir / "brand" and data.brand_priority == "template"
     assert data.describe() == {"datasets": [{"id": did, "file": "Выручка.csv", "sheet": None, "kind": "csv"}],
                                "brandbook": {"id": bid, "name": "VK Cloud", "file": None, "source": "tokens"}}
 

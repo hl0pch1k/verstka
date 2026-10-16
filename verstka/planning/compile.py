@@ -856,6 +856,8 @@ def _compile_charts(o: DeckOutline, run: _Run) -> int:
     reg: dict[str, Series] = {x.id: x for x in o.series}
     made = 0
     for s in o.slides:
+        if getattr(s, "data", None) is not None:
+            continue  # a chart made from a data file keeps its own values (gaps — None — included): the data layer's
         n = 0
         gone = False
         for which in ("chart", "chart2"):
