@@ -4,9 +4,14 @@
 
 from __future__ import annotations
 
+import math
+import random
+import re
+import zipfile
 from pathlib import Path
 
 import pytest
+from lxml import etree
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Emu
@@ -16,17 +21,23 @@ from verstka.audit.ir import build_deck_ir
 from verstka.rendering.charts import (
     NO_HIGHLIGHT,
     _chroma,
+    _label_on,
+    _label_spot,
+    _scatter_range,
     add_chart,
     chart_data_ok,
     delta_e,
     eased,
     effective_chart_type,
+    glue_numbers,
+    label_pieces,
     prefer_bar,
     resolve_series,
     source_said,
     source_text,
     xy_series,
 )
+from verstka.rendering.fonts import break_pieces, text_width_pt, wrap_lines
 from verstka.schemas.common import Bbox, contrast_ratio
 from verstka.schemas.outline import ChartSpec, DeckOutline, InlineSeries, OutlineSlide, SlideContent, XYSeries
 from verstka.schemas.template import ChartStyleSpec, TypeStep, Typography
@@ -146,7 +157,7 @@ def test_stacked_bars_are_parts_of_one_whole():
         sers = bc.findall(f"{C}ser")
         fills = [_ser_fill(s) for s in sers]
         # the template's categorical colours, the accent first, every two clearly apart; «Прочее» quiet (no hue)
-        assert fills[0] == "0077FF" and set(fills[:3]) <= set(PALETTE + ["0077FF"]) | set(fills[:3])
+        assert fills[0] == "0077FF" and set(fills[:3]) <= set(PALETTE)  # (not a colour of the template: not a series colour)
         assert all(delta_e(a, b) >= 20 for i, a in enumerate(fills) for b in fills[i + 1 :])
         assert _chroma(fills[3]) < 12
         # a hairline of the ground between the segments, each value inside its segment
@@ -481,3 +492,341 @@ def test_libreoffice_renders_every_new_kind(tmp_path):
         add_chart(s, BOX, spec, OUTLINE, STYLE, TYPO, text_hex=TEXT)
     pngs = render_slides(_save(prs, tmp_path, "kinds.pptx"), tmp_path / "png", dpi=40, keep_pdf=False)
     assert len(pngs) == len(specs) and all(p.stat().st_size > 0 for p in pngs)
+
+
+# ---------------------------------------------------------------------------------------------- review fixes (round 2)
+
+NBSP = "\u00a0"
+NARROW = Bbox(x=int(W * 0.06), y=int(H * 0.22), w=int(W * 0.30), h=int(H * 0.45))
+BINS12 = [f"{i * 250:,}–{(i + 1) * 250:,}".replace(",", NBSP) for i in range(11)] + [f"больше 2{NBSP}750"]
+COUNTS12 = [5, 18, 44, 80, 121, 140, 118, 77, 41, 20, 9, 4]
+
+
+def _in(box: Bbox, spec: ChartSpec, bg: str = "FFFFFF", **kw):
+    prs, s = _slide(bg)
+    gf = add_chart(s, box, spec, OUTLINE, STYLE, TYPO, text_hex=TEXT if bg == "FFFFFF" else "FFFFFF", **kw)
+    return prs, s, gf
+
+
+def _axis(cs, pos: str):
+    """The axis of a chart whose c:axPos is `pos` (bar charts: a catAx and a valAx; scatter: two valAx)."""
+    return next(a for a in cs.findall(f".//{C}plotArea/*") if a.tag in (f"{C}catAx", f"{C}valAx") and a.find(f"{C}axPos").get("val") == pos)
+
+
+def _neg_scatter(**kw) -> ChartSpec:
+    return ChartSpec(type="scatter", xy=[XYSeries(name="a", x=[-5, -3, 0, 2, 4], y=[-20, -5, 3, 10, 30])], x_title="Изменение цены, %", y_title="Изменение спроса, %", **kw)
+
+
+def test_scatter_y_axis_stands_at_the_left_when_x_spans_zero():
+    cs = _cs(_neg_scatter())
+    y_axis = _axis(cs, "l")
+    # it crosses X at X's minimum and writes its ticks low: never in the middle of the points
+    assert y_axis.find(f"{C}crosses").get("val") == "min"
+    assert y_axis.find(f"{C}tickLblPos").get("val") == "low"
+    # the X axis keeps its hairline at Y = 0 (a negative Y reads against it), its ticks low
+    x_axis = _axis(cs, "b")
+    assert x_axis.find(f"{C}tickLblPos").get("val") == "low"
+    assert float(x_axis.find(f"{C}scaling/{C}min").get("val")) < 0 < float(x_axis.find(f"{C}scaling/{C}max").get("val"))
+
+
+def test_scatter_axes_use_the_room_they_have():
+    # 137…590 reads 100…600 (not 0…800); −24…517 stays within −100…600 (not −200…600)
+    assert _scatter_range([137, 300, 590])[:2] == (100.0, 600.0)
+    lo, hi, step = _scatter_range([-24, 100, 300, 517])
+    assert -100 <= lo <= -24 and 517 <= hi <= 600 and step == 100
+    # data near zero still start at zero; steps are round and bounded by the room the labels have
+    assert _scatter_range([2, 40, 95])[0] == 0.0
+    for vals, room in (([137, 590], 5), ([0.012, 0.047], 9), ([-3, 4], 4)):
+        lo, hi, step = _scatter_range(vals, room)
+        n = round((hi - lo) / step)
+        assert 3 <= n <= max(3, room) and lo <= min(vals) and hi >= max(vals)
+
+
+def _cloud(n: int = 500):
+    rnd = random.Random(3)
+    xs = [rnd.gauss(300, 90) for _ in range(n)]
+    ys = [x * 0.8 + rnd.gauss(0, 40) for x in xs]
+    return xs, ys
+
+
+def test_scatter_of_500_points_renders_and_keeps_its_highlight_label_off_the_cloud():
+    xs, ys = _cloud()
+    spec = ChartSpec(type="scatter", xy=[XYSeries(name="Клиенты", x=xs, y=ys)], x_title="Средний чек", y_title="Выручка", highlight_index=7)
+    cs = _cs(spec)
+    ser = cs.find(f".//{C}scatterChart/{C}ser")
+    assert len(ser.findall(f"{C}xVal//{C}pt")) == 500
+    lbl = ser.find(f"{C}dLbls/{C}dLbl")
+    assert lbl.find(f"{C}idx").get("val") == "7"
+    # the label is nudged to free ground (or sits on a chip of the ground where it must touch a marker)
+    nudged = lbl.find(f"{C}layout/{C}manualLayout") is not None
+    chip = lbl.find(f"{C}spPr/{A}solidFill/{A}srgbClr")
+    assert nudged or (chip is not None and chip.get("val") == "FFFFFF")
+
+
+def test_label_spot_finds_the_free_ground_nearest_the_point():
+    rnd = random.Random(5)
+    pts = [(rnd.gauss(400, 90), rnd.gauss(250, 60)) for _ in range(500)]
+    me = pts[7]
+    bounds = (0.0, 0.0, 900.0, 520.0)
+    cx, cy, touched = _label_spot(me, (24.0, 14.0), pts, 3.5, 7.5, bounds, 9.0)
+    box = (cx - 12, cy - 7, cx + 12, cy + 7)
+    assert bounds[0] <= box[0] and box[2] <= bounds[2] and bounds[1] <= box[1] and box[3] <= bounds[3]
+    hits = sum(1 for q in pts if q != me and box[0] - 3.5 <= q[0] <= box[2] + 3.5 and box[1] - 3.5 <= q[1] <= box[3] + 3.5)
+    assert hits == touched
+    # an isolated point (the cloud's outlier) gets a free spot right beside it
+    lone = (60.0, 480.0)
+    cx, cy, touched = _label_spot(lone, (24.0, 14.0), pts + [lone], 3.5, 7.5, bounds, 9.0)
+    assert touched == 0 and math.hypot(cx - lone[0], cy - lone[1]) < 45
+
+
+def test_value_axis_of_top_down_bars_stands_at_the_bottom():
+    # a narrow slot cannot hold the values inside the segments: the quiet axis comes — under the bars, not above them
+    spec = ChartSpec(type="stacked_bar", categories=["Москва", "Казань", "Самара"], series=[InlineSeries(name="Прибыль", values=[50, 20, -10]), InlineSeries(name="Убыток", values=[-30, -40, -5])], unit="млн ₽")
+    cs = _in(NARROW, spec)[2].chart._chartSpace
+    cat, val = cs.find(f".//{C}catAx"), cs.find(f".//{C}valAx")
+    assert cat.find(f"{C}scaling/{C}orientation").get("val") == "maxMin"  # read top-down
+    assert val.find(f"{C}delete").get("val") == "0" and val.find(f"{C}tickLblPos").get("val") == "nextTo"
+    assert val.find(f"{C}crosses").get("val") == "max"  # «max» of reversed categories: the bottom edge
+    # the room is reserved at the bottom as well: the plot ends above the axis labels
+    ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
+    assert float(ml.find(f"{C}y").get("val")) + float(ml.find(f"{C}h").get("val")) < 0.95
+    # the planner's horizontal bars with an axis (several series) cross the same way
+    bars = ChartSpec(type="bar", categories=REG, series=[InlineSeries(name="2025", values=[480, 260, 150, 120, 98]), InlineSeries(name="2026", values=[560, 300, 207, 131, 110])], unit="млн ₽")
+    val = _in(NARROW, bars)[2].chart._chartSpace.find(f".//{C}valAx")
+    assert val.find(f"{C}crosses").get("val") == "max"
+
+
+def _label_pieces_fit(cs, frame_w_pt: float, n: int) -> bool:
+    rot = cs.find(f".//{C}catAx/{C}txPr/{A}bodyPr").get("rot")
+    if rot not in (None, "0"):
+        return True  # turned: a label is never broken
+    size = int(cs.find(f".//{C}catAx/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100
+    pw = float(cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout/{C}w").get("val")) * frame_w_pt
+    labels = [v.text for v in cs.findall(f".//{C}catAx/../{C}barChart/{C}ser/{C}cat//{C}pt/{C}v")]
+    return all(text_width_pt(p, "Play", size) <= pw / n * 0.95 for t in labels for p in label_pieces(t))
+
+
+def test_histogram_bin_labels_never_break_inside_a_number():
+    all_nbsp = [b.replace(" ", NBSP) for b in BINS12[:-1]] + [f"больше{NBSP}2{NBSP}750"]  # («больше 2 750» one piece)
+    for box in (BOX, NARROW):
+        for cats in (BINS12, all_nbsp):
+            prs, s, gf = _in(box, ChartSpec(type="histogram", categories=cats, series=[InlineSeries(name="Заказы", values=COUNTS12)], x_title="Сумма заказа, ₽", y_title="Число заказов"))
+            cs = gf.chart._chartSpace
+            labels = [v.text for v in cs.findall(f".//{C}barChart/{C}ser/{C}cat//{C}pt/{C}v")]
+            assert len(labels) == 12 and not [t for t in labels if re.search(r"\d \d{3}", t)]  # (no ordinary space inside a number)
+            # either every piece a renderer may break between fits its slot (so it breaks after the dash, before a
+            # word), or the labels are turned: the labels are whole
+            assert _label_pieces_fit(cs, box.w / 12700, 12), (box, cats[-1])
+    # the labels of the full-width chart stay straight and wrap after the dash (two short lines each)
+    cs = _in(BOX, ChartSpec(type="histogram", categories=BINS12, series=[InlineSeries(name="Заказы", values=COUNTS12)]))[2].chart._chartSpace
+    assert cs.find(f".//{C}catAx/{C}txPr/{A}bodyPr").get("rot") in (None, "0")
+    # ordinary spaces written into the bins are bound too
+    cs = _cs(ChartSpec(type="histogram", categories=[b.replace(NBSP, " ") for b in BINS12], series=[InlineSeries(name="Заказы", values=COUNTS12)]))
+    texts = [v.text for v in cs.findall(f".//{C}barChart/{C}ser/{C}cat//{C}pt/{C}v")]
+    assert f"1{NBSP}000–1{NBSP}250" in texts and not [t for t in texts if re.search(r"\d \d{3}", t)]
+
+
+def test_wrap_breaks_after_a_range_dash_and_never_inside_a_number():
+    n = NBSP
+    assert glue_numbers("1 250–1 500") == f"1{n}250–1{n}500" and glue_numbers("2026") == "2026" and glue_numbers("Янв 2026") == "Янв 2026"
+    assert label_pieces(f"1{n}250–1{n}500") == [f"1{n}250–", f"1{n}500"]
+    assert label_pieces(f"больше 2{n}750") == ["больше", f"2{n}750"]
+    assert break_pieces(f"2{n}750 тыс.") == [(f"2{n}750", " "), ("тыс.", " ")]
+    # default behaviour of the other callers is unchanged: no break after a dash, none at a no-break space
+    label = f"1{n}000–1{n}250"
+    assert wrap_lines(label, "Play", 9, False, 400) == [label]
+    assert wrap_lines(label, "Play", 9, False, 40, dashes=True) == [f"1{n}000–", f"1{n}250"]
+    assert wrap_lines(f"в{n}VK 27{n}млн рублей", "Play", 9, False, 60) == [f"в{n}VK 27{n}млн", "рублей"]
+
+
+def test_stacked_columns_with_negatives_span_both_sides_and_read_on_their_fills():
+    spec = ChartSpec(type="stacked_column", categories=["I кв.", "II кв.", "III кв.", "IV кв."], series=[
+        InlineSeries(name="Выручка", values=[120, 134, 142, 151]), InlineSeries(name="Расходы", values=[-90, -110, -150, -100]), InlineSeries(name="Прочее", values=[10, -15, 5, 20])], unit="млн ₽", y_title="Результат")
+    for bg, text in (("FFFFFF", TEXT), ("0B1220", "FFFFFF")):
+        cs = _in(BOX, spec, bg)[2].chart._chartSpace
+        va = cs.find(f".//{C}valAx")
+        lo, hi = float(va.find(f"{C}scaling/{C}min").get("val")), float(va.find(f"{C}scaling/{C}max").get("val"))
+        assert lo <= -150 and hi >= 160  # every stack fits: positives up, negatives down
+        for ser in cs.iter(f"{C}ser"):
+            fill = _ser_fill(ser)
+            ink = ser.find(f"{C}dLbls/{C}txPr//{A}defRPr/{A}solidFill/{A}srgbClr").get("val")
+            if ser.find(f"{C}tx//{C}v").text != "Прочее":
+                assert contrast_ratio(ink, fill) >= 4.5, (bg, fill, ink)
+    # a 12 pt value on the template's pink or blue: never the 3:1 of large print
+    for fill in ("FF3D8B", "0077FF", "FF6C6C", "00D3E6"):
+        assert contrast_ratio(_label_on(fill, "000000", "FFFFFF", 4.5), fill) >= 4.5
+    assert contrast_ratio(_label_on("FF3D8B", "000000", "FFFFFF"), "FF3D8B") < 4.5  # (the pie's larger figures keep 3:1: white)
+
+
+def test_dark_ground_charts_keep_their_titles_and_labels_readable():
+    ground = "0B1220"
+    for spec in (_hist(x_title="Минут", y_title="Число", source="Файл.csv"), _scatter(x_title="x", y_title="y", highlight_index=2),
+                 ChartSpec(type="stacked_bar", categories=REG, series=[InlineSeries(name="a", values=[3, 2, 4, 1, 5]), InlineSeries(name="b", values=[1, 2, 1, 2, 1])], y_title="Объём")):
+        prs, s, gf = _in(BOX, spec, ground)
+        for r in gf.chart._chartSpace.iter(f"{A}rPr"):
+            clr = r.find(f"{A}solidFill/{A}srgbClr")
+            if clr is not None:
+                assert contrast_ratio(clr.get("val"), ground) >= 4.5
+
+
+def test_axis_titles_ticks_legend_and_source_share_one_grey():
+    muted = "6B7280"
+    spec = _hist(x_title="Минут до ответа", y_title="Число обращений", source="Файл.csv")
+    prs, s, gf = _in(BOX, spec, muted_hex=muted)
+    cs = gf.chart._chartSpace
+    for axis in ("catAx", "valAx"):
+        assert _axis_title(cs, axis).find(f".//{A}rPr/{A}solidFill/{A}srgbClr").get("val") == muted
+    assert cs.find(f".//{C}catAx/{C}txPr//{A}defRPr/{A}solidFill/{A}srgbClr").get("val") == muted
+    assert str(gf.verstka_source.text_frame.paragraphs[0].runs[0].font.color.rgb) == muted
+    # a secondary colour too faint for small print is not used: the chart's own readable grey stays
+    prs, s, gf = _in(BOX, spec, muted_hex="D1D5DB")
+    assert _axis_title(gf.chart._chartSpace, "catAx").find(f".//{A}rPr/{A}solidFill/{A}srgbClr").get("val") not in ("D1D5DB",)
+
+
+def test_gaps_flag_decides_how_a_line_meets_a_missing_value():
+    line = ChartSpec(type="line", categories=QS, series=[InlineSeries(name="NPS", values=NPS)])
+    assert _cs(line).find(f"{C}chart/{C}dispBlanksAs").get("val") == "span"  # no break asked: the line runs through
+    assert _cs(line.model_copy(update={"gaps": True})).find(f"{C}chart/{C}dispBlanksAs").get("val") == "gap"
+    area = ChartSpec(type="area", categories=QS, series=[InlineSeries(name="NPS", values=NPS)])
+    assert _cs(area).find(f"{C}chart/{C}dispBlanksAs").get("val") == "span"
+    assert _cs(area.model_copy(update={"gaps": True})).find(f"{C}chart/{C}dispBlanksAs").get("val") == "gap"
+    # bars have nothing to draw at a missing value either way; no zero is ever written
+    bars = ChartSpec(type="column", categories=["a", "b", "c"], series=[InlineSeries(name="x", values=[1, None, 3])])
+    cs = _cs(bars)
+    assert cs.find(f"{C}chart/{C}dispBlanksAs").get("val") == "gap"
+    assert sorted(int(p.get("idx")) for p in cs.findall(f".//{C}barChart/{C}ser/{C}val//{C}pt")) == [0, 2]
+
+
+def test_area_marker_and_label_sit_on_the_last_value():
+    spec = ChartSpec(type="area", categories=QS, series=[InlineSeries(name="NPS", values=[41, 43, 44, 46, 48, 49, 52, None])], gaps=True)
+    cs = _cs(spec)
+    edge = cs.find(f".//{C}lineChart/{C}ser")
+    assert edge.find(f"{C}dPt/{C}idx").get("val") == "6"
+    assert [d.find(f"{C}idx").get("val") for d in edge.findall(f"{C}dLbls/{C}dLbl")] == ["6"]
+    full = ChartSpec(type="area", categories=QS, series=[InlineSeries(name="NPS", values=[41, 43, 44, 46, 48, 49, 52, 53])])
+    assert _cs(full).find(f".//{C}lineChart/{C}ser/{C}dPt/{C}idx").get("val") == "7"
+
+
+def test_source_line_survives_a_small_frame_or_is_handed_back():
+    spec = _hist(source="Время ответа поддержки.csv")
+    small = Bbox(x=BOX.x, y=BOX.y, w=int(W * 0.5), h=int(H * 0.17))  # ≈ 92 pt: a chart and a line, the line kept
+    gf = _in(small, spec)[2]
+    assert gf.verstka_source is not None and gf.verstka_source_dropped is None
+    assert gf.top + gf.height <= gf.verstka_source.top and gf.verstka_source.top + gf.verstka_source.height <= small.y + small.h + 1
+    tiny = Bbox(x=BOX.x, y=BOX.y, w=int(W * 0.5), h=int(H * 0.05))  # ≈ 27 pt: no room for both — the line is handed back
+    gf = _in(tiny, spec)[2]
+    assert gf.verstka_source is None and gf.verstka_source_dropped == "Источник: Время ответа поддержки.csv"
+    assert gf.height == tiny.h
+    assert _in(BOX, _hist())[2].verstka_source_dropped is None
+
+
+def test_narrow_slot_keeps_every_new_kind_inside_its_frame():
+    specs = [
+        _hist(x_title="Минут до ответа", y_title="Число обращений", source="Файл.csv"), _stacked(y_title="Выручка"), _stacked("stacked_bar", x_title="Квартал"),
+        _scatter(x_title="Средний чек", y_title="Выручка", highlight_index=2), _neg_scatter(),
+        ChartSpec(type="grouped_bar", categories=REG, series=[InlineSeries(name="2025", values=[480, 260, 150, 120, 98]), InlineSeries(name="2026", values=[560, 300, 207, 131, 110])], unit="млн ₽", highlight_index=2),
+    ]
+    for spec in specs:
+        gf = _in(NARROW, spec)[2]
+        cs = gf.chart._chartSpace
+        ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
+        x, y, w, h = (float(ml.find(f"{C}{k}").get("val")) for k in ("x", "y", "w", "h"))
+        assert 0 <= x and x + w <= 1.0001 and 0 <= y and y + h <= 1.0001 and w >= 0.3, spec.type
+        for t in cs.iter(f"{C}title"):
+            tl = t.find(f"{C}layout/{C}manualLayout")
+            if tl is not None:
+                assert 0 <= float(tl.find(f"{C}x").get("val")) <= 1 and 0 <= float(tl.find(f"{C}y").get("val")) <= 1
+
+
+# ---------------------------------------------------------------------------------------------- schema order
+
+C_ORDER = {
+    "title": ["tx", "layout", "overlay", "spPr", "txPr", "extLst"],
+    "valAx": ["axId", "scaling", "delete", "axPos", "majorGridlines", "minorGridlines", "title", "numFmt", "majorTickMark", "minorTickMark", "tickLblPos", "spPr", "txPr", "crossAx", "crosses", "crossesAt", "crossBetween", "majorUnit", "minorUnit", "dispUnits", "extLst"],
+    "catAx": ["axId", "scaling", "delete", "axPos", "majorGridlines", "minorGridlines", "title", "numFmt", "majorTickMark", "minorTickMark", "tickLblPos", "spPr", "txPr", "crossAx", "crosses", "crossesAt", "auto", "lblAlgn", "lblOffset", "tickLblSkip", "tickMarkSkip", "noMultiLvlLbl", "extLst"],
+    "barChart": ["barDir", "grouping", "varyColors", "ser", "dLbls", "gapWidth", "overlap", "serLines", "axId", "extLst"],
+    "lineChart": ["grouping", "varyColors", "ser", "dLbls", "dropLines", "hiLowLines", "upDownBars", "marker", "smooth", "axId", "extLst"],
+    "areaChart": ["grouping", "varyColors", "ser", "dLbls", "dropLines", "axId", "extLst"],
+    "scatterChart": ["scatterStyle", "varyColors", "ser", "dLbls", "axId", "extLst"],
+    "chart": ["title", "autoTitleDeleted", "pivotFmts", "view3D", "floor", "sideWall", "backWall", "plotArea", "legend", "plotVisOnly", "dispBlanksAs", "showDLblsOverMax", "extLst"],
+    "marker": ["symbol", "size", "spPr", "extLst"],
+    "dPt": ["idx", "invertIfNegative", "marker", "bubble3D", "explosion", "spPr", "pictureOptions", "extLst"],
+    "dLbl": ["idx", "delete", "layout", "tx", "numFmt", "spPr", "txPr", "dLblPos", "showLegendKey", "showVal", "showCatName", "showSerName", "showPercent", "showBubbleSize", "separator", "extLst"],
+    "dLbls": ["dLbl", "delete", "numFmt", "spPr", "txPr", "dLblPos", "showLegendKey", "showVal", "showCatName", "showSerName", "showPercent", "showBubbleSize", "separator", "showLeaderLines", "leaderLines", "extLst"],
+}
+C_SER = {
+    "barChart": ["idx", "order", "tx", "spPr", "invertIfNegative", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "shape", "extLst"],
+    "scatterChart": ["idx", "order", "tx", "spPr", "marker", "dPt", "dLbls", "trendline", "errBars", "xVal", "yVal", "smooth", "extLst"],
+    "lineChart": ["idx", "order", "tx", "spPr", "marker", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "smooth", "extLst"],
+    "areaChart": ["idx", "order", "tx", "spPr", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "extLst"],
+}
+
+
+def _order_problems(chart_space) -> list[str]:
+    """Children of the chart elements this module writes against the sequences of the DrawingML chart schema."""
+    bad = []
+    for el in chart_space.iter():
+        if not isinstance(el.tag, str) or etree.QName(el).namespace != C[1:-1]:
+            continue
+        loc = etree.QName(el).localname
+        seq = C_SER.get(etree.QName(el.getparent()).localname) if loc == "ser" else C_ORDER.get(loc)
+        if not seq:
+            continue
+        kids = [etree.QName(k).localname for k in el if isinstance(k.tag, str)]
+        pos = [seq.index(k) if k in seq else -1 for k in kids]
+        if -1 in pos or pos != sorted(pos):
+            bad.append(f"{loc}: {kids}")
+    return bad
+
+
+def _every_kind():
+    xs, ys = _cloud(60)
+    return [
+        _hist(x_title="Минут", y_title="Число", source="Файл.csv", highlight_index=2),
+        ChartSpec(type="histogram", categories=BINS12, series=[InlineSeries(name="n", values=COUNTS12)], x_title="Сумма", y_title="Число"),
+        _stacked(y_title="Выручка"), _stacked("stacked_bar", x_title="Квартал", y_title="Выручка"),
+        ChartSpec(type="stacked_column", categories=["a", "b", "c"], series=[InlineSeries(name="x", values=[3, -2, 4]), InlineSeries(name="y", values=[-1, 2, 2])]),
+        ChartSpec(type="grouped_column", categories=["I", "II", "III"], series=[InlineSeries(name="2025", values=[3, 4, 5]), InlineSeries(name="2026", values=[4, 5, None])], highlight_index=1),
+        ChartSpec(type="grouped_bar", categories=REG, series=[InlineSeries(name="2025", values=[480, 260, 150, 120, 98]), InlineSeries(name="2026", values=[560, 300, 207, 131, 110])], unit="млн ₽", highlight_index=2),
+        ChartSpec(type="line", categories=QS, series=[InlineSeries(name="NPS", values=NPS)], gaps=True, y_title="NPS", x_title="Квартал"),
+        ChartSpec(type="area", categories=QS, series=[InlineSeries(name="NPS", values=NPS[:-1] + [None])], y_title="NPS"),
+        ChartSpec(type="column", categories=["a", "b", "c"], series=[InlineSeries(name="x", values=[1, None, 3])], unit="%"),
+        _scatter(x_title="Средний чек", y_title="Выручка", highlight_index=2), _neg_scatter(),
+        ChartSpec(type="scatter", xy=[XYSeries(name="Клиенты", x=xs, y=ys)], highlight_index=7),
+    ]
+
+
+def test_every_chart_part_keeps_the_schema_order():
+    for box in (BOX, NARROW):
+        for spec in _every_kind():
+            cs = _in(box, spec)[2].chart._chartSpace
+            assert _order_problems(cs) == [], (spec.type, box.w)
+
+
+def _chart_xsd():
+    for root in (Path.home() / ".claude/skills/pptx/scripts/office/schemas/ISO-IEC29500-4_2016",):
+        if (root / "dml-chart.xsd").is_file():
+            return root / "dml-chart.xsd"
+    return None
+
+
+def test_every_chart_part_validates_against_the_iso_chart_schema(tmp_path):
+    xsd = _chart_xsd()
+    if xsd is None:
+        pytest.skip("ISO 29500 dml-chart.xsd is not installed here")
+    schema = etree.XMLSchema(etree.parse(str(xsd)))
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    for box in (BOX, NARROW):
+        for spec in _every_kind():
+            s = prs.slides.add_slide(prs.slide_layouts[6])
+            add_chart(s, box, spec, OUTLINE, STYLE, TYPO, text_hex=TEXT, muted_hex="6B7280")
+    path = _save(prs, tmp_path, "xsd.pptx")
+    bad = []
+    with zipfile.ZipFile(path) as z:
+        for name in sorted(z.namelist()):
+            if name.startswith("ppt/charts/chart") and name.endswith(".xml"):
+                doc = etree.fromstring(z.read(name))
+                if not schema.validate(doc):
+                    bad.append((name, schema.error_log[0].message[:160]))
+    assert not bad, bad[:3]

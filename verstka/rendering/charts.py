@@ -18,13 +18,18 @@ A chart is drawn the way a designer would finish it, whatever the template:
   frame exactly; chart and plot area are transparent, so the chart sits on the slide's own ground;
 * lines are 2.25 pt with ringed markers and labels placed off the line; an area is a soft fill under a 2.25 pt edge;
   pies and doughnuts show percentages inside the slices that fit them, no leader lines;
-* a missing value is a break in the line (dispBlanksAs gap), never a zero: the end label and the default highlight go
-  to the last point that has a value; `highlight_index` = −1 asks for no highlight at all;
+* a missing value is a break in the line (dispBlanksAs gap, when `spec.gaps` says so), never a zero (without the flag a
+  line or an area runs through it): the end label, its marker and the default highlight go to the last point that has
+  a value; `highlight_index` = −1 asks for no highlight at all;
+* value axes of top-down bars stand at their bottom edge; a range label («1 250–1 500») breaks after its dash, never
+  inside a number, else the labels turn;
 * a histogram's bins touch (no gap, a hairline of the ground between them) and are read like columns; stacked bars
   are parts of one whole: the template's categorical colours (a remainder quiet), a hairline of the ground between
   the segments, each value inside its segment where it fits, else a quiet value axis; grouped bars are the
   several-series bars above; several series with a highlighted category ease the other categories toward the ground;
-* a scatter shows points only: translucent ringed markers on two quiet value axes on round ticks;
+* a scatter shows points only: translucent ringed markers on two quiet value axes on round ticks (the Y axis stands
+  at the left edge even when X spans zero; the zero only where the data are near it); in a dense cloud the highlighted
+  point's value takes the nearest free ground, on a chip of the ground where it must touch a marker;
 * axis titles (`x_title` the categories or X, `y_title` the values or Y) are set in the template's face at the label
   size in the muted text colour, along their axis; the value axis's title carries the word unit, so no caption repeats
   it; an axis whose ticks the labels replace stays only to carry its title;
@@ -53,7 +58,7 @@ from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.slide import Slide
 from pptx.util import Emu, Pt
 
-from verstka.rendering.fonts import text_width_pt, wrap_lines
+from verstka.rendering.fonts import break_pieces, text_width_pt, wrap_lines
 from verstka.schemas.common import Bbox, contrast_ratio, relative_luminance, rgb_to_lab
 from verstka.schemas.outline import ChartSpec, DeckOutline, Series
 from verstka.schemas.template import ChartStyleSpec, Typography
@@ -98,6 +103,7 @@ SEAM_PT = 0.75  # the hairline of the ground between a histogram's bins and betw
 STACK_GAP = (40, 180)  # gapWidth range of stacked bars: one bar per category, wider than a cluster's
 SCATTER_ALPHA = (0.85, 0.65)  # marker fill opacity: a few points, many points (overlaps stay visible)
 TITLE_LINE = 1.25  # an axis title's line height over its size
+STACK_LABEL_CONTRAST = 4.5  # a value inside a stacked segment is small text: it reads at least this well on its fill
 
 
 def _c(tag: str) -> str:
@@ -258,10 +264,12 @@ def _rule_color(neutral_hex: Optional[str], text: str, ground: str) -> str:
     return _mix(text, ground, 0.5)
 
 
-def _label_on(fill: str, text: str, ground: str) -> str:
-    """Text colour for a label printed on a filled slice."""
+def _label_on(fill: str, text: str, ground: str, floor: float = 3.0) -> str:
+    """Text colour for a label printed on a filled slice: white, the template's text, the ground, near-black — the first
+    that reads at `floor` (3:1 for a pie's larger figures; a stacked segment's 12 pt value needs 4.5:1), else the one of
+    white and near-black that reads best."""
     for c in ("FFFFFF", text, ground, "1A1A1A"):
-        if contrast_ratio(c, fill) >= 3.0:
+        if contrast_ratio(c, fill) >= floor:
             return c
     return "FFFFFF" if contrast_ratio("FFFFFF", fill) >= contrast_ratio("1A1A1A", fill) else "1A1A1A"
 
@@ -1396,13 +1404,28 @@ CAT_LINE = 1.25  # a category label's line height over its size
 TURN_SIN = 0.7071  # 45°
 
 
+_DIGIT_GROUP_RE = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
+
+
+def glue_numbers(label: str) -> str:
+    """A category label with the digit groups of its numbers bound by no-break spaces («1 250–1 500» is two numbers,
+    never four words): a renderer breaks such a label after the dash or before a word, never inside a number."""
+    return _DIGIT_GROUP_RE.sub("\u00a0", label)
+
+
+def label_pieces(label: str) -> list[str]:
+    """The pieces a renderer may break a category label between (ordinary spaces, and after the dash of a range;
+    never at a no-break space, so never inside a number): each is as wide as the label's narrowest possible line."""
+    return [p for p, _ in break_pieces(label, dashes=True)]
+
+
 def period_levels(cats: Sequence[str]) -> list[list[str]]:
     """A time axis's labels at each shortening level: as written; the period word shortened («1-й месяц» → «1-й мес.»,
     «Январь 2026» → «Янв 2026», «2 квартал» → «2 кв.»); and the ordinal dropped as well («1-й мес.» → «1 мес.»). Plain
     spaces and no joiners: a label that must wrap after all breaks between its words, never inside one. Levels that
     change nothing are left out (the first one is always there)."""
-    base = [" ".join(str(c).replace("⁠", "").replace(" ", " ").split()) for c in cats]
-    one = [c.replace(" ", " ") for c in short_categories(base, joiner=False)]
+    base = [glue_numbers(" ".join(str(c).replace("⁠", "").replace(" ", " ").split())) for c in cats]
+    one = [glue_numbers(c.replace(" ", " ")) for c in short_categories(base, joiner=False)]
     two = [_ORDINAL_PERIOD_RE.sub(r"\1 ", c) for c in one]
     out = [base]
     for lv in (one, two):
@@ -1473,9 +1496,9 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
     def wrapped(size: float) -> Optional[CatFit]:
         lim = slot * room
         for lv, labs in enumerate(levels):
-            if any(width(w, size) > _word_room(w, lim) for t in labs for w in t.split()):
-                continue  # a word wider than its slot would be broken inside
-            lines = max((len(wrap_lines(t, family, size, False, lim)) for t in labs if t), default=1)
+            if any(width(w, size) > _word_room(w, lim) for t in labs for w in label_pieces(t)):
+                continue  # a word (a number, a range's half) wider than its slot would be broken inside
+            lines = max((len(wrap_lines(t, family, size, False, lim, dashes=True)) for t in labs if t), default=1)
             below = lines * size * CAT_LINE + size * 0.6
             if lines <= 2 and below <= below_max:
                 return CatFit(list(labs), "wrap", size, lines, 1, below, max((width(t, size) for t in labs), default=0.0), lv)
@@ -1486,7 +1509,7 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
         for lv, labs in enumerate(levels):
             longest = max((width(t, size) for t in labs), default=0.0)
             # (a long single word keeps a margin: it cannot wrap, a renderer breaks it inside — `_word_room`)
-            if all(width(t, size) <= (_word_room(t, lim) if len(t.split()) == 1 else lim) for t in labs if t):
+            if all(width(t, size) <= (_word_room(t, lim) if len(label_pieces(t)) == 1 else lim) for t in labs if t):
                 return CatFit(list(labs), "flat", size, 1, 1, size * CAT_LINE + size * 0.6, longest, lv)
         for step in ((turned, wrapped) if turn_first else (wrapped, turned)):
             got = step(size)
@@ -1656,7 +1679,8 @@ def _flags(parent, show_val: bool = True, leader_lines: Optional[bool] = None, s
 
 def _dlbls(fmt: str, size: float, color: str, family: Optional[str], pos: Optional[str], points: Optional[dict] = None, leader_lines: Optional[bool] = False, bold: bool = False, show_val: bool = True):
     """A complete c:dLbls: per-point overrides (`points[idx]` = {"delete": True} or any of "fmt", "size", "color",
-    "bold", "pos", "dx"/"dy" (a nudge, as a fraction of the chart frame), "sername" (series name + value)), then the
+    "bold", "pos", "dx"/"dy" (a nudge, as a fraction of the chart frame), "box" (a chip colour behind the text),
+    "sername" (series name + value)), then the
     shared numFmt, transparent box, text, position and flags. Leader lines are off: a nudged label is never tied to
     its point by a stray line."""
     d = etree.Element(_c("dLbls"))
@@ -1675,7 +1699,7 @@ def _dlbls(fmt: str, size: float, color: str, family: Optional[str], pos: Option
         nf = etree.SubElement(lbl, _c("numFmt"))
         nf.set("formatCode", o.get("fmt", fmt))
         nf.set("sourceLinked", "0")
-        lbl.append(_sppr())
+        lbl.append(_sppr(o["box"], 0.92) if o.get("box") else _sppr())  # a «box» colour: a chip behind the text
         lbl.append(_txpr(o.get("size", size), o.get("color", color), o.get("bold", bold), family, nowrap=True))
         p = o.get("pos", pos)
         if p:
@@ -2084,7 +2108,8 @@ def add_chart(
     source on the slide clears it — `source_said`); `spec.xy`: the points of a scatter. `muted_hex`: the template's own
     secondary text colour (the composer's footnote colour) for the source line, which stands on the slide outside the
     chart — a colour of the template, as the audit wants every text of the slide. The returned graphic frame carries
-    `verstka_source` (the source line's text box, or None)."""
+    `verstka_source` (the source line's text box, or None) and `verstka_source_dropped` (the line of a frame too small to
+    hold it, which the caller then prints in its own note; None when nothing was left out)."""
     kind = effective_chart_type(spec, outline)
     xs_all: list[list[float]] = []
     if kind == "scatter":
@@ -2100,6 +2125,8 @@ def add_chart(
     if kind in ("pie", "doughnut"):
         series = series[:1]
     cats = [str(c) for c in series[0].categories]
+    if kind in _BARS:
+        cats = [glue_numbers(c) for c in cats]  # a bin «1 250–1 500» is broken after its dash, never inside a number
     n = len(cats)
     multi = len(series) > 1
     if kind == "scatter":
@@ -2114,6 +2141,8 @@ def add_chart(
         ground = "000000" if (_norm(text_hex) and not _is_dark(_norm(text_hex)) and relative_luminance(_norm(text_hex)) > 0.5) else "FFFFFF"
     text = _readable_text(text_hex, ground)
     muted = _muted_text(text, ground)
+    if _norm(muted_hex) and contrast_ratio(_norm(muted_hex), ground) >= 4.5:
+        muted = _norm(muted_hex)  # one grey: the template's own secondary text colour (ticks, legend, axis titles, source)
     rule = _rule_color(neutral_hex, text, ground)
     # accent.1 leads; then the template's own chart colours, the theme accents (what Office charts use) and the
     # manifest's ranked fill colours. On a ground the accent cannot stand on (an accent-coloured panel) the text
@@ -2177,6 +2206,7 @@ def add_chart(
 
     # --- the source line: small muted print under the chart, inside its frame (the chart takes what is left)
     src = source_text(spec.source)
+    src_dropped: Optional[str] = None
     src_fs = src_h = 0.0
     chart_box = bbox
     if src:
@@ -2184,11 +2214,12 @@ def add_chart(
         lines = max(1, min(2, len(wrap_lines(src, family, src_fs, False, W * 0.98))))
         src_h = lines * src_fs * 1.3
         room = src_h + src_fs * 0.6
-        if H - room >= 0.6 * H:
+        # (the line is already at the chart's floor size) the chart keeps at least 45 % of its frame
+        if H - room >= 0.45 * H:
             H -= room
             chart_box = Bbox(x=bbox.x, y=bbox.y, w=bbox.w, h=max(1, int(round(H * EMU_PER_PT))))
         else:
-            src = None  # a frame too small for a chart and its source line: the chart keeps it (the caller's note says it)
+            src_dropped, src = src, None  # a frame too small for a chart and its line: `verstka_source_dropped` hands it back
 
     # --- data
     data = XyChartData() if kind == "scatter" else CategoryChartData()
@@ -2270,7 +2301,9 @@ def add_chart(
     cs = chart._chartSpace
     fix_axis_ids(cs)
     if kind != "scatter":
-        _set_disp_blanks(cs, "gap")  # a missing value is a break in the line, never a zero
+        # `spec.gaps`: a missing value is a break in the line, never a zero (bars have nothing to draw there either
+        # way); without the flag a line or an area is drawn through it (connected), as a series that has no break to show
+        _set_disp_blanks(cs, "gap" if (spec.gaps or kind not in ("line", "area")) else "span")
     chart.font.size = Pt(fs)
     if family:
         chart.font.name = family
@@ -2346,6 +2379,7 @@ def add_chart(
         _style_pie(k)
     _transparent(chart)
     _fonts_everywhere(cs, family)
+    gf.verstka_source_dropped = src_dropped  # the source line a frame too small for it left out: the caller prints it
     gf.verstka_source = _source_box(slide, Bbox(x=bbox.x, y=bbox.y + bbox.h - int(round(src_h * EMU_PER_PT)), w=bbox.w, h=int(round(src_h * EMU_PER_PT))), src, src_fs, _source_ink(muted_hex, text, muted, ground), family) if src else None
     # for a caller's own legend: the colour of every slice (series), and for a pie its tint as (base, share over the
     # ground) — a swatch drawn in the base colour at that opacity looks the same and stays a colour of the template
@@ -2426,6 +2460,19 @@ def _value_axis(k: _Kit, show: bool, fs: float, lo: Optional[float], hi: Optiona
     va.tick_labels.number_format = _tick_format(k.unit, tick_decimals(step, k.decimals))
     va.tick_labels.number_format_is_linked = False
     _axis_txpr(va, fs, k.muted, k.family)
+
+
+def _axis_crosses(axis_el, where: str) -> None:
+    """Where this axis crosses the other one: c:crosses «autoZero» | «min» | «max» (the other axis's value), whichever
+    of c:crosses / c:crossesAt it had. A value axis of reversed categories («maxMin», top-down bars) crosses them at
+    «max» to stand at the bottom, not at the top edge; a scatter's Y axis crosses X at its «min» to stand at the left,
+    not in the middle of the points when X spans zero."""
+    for tag in ("crossesAt", "crosses"):
+        for old in axis_el.findall(_c(tag)):
+            axis_el.remove(old)
+    el = etree.Element(_c("crosses"))
+    el.set("val", where)
+    _insert_before(axis_el, el, ("crossBetween", "auto", "lblAlgn", "lblOffset", "majorUnit", "minorUnit", "dispUnits", "tickLblSkip", "tickMarkSkip", "noMultiLvlLbl", "extLst"))
 
 
 def _nice_floor(v: float) -> float:
@@ -2575,13 +2622,13 @@ def _style_bars(k: _Kit) -> None:
         for size in sorted({fs, max(floor, _snap(fs * 0.9)), max(floor, _snap(fs * 0.82))}, reverse=True):
             cat_fs = size
             cat_w = min(max((text_width_pt(c, family, size) for c in cats), default=20.0), W * 0.42)
-            lines = max((len(wrap_lines(c, family, size, False, cat_w + 0.5)) for c in cats), default=1)
+            lines = max((len(wrap_lines(c, family, size, False, cat_w + 0.5, dashes=True)) for c in cats), default=1)
             if lines * size * 1.2 <= row * 0.92:
                 break
     else:
         # single-word labels cannot wrap: one step down when they crowd their column (headroom for a wider font)
         pitch = W / n
-        longest = max((max((text_width_pt(w, family, fs) for w in c.split()), default=0.0) for c in cats), default=0.0)
+        longest = max((max((text_width_pt(w, family, fs) for w in label_pieces(c)), default=0.0) for c in cats), default=0.0)
         if longest > pitch * 0.75:
             cat_fs = min(fs, max(_snap(fs * 0.85), _snap(fs * pitch * 0.75 / max(longest, 1)), floor))
 
@@ -2596,7 +2643,7 @@ def _style_bars(k: _Kit) -> None:
             bottom = k.foot + (fs * 1.8 if axis_on else fs * 0.3)
         else:
             pitch0 = W / n
-            lines = max((len(wrap_lines(c, family, cat_fs, False, pitch0 * 0.92)) for c in cats), default=1)
+            lines = max((len(wrap_lines(c, family, cat_fs, False, pitch0 * 0.92, dashes=True)) for c in cats), default=1)
             lines = min(lines, 3)
             left = k.inset_l + (_axis_room(ext, k.unit, k.decimals, family, fs, 0.8) if axis_on else 1.0)
             right = 1.0
@@ -2647,7 +2694,9 @@ def _style_bars(k: _Kit) -> None:
         lim = pw / n * _cat_room(family)
         floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
         # (each word against its own room: a long word keeps a margin, `_word_room`)
-        over = lambda size: any(text_width_pt(w, family, size) > _word_room(w, lim) for c in cats for w in c.split())  # noqa: E731
+        # (a label breaks at its ordinary spaces and after the dash of a range, never at a no-break space or inside a
+        # number: its pieces, `label_pieces` — «1 250–1 500» is «1 250–» over «1 500»)
+        over = lambda size: any(text_width_pt(w, family, size) > _word_room(w, lim) for c in cats for w in label_pieces(c))  # noqa: E731
         if over(cat_fs):
             for size in [x for x in (_snap(cat_fs * 0.9), _snap(cat_fs * 0.82)) if x >= min(floor, cat_fs) - 0.05]:
                 if not over(size):
@@ -2751,8 +2800,8 @@ def _style_bars(k: _Kit) -> None:
                     if v is None or v == 0 or not inside.get((i, j)):
                         pts[j] = {"delete": True}
                     elif cat_hl is not None and j != cat_hl:
-                        pts[j] = {"color": _label_on(eased(fill, k.ground), k.text, k.ground)}
-                _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, _label_on(fill, k.text, k.ground), family, pos, pts))
+                        pts[j] = {"color": _label_on(eased(fill, k.ground), k.text, k.ground, STACK_LABEL_CONTRAST)}
+                _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, _label_on(fill, k.text, k.ground, STACK_LABEL_CONTRAST), family, pos, pts))
                 continue
             for j, v in enumerate(values[i]):
                 if v is None:
@@ -2786,6 +2835,8 @@ def _style_bars(k: _Kit) -> None:
     if axis_on and flat:
         lo, hi, step = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)))
     _value_axis(k, axis_on, fs, lo, hi, step)
+    if horizontal:
+        _axis_crosses(k.chart.value_axis._element, "max")  # (the categories run top-down: «max» is the bottom edge)
     _plot_layout(k, left, top, pw, ph)
 
 
@@ -2879,7 +2930,7 @@ def _repel(ys: dict, h: float, lo: float, hi: float) -> dict:
     return pos
 
 
-def _area_overlay(k: _Kit, area_el, colors: list[str]) -> list:
+def _area_overlay(k: _Kit, area_el, colors: list[str], lasts: Sequence[Optional[int]] = ()) -> list:
     """The top edge of each area as a 2.25 pt line series over it (a c:lineChart on the same axes): the area itself
     has no outline, so its sides and bottom are not stroked, and the edge carries the end label."""
     sers = area_el.findall(_c("ser"))
@@ -2899,9 +2950,10 @@ def _area_overlay(k: _Kit, area_el, colors: list[str]) -> list:
         ls.append(_sppr(None, line=color, line_w=2.25, no_line=False))
         mk = etree.SubElement(ls, _c("marker"))
         etree.SubElement(mk, _c("symbol")).set("val", "none")
-        # the last point: a ringed marker where the end label sits
+        # the last point with a value: a ringed marker where the end label sits
+        end = lasts[i] if i < len(lasts) and lasts[i] is not None else n - 1
         dpt = etree.SubElement(ls, _c("dPt"))
-        etree.SubElement(dpt, _c("idx")).set("val", str(max(0, n - 1)))
+        etree.SubElement(dpt, _c("idx")).set("val", str(max(0, end)))
         m2 = etree.SubElement(dpt, _c("marker"))
         etree.SubElement(m2, _c("symbol")).set("val", "circle")
         etree.SubElement(m2, _c("size")).set("val", "7")
@@ -3081,7 +3133,7 @@ def _style_line(k: _Kit) -> None:
         mk.format.line.color.rgb = _rgb(k.ground)
         mk.format.line.width = Pt(2)
     if kind == "area" and k.chart_el is not None:
-        area_lines = _area_overlay(k, k.chart_el, colors)
+        area_lines = _area_overlay(k, k.chart_el, colors, lasts)
         k.plot.has_data_labels = False
 
     # geometry of the points in the chart frame (pt, y down): points sit in the middle of their category slots
@@ -3096,6 +3148,10 @@ def _style_line(k: _Kit) -> None:
     lines_xy = [[xy(j, v) for j, v in enumerate(vs)] for vs in values]
     gap = marker / 2 + 3
 
+    def drawn(i: int) -> list:
+        # the line as drawn: broken at a missing value (`spec.gaps`), else running through it
+        return lines_xy[i] if k.spec.gaps else [q for q in lines_xy[i] if q is not None]
+
     if k.chart_el is not None:
         if every_point:
             k.plot.has_data_labels = True
@@ -3108,7 +3164,7 @@ def _style_line(k: _Kit) -> None:
                 size = _snap(fs_val * ratio) if j == hl else fs_val
                 sizes.append((text_width_pt(point_text(0, j), family, size, k.bold and j == hl) * 1.08 + 2, size * 1.2))
             bounds = (0.0, k.title_h, W, H - bottom + cat_fs * 0.4)
-            placed = place_point_labels(lines_xy[0], sizes, bounds, gap)
+            placed = place_point_labels(lines_xy[0], sizes, bounds, gap, lines=[drawn(0)])
             _set_plot_dlbls(k.chart_el, _dlbls(k.fmt_unit, fs_val, k.text, family, "t"))
             pts: dict[int, dict] = {}
             for j, v in enumerate(values[0]):
@@ -3147,7 +3203,7 @@ def _style_line(k: _Kit) -> None:
                     p = lines_xy[i][hl]
                     size = _snap(fs_val * ratio)
                     w = text_width_pt(k.emph(values[i][hl]), family, size, k.bold) * 1.08 + 2
-                    (pos, dx), = place_point_labels([p], [(w, size * 1.2)], (0.0, k.title_h, W, H - bottom), gap, lines=[lines_xy[i]])
+                    (pos, dx), = place_point_labels([p], [(w, size * 1.2)], (0.0, k.title_h, W, H - bottom), gap, lines=[drawn(i)])
                     o = {**k.hl_label(fs_val / k.fs_value if k.fs_value else 1.0), "pos": pos}
                     if dx:
                         o["dx"] = dx / W
@@ -3167,19 +3223,73 @@ def _style_line(k: _Kit) -> None:
 # ---------------------------------------------------------------------------------------------- scatter
 
 
-def _scatter_range(vals: Sequence[float]) -> tuple[float, float, float]:
-    """(min, max, step) of a scatter axis on round ticks: from zero when the data sit near it (as a line's axis), else
-    from a round value under the lowest point."""
+def _scatter_range(vals: Sequence[float], max_steps: int = 9, anchor: float = 0.15) -> tuple[float, float, float]:
+    """(min, max, step) of a scatter axis on round ticks. A scatter has no baseline whose length a bar's would carry, so
+    the axis starts at zero only when the data sit that near it (its lowest point within `anchor` of its highest), else
+    at a round value under the lowest point; the step is the round one that wastes the least of the axis (up to
+    `max_steps` intervals, as many as the frame's labels have room for): 137…590 reads 100…600, not 0…800."""
     mn, mx = min(vals), max(vals)
-    if mn >= 0 and mn <= 0.45 * mx:
+    span = mx - mn
+    if mn >= 0 and mn <= anchor * mx:
         lo_raw = 0.0
     else:
-        lo_raw = mn - (mx - mn) * 0.08
-    hi_raw = mx + (mx - mn) * 0.04
-    lo, hi, step = _nice_scale(lo_raw, hi_raw if hi_raw > lo_raw else lo_raw + (abs(lo_raw) or 1.0))
+        lo_raw = mn - span * 0.05
+    hi_raw = mx + span * 0.02  # (a marker's radius of clearance at the high edge)
+    if hi_raw <= lo_raw:
+        hi_raw = lo_raw + (abs(lo_raw) or 1.0)
+    width = hi_raw - lo_raw
+    best = None
+    mag = 10 ** math.floor(math.log10(width / 4.5))
+    for m in (0.1, 1, 10):
+        for base in (1, 2, 2.5, 5):
+            step = base * mag * m
+            a = math.floor(lo_raw / step + 1e-9) * step
+            b = math.ceil(hi_raw / step - 1e-9) * step
+            n = round((b - a) / step)
+            if n < 3 or n > max(3, max_steps):
+                continue
+            cost = abs(n - 5.0) * 0.18 + 3.0 * ((b - a) - width) / (b - a) + (0.3 if base == 2.5 else 0.0)
+            if best is None or cost < best[0]:
+                best = (cost, a, b, step)
+    if best is None:
+        lo, hi, step = _nice_scale(lo_raw, hi_raw)
+    else:
+        _, lo, hi, step = best
     if mn >= 0:
         lo = max(0.0, lo)
     return lo, hi, step
+
+
+def _label_spot(me, wh, pts, marker_r: float, own_r: float, bounds, gap: float):
+    """Where the label of the highlighted point stands in a dense cloud: the box (w, h) nearest to the point whose
+    area no other marker touches, within a few lines' height of it and inside `bounds` — else the box that touches
+    the fewest. Returns (centre x, centre y, markers touched). `pts`: every marker centre (pt, y down), `marker_r` their
+    radius, `own_r` the highlighted marker's (the label keeps `gap` clear of it)."""
+    w, h = wh
+    mx, my = me
+    step = max(h / 2.0, 3.0)
+    reach_x, reach_y = w + 5 * h, 5 * h
+    near = [q for q in pts if q != me and abs(q[0] - mx) <= reach_x + w + 2 * marker_r and abs(q[1] - my) <= reach_y + h + 2 * marker_r]
+    best = None
+    nx, ny = int(reach_x / step), int(reach_y / step)
+    for iy in range(-ny, ny + 1):
+        for ix in range(-nx, nx + 1):
+            cx, cy = mx + ix * step, my + iy * step
+            bx = (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+            # clear of the highlighted marker itself
+            ex = max(bx[0] - mx, 0.0, mx - bx[2])
+            ey = max(bx[1] - my, 0.0, my - bx[3])
+            if math.hypot(ex, ey) < own_r + gap * 0.5:
+                continue
+            out_of = max(0.0, bounds[0] - bx[0]) + max(0.0, bx[2] - bounds[2]) + max(0.0, bounds[1] - bx[1]) + max(0.0, bx[3] - bounds[3])
+            if out_of > 0.5:
+                continue
+            touched = sum(1 for q in near if bx[0] - marker_r <= q[0] <= bx[2] + marker_r and bx[1] - marker_r <= q[1] <= bx[3] + marker_r)
+            dist = math.hypot(ex, ey)
+            cost = touched * 100.0 + dist
+            if best is None or cost < best[0]:
+                best = (cost, cx, cy, touched)
+    return best[1:] if best else None
 
 
 def _style_scatter(k: _Kit) -> None:
@@ -3193,8 +3303,9 @@ def _style_scatter(k: _Kit) -> None:
     xs_flat = [x for xs in k.xs for x in xs] or [0.0]
     ys_flat = [y for ys in k.values for y in ys] or [0.0]
     npts = len(ys_flat)
-    x_lo, x_hi, x_step = _scatter_range(xs_flat)
-    y_lo, y_hi, y_step = _scatter_range(ys_flat)
+    # as many round steps as the frame's labels have room for: a tick label wants ~5.5 sizes of width, ~2.6 of height
+    x_lo, x_hi, x_step = _scatter_range(xs_flat, max(4, min(9, int(W / (fs * 5.5)))))
+    y_lo, y_hi, y_step = _scatter_range(ys_flat, max(4, min(9, int(H / (fs * 2.6)))))
     want = k.spec.highlight_index
     hl = want if (want is not None and not multi and 0 <= want < len(k.values[0])) else None
     size = 8 if npts <= 30 else (7 if npts <= 120 else 5)
@@ -3248,10 +3359,32 @@ def _style_scatter(k: _Kit) -> None:
                 pts = [at(x, y) for xs, ys in zip(k.xs, k.values) for x, y in zip(xs, ys)]
                 me = at(k.xs[0][hl], k.values[0][hl])
                 w = text_width_pt(k.emph(k.values[0][hl]), family, o["size"], k.bold) * 1.08 + 2
-                (pos, dx), = place_point_labels([me], [(w, o["size"] * 1.2)], (0.0, k.title_h, W, H - bottom), (size + 4) / 2 + 3, lines=[[q] for q in pts])
-                o = {**o, "pos": pos}
-                if dx:
-                    o["dx"] = dx / W
+                lh = o["size"] * 1.2
+                bounds = (left, top, left + pw, top + ph)
+                spot = _label_spot(me, (w, lh), pts, size / 2.0 + 0.5, (size + 4) / 2.0 + 0.75, bounds, (size + 4) / 2 + 3) if npts > 30 else None
+                if spot is None:
+                    (pos, dx), = place_point_labels([me], [(w, lh)], (0.0, k.title_h, W, H - bottom), (size + 4) / 2 + 3, lines=[[q] for q in pts])
+                    o = {**o, "pos": pos}
+                    if dx:
+                        o["dx"] = dx / W
+                else:
+                    # a dense cloud: the label stands on the nearest free ground (clear of the cloud where the room
+                    # allows) and on a chip of the slide's ground where it must touch a marker — it stays legible
+                    cx, cy, touched = spot
+                    g = (size + 4) / 2 + 3
+                    if abs(cx - me[0]) / (w / 2 + g) >= abs(cy - me[1]) / (lh / 2 + g):
+                        pos = "r" if cx >= me[0] else "l"
+                        bx_, by_ = me[0] + (g + w / 2) * (1 if cx >= me[0] else -1), me[1]
+                    else:
+                        pos = "b" if cy >= me[1] else "t"
+                        bx_, by_ = me[0], me[1] + (g + lh / 2) * (1 if cy >= me[1] else -1)
+                    o = {**o, "pos": pos}
+                    if abs(cx - bx_) > 0.5:
+                        o["dx"] = (cx - bx_) / W
+                    if abs(cy - by_) > 0.5:
+                        o["dy"] = (cy - by_) / H
+                    if touched:
+                        o["box"] = k.ground
                 _set_ser_dlbls(el, _dlbls(k.fmt_plain, k.fs_value, k.hl_color, family, None, {hl: o}, show_val=False))
     if k.chart_el is not None:
         for d in k.chart_el.findall(_c("dLbls")):
@@ -3272,7 +3405,11 @@ def _style_scatter(k: _Kit) -> None:
     xa.tick_labels.number_format_is_linked = False
     _axis_txpr(xa, fs, k.muted, family)
     _value_axis(k, True, fs, y_lo, y_hi, y_step)
+    k.chart.value_axis.tick_label_position = XL_TICK_LABEL_POSITION.LOW
     va = k.chart.value_axis._element
+    # the Y axis crosses X at X's minimum: its ticks stand at the left edge, not in the middle of the points when X
+    # spans zero (the X axis keeps crossing Y at zero: a negative Y has its hairline there)
+    _axis_crosses(va, "min")
     _set_child_val(va, "crossBetween", "midCat", ("majorUnit", "minorUnit", "dispUnits", "extLst"))
     _plot_layout(k, left, top, pw, ph)
 

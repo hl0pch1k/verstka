@@ -539,8 +539,26 @@ def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool =
     return w
 
 
-def wrap_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, *, caps: bool = False, spc_pt: float = 0.0) -> list[str]:
-    """Greedy word wrap; over-long words are split by characters. `caps`/`spc_pt` as in `text_width_pt`."""
+_DASH_BREAK_RE = re.compile(r"(?<=[\u2013\u2014])(?=[^\s\u2013\u2014])")
+
+
+def break_pieces(raw: str, *, dashes: bool = False) -> list[tuple[str, str]]:
+    """The unbreakable pieces of one line of text as (piece, separator before it): a line may be broken only between
+    them. Ordinary spaces separate pieces; a no-break space (U+00A0, U+202F) and a word joiner never do, so «2 750»
+    set with one stays whole, as PowerPoint and LibreOffice keep it. `dashes`: a break is also allowed right after an
+    en or em dash that joins two words or numbers («1 000–1 250» → «1 000–» + «1 250», separated by nothing) — a
+    range label of a chart axis, which both renderers break there and nowhere inside a number."""
+    out: list[tuple[str, str]] = []
+    for w in (x for x in re.split(r"[ \t\r]+", raw) if x):
+        parts = _DASH_BREAK_RE.split(w) if dashes else [w]
+        for j, part in enumerate(parts):
+            out.append((part, " " if j == 0 else ""))
+    return out
+
+
+def wrap_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, *, caps: bool = False, spc_pt: float = 0.0, dashes: bool = False) -> list[str]:
+    """Greedy word wrap; over-long words are split by characters. `caps`/`spc_pt` as in `text_width_pt`. `dashes`: a
+    line may also break right after an en or em dash (`break_pieces`; off by default)."""
     if width_pt <= 0:
         return [text]
 
@@ -550,13 +568,13 @@ def wrap_lines(text: str, family: Optional[str], size_pt: float, bold: bool, wid
     lines: list[str] = []
     for raw in text.split("\n"):
         # break at ordinary spaces only: a no-break space keeps «27 млн» and «в VK» together, as PowerPoint does
-        words = [w for w in re.split(r"[ \t\r]+", raw) if w]
+        words = break_pieces(raw, dashes=dashes)
         if not words:
             lines.append("")
             continue
         cur = ""
-        for w in words:
-            cand = (cur + " " + w).strip()
+        for w, sep in words:
+            cand = (cur + sep + w) if cur else w
             if width(cand) <= width_pt:
                 cur = cand
                 continue
