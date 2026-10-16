@@ -9,9 +9,10 @@ What the PPTX wrote is drawn as written: the bars' gap and overlap (in % of one 
 the value axis's ends, step and tick format, a scatter's markers (size, translucent fill, the ring of the ground) and a
 label's nudge off its point. A histogram's bins touch and stacked segments sit one on another, parted by a hairline
 where the ground shows through (SEAM_PT: a gap, never a stroke of a guessed colour), each stacked value inside its
-segment; a scatter's points stand on two value axes, the highlighted one larger and on top; a missing value is a break
-in the line, never a zero, and a line ends (and is labelled) on its last point with a value; axis titles stand along
-their axes in the muted label colour, the vertical one turned to read bottom-up. The source line («Источник: …») is a
+segment (like a pie slice's) in the ink the PPTX charts choose for that fill, charts.label_on — one rule for both; a
+scatter's points stand on two value axes, the highlighted one larger and on top; a missing value is a break in the line,
+never a zero, and a line ends (and is labelled) on its last point with a value; axis titles stand along their axes in
+the muted label colour, the vertical one turned to read bottom-up. The source line («Источник: …») is a
 text box of the slide under the chart frame: the HTML exporter draws it with the slide's text, never inside the chart."""
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ import html
 import math
 from typing import Optional
 
-from verstka.rendering.charts import SEAM_PT, TITLE_LINE
+from verstka.rendering.charts import SEAM_PT, TITLE_LINE, label_on
 from verstka.rendering.fonts import text_width_pt, wrap_lines
+from verstka.schemas.common import contrast_ratio
 from verstka.schemas.deck_ir import IRAxisScale, IRChart, IRChartSeries, IRPointLabel
 
 _MINUS = "−"
@@ -205,13 +207,28 @@ def _legend_rows(parts: list, items: list[tuple[str, str, bool]], width: float, 
             lx += w
 
 
+def _ground_of(text_hex: str) -> str:
+    """The ground a chart stands on when the caller does not say: the one of white and black the text reads better on."""
+    return "FFFFFF" if contrast_ratio(text_hex, "FFFFFF") >= contrast_ratio(text_hex, "000000") else "000000"
+
+
 class _Labels:
     """What each point's label says and how it looks, from the series' c:dLbls and its per-point overrides; its nudge
-    is a fraction of the chart frame (`frame_w` × `frame_h`)."""
+    is a fraction of the chart frame (`frame_w` × `frame_h`). A label printed on a filled segment or slice takes its ink
+    from `on_fill` — the rule of the PPTX charts (charts.label_on), on the fill drawn here."""
 
-    def __init__(self, chart: IRChart, text_hex: str, font_px: float, frame_w: float = 0.0, frame_h: float = 0.0):
+    def __init__(self, chart: IRChart, text_hex: str, font_px: float, frame_w: float = 0.0, frame_h: float = 0.0, ground: Optional[str] = None):
         self.chart, self.text, self.size = chart, text_hex, font_px
         self.frame_w, self.frame_h = frame_w, frame_h
+        self.ground = ground or _ground_of(text_hex)
+
+    def on_fill(self, fill: str, written: str) -> str:
+        """The ink of a value inside a segment or slice painted `fill`; `written` (the label's own colour in the file)
+        stays when the fill is not a plain hex colour."""
+        h = (fill or "").lstrip("#").upper()
+        if len(h) != 6 or any(ch not in "0123456789ABCDEF" for ch in h):
+            return written
+        return label_on(h, self.text, self.ground)
 
     def get(self, s: IRChartSeries, j: int) -> Optional[tuple[str, str, bool, float, Optional[str]]]:
         v = s.values[j] if j < len(s.values) else None
@@ -312,14 +329,14 @@ def _circle(x: float, y: float, r: float, fill: str, alpha: Optional[float] = No
 # ---------------------------------------------------------------------------------------------- the chart
 
 
-def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], text_hex: str = "222222", font: str = "Play, Arial, sans-serif", font_px: float = 12.0) -> str:
+def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], text_hex: str = "222222", font: str = "Play, Arial, sans-serif", font_px: float = 12.0, ground: Optional[str] = None) -> str:
     colors = [c for c in (colors or []) if c] or ["0077FF"]
     series = chart.series or []
     cats = chart.categories or []
     n_cat = max(len(cats), max((len(s.values) for s in series), default=0))
     muted = chart.axis_color or text_hex
     rule = chart.rule_color
-    labels = _Labels(chart, text_hex, font_px, width, height)
+    labels = _Labels(chart, text_hex, font_px, width, height, ground)
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" width="100%" height="100%" font-family="{html.escape(font)}" font-size="{font_px}" fill="#{text_hex}">']
     top = 2.0
     if chart.title:
@@ -458,6 +475,7 @@ def _columns(chart, series, cats, n_cat, width, height, top, colors, muted, base
                 t, c, b, size, _ = lab
                 if stacked:
                     y = (y0 + y1) / 2  # inside its segment
+                    c = c if s.outline_only else labels.on_fill(col, c)  # (a hollow segment: its value stands on the ground)
                 else:
                     y = (y0 - size * 0.7) if v >= 0 else (y1 + size * 0.8)
                 parts.append(_txt(x + bar / 2, y, t, size, c, bold=b))
@@ -518,7 +536,7 @@ def _hbars(chart, series, cats, n_cat, width, height, top, colors, muted, base_r
             if lab:
                 t, c, b, size, _ = lab
                 if stacked:
-                    parts.append(_txt((x0 + x1) / 2, y + bar / 2, t, size, c, bold=b))  # inside its segment
+                    parts.append(_txt((x0 + x1) / 2, y + bar / 2, t, size, c if s.outline_only else labels.on_fill(col, c), bold=b))  # inside its segment
                 else:
                     parts.append(_txt(x1 + size * 0.4, y + bar / 2, t, size, c, anchor="start", bold=b))
         if i < len(cats):
@@ -743,7 +761,8 @@ def _pie(chart, s, cats, width, height, top, colors, text_hex, muted, font_px, l
             t, c, b, size, pos = lab
             mid = angle + frac * math.pi
             rho = (r + size * 1.2) if pos == "outEnd" else ((r + r_in) / 2 if r_in else (r * 0.5 if pos == "ctr" or frac >= 0.25 else r * 0.72))
-            parts.append(_txt(cx + rho * math.cos(mid), cy + rho * math.sin(mid), t, size, c if pos != "outEnd" else (c or text_hex), bold=b))
+            ink = (c or text_hex) if pos == "outEnd" else labels.on_fill(col, c)  # outside: on the ground; inside: on the slice
+            parts.append(_txt(cx + rho * math.cos(mid), cy + rho * math.sin(mid), t, size, ink, bold=b))
         angle += frac * 2 * math.pi
     if side_legend:
         lx = cx + r + font_px * 2

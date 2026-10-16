@@ -20,8 +20,8 @@ from verstka.audit.checks.writing import _chart_rows
 from verstka.audit.ir import build_deck_ir
 from verstka.rendering.charts import (
     NO_HIGHLIGHT,
+    STACK_LABEL_CONTRAST,
     _chroma,
-    _label_on,
     _label_spot,
     _scatter_range,
     add_chart,
@@ -30,6 +30,7 @@ from verstka.rendering.charts import (
     eased,
     effective_chart_type,
     glue_numbers,
+    label_on,
     label_pieces,
     prefer_bar,
     resolve_series,
@@ -651,11 +652,40 @@ def test_stacked_columns_with_negatives_span_both_sides_and_read_on_their_fills(
             fill = _ser_fill(ser)
             ink = ser.find(f"{C}dLbls/{C}txPr//{A}defRPr/{A}solidFill/{A}srgbClr").get("val")
             if ser.find(f"{C}tx//{C}v").text != "Прочее":
-                assert contrast_ratio(ink, fill) >= 4.5, (bg, fill, ink)
-    # a 12 pt value on the template's pink or blue: never the 3:1 of large print
-    for fill in ("FF3D8B", "0077FF", "FF6C6C", "00D3E6"):
-        assert contrast_ratio(_label_on(fill, "000000", "FFFFFF", 4.5), fill) >= 4.5
-    assert contrast_ratio(_label_on("FF3D8B", "000000", "FFFFFF"), "FF3D8B") < 4.5  # (the pie's larger figures keep 3:1: white)
+                assert contrast_ratio(ink, fill) >= STACK_LABEL_CONTRAST, (bg, fill, ink)
+
+
+def _ink_by_fill(spec: ChartSpec, style: ChartStyleSpec, bg: str = "FFFFFF", text: str = TEXT) -> dict[str, str]:
+    """{series fill: the ink of its values} as the native stacked chart writes them."""
+    prs, s = _slide(bg)
+    cs = add_chart(s, BOX, spec, OUTLINE, style, TYPO, text_hex=text).chart._chartSpace
+    return {_ser_fill(ser): ser.find(f"{C}dLbls/{C}txPr//{A}defRPr/{A}solidFill/{A}srgbClr").get("val") for ser in cs.iter(f"{C}ser")}
+
+
+def test_a_value_on_a_segment_keeps_the_templates_own_ink_from_three_to_one():
+    # the template's white on its accents is accepted from 3:1 (the audit's convention for a pair of template colours):
+    # the brand blue (4.1:1) and the pink (3.3:1) keep white — never flipped to black as at 4.5:1
+    assert STACK_LABEL_CONTRAST == 3.0
+    assert 3.0 <= contrast_ratio("FFFFFF", "FF3985") < 4.5 and 3.0 <= contrast_ratio("FFFFFF", "0077FF") < 4.5
+    for ground, text in (("FFFFFF", "000000"), ("0B1220", "FFFFFF")):
+        assert label_on("0077FF", text, ground) == "FFFFFF"
+        assert label_on("FF3985", text, ground) == "FFFFFF"
+    # a light fill takes the dark ink: the template's text on a light ground, the ground itself on a dark one
+    assert label_on("8BBFFA", "000000", "FFFFFF") == "000000"
+    assert label_on("8BBFFA", "FFFFFF", "0B1220") == "0B1220"
+    assert label_on("FFE08A", "FFFFFF", "FFFFFF") == "1A1A1A"  # neither white text nor white ground reads: near-black
+
+
+def test_stacked_values_on_the_brand_blue_and_pink_are_white_and_on_a_light_fill_dark():
+    style = ChartStyleSpec(series_colors=["0077FF", "FF3985", "8BBFFA"], font_family="Play", font_size_pt=7.0)
+    spec = ChartSpec(type="stacked_column", categories=["I кв.", "II кв.", "III кв."], series=[
+        InlineSeries(name="Один", values=[51, 61, 71]), InlineSeries(name="Два", values=[32, 42, 52]), InlineSeries(name="Три", values=[23, 33, 43])])
+    for kind in ("stacked_column", "stacked_bar"):
+        ink = _ink_by_fill(spec.model_copy(update={"type": kind}), style)
+        assert ink["0077FF"] == "FFFFFF" and ink["FF3985"] == "FFFFFF"
+        assert ink["8BBFFA"] in ("000000", "1A1A1A") and contrast_ratio(ink["8BBFFA"], "8BBFFA") >= 4.5
+        for fill, c in ink.items():
+            assert c == label_on(fill, TEXT, "FFFFFF"), (kind, fill)  # one rule, written once
 
 
 def test_dark_ground_charts_keep_their_titles_and_labels_readable():

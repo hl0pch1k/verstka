@@ -13,7 +13,8 @@ from pptx.util import Emu
 
 from verstka.audit.ir import build_deck_ir
 from verstka.export.svg_charts import chart_svg
-from verstka.rendering.charts import SEAM_PT, add_chart
+from verstka.rendering.charts import SEAM_PT, add_chart, label_on
+from verstka.schemas.common import contrast_ratio
 from verstka.schemas.common import Bbox
 from verstka.schemas.deck_ir import IRAxisScale, IRChart, IRChartSeries, IRPointLabel
 from verstka.schemas.outline import ChartSpec, DeckOutline, InlineSeries, OutlineSlide, SlideContent, XYSeries
@@ -38,14 +39,14 @@ RECT_RE = re.compile(r'<rect x="([\d.\-]+)" y="([\d.\-]+)" width="([\d.\-]+)" he
 CIRCLE_RE = re.compile(r'<circle cx="([\d.\-]+)" cy="([\d.\-]+)" r="([\d.\-]+)" fill="#([0-9A-F]{6})"([^/]*)/>')
 
 
-def _ir(spec: ChartSpec, tmp_path, name: str = "c.pptx") -> IRChart:
+def _ir(spec: ChartSpec, tmp_path, name: str = "c.pptx", style: ChartStyleSpec = STYLE) -> IRChart:
     """The chart the PPTX holds, read back by the audit's IR (what the HTML export draws)."""
     prs = Presentation()
     prs.slide_width, prs.slide_height = Emu(W), Emu(H)
     s = prs.slides.add_slide(prs.slide_layouts[6])
     s.background.fill.solid()
     s.background.fill.fore_color.rgb = RGBColor.from_string("FFFFFF")
-    add_chart(s, BOX, spec, OUTLINE, STYLE, TYPO, text_hex="000000")
+    add_chart(s, BOX, spec, OUTLINE, style, TYPO, text_hex="000000")
     path = tmp_path / name
     prs.save(str(path))
     ir = build_deck_ir(path, with_images=False)
@@ -144,6 +145,55 @@ def test_stacked_columns_stack_their_segments_with_values_inside(tmp_path):
     assert m and first[0][1] < float(m.group(2)) < first[0][1] + first[0][3] and m.group(3) == "FFFFFF"
     assert all(n in _texts(svg) for n in ("Прямые продажи", "Партнёры", "Прочее"))  # the legend
     assert re.search(r'transform="rotate\(-90[^"]*"[^>]*>Выручка, млн ₽</text>', svg)  # the value axis's title, turned
+
+
+def _ink_of(svg: str, label: str) -> str:
+    """The fill of the SVG <text> that prints `label`."""
+    m = re.search(rf'<text[^>]*fill="#([0-9A-F]{{6}})"[^>]*>{re.escape(label)}</text>', svg)
+    assert m, label
+    return m.group(1)
+
+
+def test_values_on_segments_follow_the_pptx_rule_white_on_blue_and_pink_dark_on_light(tmp_path):
+    # one rule for the PPTX and the HTML: the template's white on its accents from 3:1 (0077FF 4.1:1, FF3985 3.3:1),
+    # the dark ink on a light fill (8BBFFA) — and the same ink in both for the same fill
+    style = ChartStyleSpec(series_colors=["0077FF", "FF3985", "8BBFFA"], font_family="Play", font_size_pt=7.0)
+    cats = ["I кв.", "II кв.", "III кв."]
+    vals = {"Один": [51, 61, 71], "Два": [32, 42, 52], "Три": [23, 33, 43]}
+    series = [InlineSeries(name=n, values=v) for n, v in vals.items()]
+    for kind in ("stacked_column", "stacked_bar"):
+        ch = _ir(ChartSpec(type=kind, categories=cats, series=series), tmp_path, f"{kind}.pptx", style)
+        assert [s.color for s in ch.series] == ["0077FF", "FF3985", "8BBFFA"]
+        svg = _svg(ch)
+        for s in ch.series:
+            for v in vals[s.name]:
+                ink = _ink_of(svg, str(v))
+                assert ink == s.label_color == label_on(s.color, "000000", "FFFFFF"), (kind, s.color, ink, s.label_color)  # PPTX == SVG
+        assert _ink_of(svg, "51") == "FFFFFF" and _ink_of(svg, "32") == "FFFFFF"  # the brand blue and the pink keep white
+        dark = _ink_of(svg, "23")
+        assert dark != "FFFFFF" and contrast_ratio(dark, "8BBFFA") >= 4.5  # the light fill takes the dark ink
+
+
+def test_values_on_a_dark_deck_take_the_ground_on_a_light_fill_and_stay_white_on_the_accent(tmp_path):
+    style = ChartStyleSpec(series_colors=["0077FF", "8BBFFA"], font_family="Play", font_size_pt=7.0)
+    ch = _ir(ChartSpec(type="stacked_column", categories=["I", "II"], series=[InlineSeries(name="Один", values=[51, 61]), InlineSeries(name="Два", values=[23, 33])]), tmp_path, "d.pptx", style)
+    svg = chart_svg(ch, BOX.w / 12700, BOX.h / 12700, PALETTE, text_hex="FFFFFF", font="Play", font_px=9.0, ground="0B1220")
+    assert _ink_of(svg, "51") == "FFFFFF"
+    assert _ink_of(svg, "23") == label_on("8BBFFA", "FFFFFF", "0B1220") == "0B1220"  # white text does not read on it: the ground does
+
+
+def test_pie_and_doughnut_slice_values_follow_the_same_rule(tmp_path):
+    style = ChartStyleSpec(series_colors=["0077FF", "FF3985", "8BBFFA"], font_family="Play", font_size_pt=7.0)
+    for kind in ("pie", "doughnut"):
+        ch = _ir(ChartSpec(type=kind, categories=["a", "b", "c"], series=[InlineSeries(name="Доли", values=[50, 30, 20])], unit="%"), tmp_path, f"{kind}.pptx", style)
+        s = ch.series[0]
+        svg = _svg(ch)
+        inks = re.findall(r'<text[^>]*fill="#([0-9A-F]{6})"[^>]*>(\d+%?)</text>', svg)
+        assert len(inks) == 3 and len(s.point_colors) == 3
+        for j, (ink, _) in enumerate(inks):
+            fill = s.point_colors[j]
+            assert ink == s.point_labels[j].color == label_on(fill, "000000", "FFFFFF"), (kind, j, fill)  # PPTX == SVG
+        assert inks[0][0] == "FFFFFF"  # the first slice is the accent 0077FF
 
 
 def test_stacked_bars_run_left_to_right_top_down(tmp_path):

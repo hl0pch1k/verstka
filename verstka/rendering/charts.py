@@ -103,7 +103,10 @@ SEAM_PT = 0.75  # the hairline of the ground between a histogram's bins and betw
 STACK_GAP = (40, 180)  # gapWidth range of stacked bars: one bar per category, wider than a cluster's
 SCATTER_ALPHA = (0.85, 0.65)  # marker fill opacity: a few points, many points (overlaps stay visible)
 TITLE_LINE = 1.25  # an axis title's line height over its size
-STACK_LABEL_CONTRAST = 4.5  # a value inside a stacked segment is small text: it reads at least this well on its fill
+# a value printed on a filled segment or slice (stacked bars, pie, doughnut): the template's own ink on its accent fill is
+# accepted from 3:1 (white on the brand blue 0077FF is 4.1:1, on the pink FF3985 3.3:1) — the same convention as the
+# audit (audit/checks/template.py, TABLE_CONTRAST_LOW: a pair of template colours from 3:1 is the template's own choice)
+STACK_LABEL_CONTRAST = 3.0
 
 
 def _c(tag: str) -> str:
@@ -264,10 +267,11 @@ def _rule_color(neutral_hex: Optional[str], text: str, ground: str) -> str:
     return _mix(text, ground, 0.5)
 
 
-def _label_on(fill: str, text: str, ground: str, floor: float = 3.0) -> str:
-    """Text colour for a label printed on a filled slice: white, the template's text, the ground, near-black — the first
-    that reads at `floor` (3:1 for a pie's larger figures; a stacked segment's 12 pt value needs 4.5:1), else the one of
-    white and near-black that reads best."""
+def label_on(fill: str, text: str, ground: str, floor: float = STACK_LABEL_CONTRAST) -> str:
+    """Ink for a label printed on a filled segment or slice — the one rule of the PPTX charts and of their HTML/SVG twin
+    (verstka.export.svg_charts): white, the template's text, the ground, near-black — the first that reads on `fill` at
+    `floor` (3:1: the template's own ink on its accent, white on 0077FF and on FF3985), else the one of white and
+    near-black that reads best (a light fill such as 8BBFFA takes the dark ink)."""
     for c in ("FFFFFF", text, ground, "1A1A1A"):
         if contrast_ratio(c, fill) >= floor:
             return c
@@ -2800,8 +2804,8 @@ def _style_bars(k: _Kit) -> None:
                     if v is None or v == 0 or not inside.get((i, j)):
                         pts[j] = {"delete": True}
                     elif cat_hl is not None and j != cat_hl:
-                        pts[j] = {"color": _label_on(eased(fill, k.ground), k.text, k.ground, STACK_LABEL_CONTRAST)}
-                _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, _label_on(fill, k.text, k.ground, STACK_LABEL_CONTRAST), family, pos, pts))
+                        pts[j] = {"color": label_on(eased(fill, k.ground), k.text, k.ground)}
+                _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, label_on(fill, k.text, k.ground), family, pos, pts))
                 continue
             for j, v in enumerate(values[i]):
                 if v is None:
@@ -3507,7 +3511,7 @@ def _style_pie(k: _Kit) -> None:
         if where[j] == "outEnd":
             pts[j] = {"color": k.text, "pos": "outEnd"}
         else:
-            pts[j] = {"color": _label_on(fill, k.text, k.ground)}
+            pts[j] = {"color": label_on(fill, k.text, k.ground)}
             if not ring:
                 pts[j]["pos"] = where[j]
         if v < 1 and not amounts:
