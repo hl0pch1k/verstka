@@ -1495,6 +1495,217 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 /* логотип крупнее (владелец, 15.10): «Verstka» 25 px, полоски 5 px — всё в пропорции, вместе с наведением и анимацией «Нет связи» */
 .p2-brand{zoom:1.25}
+/* ═══ Данные и брендбук (модуль ds) — вторая ступень «интерпретация данных»: файлы с данными и брендбук на шагах 01 и 02,
+   профиль данных и ранжированные варианты графика в «Подробнее → Почему так». Без файлов и брендбука ничего не меняется ═══ */
+.ds-spin{display:block;flex:none;animation:gh-spin 1000ms linear infinite}
+/* 01 · «Брендбук»: тихая кнопка рядом с шаблоном; меню — как «Из файла», выровнено по правому краю кнопки */
+.bb-fg{position:relative;z-index:4;display:flex;align-items:center;flex:none}
+/* блок шапки с «Брендбуком» проявляется (p2-in) — пока идёт анимация, он сам контекст наложения; свой z-index держит меню
+   над плитками ленты, которые проявляются в то же время */
+.p2-hx>.p2-in:has(>.bb-fg){position:relative;z-index:4}
+.bb-btn{flex:none}
+.tx-menu.bb-menu{left:auto;right:0;transform-origin:top right}
+.tx-mdiv{display:block;height:1px;margin:4px 12px;background:rgba(11,18,32,.08)}
+.bb-busy{display:inline-flex;align-items:center;gap:8px;height:40px;font-size:14px;font-weight:600;line-height:20px;color:#2563EB;white-space:nowrap}
+/* карточка брендбука — пара карточке шаблона: плитка палитры 80 × 45 и две строки; кликабельна (слой «Брендбук») */
+.bb-chip{display:flex;align-items:center;gap:16px;padding:0;border:0;border-radius:12px;background:none;color:#0B1220;font-family:inherit;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.bb-chip:hover{transform:translateY(-2px)}
+.bb-chip:active{transform:scale(.98)}
+.bb-tile{display:flex;flex:none;width:80px;height:45px;border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
+.bb-tile>span{flex:1 1 0%}
+.bb-ct{display:flex;flex-direction:column;min-width:0}
+.bb-cn{font-size:15px;font-weight:700;line-height:24px;color:#0B1220;white-space:nowrap}
+.bb-chip:hover .bb-cn{color:#2563EB}
+.bb-cm{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+/* разбор брендбука: плитки заполняются по ходу — пульс гаснет, содержимое проявляется (только opacity и transform) */
+.bb-at{position:relative;display:block;height:142px;border-radius:16px;overflow:hidden;background:#F3F4F1}
+.bb-at .an-pulse{transition:opacity 240ms var(--ease)}
+.bb-at-on .an-pulse{opacity:0}
+.bb-atin{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;transform:scale(.98);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.bb-at-on .bb-atin{opacity:1;transform:none}
+.bb-atpal{flex-direction:row;align-items:stretch}
+.bb-atpal>span{flex:1 1 0%}
+.bb-atpal>span:nth-child(4){box-shadow:inset 0 0 0 1px rgba(11,18,32,.06)}
+.bb-aa{font-family:'Play','Manrope',sans-serif;font-weight:700;font-size:48px;line-height:56px;color:#0B1220}
+.bb-aan{font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.bb-atlg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:16px}
+/* логотип-знак: квадрат-знак и полоса слова; размеры — доли плитки, поэтому плитка сжимается без перестроек */
+.bb-lg{display:flex;align-items:center;justify-content:center;gap:6%;min-width:0;border-radius:12px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.bb-lgm{display:block;width:16%;aspect-ratio:1;border-radius:24%;background:#0077FF}
+.bb-lgw{display:block;width:38%;aspect-ratio:6 / 1;border-radius:999px;background:#0B1220}
+.bb-lg-white{background:#0077FF;box-shadow:none}
+.bb-lg-white .bb-lgm,.bb-lg-white .bb-lgw{background:#FFFFFF}
+.bb-lg-mark .bb-lgw{display:none}
+.bb-lg-mark .bb-lgm{width:22%}
+.bb-lg-mono .bb-lgm{background:#0B1220}
+/* слой «Брендбук» */
+.bb-g{display:grid;grid-template-columns:minmax(0,1fr) 416px;gap:24px;align-items:start}
+.bb-sec{margin-top:32px}
+.bb-sws{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:16px 0 0;padding:0;list-style:none}
+.bb-sws>li{min-width:0}
+.bb-sw{display:block;height:56px;border-radius:12px;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.bb-hex{display:block;margin-top:8px;font-size:14px;font-weight:700;line-height:20px;color:#0B1220;font-variant-numeric:tabular-nums}
+.bb-role{display:block;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-fonts{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;padding:0;list-style:none}
+.bb-font{display:flex;align-items:center;gap:16px;height:72px;padding:0 16px;border-radius:16px;background:#F3F4F1;min-width:0}
+.bb-fa{flex:none;width:56px;font-family:'Play','Manrope',sans-serif;font-size:32px;line-height:40px;color:#0B1220}
+.bb-logos2{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:16px 0 0;padding:0;list-style:none}
+.bb-logos2>li{min-width:0}
+.bb-lgt{aspect-ratio:16 / 9}
+.bb-lgc{display:block;margin-top:8px;font-size:13px;font-weight:600;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-sub{margin:12px 0 0;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.bb-seg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;height:48px;margin-top:8px;padding:4px;border-radius:999px;background:#F3F4F1}
+.bb-cfs{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;padding:0;list-style:none}
+.bb-cf{display:flex;flex-direction:column;padding:16px;border-radius:16px;background:#F3F4F1;min-width:0}
+.bb-cfk{font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
+.bb-cfv{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.bb-win{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;font-weight:700;line-height:20px;color:#2563EB;white-space:nowrap}
+.bb-win svg{flex:none}
+.bb-dot{display:block;flex:none;width:12px;height:12px;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14)}
+/* 02 · «Из файла» на две колонки: текст и данные; высота прежняя */
+.tx-menu.tx-menu2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;width:608px}
+.tx-mcol{position:relative;min-width:0}
+.tx-mcol+.tx-mcol::before{content:"";position:absolute;left:-4px;top:8px;bottom:8px;width:1px;background:rgba(11,18,32,.08)}
+.tx-mdrop{display:flex;align-items:center;gap:12px;height:56px;margin:0;padding:0 12px}
+.tx-mdrop .tx-mic{background:#F3F4F1;color:#5A6272}
+.tx-mdrop .tx-mn{font-weight:600;color:#5A6272}
+/* 02 · поле и панель «Данные» в одной сетке: без данных вторая дорожка 0, поле во всю ширину, как было */
+.tx-fw.dt-g{display:grid;grid-template-columns:minmax(0,1fr) 0px;grid-template-rows:auto;column-gap:0px;row-gap:0px;align-items:start;transition:transform 520ms var(--ease),grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+.tx-fw.dt-g.dt-in{transition:transform 520ms var(--ease),grid-template-columns 520ms var(--ease),column-gap 520ms var(--ease)}
+.tx-fw.dt-g.dt-on{row-gap:16px}
+.tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px}
+.dt-g>.p2-field{grid-column:1;grid-row:1;min-width:0}
+.dt-cell{grid-column:2;grid-row:1;align-self:stretch;min-width:0;overflow:clip}
+.dt-on>.dt-cell{grid-row:1 / span 2}
+.dt-goalw{grid-column:1;grid-row:2;min-width:0}
+.dt-pan{display:flex;flex-direction:column;height:100%;min-width:0;padding:16px 8px 8px;border-radius:24px;background:#FFFFFF}
+.dt-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;height:20px;margin:0 8px 8px;white-space:nowrap}
+.dt-lbl{flex:none;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dt-st{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dt-st-run{color:#2563EB}
+.dt-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;margin:0;padding:0;list-style:none;overflow-y:auto;scrollbar-width:none}
+.dt-list::-webkit-scrollbar{display:none}
+.dt-list>li{flex:none}
+.dt-card{display:grid;grid-template-columns:28px minmax(0,1fr) 28px;column-gap:10px;align-items:center;height:40px;padding:0 6px 0 8px;border-radius:12px}
+.dt-card:hover{background:#F3F4F1}
+.dt-ic{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;background:#E9F1FF;color:#2563EB}
+.dt-tx{display:flex;flex-direction:column;min-width:0}
+.dt-nm{min-width:0;font-size:13px;font-weight:700;line-height:18px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt-sw{display:grid;min-width:0;height:16px}
+.dt-sw>*{grid-area:1 / 1;min-width:0;font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt-run{display:flex;align-items:center;gap:4px;font-weight:600;color:#2563EB}
+.dt-run>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dt-wait{font-weight:500;color:#5A6272}
+.dt-pf{font-weight:500;color:#5A6272}
+.dt-pf b{font-weight:700;color:#0B1220}
+.dt-pf .hp-sw{min-width:0}
+.dt-pf .hp-sw>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dt-x{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:#5A6272;cursor:pointer;transition:transform 160ms var(--ease)}
+.dt-x svg{opacity:.56;transition:opacity 160ms var(--ease)}
+.dt-card:hover .dt-x{color:#0B1220}
+.dt-card:hover .dt-x svg,.dt-x:focus-visible svg{opacity:1}
+.dt-x:hover{background:#FFFFFF;transform:translateY(-2px)}
+.dt-x:active{transform:scale(.98)}
+.dt-li{transition:opacity 240ms var(--ease)}
+.dt-li.dt-out{opacity:0}
+@keyframes dt-upa{from{transform:translateY(42px)}to{transform:none}}
+@keyframes dt-upb{from{transform:translateY(42px)}to{transform:none}}
+.dt-li.dt-upa{animation:dt-upa 360ms var(--ease) backwards}
+.dt-li.dt-upb{animation:dt-upb 360ms var(--ease) backwards}
+.dt-goal{display:flex;flex-direction:column;justify-content:center;gap:8px;height:88px;padding:0 24px;border-radius:24px;background:#FFFFFF;min-width:0}
+.dt-gl{display:flex;align-items:center;gap:8px;min-width:0;margin:0;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.dt-gcs{display:flex;align-items:center;gap:8px;min-width:0;overflow:clip}
+.dt-gc{display:inline-flex;align-items:center;flex:none;height:32px;padding:0 12px;border-radius:999px;background:#E9F1FF;font-size:13px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap}
+.dt-gt{display:inline-block;max-width:220px;overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
+.dt-zone{z-index:5}
+/* колонка результата: файл слайда под «Почему так», оформление */
+.ds-rfile{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ds-rfile svg{flex:none;color:#2563EB}
+.ds-tile{width:56px;height:32px;border-radius:8px}
+/* «Подробнее → Почему так» для слайда с данными: данные, задача, варианты, заголовок-вывод (язык D-why) */
+.dx-col{min-width:0}
+.dx-file{display:flex;align-items:center;gap:16px;margin-top:16px}
+.dx-fic{display:flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;border-radius:999px;background:#E9F1FF;color:#2563EB}
+.dx-ft{display:flex;flex-direction:column;min-width:0}
+.dx-fn{font-size:15px;font-weight:700;line-height:24px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dx-fm{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dx-cols{display:flex;flex-direction:column;margin:8px 0 0;padding:0;list-style:none}
+.dx-cr{display:grid;grid-template-columns:minmax(0,1fr) 96px 104px;column-gap:12px;align-items:center;height:40px;border-top:1px solid rgba(11,18,32,.08)}
+.dx-cn{min-width:0;font-size:14px;font-weight:600;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dx-ty{justify-self:start}
+.dx-t-d{background:#E9F1FF;color:#2563EB}
+.dx-t-n{background:#F3F4F1;color:#0B1220}
+.dx-t-c{background:#F3F4F1;color:#5A6272}
+.dx-t-t{background:#FFFFFF;color:#5A6272;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14)}
+.dx-role{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.dx-facts{margin:8px 0 0;padding:0}
+.dx-fr{display:grid;grid-template-columns:120px minmax(0,1fr);column-gap:12px;align-items:start;margin:0 -12px;padding:8px 12px;border-radius:12px}
+.dx-fr+.dx-fr{margin-top:2px}
+.dx-fr dt{margin:0;font-size:13px;font-weight:700;line-height:20px;color:#5A6272}
+.dx-fr dd{display:flex;align-items:flex-start;gap:8px;min-width:0;margin:0;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dx-fw{background:#FFFBEB}
+.dx-fw dt,.dx-fw dd{color:#B45309}
+.dx-fw dd{font-weight:700}
+.dx-fb{background:#E9F1FF}
+.dx-fb dt,.dx-fb dd svg{color:#2563EB}
+.dx-tn{margin:12px 0 0;font-size:16px;font-weight:700;line-height:24px;color:#0B1220}
+.dx-goal{margin:8px 0 0}
+.dx-goal .dd-tag{gap:6px}
+.dx-tw{margin:8px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.dx-ks{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.dx-k{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:999px;background:#F3F4F1;color:#5A6272;font-size:13px;font-weight:600;line-height:20px;white-space:nowrap}
+.dx-k-on{background:#0B1220;color:#FFFFFF}
+.dx-vars{display:flex;flex-direction:column;margin:8px 0 0;padding:0;list-style:none}
+.dx-v{display:grid;grid-template-columns:24px 112px minmax(0,1fr);column-gap:16px;align-items:start;padding:16px 0;border-top:1px solid rgba(11,18,32,.08)}
+.dx-v:first-child{border-top:0}
+.dx-v:last-child{padding-bottom:0}
+.dx-rank{display:flex;align-items:center;justify-content:center;width:24px;height:24px;margin-top:20px;border-radius:999px;background:#F3F4F1;color:#5A6272;font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;line-height:16px;font-variant-numeric:tabular-nums}
+.dx-v-on .dx-rank{background:#2563EB;color:#FFFFFF}
+.dx-mini{display:block;width:112px;height:63px;border-radius:10px}
+.dx-vt{min-width:0}
+.dx-vn{margin:0;font-size:14px;font-weight:700;line-height:24px;color:#0B1220}
+.dx-on{margin-left:8px}
+.dx-vr{margin:2px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.dx-note{display:flex;align-items:flex-start;gap:8px;margin:8px 0 0;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dx-note svg{flex:none;margin-top:2px;color:#2563EB}
+.dx-act{margin:4px 0 0 -16px}
+.dx-act:disabled{opacity:.32;cursor:default;transform:none}
+.dx-act:disabled:hover{background:transparent}
+.dx-busy{display:flex;align-items:center;gap:8px;height:40px;margin:4px 0 0;font-size:14px;font-weight:600;line-height:20px;color:#2563EB}
+.dx-hl{display:grid;grid-template-columns:160px minmax(0,1fr);column-gap:16px;align-items:start;margin-top:16px}
+.dx-hl img{display:block;width:160px;aspect-ratio:16 / 9;object-fit:cover;border-radius:12px;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
+.dx-hlt{min-width:0}
+.dx-key{display:block;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:28px;line-height:36px;letter-spacing:-0.03em;color:#2563EB;white-space:nowrap}
+.dx-from{margin:4px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dx-not{display:flex;align-items:flex-start;gap:8px;margin:16px 0 0;padding-top:16px;border-top:1px solid rgba(11,18,32,.08);font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.dx-not .dd-tag{flex:none;margin-top:-2px}
+.dx-not s{text-decoration-thickness:1.5px;text-decoration-color:rgba(90,98,114,.6)}
+@media (min-width: 901px){
+  /* узкая колода: панель «Данные» 400 → 320, поле — копии текста (c-tad); «→ тип графика» у целей сжимается и гаснет;
+     в разборе брендбука вторая дорожка сжимается до нуля (как у разбора шаблона); слой «Брендбук» — правая колонка 416 → 376 */
+  .tx-fw.dt-g{transition:transform 520ms var(--ease),translate 340ms var(--ease),grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+  .hp-nar .tx-fw.dt-g,.tx-fw.dt-g.dt-in{transition:transform 520ms var(--ease),translate 520ms var(--ease),grid-template-columns 520ms var(--ease),column-gap 520ms var(--ease)}
+  .hp-nar .tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr) 320px}
+  /* поле с панелью у́же: скрытая подсказка ошибки («Вставьте готовый текст…») не держит место у счётчика знаков */
+  .tx-fw.dt-w .tx-fixw{max-width:0}
+  .dt-goal{transition:padding 340ms var(--ease)}
+  .hp-nar .dt-goal{padding:0 16px;transition-duration:520ms}
+  .dt-gc{transition:padding 340ms var(--ease)}
+  .hp-nar .dt-gc{padding:0 10px;transition-duration:520ms}
+  .dt-gt{transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dt-gt{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  .bb-g{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .bb-g{grid-template-columns:minmax(0,1fr) 376px;transition-duration:520ms}
+  /* карточка шаблона рядом с брендбуком: в узкой колоде обложка сжимается и гаснет на месте (только в широкой) */
+  .bb-tpl-n>img,.bb-tpl-n>.tp-wf-m{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bb-tpl-n>img,.hp-nar .bb-tpl-n>.tp-wf-m{width:0 !important;margin-right:-16px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .bb-tpl-n>div{min-width:0}
+  .dx-capw{display:block;max-width:240px;overflow:hidden;white-space:nowrap;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .dx-capw{max-width:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  [data-tx="c-tad"]{--hpd:336px}
+  [data-tx="x-l"]{--hpd:110px}
+  [data-tx="x-r"],[data-tx="x-rn"],[data-tx="x-rh"],[data-tx="x-r2"]{--hpd:306px}
+}
 </style>
 </helmet>
 <div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
@@ -1523,12 +1734,13 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <!-- ПЛИТА 01 · Шаблон -->
 <div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform: {{ y1 }};">
 <section class="p2-plate p2-rise" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; animation-delay:0ms;">
+<sc-if value="{{ bbMenuOn }}" hint-placeholder-val="{{ false }}"><button type="button" class="tx-scrim" onClick="{{ bbMenuClose }}" tabindex="-1" aria-label="Закрыть выбор брендбука"></button></sc-if>
 
-<div class="{{ stripCls }}" style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<div class="{{ s1Cls }}" style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
 <span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">01</span>
 <span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">{{ tplName }}</span>
-<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">{{ tplMeta }}</span>
-<sc-if value="{{ more }}" hint-placeholder-val="{{ false }}"><button type="button" class="p2-sbtn" onClick="{{ backTpl }}" aria-label="Вернуться к шагу «Шаблон»"></button></sc-if>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">{{ s1Meta }}</span>
+<sc-if value="{{ s1Btn }}" hint-placeholder-val="{{ false }}"><button type="button" class="p2-sbtn" onClick="{{ backTpl }}" aria-label="Вернуться к шагу «Шаблон»"></button></sc-if>
 </div>
 
 <div class="{{ head1 }}">
@@ -1541,12 +1753,68 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span style="flex:1; min-width:0;"></span>
 <sc-if value="{{ tplOpen }}" hint-placeholder-val="{{ false }}">
 <div class="p2-in" style="display:flex; align-items:center; gap:24px;">
+<!-- «Брендбук» (модуль ds): тихая кнопка рядом с шаблоном → меню как «Из файла» → разбор в теле шага → карточка с палитрой -->
+<div class="bb-fg">
+<sc-if value="{{ bbNone }}" hint-placeholder-val="{{ true }}">
+<button type="button" class="p2-gb bb-btn" onClick="{{ bbToggle }}" aria-haspopup="menu" aria-expanded="{{ bbMenuStr }}" aria-controls="bb-menu" title="Брендбук или дизайн-система: PDF, токены, папка, Figma">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg>
+<span>Брендбук</span>
+</button>
+</sc-if>
+<sc-if value="{{ bbBusy }}" hint-placeholder-val="{{ false }}">
+<span class="bb-busy p2-in" role="status"><svg class="ds-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)"></circle><path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB"></path></svg><span>Разбираю брендбук…</span></span>
+</sc-if>
+<sc-if value="{{ bbHas }}" hint-placeholder-val="{{ false }}">
+<button type="button" class="bb-chip p2-in" onClick="{{ bbOpen }}" aria-haspopup="dialog" aria-controls="bb-lay" title="Открыть брендбук: палитра, шрифты, правила, расхождения с шаблоном">
+<span class="bb-tile" aria-hidden="true"><sc-for list="{{ bbPal }}" as="c" hint-placeholder-count="6"><span style="background: {{ c.hex }};"></span></sc-for></span>
+<span class="bb-ct"><span class="bb-cn">Брендбук VK Cloud</span><span class="bb-cm">{{ bbMeta }}</span></span>
+</button>
+</sc-if>
+<div id="bb-menu" role="menu" aria-label="Выберите брендбук" class="tx-menu bb-menu {{ bbMenuCls }}">
+<p class="tx-mcap">Брендбук или дизайн-система</p>
+<sc-for list="{{ bbItems }}" as="f" hint-placeholder-count="5">
+<sc-if value="{{ f.sep }}" hint-placeholder-val="{{ false }}"><span class="tx-mdiv" role="separator"></span></sc-if>
+<button type="button" role="menuitem" class="tx-mi" onClick="{{ f.pick }}">
+<span class="tx-mic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ f.icon }}"></path></svg></span>
+<span class="tx-mt"><span class="tx-mn">{{ f.name }}</span><span class="tx-mm">{{ f.meta }}</span></span>
+</button>
+</sc-for>
+</div>
+</div>
 <button type="button" class="p2-ob" onClick="{{ openText }}" style="height:40px;">Готово</button>
 </div>
 </sc-if>
 <sc-if value="{{ tplClosed }}" hint-placeholder-val="{{ true }}">
 <div class="p2-in" style="display:flex; align-items:center; gap:24px;">
-<div style="display:flex; align-items:center; gap:16px;">
+<!-- «Брендбук» (модуль ds): тихая кнопка рядом с шаблоном → меню как «Из файла» → разбор в теле шага → карточка с палитрой -->
+<div class="bb-fg">
+<sc-if value="{{ bbNone }}" hint-placeholder-val="{{ true }}">
+<button type="button" class="p2-gb bb-btn" onClick="{{ bbToggle }}" aria-haspopup="menu" aria-expanded="{{ bbMenuStr }}" aria-controls="bb-menu" title="Брендбук или дизайн-система: PDF, токены, папка, Figma">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg>
+<span>Брендбук</span>
+</button>
+</sc-if>
+<sc-if value="{{ bbBusy }}" hint-placeholder-val="{{ false }}">
+<span class="bb-busy p2-in" role="status"><svg class="ds-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)"></circle><path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB"></path></svg><span>Разбираю брендбук…</span></span>
+</sc-if>
+<sc-if value="{{ bbHas }}" hint-placeholder-val="{{ false }}">
+<button type="button" class="bb-chip p2-in" onClick="{{ bbOpen }}" aria-haspopup="dialog" aria-controls="bb-lay" title="Открыть брендбук: палитра, шрифты, правила, расхождения с шаблоном">
+<span class="bb-tile" aria-hidden="true"><sc-for list="{{ bbPal }}" as="c" hint-placeholder-count="6"><span style="background: {{ c.hex }};"></span></sc-for></span>
+<span class="bb-ct"><span class="bb-cn">Брендбук VK Cloud</span><span class="bb-cm">{{ bbMeta }}</span></span>
+</button>
+</sc-if>
+<div id="bb-menu" role="menu" aria-label="Выберите брендбук" class="tx-menu bb-menu {{ bbMenuCls }}">
+<p class="tx-mcap">Брендбук или дизайн-система</p>
+<sc-for list="{{ bbItems }}" as="f" hint-placeholder-count="5">
+<sc-if value="{{ f.sep }}" hint-placeholder-val="{{ false }}"><span class="tx-mdiv" role="separator"></span></sc-if>
+<button type="button" role="menuitem" class="tx-mi" onClick="{{ f.pick }}">
+<span class="tx-mic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ f.icon }}"></path></svg></span>
+<span class="tx-mt"><span class="tx-mn">{{ f.name }}</span><span class="tx-mm">{{ f.meta }}</span></span>
+</button>
+</sc-for>
+</div>
+</div>
+<div class="bb-tpl {{ bbTplCls }}" style="display:flex; align-items:center; gap:16px;">
 <sc-if value="{{ tpHeadImg }}" hint-placeholder-val="{{ true }}"><img src="{{ tplImg }}" alt="Обложка шаблона {{ tplName }}" style="display:block; width:80px; height:45px; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if><sc-if value="{{ tpHeadWf }}" hint-placeholder-val="{{ false }}"><span class="tp-wf tp-wf-m" role="img" aria-label="Обложка шаблона {{ tplName }}"><span class="tp-b" style="left:8%; top:24%; width:10%; height:4%; background: {{ tpHeadInk }};"></span><span class="tp-b tp-dk" style="left:8%; top:36%; width:56%; height:9%;"></span><span class="tp-b tp-dk" style="left:8%; top:49%; width:38%; height:9%;"></span><span class="tp-b" style="left:8%; top:66%; width:30%; height:4%;"></span></span></sc-if>
 <div style="display:flex; flex-direction:column;">
 <span style="font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">{{ tplName }}</span>
@@ -1685,6 +1953,55 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </section>
 </sc-if>
 
+<!-- Разбор брендбука (модуль ds, язык C-analyzing): слева файл и три плитки, которые заполняются по ходу разбора — шрифты,
+     палитра, логотипы (в узкой колоде вторая дорожка сжимается до нуля, как у разбора шаблона); справа на две колонки — ход разбора -->
+<sc-if value="{{ bbRunOn }}" hint-placeholder-val="{{ false }}">
+<div class="p2-stag p2-in {{ bbOut }}" style="animation-delay:0ms; transition-delay:0ms;" aria-busy="true">
+<div class="an-sk">
+<span class="an-pulse" aria-hidden="true"></span>
+<span class="an-skin">
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ bbFile }}</span>
+<span class="an-track" role="progressbar" aria-label="Разбор брендбука" aria-valuemin="0" aria-valuemax="6" aria-valuenow="{{ bbStepN }}"><span class="an-fill tp-fill" style="transform:scaleX({{ bbProg }});"></span></span>
+<span style="margin-top:8px; font-size:13px; font-weight:600; line-height:20px; color:#5A6272;">{{ bbWord }}</span>
+</span>
+</div>
+<span class="an-cap" aria-hidden="true" style="align-items:center;">
+<span class="an-line" style="width:112px;"></span>
+<span class="an-line" style="width:56px;"></span>
+</span>
+</div>
+
+<sc-for list="{{ bbTiles }}" as="t" hint-placeholder-count="3">
+<div class="p2-stag p2-in {{ bbOut }} {{ t.cut }}" style="animation-delay: {{ t.delay }}; transition-delay: {{ t.delay }};">
+<div class="{{ t.wo }}">
+<span class="bb-at {{ t.on }}" role="img" aria-label="{{ t.aria }}">
+<span class="an-pulse" aria-hidden="true"></span>
+<sc-if value="{{ t.isFont }}" hint-placeholder-val="{{ true }}"><span class="bb-atin"><span class="bb-aa">Аа</span><span class="bb-aan">VK Sans Display</span></span></sc-if>
+<sc-if value="{{ t.isPal }}" hint-placeholder-val="{{ false }}"><span class="bb-atin bb-atpal"><sc-for list="{{ bbPal }}" as="c" hint-placeholder-count="6"><span style="background: {{ c.hex }};"></span></sc-for></span></sc-if>
+<sc-if value="{{ t.isLogo }}" hint-placeholder-val="{{ false }}"><span class="bb-atin bb-atlg"><sc-for list="{{ bbLogos }}" as="l" hint-placeholder-count="4"><span class="bb-lg {{ l.cls }}"><span class="bb-lgm"></span><span class="bb-lgw"></span></span></sc-for></span></sc-if>
+</span>
+<span class="an-cap">
+<span class="an-name">{{ t.name }}</span>
+<span class="an-meta">{{ t.meta }}</span>
+</span>
+</div>
+</div>
+</sc-for>
+
+<section class="an-box p2-stag p2-in {{ bbOut }}" aria-labelledby="bb-job" aria-live="polite" style="grid-column:3 / span 2; grid-row:1 / span 2; animation-delay:160ms; transition-delay:160ms;">
+<h2 id="bb-job" style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:20px; line-height:28px; letter-spacing:-0.02em; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Разбираю брендбук «VK Cloud»</h2>
+<ol class="an-steps">
+<sc-for list="{{ bbSteps }}" as="s" hint-placeholder-count="6">
+<li class="an-step {{ s.cls }}" aria-current="{{ s.current }}">
+<span class="an-dot" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
+<span class="an-txt">{{ s.a }}<b>{{ s.b }}</b>{{ s.c }}<span class="p2-sr">{{ s.sr }}</span></span>
+<span class="an-now">{{ s.now }}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+</sc-if>
+
 <!-- Файл над шагом (как C-upload): принимается в любом месте шага; в макете — щелчок по подсказке = «отпустить файл» -->
 <div class="up-zone tp-zone {{ tpZoneCls }}" role="status" aria-live="polite" onClick="{{ tpDrop }}">
 <span class="up-veil" aria-hidden="true"></span>
@@ -1716,10 +2033,10 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <section class="p2-plate p2-p2 p2-rise" aria-label="Шаг 2 — текст" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;">
 <sc-if value="{{ txMenuOn }}" hint-placeholder-val="{{ false }}"><button type="button" class="tx-scrim" onClick="{{ txMenuClose }}" tabindex="-1" aria-label="Закрыть выбор файла"></button></sc-if>
 
-<div class="{{ stripCls }}" style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<div class="{{ s2Cls }}" style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
 <span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">02</span>
-<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">{{ docTitle }}</span>
-<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">{{ docSub }}</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">{{ s2Title }}</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">{{ s2Sub }}</span>
 <sc-if value="{{ more }}" hint-placeholder-val="{{ false }}"><button type="button" class="p2-sbtn" onClick="{{ backText }}" aria-label="Вернуться к шагу «Текст»"></button></sc-if>
 </div>
 
@@ -1731,19 +2048,32 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </button>
 <div class="p2-hx">
 <div class="p2-in tx-fg {{ txHead }}" style="display:flex; align-items:center; gap:12px; animation-delay:40ms;">
-<button type="button" class="p2-ob" onClick="{{ txFileBtn }}" title="Текст из файла .txt или .md" aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded="{{ txMenuStr }}" aria-controls="tx-menu" style="height:40px;">
+<button type="button" class="p2-ob" onClick="{{ txFileBtn }}" title="Текст или данные из файла" aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded="{{ txMenuStr }}" aria-controls="tx-menu" style="height:40px;">
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 11.5l-7.6 7.6a4.6 4.6 0 0 1-6.5-6.5l8.1-8.1a3.1 3.1 0 0 1 4.4 4.4l-8 8a1.55 1.55 0 0 1-2.2-2.2l7.3-7.3"></path></svg>
 <span>Из файла</span>
 </button>
 <span class="hp-wo tx-fmtw"><span id="ct-fmt" class="p2-hide-s {{ txFmt }}" style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">.txt или .md</span></span>
-<div id="tx-menu" role="menu" aria-label="Выберите файл" class="tx-menu {{ txMenuCls }}">
-<p class="tx-mcap">Выберите файл</p>
+<!-- меню на две колонки (модуль ds): слева текст (как было), справа данные для графиков; высота прежняя — меню не заходит под плиту 03 -->
+<div id="tx-menu" role="menu" aria-label="Выберите файл" class="tx-menu tx-menu2 {{ txMenuCls }}">
+<div class="tx-mcol" role="group" aria-labelledby="tx-mc1">
+<p id="tx-mc1" class="tx-mcap">Текст</p>
 <sc-for list="{{ txFiles }}" as="f" hint-placeholder-count="3">
 <button type="button" role="menuitem" class="tx-mi" onClick="{{ f.pick }}">
 <span class="tx-mic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ f.icon }}"></path></svg></span>
 <span class="tx-mt"><span class="tx-mn">{{ f.name }}</span><span class="tx-mm">{{ f.meta }}</span></span>
 </button>
 </sc-for>
+</div>
+<div class="tx-mcol" role="group" aria-labelledby="tx-mc2">
+<p id="tx-mc2" class="tx-mcap">Данные для графиков</p>
+<sc-for list="{{ dtMenu }}" as="f" hint-placeholder-count="2">
+<button type="button" role="menuitem" class="tx-mi" onClick="{{ f.pick }}">
+<span class="tx-mic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ f.icon }}"></path></svg></span>
+<span class="tx-mt"><span class="tx-mn">{{ f.name }}</span><span class="tx-mm">{{ f.meta }}</span></span>
+</button>
+</sc-for>
+<p class="tx-mdrop"><span class="tx-mic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14.5V4 M7.5 8.5L12 4l4.5 4.5 M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2"></path></svg></span><span class="tx-mt"><span class="tx-mn">Или перетащите на поле</span><span class="tx-mm">текст и данные вместе</span></span></p>
+</div>
 </div>
 </div>
 <span style="flex:1; min-width:0;"></span>
@@ -1769,17 +2099,17 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span aria-hidden="true" style="display:flex; align-items:center; justify-content:center; flex:none; width:32px; height:32px; border-radius:999px; background:#2563EB; color:#FFFFFF;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg></span>
 <div class="hp-tx hp-txf" data-tx="c-note"><p class="hp-txw" style="min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Текст и оформление — из презентации <b style="font-weight:700;">«Итоги квартала»</b>: 14 слайдов, 3 таблицы, 4 диаграммы, 6 изображений. Оценка исходной презентации — <b style="font-weight:700;">62 из 100</b>. Модель нашла в ней <b style="font-weight:700;">9 проблем вёрстки</b>. Слайды останутся те же, вёрстка соберётся заново, а модель посмотрит на каждый новый слайд.</p><p class="hp-txn" style="min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true">Текст и оформление — из презентации <b style="font-weight:700;">«Итоги квартала»</b>: 14 слайдов, 3 таблицы, 4 диаграммы, 6 изображений. Оценка исходной презентации — <b style="font-weight:700;">62 из 100</b>. Модель нашла в ней <b style="font-weight:700;">9 проблем вёрстки</b>. Слайды останутся те же, вёрстка соберётся заново, а модель посмотрит на каждый новый слайд.</p></div>
 </div>
-<div class="tx-fw {{ txFw }}">
+<div class="tx-fw dt-g {{ txFw }} {{ dtG }}">
 <div class="p2-field p2-stag tx-ring {{ txBad }}" style="display:flex; flex-direction:column; height:244px; padding:24px; border-radius:24px; background:#FFFFFF;">
 <label style="display:flex; flex-direction:column; flex:1; min-height:0;">
 <span style="font-size:13px; font-weight:600; line-height:20px; color:#5A6272;">О чём презентация</span>
-<span class="p2-taw"><span class="hp-tx hp-txf hp-txa" data-tx="c-ta"><textarea class="hp-txw p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;"></textarea><textarea class="hp-txn p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;" aria-hidden="true" tabindex="-1"></textarea></span><sc-if value="{{ phShow }}" hint-placeholder-val="{{ true }}"><span class="p2-tph" aria-hidden="true">{{ phText }}<span class="p2-caret {{ caretCls }}"></span></span></sc-if></span>
+<span class="p2-taw"><span class="hp-tx hp-txf hp-txa" data-tx="{{ txTa }}"><textarea class="hp-txw p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;"></textarea><textarea class="hp-txn p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;" aria-hidden="true" tabindex="-1"></textarea></span><sc-if value="{{ phShow }}" hint-placeholder-val="{{ true }}"><span class="p2-tph" aria-hidden="true">{{ phText }}<span class="p2-caret {{ caretCls }}"></span></span></sc-if></span>
 </label>
 <div class="p2-wrap" style="display:flex; align-items:center; justify-content:space-between; gap:24px; height:20px; margin-top:16px;">
 <div class="tx-sw">
 <p class="{{ txHintCls }}" style="display:flex; align-items:center; gap:8px; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg>
-<span class="hp-sw tx-hsw"><span class="hp-wo">{{ txHintShort }}</span><span class="hp-no">Это тема — агент напишет полный текст</span></span>
+<span class="hp-sw tx-hsw"><span class="hp-wo">{{ txHintShort }}</span><span class="hp-no">{{ txHintShortN }}</span></span>
 </p>
 <p id="ct-facts" class="{{ txFactsCls }}" style="display:flex; align-items:center; gap:8px; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg>
@@ -1796,6 +2126,57 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="hp-wo tx-fixw"><span class="{{ txFixCls }}" style="flex:none; font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">Вставьте готовый текст или загрузите .txt и .md</span></span>
 </span>
 </div>
+</div>
+<!-- Данные (модуль ds): панель справа от поля — карточки файлов; разбор по очереди: строка статуса сменяется профилем.
+     Дорожка панели 0 → 400 px (узкая колода — 320), содержимое не переносится, строки обрезаются многоточием -->
+<div class="dt-cell" aria-hidden="{{ dtHide }}">
+<section class="dt-pan" aria-labelledby="dt-h">
+<div class="dt-hd">
+<span id="dt-h" class="dt-lbl">Данные</span>
+<span class="dt-st {{ dtStCls }}" aria-live="polite">{{ dtStatus }}</span>
+</div>
+<ul class="dt-list">
+<sc-for list="{{ dtCards }}" as="d" hint-placeholder-count="7">
+<li class="dt-li p2-in {{ d.cls }}" style="animation-delay: {{ d.delay }};">
+<div class="dt-card" title="{{ d.tip }}">
+<span class="dt-ic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ d.icon }}"></path></svg></span>
+<span class="dt-tx">
+<span class="dt-nm">{{ d.name }}</span>
+<span class="dt-sw">
+<span class="dt-wait {{ d.waitCls }}">в очереди</span>
+<span class="dt-run {{ d.runCls }}"><svg class="ds-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)"></circle><path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB"></path></svg><span>{{ d.run }}</span></span>
+<span class="dt-pf {{ d.pfCls }}"><span class="hp-sw"><span class="hp-wo"><b>{{ d.nature }}</b> · {{ d.size }}</span><span class="hp-no"><b>{{ d.nature }}</b> · {{ d.sizeN }}</span></span></span>
+</span>
+</span>
+<button type="button" class="dt-x" onClick="{{ d.remove }}" aria-label="{{ d.rmLabel }}" title="Убрать файл"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></button>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+</div>
+<!-- цели из текста: показывают, что бриф влияет на выбор графика (ТЗ: «показать рост», «сравнить регионы») -->
+<sc-if value="{{ dtGoalOn }}" hint-placeholder-val="{{ false }}">
+<div class="dt-goalw {{ dtGoalCls }}">
+<div class="dt-goal p2-in" style="animation-delay:120ms;">
+<p class="dt-gl"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 8a4 4 0 1 1 0 8a4 4 0 0 1 0-8z M12 12h.01"></path></svg><span class="hp-sw"><span class="hp-wo">{{ dtGoalLbl }}</span><span class="hp-no">{{ dtGoalLblN }}</span></span></p>
+<div class="dt-gcs">
+<sc-for list="{{ dtGoals }}" as="g" hint-placeholder-count="2">
+<span class="dt-gc">«{{ g.q }}»<span class="dt-gt"> → {{ g.to }}</span></span>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+<!-- Файлы данных над полем (как C-upload): в макете — щелчок по подсказке = «отпустить» -->
+<div class="up-zone tp-zone dt-zone {{ dtZoneCls }}" role="status" aria-live="polite" onClick="{{ dtDrop }}">
+<span class="up-veil" aria-hidden="true"></span>
+<span class="up-line" aria-hidden="true"></span>
+<div class="up-msg">
+<span class="p2-lic p2-lic-w p2-lic-up" aria-hidden="true"><span class="p2-lic-b"></span><span class="p2-lic-f"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg></span></span>
+<p style="margin:24px 0 0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:24px; line-height:32px; letter-spacing:-0.03em; color:#0B1220;">Отпустите файлы — разберу данные</p>
+<p style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">CSV, XLSX, JSON или текст с таблицей · 7 файлов</p>
 </div>
 </div>
 </div>
@@ -2200,6 +2581,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <ul style="display:flex; flex-direction:column; gap:12px; margin:24px 0 0; padding:0; list-style:none;">
 <li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><span><b style="font-weight:700;">Ошибок нет</b> · 3 замечания</span></li>
 <sc-if value="{{ fullDoc }}" hint-placeholder-val="{{ true }}"><li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg><span><b style="font-weight:700;">9 чисел</b> сверены с текстом</span></li></sc-if>
+<sc-if value="{{ dataDoc }}" hint-placeholder-val="{{ false }}"><li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg><span><b style="font-weight:700;">7 файлов данных</b> — числа сверены</span></li></sc-if>
 <li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg><span>{{ hpSrc }}</span></li>
 </ul>
 </div>
@@ -2496,6 +2878,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span style="display:inline-flex; align-items:center; gap:4px; color:#B45309;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg>3 предупреждения</span>
 </span>
 <sc-if value="{{ fullDoc }}" hint-placeholder-val="{{ true }}"><span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">9 чисел сверены с текстом</span></sc-if>
+<sc-if value="{{ dataDoc }}" hint-placeholder-val="{{ false }}"><span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">Числа на слайдах сверены с файлами</span></sc-if>
 </span>
 </span>
 </a>
@@ -2535,6 +2918,21 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span style="min-width:0; font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">Увидел: формула прижата к абзацу над ней</span>
 </span>
 </a>
+</sc-if>
+<!-- колода с данными (модуль ds): «Почему так» — про открытый слайд; оформление — шаблон и брендбук -->
+<sc-if value="{{ dataDoc }}" hint-placeholder-val="{{ false }}">
+<a class="ra-card" href="#" onClick="{{ ddWhy }}">
+<span class="ra-ch"><span class="ra-ct">Почему так</span><span style="display:flex; align-items:center; gap:8px;"><span class="ra-cm">Слайд {{ bigN }}</span><svg class="ra-go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span></span>
+<span style="display:-webkit-box; margin-top:8px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">{{ dsWhySum }}</span>
+<sc-if value="{{ dsWhyFile }}" hint-placeholder-val="{{ true }}"><span class="ds-rfile"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ dsWhyIc }}"></path></svg><span>{{ dsWhyFileName }}</span></span></sc-if>
+</a>
+<div class="ra-card ra-card-static ds-look">
+<span class="ra-ch"><span class="ra-ct">Оформление</span><span class="ra-cm">{{ dsLookTag }}</span></span>
+<span style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+<sc-if value="{{ bbOnR }}" hint-placeholder-val="{{ true }}"><span class="bb-tile ds-tile" aria-hidden="true"><sc-for list="{{ bbPal }}" as="c" hint-placeholder-count="6"><span style="background: {{ c.hex }};"></span></sc-for></span></sc-if>
+<span style="min-width:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">{{ dsLook }}</span>
+</span>
+</div>
 </sc-if>
 
 </div>
@@ -2704,7 +3102,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 <!-- СЛОЙ · «Подробнее» (как доски D-*), живой: открывается карточками и ссылками правой колонки результата -->
 <div id="p2-lay-d" class="p2-slot p2-lay {{ ddLay }}" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:5; transform: {{ ddY }};">
-<section class="dd-sheet" role="region" aria-label="Подробнее о презентации «Интеграл»">
+<section class="dd-sheet" role="region" aria-label="Подробнее о презентации «{{ docTitle }}»">
 <div class="dd-fx">
 <div class="dd-top p2-ls" style="--d:120ms;">
 <div class="dd-tabs" role="tablist" aria-label="Разделы подробностей">
@@ -2987,6 +3385,18 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <h3 class="dd-h" style="max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ dlw.title }}</h3>
 </div>
 </sc-if>
+<sc-if value="{{ dlw.dA }}" hint-placeholder-val="{{ false }}">
+<div class="p2-in" style="display:flex; flex-direction:column; align-items:center; flex:1; min-width:0; text-align:center;">
+<span class="dd-cap">{{ dlw.cap }}</span>
+<h3 class="dd-h" style="max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ dlw.title }}</h3>
+</div>
+</sc-if>
+<sc-if value="{{ dlw.dB }}" hint-placeholder-val="{{ false }}">
+<div class="p2-in" style="display:flex; flex-direction:column; align-items:center; flex:1; min-width:0; text-align:center;">
+<span class="dd-cap">{{ dlw.cap }}</span>
+<h3 class="dd-h" style="max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ dlw.title }}</h3>
+</div>
+</sc-if>
 <button type="button" class="p2-rbl" aria-label="Следующий слайд" title="Следующий слайд (→)" onClick="{{ dlw.next }}" disabled="{{ dlw.nextDis }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></button>
 </nav>
 </div>
@@ -3084,12 +3494,14 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 
 <!-- Нижняя строка: проверка слайда -->
+<sc-if value="{{ dlw.hasCheck }}" hint-placeholder-val="{{ true }}">
 <button type="button" class="dw-chk p2-in" onClick="{{ dlw.check }}" aria-label="{{ dlw.checkAria }}" style="grid-column:1 / -1; animation-delay:120ms;">
 <span class="dd-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7"></path></svg></span>
 <span style="font-family:'Unbounded','Manrope',sans-serif; font-size:14px; font-weight:600; line-height:24px; letter-spacing:-0.02em;">Проверка слайда <span style="font-family:'Manrope',system-ui,sans-serif; font-size:15px; font-weight:500; letter-spacing:0; color:#5A6272;">· {{ dlw.checkN }}</span></span>
 <sc-if value="{{ dlw.hasTag }}" hint-placeholder-val="{{ true }}"><span class="dd-tag {{ dlw.tagCls }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ dlw.tagP }}"></path></svg>{{ dlw.tagText }}</span></sc-if>
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left:auto; flex:none; color:#5A6272;"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg>
 </button>
+</sc-if>
 
 </div>
 </sc-if>
@@ -3186,12 +3598,199 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 
 <!-- Нижняя строка: проверка слайда -->
+<sc-if value="{{ dlw.hasCheck }}" hint-placeholder-val="{{ true }}">
 <button type="button" class="dw-chk p2-in" onClick="{{ dlw.check }}" aria-label="{{ dlw.checkAria }}" style="grid-column:1 / -1; animation-delay:120ms;">
 <span class="dd-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7"></path></svg></span>
 <span style="font-family:'Unbounded','Manrope',sans-serif; font-size:14px; font-weight:600; line-height:24px; letter-spacing:-0.02em;">Проверка слайда <span style="font-family:'Manrope',system-ui,sans-serif; font-size:15px; font-weight:500; letter-spacing:0; color:#5A6272;">· {{ dlw.checkN }}</span></span>
 <sc-if value="{{ dlw.hasTag }}" hint-placeholder-val="{{ true }}"><span class="dd-tag {{ dlw.tagCls }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ dlw.tagP }}"></path></svg>{{ dlw.tagText }}</span></sc-if>
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left:auto; flex:none; color:#5A6272;"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg>
 </button>
+</sc-if>
+
+</div>
+</sc-if>
+
+<sc-if value="{{ dlw.dA }}" hint-placeholder-val="{{ false }}">
+<div class="dd-g dw-g">
+
+<!-- Левая колонка: данные слайда (профиль файла) и аналитическая задача -->
+<div class="dx-col">
+<section class="dd-box p2-in" aria-labelledby="dx-h-data-a" style="animation-delay:0ms;">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+<h3 id="dx-h-data-a" class="dd-h">Данные</h3>
+<span class="dd-cap">профиль файла</span>
+</div>
+<div class="dx-file">
+<span class="dx-fic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ dlw.fileIc }}"></path></svg></span>
+<span class="dx-ft"><span class="dx-fn">{{ dlw.file }}</span><span class="dx-fm">{{ dlw.fileMeta }}</span></span>
+</div>
+<h4 class="dw-sub" style="margin-top:16px;">Колонки</h4>
+<ul class="dx-cols" aria-label="Колонки и их типы">
+<sc-for list="{{ dlw.cols }}" as="c" hint-placeholder-count="3">
+<li class="dx-cr"><span class="dx-cn">{{ c.name }}</span><span class="dd-tag dx-ty {{ c.tcls }}">{{ c.type }}</span><span class="dx-role">{{ c.role }}</span></li>
+</sc-for>
+</ul>
+<dl class="dx-facts">
+<sc-for list="{{ dlw.facts }}" as="f" hint-placeholder-count="5">
+<div class="dx-fr {{ f.cls }}">
+<dt>{{ f.k }}</dt>
+<dd><sc-if value="{{ f.hasIc }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none; margin-top:2px;"><path d="{{ f.p }}"></path></svg></sc-if><div class="hp-tx hp-txf" data-tx="{{ f.tx }}"><span class="hp-txw">{{ f.v }}</span><span class="hp-txn" aria-hidden="true">{{ f.v }}</span></div></dd>
+</div>
+</sc-for>
+</dl>
+</section>
+
+<section class="dd-box p2-in" aria-labelledby="dx-h-task-a" style="margin-top:24px; animation-delay:40ms;">
+<h3 id="dx-h-task-a" class="dd-h">Задача</h3>
+<p class="dx-tn">{{ dlw.task }}</p>
+<sc-if value="{{ dlw.hasGoal }}" hint-placeholder-val="{{ true }}"><p class="dx-goal"><span class="dd-tag dd-tag-b"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 8a4 4 0 1 1 0 8a4 4 0 0 1 0-8z M12 12h.01"></path></svg>{{ dlw.goal }}</span></p></sc-if>
+<div class="hp-tx" data-tx="x-l"><p class="hp-txw dx-tw">{{ dlw.taskWhy }}</p><p class="hp-txn dx-tw" aria-hidden="true">{{ dlw.taskWhy }}</p></div>
+<div class="hp-tx" data-tx="x-l"><div class="hp-txw dx-ks"><sc-for list="{{ dlw.kinds }}" as="k" hint-placeholder-count="6"><span class="dx-k {{ k.cls }}">{{ k.t }}</span></sc-for></div><div class="hp-txn dx-ks" aria-hidden="true"><sc-for list="{{ dlw.kinds }}" as="k" hint-placeholder-count="6"><span class="dx-k {{ k.cls }}">{{ k.t }}</span></sc-for></div></div>
+</section>
+</div>
+
+<!-- Правая колонка: ранжированные варианты визуализации и откуда заголовок-вывод -->
+<div class="dx-col">
+<section class="dd-box p2-in" aria-labelledby="dx-h-vars-a" style="animation-delay:40ms;">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+<h3 id="dx-h-vars-a" class="dd-h" style="white-space:nowrap;">Варианты визуализации</h3>
+<span class="hp-wo dx-capw"><span class="dd-cap">лучший по данным — первым</span></span>
+</div>
+<ol class="dx-vars">
+<sc-for list="{{ dlw.vars }}" as="v" hint-placeholder-count="3">
+<li class="dx-v {{ v.cls }}">
+<span class="dx-rank" aria-hidden="true">{{ v.n }}</span>
+<svg class="dx-mini" viewBox="0 0 160 90" role="img" aria-label="{{ v.label }}">
+<rect x="0.5" y="0.5" width="159" height="89" rx="10" fill="#FAFCFF" stroke="rgba(11,18,32,.08)"></rect>
+<path d="{{ v.m.grid }}" fill="none" stroke="rgba(32,32,32,.14)" stroke-width="1" stroke-linecap="round"></path>
+<path d="{{ v.m.light }}" fill="#D6ECFF"></path>
+<path d="{{ v.m.txt }}" fill="none" stroke="rgba(32,32,32,.22)" stroke-width="3" stroke-linecap="round"></path>
+<path d="{{ v.m.ringL }}" fill="none" stroke="#D6ECFF" stroke-width="12"></path>
+<path d="{{ v.m.ring2 }}" fill="none" stroke="{{ v.cMain }}" stroke-opacity=".55" stroke-width="12"></path>
+<path d="{{ v.m.ring }}" fill="none" stroke="{{ v.cMain }}" stroke-width="12"></path>
+<path d="{{ v.m.half }}" fill="{{ v.cMain }}" fill-opacity=".55"></path>
+<path d="{{ v.m.main }}" fill="{{ v.cMain }}"></path>
+<path d="{{ v.m.sep }}" fill="none" stroke="#FAFCFF" stroke-width="1.5" stroke-linecap="round"></path>
+<path d="{{ v.m.line }}" fill="none" stroke="{{ v.cMain }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="{{ v.m.acc }}" fill="{{ v.cAcc }}"></path>
+<path d="{{ v.m.dash }}" fill="none" stroke="rgba(32,32,32,.4)" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round"></path>
+</svg>
+<div class="dx-vt">
+<div class="hp-tx" data-tx="x-r"><p class="hp-txw dx-vn">{{ v.name }}<sc-if value="{{ v.isOn }}" hint-placeholder-val="{{ true }}"><span class="dd-tag dd-tag-b dx-on">Выбран</span></sc-if></p><p class="hp-txn dx-vn" aria-hidden="true">{{ v.name }}<sc-if value="{{ v.isOn }}" hint-placeholder-val="{{ true }}"><span class="dd-tag dd-tag-b dx-on">Выбран</span></sc-if></p></div>
+<div class="hp-tx" data-tx="x-r"><p class="hp-txw dx-vr">{{ v.why }}</p><p class="hp-txn dx-vr" aria-hidden="true">{{ v.why }}</p></div>
+<sc-if value="{{ v.hasNote }}" hint-placeholder-val="{{ false }}"><div class="hp-tx" data-tx="x-rn"><p class="hp-txw dx-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg><span>{{ v.note }}</span></p><p class="hp-txn dx-note" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg><span>{{ v.note }}</span></p></div></sc-if>
+<sc-if value="{{ v.canBuild }}" hint-placeholder-val="{{ true }}"><button type="button" class="p2-gb dx-act" onClick="{{ v.build }}" disabled="{{ v.dis }}" title="Пересобрать слайд {{ v.slide }} этим вариантом"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg><span>Пересобрать слайд так</span></button></sc-if>
+<sc-if value="{{ v.isBusy }}" hint-placeholder-val="{{ false }}"><p class="dx-busy p2-in" role="status"><svg class="ds-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)"></circle><path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB"></path></svg><span>Пересобираю слайд {{ v.slide }}…</span></p></sc-if>
+</div>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<section class="dd-box p2-in" aria-labelledby="dx-h-hl-a" style="margin-top:24px; animation-delay:80ms;">
+<h3 id="dx-h-hl-a" class="dd-h">Заголовок-вывод</h3>
+<div class="dx-hl">
+<img src="{{ dlw.slideImg }}" alt="{{ dlw.slideAlt }}">
+<div class="dx-hlt">
+<span class="dx-key">{{ dlw.key }}</span>
+<div class="hp-tx" data-tx="x-rh"><p class="hp-txw dx-from">{{ dlw.from }}</p><p class="hp-txn dx-from" aria-hidden="true">{{ dlw.from }}</p></div>
+</div>
+</div>
+<div class="hp-tx" data-tx="x-r2"><p class="hp-txw dx-not"><span class="dd-tag dd-tag-n">не описание</span><span>«<s>{{ dlw.plain }}</s>» — это тема; в заголовке — вывод из данных</span></p><p class="hp-txn dx-not" aria-hidden="true"><span class="dd-tag dd-tag-n">не описание</span><span>«<s>{{ dlw.plain }}</s>» — это тема; в заголовке — вывод из данных</span></p></div>
+</section>
+</div>
+
+</div>
+</sc-if>
+<sc-if value="{{ dlw.dB }}" hint-placeholder-val="{{ false }}">
+<div class="dd-g dw-g">
+
+<!-- Левая колонка: данные слайда (профиль файла) и аналитическая задача -->
+<div class="dx-col">
+<section class="dd-box p2-in" aria-labelledby="dx-h-data-b" style="animation-delay:0ms;">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+<h3 id="dx-h-data-b" class="dd-h">Данные</h3>
+<span class="dd-cap">профиль файла</span>
+</div>
+<div class="dx-file">
+<span class="dx-fic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ dlw.fileIc }}"></path></svg></span>
+<span class="dx-ft"><span class="dx-fn">{{ dlw.file }}</span><span class="dx-fm">{{ dlw.fileMeta }}</span></span>
+</div>
+<h4 class="dw-sub" style="margin-top:16px;">Колонки</h4>
+<ul class="dx-cols" aria-label="Колонки и их типы">
+<sc-for list="{{ dlw.cols }}" as="c" hint-placeholder-count="3">
+<li class="dx-cr"><span class="dx-cn">{{ c.name }}</span><span class="dd-tag dx-ty {{ c.tcls }}">{{ c.type }}</span><span class="dx-role">{{ c.role }}</span></li>
+</sc-for>
+</ul>
+<dl class="dx-facts">
+<sc-for list="{{ dlw.facts }}" as="f" hint-placeholder-count="5">
+<div class="dx-fr {{ f.cls }}">
+<dt>{{ f.k }}</dt>
+<dd><sc-if value="{{ f.hasIc }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none; margin-top:2px;"><path d="{{ f.p }}"></path></svg></sc-if><div class="hp-tx hp-txf" data-tx="{{ f.tx }}"><span class="hp-txw">{{ f.v }}</span><span class="hp-txn" aria-hidden="true">{{ f.v }}</span></div></dd>
+</div>
+</sc-for>
+</dl>
+</section>
+
+<section class="dd-box p2-in" aria-labelledby="dx-h-task-b" style="margin-top:24px; animation-delay:40ms;">
+<h3 id="dx-h-task-b" class="dd-h">Задача</h3>
+<p class="dx-tn">{{ dlw.task }}</p>
+<sc-if value="{{ dlw.hasGoal }}" hint-placeholder-val="{{ true }}"><p class="dx-goal"><span class="dd-tag dd-tag-b"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 8a4 4 0 1 1 0 8a4 4 0 0 1 0-8z M12 12h.01"></path></svg>{{ dlw.goal }}</span></p></sc-if>
+<div class="hp-tx" data-tx="x-l"><p class="hp-txw dx-tw">{{ dlw.taskWhy }}</p><p class="hp-txn dx-tw" aria-hidden="true">{{ dlw.taskWhy }}</p></div>
+<div class="hp-tx" data-tx="x-l"><div class="hp-txw dx-ks"><sc-for list="{{ dlw.kinds }}" as="k" hint-placeholder-count="6"><span class="dx-k {{ k.cls }}">{{ k.t }}</span></sc-for></div><div class="hp-txn dx-ks" aria-hidden="true"><sc-for list="{{ dlw.kinds }}" as="k" hint-placeholder-count="6"><span class="dx-k {{ k.cls }}">{{ k.t }}</span></sc-for></div></div>
+</section>
+</div>
+
+<!-- Правая колонка: ранжированные варианты визуализации и откуда заголовок-вывод -->
+<div class="dx-col">
+<section class="dd-box p2-in" aria-labelledby="dx-h-vars-b" style="animation-delay:40ms;">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+<h3 id="dx-h-vars-b" class="dd-h" style="white-space:nowrap;">Варианты визуализации</h3>
+<span class="hp-wo dx-capw"><span class="dd-cap">лучший по данным — первым</span></span>
+</div>
+<ol class="dx-vars">
+<sc-for list="{{ dlw.vars }}" as="v" hint-placeholder-count="3">
+<li class="dx-v {{ v.cls }}">
+<span class="dx-rank" aria-hidden="true">{{ v.n }}</span>
+<svg class="dx-mini" viewBox="0 0 160 90" role="img" aria-label="{{ v.label }}">
+<rect x="0.5" y="0.5" width="159" height="89" rx="10" fill="#FAFCFF" stroke="rgba(11,18,32,.08)"></rect>
+<path d="{{ v.m.grid }}" fill="none" stroke="rgba(32,32,32,.14)" stroke-width="1" stroke-linecap="round"></path>
+<path d="{{ v.m.light }}" fill="#D6ECFF"></path>
+<path d="{{ v.m.txt }}" fill="none" stroke="rgba(32,32,32,.22)" stroke-width="3" stroke-linecap="round"></path>
+<path d="{{ v.m.ringL }}" fill="none" stroke="#D6ECFF" stroke-width="12"></path>
+<path d="{{ v.m.ring2 }}" fill="none" stroke="{{ v.cMain }}" stroke-opacity=".55" stroke-width="12"></path>
+<path d="{{ v.m.ring }}" fill="none" stroke="{{ v.cMain }}" stroke-width="12"></path>
+<path d="{{ v.m.half }}" fill="{{ v.cMain }}" fill-opacity=".55"></path>
+<path d="{{ v.m.main }}" fill="{{ v.cMain }}"></path>
+<path d="{{ v.m.sep }}" fill="none" stroke="#FAFCFF" stroke-width="1.5" stroke-linecap="round"></path>
+<path d="{{ v.m.line }}" fill="none" stroke="{{ v.cMain }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="{{ v.m.acc }}" fill="{{ v.cAcc }}"></path>
+<path d="{{ v.m.dash }}" fill="none" stroke="rgba(32,32,32,.4)" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round"></path>
+</svg>
+<div class="dx-vt">
+<div class="hp-tx" data-tx="x-r"><p class="hp-txw dx-vn">{{ v.name }}<sc-if value="{{ v.isOn }}" hint-placeholder-val="{{ true }}"><span class="dd-tag dd-tag-b dx-on">Выбран</span></sc-if></p><p class="hp-txn dx-vn" aria-hidden="true">{{ v.name }}<sc-if value="{{ v.isOn }}" hint-placeholder-val="{{ true }}"><span class="dd-tag dd-tag-b dx-on">Выбран</span></sc-if></p></div>
+<div class="hp-tx" data-tx="x-r"><p class="hp-txw dx-vr">{{ v.why }}</p><p class="hp-txn dx-vr" aria-hidden="true">{{ v.why }}</p></div>
+<sc-if value="{{ v.hasNote }}" hint-placeholder-val="{{ false }}"><div class="hp-tx" data-tx="x-rn"><p class="hp-txw dx-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg><span>{{ v.note }}</span></p><p class="hp-txn dx-note" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg><span>{{ v.note }}</span></p></div></sc-if>
+<sc-if value="{{ v.canBuild }}" hint-placeholder-val="{{ true }}"><button type="button" class="p2-gb dx-act" onClick="{{ v.build }}" disabled="{{ v.dis }}" title="Пересобрать слайд {{ v.slide }} этим вариантом"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg><span>Пересобрать слайд так</span></button></sc-if>
+<sc-if value="{{ v.isBusy }}" hint-placeholder-val="{{ false }}"><p class="dx-busy p2-in" role="status"><svg class="ds-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)"></circle><path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB"></path></svg><span>Пересобираю слайд {{ v.slide }}…</span></p></sc-if>
+</div>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<section class="dd-box p2-in" aria-labelledby="dx-h-hl-b" style="margin-top:24px; animation-delay:80ms;">
+<h3 id="dx-h-hl-b" class="dd-h">Заголовок-вывод</h3>
+<div class="dx-hl">
+<img src="{{ dlw.slideImg }}" alt="{{ dlw.slideAlt }}">
+<div class="dx-hlt">
+<span class="dx-key">{{ dlw.key }}</span>
+<div class="hp-tx" data-tx="x-rh"><p class="hp-txw dx-from">{{ dlw.from }}</p><p class="hp-txn dx-from" aria-hidden="true">{{ dlw.from }}</p></div>
+</div>
+</div>
+<div class="hp-tx" data-tx="x-r2"><p class="hp-txw dx-not"><span class="dd-tag dd-tag-n">не описание</span><span>«<s>{{ dlw.plain }}</s>» — это тема; в заголовке — вывод из данных</span></p><p class="hp-txn dx-not" aria-hidden="true"><span class="dd-tag dd-tag-n">не описание</span><span>«<s>{{ dlw.plain }}</s>» — это тема; в заголовке — вывод из данных</span></p></div>
+</section>
+</div>
 
 </div>
 </sc-if>
@@ -4072,6 +4671,99 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </section>
 </div>
 
+<!-- СЛОЙ · «Брендбук» (модуль ds): голубой слой поднимается из-под колоды, как «Слайды шаблона»; полоса над слоем закрывает его.
+     Слева — что извлечено (палитра, шрифты, логотипы), справа — расхождения с шаблоном, что важнее, правила -->
+<sc-if value="{{ bbPvOn }}" hint-placeholder-val="{{ false }}"><button type="button" class="p2-scrim" onClick="{{ bbClose }}" aria-label="Закрыть «Брендбук»" style="position:absolute; left:0; right:0; top:0; height:120px; z-index:8;"></button></sc-if>
+<div id="bb-lay" class="p2-slot p2-lay {{ bbLay }}" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:8; transform: {{ bbY }};">
+<section class="p2-plate" role="dialog" aria-modal="true" aria-labelledby="bb-ttl" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4);">
+
+<div style="display:flex; align-items:center; justify-content:space-between; gap:24px; height:64px;">
+<div style="display:flex; flex-direction:column; min-width:0;">
+<h2 id="bb-ttl" style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:32px; line-height:40px; letter-spacing:-0.03em; color:#0B1220; white-space:nowrap;">Брендбук VK Cloud</h2>
+<div style="display:flex; align-items:center; gap:16px; height:24px; min-width:0;">
+<span role="img" aria-label="Палитра брендбука" style="display:flex; align-items:center; gap:4px; flex:none;">
+<sc-for list="{{ bbPal }}" as="d" hint-placeholder-count="6"><span class="pv-dot" title="{{ d.hex }}" style="background: {{ d.hex }};"></span></sc-for>
+</span>
+<span style="min-width:0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ bbLayMeta }}</span>
+</div>
+</div>
+<button type="button" class="p2-rbl pv-rbw" onClick="{{ bbClose }}" aria-label="Закрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></button>
+</div>
+
+<div class="pv-box">
+<div class="pv-scroll p2-fade">
+<div class="bb-g">
+
+<!-- что извлечено -->
+<div style="min-width:0;">
+<section class="p2-ls" aria-labelledby="bb-h-pal" style="--d:160ms;">
+<h3 id="bb-h-pal" class="dd-h">Палитра</h3>
+<ul class="bb-sws">
+<sc-for list="{{ bbPal }}" as="c" hint-placeholder-count="6">
+<li><span class="bb-sw" style="background: {{ c.hex }};"></span><span class="bb-hex">{{ c.hex }}</span><span class="bb-role">{{ c.role }}</span></li>
+</sc-for>
+</ul>
+</section>
+<section class="p2-ls bb-sec" aria-labelledby="bb-h-font" style="--d:200ms;">
+<h3 id="bb-h-font" class="dd-h">Шрифты</h3>
+<ul class="bb-fonts">
+<sc-for list="{{ bbFonts }}" as="f" hint-placeholder-count="2">
+<li class="bb-font"><span class="bb-fa" style="font-weight: {{ f.w }};" aria-hidden="true">Аа</span><span class="bb-ct"><span class="bb-cn">{{ f.name }}</span><span class="bb-cm">{{ f.role }} · замена — Play</span></span></li>
+</sc-for>
+</ul>
+</section>
+<section class="p2-ls bb-sec" aria-labelledby="bb-h-logo" style="--d:240ms;">
+<h3 id="bb-h-logo" class="dd-h">Логотипы</h3>
+<ul class="bb-logos2">
+<sc-for list="{{ bbLogos }}" as="l" hint-placeholder-count="4">
+<li><span class="bb-lg bb-lgt {{ l.cls }}" role="img" aria-label="Логотип: {{ l.name }}"><span class="bb-lgm"></span><span class="bb-lgw"></span></span><span class="bb-lgc">{{ l.name }}</span></li>
+</sc-for>
+</ul>
+</section>
+</div>
+
+<!-- расхождения с шаблоном и правила -->
+<div style="min-width:0;">
+<section class="p2-ls" aria-labelledby="bb-h-cf" style="--d:200ms;">
+<h3 id="bb-h-cf" class="dd-h">Расхождения с шаблоном</h3>
+<p class="bb-sub">При расхождении важнее</p>
+<div class="bb-seg" role="radiogroup" aria-label="При расхождении важнее">
+<sc-for list="{{ bbSeg }}" as="g" hint-placeholder-count="2">
+<button type="button" role="radio" aria-checked="{{ g.on }}" class="p2-rseg {{ g.cls }}" onClick="{{ g.pick }}">{{ g.label }}</button>
+</sc-for>
+</div>
+<ul class="bb-cfs">
+<sc-for list="{{ bbConf }}" as="c" hint-placeholder-count="2">
+<li class="bb-cf">
+<span class="bb-cfk">{{ c.k }}</span>
+<span class="bb-cfv"><sc-if value="{{ c.sw }}" hint-placeholder-val="{{ false }}"><span class="bb-dot" style="background: {{ c.a }};"></span></sc-if><span>шаблон — {{ c.a }}</span><span aria-hidden="true">·</span><sc-if value="{{ c.sw }}" hint-placeholder-val="{{ false }}"><span class="bb-dot" style="background: {{ c.b }};"></span></sc-if><span>брендбук — {{ c.b }}</span></span>
+<span class="bb-win"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg><span>В презентации: {{ c.res }}</span></span>
+</li>
+</sc-for>
+</ul>
+</section>
+<section class="p2-ls bb-sec" aria-labelledby="bb-h-rl" style="--d:240ms;">
+<h3 id="bb-h-rl" class="dd-h">Правила</h3>
+<ul class="dtp-rules">
+<sc-for list="{{ bbRules }}" as="r" hint-placeholder-count="3"><li class="dtp-rule">{{ r.s }}</li></sc-for>
+</ul>
+</section>
+</div>
+
+</div>
+</div>
+<div class="pv-foot">
+<button type="button" class="p2-gb pv-del" onClick="{{ bbRemove }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7.5h15 M9.5 7.5V6a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1.5 M6.5 7.5l.75 10.6A2 2 0 0 0 9.24 20h5.52a2 2 0 0 0 2-1.9l.74-10.6 M10 11v5.5 M14 11v5.5"></path></svg>
+<span>Убрать брендбук</span>
+</button>
+<button type="button" class="p2-cta pv-cta" onClick="{{ bbClose }}"><span>Готово</span></button>
+</div>
+</div>
+
+</section>
+</div>
+
 </main>
 
 <!-- ПОМОЩНИК · ячейка второй колонки (0 → 400 px); плита 400 px, #E9F1FF, прижата к правому краю (как G-helper-open) -->
@@ -4211,7 +4903,12 @@ class Component extends DCLogic {
       tick: fr ? 9 : 0,
       bvar: 's',
       rvar: 's',
-      rslide: fr ? 2 : 0
+      rslide: fr ? 2 : 0,
+      // данные и брендбук (модуль ds): dt — прикреплённые файлы данных, dtT — такт разбора файлов, dtUp — файлы над полем;
+      // bb* — брендбук: меню, разбор (bbUp/bbStep), прикреплён (bbOn), слой (bbPv), что важнее при расхождении (bbPri)
+      dt: [], dtT: 0, dtUp: '', dtKeep: false, dtIn: false, dtOut: '', dtSh: {},
+      bbMenu: false, bbUp: '', bbStep: 0, bbOn: false, bbSrc: 'pdf', bbPv: false, bbPri: 'bb',
+      dwPick: {}, dwBusy: ''
     };
     this.timer = null;
     this.after = null;
@@ -4259,6 +4956,18 @@ class Component extends DCLogic {
         v: { 0: '/_blob/3a65dd36fb256725b6220c8e2348b214', 3: '/_blob/bb6e83990419cf1d61392e723e53bc08', 8: '/_blob/5254188d67a8bd743a5ca31ad8a4aca7' },
         c: { 0: '/_blob/3b92d2f49ff4c421015045369ec75374', 3: '/_blob/79d18dbbe116fd6672a8e0db0b051c68', 8: '/_blob/a6711f28fa01480a29f24df59e7d7986' }
       },
+      // Колода «Продажи VK Cloud в 2026 году» (сценарий «данные продаж», 9 слайдов): img — слайд 1280×720, th — миниатюра 320×180
+      DATA_SLIDES: [
+        { img: '/_blob/d0047c8eff047869c2f7031be1979aa8', th: '/_blob/55cf131d2818b5628c0722934d60588a' },
+        { img: '/_blob/2dce3d48161b1e04767985f3f47bb1be', th: '/_blob/a0d2c9c12fe5725faa1e8cf64010c16b' },
+        { img: '/_blob/c5985800d388906e945d17f260569ecd', th: '/_blob/cb0f29929557dcc601151d05f13b42eb' },
+        { img: '/_blob/b31779b4d24059e902444b6857da19a7', th: '/_blob/b27a637807b32e637db44a57aada865f' },
+        { img: '/_blob/f26d415c8f27facee17ba8afb1e7ec31', th: '/_blob/9a50215095fd88bb460cffef0840082c' },
+        { img: '/_blob/66a56a67533b70f8eec8e82b77504e0b', th: '/_blob/91e81236ba13fd6f9278d58318d574c1' },
+        { img: '/_blob/433d8b36dd7f3787a6ebd0ea01af8c5d', th: '/_blob/3cdf5ceab29707fec353b329cb04d942' },
+        { img: '/_blob/fe6c9fafa1a52f3aeaeed36b82bfc187', th: '/_blob/ee5d727295476d755ac340994eae46b3' },
+        { img: '/_blob/dc978ce51adf0a69161cee677e11f23a', th: '/_blob/71a98bd7b2075bc04ebc3b7a21e0b635' }
+      ],
       T: ['Интеграл', 'История создания', 'Неопределённый интеграл', 'Площадь криволинейной трапеции',
         'Формула Ньютона — Лейбница', 'Линейность и аддитивность', 'Интегрирование по частям', 'Замена переменной',
         'Пример вычисления', 'Двойной интеграл', 'Путь, работа, потенциал', 'Где применяют интеграл'],
@@ -4311,6 +5020,7 @@ class Component extends DCLogic {
     this.rmStop();
     if (this.bdT) { clearTimeout(this.bdT); this.bdT = null; }
     this.tpStop();
+    this.dsStop();
   }
 
   // подсказка видна, только пока поле пустое и открыт экран «Создать»
@@ -4398,7 +5108,9 @@ class Component extends DCLogic {
     this.stop();
     const fr = !!this.props.frozen;
     if (s === 'build') {
-      this.setState({ screen: 'build', dd: '', more: false, doc: 'int', rise: false, keep3: false, tick: fr ? 9 : 0, bvar: this.firstVar(this.state.vars) });
+      const dt = (this.state.dt || []).length > 0;
+      this.setState({ screen: 'build', dd: '', more: false, doc: dt ? 'dt' : 'int', rise: false, keep3: false, tick: fr ? 9 : 0, bvar: this.firstVar(this.state.vars),
+        bbPv: false, bbMenu: false, dwPick: {}, dwBusy: '' });
       if (!fr) this.run();
     } else if (s === 'result') {
       this.setState({ screen: 'result', dd: '', rise: false, keep3: false, rvar: this.firstVar(this.state.vars), rslide: fr ? 2 : 0 });
@@ -4448,7 +5160,9 @@ class Component extends DCLogic {
 
   // карточки и ссылки правой колонки: «Подробнее» есть только у полной колоды («Интеграл»)
   openDd(key) {
-    if ((this.state.doc || 'int') !== 'int') return;
+    const doc = this.state.doc || 'int';
+    if (doc === 'dt' && key === 'why') { this.setState({ dd: key, ddLast: key }); return; }
+    if (doc !== 'int') return;
     this.setState({ dd: key, ddLast: key });
   }
 
@@ -4500,7 +5214,8 @@ class Component extends DCLogic {
     }
     const v = this.txSample(k);
     this.twStop();
-    this.setState({ txMenu: false, txErr: '', text: v, txSrc: v, txImp: k === 'pptx', txTpl: s.tpl, open: 'text', more: false });
+    this.setState(Object.assign({ txMenu: false, txErr: '', text: v, txSrc: v, txImp: k === 'pptx', txTpl: s.tpl, open: 'text', more: false },
+      k === 'pptx' ? { dt: [], dtT: 0, dtKeep: false } : {}));
   }
 
   // «Взять пример»: тема из печатающейся подсказки
@@ -5692,8 +6407,93 @@ class Component extends DCLogic {
       checkN,
       checkAria: 'Проверка слайда: ' + checkN + ' — открыть вкладку «Качество»',
       hasTag: !!sev, tagCls: sev ? sev.cls : '', tagP: sev ? sev.p : '', tagText: sev ? sev.label : '',
-      check: () => this.dlTab('quality')
+      check: () => this.dlTab('quality'),
+      hasCheck: true, dA: false, dB: false
     };
+  }
+
+  // «Почему так» колоды с данными (модуль ds): слайды 2–8 — профиль файла, задача, ранжированные варианты, заголовок-вывод;
+  // обложка и итог — в формате D-why. Две копии разметки (pa/pb, dA/dB) сменяются на каждом слайде — каскад проявления заново
+  dlWD(c) {
+    const DD = this.dlD();
+    const D = this.dsData();
+    const st = this.state;
+    const i = Math.max(0, Math.min(8, c.rs));
+    const n = i + 1;
+    const s = D.SL[i];
+    const par = i % 2 === 0;
+    const nav = {
+      cap: 'Слайд ' + n + ' / 9 · ' + s.kind,
+      title: s.t,
+      prev: () => this.setState({ rslide: Math.max(0, i - 1) }),
+      next: () => this.setState({ rslide: Math.min(8, i + 1) }),
+      prevDis: i <= 0, nextDis: i >= 8,
+      hasCheck: false, checkN: '', checkAria: '', hasTag: false, tagCls: '', tagP: '', tagText: '', check: () => {}
+    };
+    const slide = this.D.DATA_SLIDES[i];
+    if (!s.f) {
+      const w = D.W[i];
+      const sm = w.sample;
+      const wf = DD.WF[sm[1]];
+      return Object.assign(nav, {
+        pa: par, pb: !par, dA: false, dB: false,
+        src: i === 0 ? 'В брифе — тема и для кого' : 'Выводы слайдов 2, 4 и 8',
+        why: w.why,
+        dl: w.dl.map((x) => ({ t: x[0], d: x[1] })),
+        forms: w.forms.map((f) => ({ name: f[0], text: f[1], hasVar: false, isCur: false, varName: '', varScore: '', pick: () => {} })),
+        hasCrit: !!w.crit, critA: w.crit ? w.crit[0] : '', critB: w.crit ? w.crit[1] : '',
+        wfLabel: 'Образец — слайд ' + sm[0] + ' шаблона: ' + wf.long,
+        bars: this.dlWf(sm[1]),
+        img: slide.th, imgAlt: 'Ваш слайд ' + n + ': ' + s.t,
+        sampleCap: 'Образец: слайд ' + sm[0] + ' шаблона',
+        sim: sm[2] + '%', simN: String(sm[2]), simS: '.' + sm[2],
+        simNote: w.note,
+        reasons: w.reasons.map((t) => ({ text: t.replace('{v}', c.VN[c.rv]) })),
+        alts: w.alts.map((a) => ({
+          label: 'Слайд ' + a[0] + ' шаблона: ' + DD.WF[a[3]].short,
+          bars: this.dlWf(a[3]),
+          cap: 'Слайд ' + a[0] + ' · ' + a[1],
+          sim: 'сходство ' + a[2] + '%'
+        }))
+      });
+    }
+    const P = D.PR[s.f];
+    const F = D.FILES.find((x) => x.id === s.f);
+    const pick = (st.dwPick || {})[n] || 0;
+    const busy = st.dwBusy || '';
+    // палитра мини-графиков — шаблона; при брендбуке, если он важнее, акцент — из брендбука
+    const cMain = '#0077FF';
+    const cAcc = st.bbOn && st.bbPri !== 'tpl' ? '#FF3985' : '#FF3885';
+    const rw = this.pl(F.rows, 'строка', 'строки', 'строк');
+    const cw = this.pl(F.cols, 'колонка', 'колонки', 'колонок');
+    return Object.assign(nav, {
+      pa: false, pb: false, dA: par, dB: !par,
+      file: F.name, fileIc: D.I[F.ic],
+      fileMeta: F.fmt + ' · ' + F.rows + ' ' + rw + ' × ' + F.cols + ' ' + cw + ' · ' + F.nature.toLowerCase(),
+      cols: P.cols.map((x) => ({ name: x[0], type: x[1], tcls: this.dsType(x[1]), role: x[2] })),
+      facts: P.facts.map((x) => ({
+        k: x[0], v: x[1], tx: 'x-l',
+        cls: x[2] === 'w' ? 'dx-fw' : (x[2] === 'b' ? 'dx-fb' : ''),
+        hasIc: !!x[2], p: x[2] === 'w' ? D.I.warn : D.I.info
+      })),
+      task: P.task, taskWhy: P.why,
+      hasGoal: !!P.goal, goal: P.goal ? 'Цель из текста: «' + P.goal + '»' : '',
+      kinds: D.TASKS.map((t, k) => ({ t, cls: k === P.tk ? 'dx-k-on' : '' })),
+      vars: P.vars.map((v, k) => {
+        const on = k === pick;
+        const isBusy = busy === n + ':' + k;
+        return {
+          n: k + 1, name: v[1], why: v[2], note: v[3] || '', hasNote: !!v[3],
+          m: this.dsMini(v[0]), cMain, cAcc,
+          label: 'Вариант ' + (k + 1) + ': ' + v[1],
+          cls: on ? 'dx-v-on' : '', isOn: on,
+          canBuild: !on && !isBusy, isBusy, dis: !!busy, slide: n,
+          build: () => this.dwRebuild(n, k)
+        };
+      }),
+      key: P.key, from: P.from, plain: P.plain,
+      slideImg: slide.th, slideAlt: 'Слайд ' + n + ': ' + s.t
+    });
   }
 
   dlA() {
@@ -5987,6 +6787,410 @@ class Component extends DCLogic {
     return many;
   }
 
+  // ── Данные и брендбук (модуль ds) — вторая ступень «интерпретация данных». Сценарий общий с колодой: бриф, 7 файлов
+  //    данных, колода «Продажи VK Cloud в 2026 году» (9 слайдов, картинки — D.DATA_SLIDES), брендбук VK Cloud
+  dsData() {
+    if (this.dsD) return this.dsD;
+    const I = {
+      tbl: 'M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M4.5 9.5h15 M4.5 14.5h15 M10 9.5v10',
+      json: 'M9 4.5H8a2 2 0 0 0-2 2v3a2.5 2.5 0 0 1-2 2.5 2.5 2.5 0 0 1 2 2.5v3a2 2 0 0 0 2 2h1 M15 4.5h1a2 2 0 0 1 2 2v3a2.5 2.5 0 0 0 2 2.5 2.5 2.5 0 0 0-2 2.5v3a2 2 0 0 1-2 2h-1',
+      txt: 'M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4',
+      file: 'M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3',
+      chart: 'M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5',
+      folder: 'M4 17.5v-11a2 2 0 0 1 2-2h3.6l2 2.5H18a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z',
+      frame: 'M8 3.5v17 M16 3.5v17 M3.5 8h17 M3.5 16h17',
+      book: 'M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4',
+      upload: 'M12 14.5V4 M7.5 8.5L12 4l4.5 4.5 M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2',
+      target: 'M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 8a4 4 0 1 1 0 8a4 4 0 0 1 0-8z M12 12h.01',
+      warn: 'M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01',
+      info: 'M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01'
+    };
+    const BRIEF = 'Итоги продаж VK Cloud за 9 месяцев 2026 года для правления. Покажи рост выручки, сравни регионы, что даёт выручку и где узкие места. Данные — в приложенных файлах.';
+    // файлы данных: природа (строка карточки), статус разбора, слайд колоды
+    const FILES = [
+      { id: 'rev', name: 'Выручка по месяцам.csv', fmt: 'CSV', ic: 'tbl', rows: 21, cols: 3, nature: 'Временной ряд', run: 'ищу ось времени…', slide: 3 },
+      { id: 'reg', name: 'Регионы.xlsx', fmt: 'XLSX', ic: 'tbl', rows: 8, cols: 3, nature: 'Сравнение', run: 'сравниваю категории…', slide: 4 },
+      { id: 'chn', name: 'Каналы продаж.json', fmt: 'JSON', ic: 'json', rows: 4, cols: 2, nature: 'Доли', run: 'проверяю сумму долей…', slide: 5 },
+      { id: 'sup', name: 'Время ответа поддержки.csv', fmt: 'CSV', ic: 'tbl', rows: 512, cols: 1, nature: 'Распределение', run: 'ищу выбросы…', slide: 6 },
+      { id: 'cli', name: 'Клиенты.xlsx', fmt: 'XLSX', ic: 'tbl', rows: 240, cols: 6, nature: 'Справочник', run: 'определяю типы колонок…', slide: 8 },
+      { id: 'nps', name: 'NPS по кварталам.csv', fmt: 'CSV', ic: 'tbl', rows: 8, cols: 2, nature: 'С пропусками', run: 'проверяю пропуски…', slide: 7 },
+      { id: 'txt', name: 'Итоги квартала.txt', fmt: 'TXT', ic: 'txt', rows: 4, cols: 3, nature: 'Таблица в тексте', run: 'ищу таблицу в тексте…', slide: 2 }
+    ];
+    // аналитические задачи (ТЗ, п. 2) — в «Почему так» выбранная выделена
+    const TASKS = ['Динамика', 'Сравнение категорий', 'Структура долей', 'Распределение', 'Взаимосвязь', 'Справочные значения'];
+    // профиль файла: колонки [имя, тип, роль], факты [подпись, значение, w — пропуски/выбросы, b — важно для вёрстки];
+    // задача (tk — номер в TASKS), варианты [мини-график, тип, почему; note — чем слайд пока отличается от идеала],
+    // заголовок-вывод: ключевое число, откуда оно, каким был бы заголовок-описание
+    const PR = {
+      rev: {
+        cols: [['месяц', 'дата', 'ось времени'], ['выручка, млн ₽', 'число', 'метрика'], ['клиенты', 'число', 'метрика']],
+        facts: [['Ось времени', 'январь 2025 — сентябрь 2026, 21 месяц'], ['Метрики', 'выручка, млн ₽ · клиенты'], ['Измерения', 'нет — один ряд'], ['Пропуски', 'нет'], ['Выбросы', 'нет']],
+        task: 'Динамика', tk: 0, why: 'Есть ось времени и одна главная метрика — важно, как выручка менялась месяц за месяцем.', goal: 'покажи рост выручки',
+        vars: [['line', 'Линейный график', 'Дата и одна метрика, 21 точка — тренд виден сразу. Цель «покажи рост выручки» подняла его на первое место.'],
+          ['vbars', 'Столбцы', 'Месяцы дискретны, но за 21 столбцом тренд виден хуже.'],
+          ['table', 'Таблица', '21 строка — тренд не читается.']],
+        key: '+23 %', from: 'Сентябрь 2026 к сентябрю 2025: 423 млн ₽ — на 23 % больше. Посчитано по колонке «выручка».', plain: 'Выручка по месяцам' },
+      reg: {
+        cols: [['регион', 'категория', 'измерение'], ['выручка, млн ₽', 'число', 'метрика'], ['рост, %', 'число', 'метрика']],
+        facts: [['Измерения', 'регион — 8 значений, длинные названия'], ['Метрики', 'выручка, млн ₽ · рост, %'], ['Ось времени', 'нет'], ['Пропуски', 'нет'], ['Выбросы', 'нет']],
+        task: 'Сравнение категорий', tk: 1, why: '8 регионов и одна главная метрика — важно, кто больше и кто растёт быстрее.', goal: 'сравни регионы',
+        vars: [['hbars', 'Ранжированные горизонтальные столбцы', '8 категорий с длинными названиями: подписи слева, порядок — по выручке. Цель «сравни регионы» подтвердила выбор.'],
+          ['vbars8', 'Вертикальные столбцы', 'Названия регионов не помещаются под столбцами.'],
+          ['pie8', 'Круговая диаграмма', '8 долей — мелкие сектора нечитаемы.']],
+        key: '41 %', from: 'Москва — 1 433 млн ₽, 41 % выручки 8 регионов. Казань выросла на 38 % — быстрее всех.', plain: 'Выручка по регионам' },
+      chn: {
+        cols: [['канал', 'категория', 'измерение'], ['доля, %', 'число', 'метрика']],
+        facts: [['Сумма', '100 % — части одного целого'], ['Измерения', 'канал — 4 значения'], ['Ось времени', 'нет: январь — сентябрь 2026 целиком'], ['Пропуски', 'нет'], ['Выбросы', 'нет']],
+        task: 'Структура долей', tk: 2, why: '4 доли в сумме дают 100 % — важно, какую часть целого даёт каждый канал.',
+        vars: [['donut', 'Кольцевая диаграмма', '4 доли в сумме дают 100 % — целое видно сразу, подписи помещаются.'],
+          ['stack', 'Накопительный столбец', 'Те же доли, но отрезки сравнивать труднее.'],
+          ['vbars4', 'Столбцы', 'Не видно, что вместе это 100 %.']],
+        key: '46 %', from: 'Прямые продажи — 46 %, больше любого другого канала: партнёры — 28 %, маркетплейс — 17 %, онлайн — 9 %.', plain: 'Каналы продаж' },
+      sup: {
+        cols: [['минуты до ответа', 'число', 'метрика']],
+        facts: [['Значений', '512 обращений'], ['80-й перцентиль', '120 минут: 410 из 512 — быстрее'], ['Ось времени', 'нет'], ['Пропуски', 'нет'], ['Выбросы', '3 значения больше 600 минут', 'w']],
+        task: 'Распределение', tk: 3, why: 'Одна числовая колонка из 512 значений — важны форма распределения и типичное время ответа.',
+        vars: [['hist', 'Гистограмма', 'Одна числовая колонка, 512 значений — видно, где большинство и насколько длинный хвост. 3 выброса — отдельно.', 'Сейчас — столбцы по интервалам «0–30» … «больше 180» мин, выбросы — в тексте; гистограмма будет отдельным типом.'],
+          ['kpi2', 'Карточки ключевых показателей', 'Медиана и 80-й перцентиль — коротко, но без формы распределения.'],
+          ['table', 'Таблица', '512 строк не показать.']],
+        key: '80 %', from: '410 из 512 обращений получили ответ быстрее 120 минут. Три ждали дольше 600 минут — они в тексте слайда.', plain: 'Время ответа поддержки' },
+      cli: {
+        cols: [['клиент', 'текст', 'подпись'], ['отрасль', 'категория', 'измерение'], ['регион', 'категория', 'измерение'], ['выручка, млн ₽', 'число', 'метрика'], ['тариф', 'категория', 'измерение'], ['дата договора', 'дата', 'атрибут']],
+        facts: [['Что это', '240 крупнейших клиентов'], ['Размер', '240 строк × 6 колонок — на слайд не помещается', 'b'], ['Иерархия', 'регион → клиент'], ['Ось времени', 'нет: даты договоров — не ряд'], ['На слайде', '5 колонок: тариф и дата договора не вошли, доля посчитана'], ['Пропуски', 'нет']],
+        task: 'Справочные значения', tk: 5, why: 'Нужны конкретные клиенты и их цифры, а не форма. 240 строк целиком не поместятся — агрегирую: топ-10 и итог «остальные 230».',
+        vars: [['top10', 'Таблица топ-10 и итог «остальные 230»', '240 строк не помещаются: 10 крупнейших — строками, остальные — одной строкой, 2 167 млн ₽ и 62 %.'],
+          ['bars10', 'Столбцы топ-10', 'Видно лидеров, но теряются отрасль и регион.'],
+          ['pages', 'Разбиение на 24 слайда', 'По 10 строк на слайд — слишком много.']],
+        key: '38 %', from: 'Выручка 10 крупнейших из 240 клиентов. Остальные 230 дают 2 167 млн ₽ — 62 %.', plain: 'Список клиентов' },
+      nps: {
+        cols: [['квартал', 'дата', 'ось времени'], ['NPS', 'число', 'метрика']],
+        facts: [['Ось времени', 'IV кв. 2024 — III кв. 2026, 8 кварталов'], ['Метрики', 'NPS'], ['Пропуски', '2 из 8: II кв. 2025 и II кв. 2026 — опрос не проводился', 'w'], ['Выбросы', 'нет']],
+        task: 'Динамика с пропусками', tk: 0, why: 'Ось времени, одна метрика и два пустых квартала — их нельзя показать нулём или падением.',
+        vars: [['gapline', 'Линейный график с разрывами', 'Пропуски — разрывы линии, а не падение до нуля.', 'Сейчас — линия по 6 измеренным кварталам и пояснение под графиком; разрывы будут отдельной возможностью.'],
+          ['gapbars', 'Столбцы с пустыми местами', 'Пропуски видны, но рост читается хуже.'],
+          ['dash', 'Таблица с прочерками', '8 строк читаются, но динамика не видна.']],
+        key: '52', from: 'NPS в III кв. 2026 — последнее измерение, в IV кв. 2024 было 41. Во II кв. 2025 и II кв. 2026 опрос не проводился.', plain: 'NPS по кварталам' },
+      txt: {
+        cols: [['показатель', 'текст', 'подпись'], ['значение', 'число', 'метрика'], ['изменение', 'число', 'метрика']],
+        facts: [['Где', 'таблица внутри текста'], ['Строк', '4 показателя III кв. 2026'], ['Единицы', 'разные: млрд ₽, клиенты, тыс. ₽, пункты', 'b'], ['Пропуски', 'нет'], ['Выбросы', 'нет']],
+        task: 'Ключевые значения', tk: 5, why: '4 итоговых числа с изменением к III кв. 2025 — важны сами значения и их рост.',
+        vars: [['kpi4', 'Карточки ключевых показателей', '4 числа с изменением — каждое крупно, со своим ростом.'],
+          ['table', 'Таблица', 'Читается, но главные числа теряются в строках.'],
+          ['ubars', 'Столбцы', 'Разные единицы — сравнивать нельзя.']],
+        key: '+23 %', from: 'Выручка — 1,24 млрд ₽, на 23 % больше; клиентов — 3 480, на 18 % больше. Сравнение с III кв. 2025.', plain: 'Итоги квартала' }
+    };
+    // слайды колоды; f — файл данных слайда; sum — коротко для карточки «Почему так» в колонке результата
+    const SL = [
+      { t: 'Продажи VK Cloud в 2026 году', kind: 'Обложка', sum: 'Обложка: название и подзаголовок из брифа, справа — изображение в палитре шаблона.' },
+      { t: 'Выручка растёт быстрее клиентской базы', kind: 'Карточки', f: 'txt', sum: 'Таблица из текста — 4 числа в разных единицах, поэтому карточки, а не столбцы. Заголовок — вывод: выручка +23 %, клиенты +18 %.' },
+      { t: 'Выручка выросла на 23% к сентябрю', kind: 'Линейный график', f: 'rev', sum: 'Выручка — временной ряд из 21 месяца, поэтому линейный график; цель «покажи рост выручки» подняла его на первое место.' },
+      { t: 'Москва даёт 41% выручки, Казань растёт быстрее всех', kind: 'Горизонтальные столбцы', f: 'reg', sum: '8 регионов с длинными названиями — ранжированные горизонтальные столбцы; так просила цель «сравни регионы».' },
+      { t: 'Почти половину выручки приносят прямые продажи', kind: 'Кольцевая диаграмма', f: 'chn', sum: '4 доли в сумме дают 100 % — кольцевая диаграмма. Заголовок — вывод: прямые продажи дают 46 %.' },
+      { t: '80% обращений закрываются за 2 часа', kind: 'Столбцы по интервалам', f: 'sup', sum: '512 значений одной колонки — распределение: столбцы по интервалам, 3 выброса больше 600 минут — в тексте.' },
+      { t: 'NPS вырос до 52, за два квартала данных нет', kind: 'Линейный график', f: 'nps', sum: 'Динамика с двумя пропусками: линия по измеренным кварталам, пропуски объяснены под графиком, а не нулём.' },
+      { t: 'Топ-10 клиентов дают 38% выручки', kind: 'Таблица', f: 'cli', sum: '240 строк не помещаются — таблица топ-10 и итог «остальные 230 клиентов дают 62 %».' },
+      { t: 'Рост держится на крупных клиентах и регионах', kind: 'Итог', sum: 'Итог: три вывода из данных в три карточки — выручка, крупные клиенты, регионы.' }
+    ];
+    // «Почему так» для слайдов без данных (обложка и итог) — в формате D-why
+    const V3 = 'Подходит стилю варианта «{v}»';
+    const W = {
+      0: { kind: 'Титул', why: 'Это обложка: название и подзаголовок взяты из брифа. Название стоит крупно слева, справа — изображение в палитре шаблона, как в макете обложки VK Tech.',
+        dl: [['Тема', 'Итоги продаж VK Cloud за 9 месяцев 2026 года'], ['Для кого', 'правление']],
+        forms: [['Крупная иллюстрация', 'картинка во весь слайд, название поверх неё.'], ['Только текст', 'название и подзаголовок по центру, без картинки.']],
+        sample: [1, 'title', 91], note: 'Лучший из рассмотренных: у остальных сходство 70% и ниже',
+        reasons: ['Название встало в три строки слева, как в образце', 'Справа осталось место под изображение', V3],
+        alts: [[54, 'Финал', 70, 'title'], [7, 'Раздел', 64, 'section'], [17, 'Текст', 41, 'w17']] },
+      8: { kind: 'Карточки', why: 'Три вывода из данных равноправны, поэтому это три карточки: выручка обгоняет базу, крупные клиенты, регионы. Заголовок — общий вывод презентации.',
+        dl: [['Вывод', 'Рост держится на крупных клиентах и регионах'], ['Откуда', 'слайды 2, 4 и 8: +23 % к +18 %, топ-10 — 38 %, Москва — 41 %']],
+        forms: [['Список', 'три вывода пунктами под заголовком.'], ['Таблица', 'вывод и его цифра — в два столбца.']],
+        crit: ['Вывод повторял заголовок', 'Новый вывод: рост держится на крупных клиентах и регионах'],
+        sample: [31, 'w31', 86], note: 'Лучший из рассмотренных: у остальных сходство 76% и ниже',
+        reasons: ['Три вывода встали в три карточки образца', 'В каждой карточке — цифра из данных', V3],
+        alts: [[23, 'Карточки', 76, 'cards2'], [38, 'Таблица', 62, 'table'], [17, 'Текст', 51, 'w17']] }
+    };
+    // брендбук VK Cloud (сценарий): палитра, шрифты, логотипы, правила, расхождения с шаблоном VK Tech
+    const BB = {
+      pal: [['#0077FF', 'основной'], ['#2787F5', 'дополнительный'], ['#0B1220', 'текст'], ['#FFFFFF', 'фон'], ['#FF3985', 'акцент'], ['#00C2FF', 'графики']],
+      fonts: [['VK Sans Display', 'заголовки', 700], ['VK Sans Text', 'основной текст', 400]],
+      logos: [['Основной', 'bb-lg-main'], ['Белый', 'bb-lg-white'], ['Знак', 'bb-lg-mark'], ['Монохром', 'bb-lg-mono']],
+      rules: ['Логотип — в правом нижнем углу', 'Поля — 48 px', 'Акцент — только для главного числа'],
+      // источник → файл, подпись на карточке, первый шаг разбора
+      SRC: {
+        pdf: { file: 'Брендбук VK Cloud.pdf', meta: 'PDF · 24 стр.', step: ['открыт файл: ', '24 страницы'] },
+        json: { file: 'Брендбук VK Cloud.json', meta: 'токены JSON', step: ['прочитаны токены: ', 'цвета, шрифты, отступы'] },
+        dir: { file: 'Брендбук VK Cloud.zip', meta: 'архив · 4 логотипа', step: ['открыт архив: ', 'логотипы и примеры слайдов'] },
+        figma: { file: 'Брендбук VK Cloud.fig', meta: 'Figma', step: ['открыт файл Figma: ', 'стили и компоненты'] }
+      }
+    };
+    this.dsD = { I, BRIEF, FILES, TASKS, PR, SL, W, BB };
+    return this.dsD;
+  }
+
+  // мини-график варианта (160×90, палитра шаблона): слои — сетка, подписи, заливки (светлая, основная, полупрозрачная),
+  // линия, кольцо (толстая обводка), акцент, пунктир, белые разделители
+  dsMini(kind) {
+    if (!this.dsMC) this.dsMC = {};
+    if (this.dsMC[kind]) return this.dsMC[kind];
+    const f = (n) => Math.round(n * 10) / 10;
+    const r = (x, y, w, h, q) => { const k = Math.min(q == null ? 2 : q, w / 2, h / 2); return `M${f(x + k)} ${f(y)}H${f(x + w - k)}A${k} ${k} 0 0 1 ${f(x + w)} ${f(y + k)}V${f(y + h - k)}A${k} ${k} 0 0 1 ${f(x + w - k)} ${f(y + h)}H${f(x + k)}A${k} ${k} 0 0 1 ${f(x)} ${f(y + h - k)}V${f(y + k)}A${k} ${k} 0 0 1 ${f(x + k)} ${f(y)}Z`; };
+    const hl = (x1, y, x2) => `M${f(x1)} ${f(y)}H${f(x2)}`;
+    const vl = (x, y1, y2) => `M${f(x)} ${f(y1)}V${f(y2)}`;
+    const ci = (cx, cy, q) => `M${f(cx - q)} ${f(cy)}a${q} ${q} 0 1 0 ${2 * q} 0a${q} ${q} 0 1 0 ${-2 * q} 0Z`;
+    const poly = (pts) => 'M' + pts.map((p) => f(p[0]) + ' ' + f(p[1])).join('L');
+    const arc = (cx, cy, q, a0, a1) => {
+      const p = (a) => [cx + q * Math.sin(a * 2 * Math.PI), cy - q * Math.cos(a * 2 * Math.PI)];
+      const s = p(a0), e = p(a1);
+      return `M${f(s[0])} ${f(s[1])}A${q} ${q} 0 ${a1 - a0 > 0.5 ? 1 : 0} 1 ${f(e[0])} ${f(e[1])}`;
+    };
+    const sector = (cx, cy, q, a0, a1) => arc(cx, cy, q, a0, a1).replace(/^M/, `M${cx} ${cy}L`) + 'Z';
+    const o = { grid: '', txt: '', light: '', main: '', half: '', line: '', ring: '', ring2: '', ringL: '', acc: '', dash: '', sep: '' };
+    const base = hl(14, 76, 146);
+    const grid3 = base + hl(14, 52, 146) + hl(14, 28, 146);
+    const bars = (vals, x0, w, step, top, max) => vals.map((v, i) => (v == null ? '' : r(x0 + i * step, 76 - (v / max) * (76 - top), w, (v / max) * (76 - top), 1.5))).join('');
+    const tbl = (rows, cols) => {
+      let g = '', t = '';
+      const rh = 58 / (rows + 1);
+      for (let i = 1; i <= rows; i += 1) g += hl(14, 16 + rh * i, 146);
+      for (let i = 1; i <= rows; i += 1) cols.forEach((c) => { t += hl(c[0], 16 + rh * i + rh / 2, c[0] + c[1]); });
+      return { g, t, rh };
+    };
+    if (kind === 'line') {
+      const V = [297, 302, 311, 309, 314, 319, 324, 330, 344, 348, 352, 378, 353, 358, 366, 372, 378, 384, 391, 400, 423];
+      const pts = V.map((v, i) => [18 + i * 6.2, 72 - ((v - 280) / 150) * 52]);
+      o.grid = grid3; o.line = poly(pts); o.main = ci(pts[20][0], pts[20][1], 3.5);
+    } else if (kind === 'vbars') {
+      const V = [297, 302, 311, 309, 314, 319, 324, 330, 344, 348, 352, 378, 353, 358, 366, 372, 378, 384, 391, 400, 423];
+      o.grid = base; o.main = V.map((v, i) => r(16 + i * 6.2, 76 - ((v - 240) / 190) * 56, 4, ((v - 240) / 190) * 56, 1)).join('');
+    } else if (kind === 'table' || kind === 'dash') {
+      const T = tbl(6, [[20, 34], [66, 26], [112, 28]]);
+      o.light = r(14, 14, 132, 9, 3); o.grid = T.g; o.txt = T.t;
+      if (kind === 'dash') { o.txt = tbl(6, [[20, 34]]).t; o.dash = [1, 2, 3, 4, 5, 6].map((i) => hl(i === 3 || i === 6 ? 70 : 66, 16 + T.rh * i + T.rh / 2, i === 3 || i === 6 ? 78 : 92) + (i === 3 || i === 6 ? '' : hl(112, 16 + T.rh * i + T.rh / 2, 140))).join(''); o.txt += ''; }
+    } else if (kind === 'hbars' || kind === 'bars10') {
+      const V = kind === 'hbars' ? [1433, 612, 318, 274, 236, 214, 210, 198] : [212, 177, 158, 142, 130, 118, 107, 98, 95, 91];
+      const n = V.length, step = 62 / n;
+      o.main = V.map((v, i) => r(48, 14 + i * step, (v / V[0]) * 94, step - 2.4, 1.5)).join('');
+      o.txt = V.map((v, i) => hl(16, 14 + i * step + (step - 2.4) / 2, 38)).join('');
+    } else if (kind === 'vbars8') {
+      const V = [1433, 612, 318, 274, 236, 214, 210, 198];
+      o.grid = hl(14, 66, 146); o.main = V.map((v, i) => r(22 + i * 15.6, 66 - (v / 1433) * 50, 9, (v / 1433) * 50, 1.5)).join('');
+      o.txt = V.map((v, i) => hl(14 + i * 15.6, i % 2 ? 80 : 74, 40 + i * 15.6)).join('');
+    } else if (kind === 'pie8') {
+      const V = [41, 17.5, 9.1, 7.8, 6.8, 6.1, 6, 5.7];
+      let a = 0;
+      V.forEach((v, i) => { const s = sector(80, 45, 31, a, a + v / 100); if (i % 2) o.light += s; else o.main += s; a += v / 100; });
+      a = 0; V.forEach((v) => { const p = [80 + 31 * Math.sin(a * 2 * Math.PI), 45 - 31 * Math.cos(a * 2 * Math.PI)]; o.sep += `M80 45L${f(p[0])} ${f(p[1])}`; a += v / 100; });
+    } else if (kind === 'donut') {
+      o.ring = arc(56, 45, 24, 0, 0.455); o.ring2 = arc(56, 45, 24, 0.465, 0.735); o.ringL = arc(56, 45, 24, 0.745, 0.905) + arc(56, 45, 24, 0.915, 0.99);
+      o.txt = hl(100, 32, 136) + hl(100, 42, 128) + hl(100, 52, 132) + hl(100, 62, 122);
+      o.main = ci(94, 32, 2.5); o.half = ci(94, 42, 2.5); o.light = ci(94, 52, 2.5) + ci(94, 62, 2.5);
+    } else if (kind === 'stack') {
+      const S = [46, 28, 17, 9]; let x = 16;
+      S.forEach((v, i) => { const w = (v / 100) * 128; const p = r(x, 36, w, 18, i === 0 ? 3 : 0.01); if (i === 0) o.main += p; else if (i === 1) o.half += p; else o.light += p; x += w; });
+      o.sep = vl(16 + 0.46 * 128, 36, 54) + vl(16 + 0.74 * 128, 36, 54) + vl(16 + 0.91 * 128, 36, 54);
+      o.txt = hl(16, 66, 44) + hl(76, 66, 96) + hl(112, 66, 126);
+    } else if (kind === 'vbars4') {
+      o.grid = base; o.main = bars([46, 28, 17, 9], 26, 20, 30, 20, 46);
+    } else if (kind === 'hist') {
+      const V = [168, 121, 75, 46, 30, 21, 13, 8, 5];
+      o.grid = base; o.main = V.map((v, i) => r(16 + i * 12.4, 76 - (v / 168) * 56, 11.4, (v / 168) * 56, 1)).join('');
+      o.acc = ci(134, 72.5, 2.5) + ci(140, 72.5, 2.5) + ci(146, 72.5, 2.5);
+    } else if (kind === 'kpi2') {
+      o.light = r(14, 22, 62, 46, 6) + r(84, 22, 62, 46, 6);
+      o.main = r(22, 32, 30, 10, 2) + r(92, 32, 34, 10, 2); o.txt = hl(22, 54, 64) + hl(92, 54, 132);
+    } else if (kind === 'kpi4') {
+      o.light = r(14, 14, 64, 29, 5) + r(82, 14, 64, 29, 5) + r(14, 47, 64, 29, 5) + r(82, 47, 64, 29, 5);
+      o.main = r(20, 20, 26, 8, 2) + r(88, 20, 22, 8, 2) + r(20, 53, 22, 8, 2) + r(88, 53, 14, 8, 2);
+      o.txt = hl(21, 36, 60) + hl(89, 36, 124) + hl(21, 69, 62) + hl(89, 69, 120);
+    } else if (kind === 'ubars') {
+      o.grid = base; o.main = bars([2, 56, 7, 1.2], 28, 18, 30, 20, 56);
+      o.txt = hl(28, 82, 46) + hl(58, 82, 76) + hl(88, 82, 106) + hl(118, 82, 136);
+    } else if (kind === 'gapline' || kind === 'gapbars') {
+      const V = [41, 43, null, 46, 47, 49, null, 52];
+      const X = (i) => 20 + i * 17.6, Y = (v) => 70 - ((v - 36) / 18) * 48;
+      if (kind === 'gapline') {
+        o.grid = grid3; o.line = poly([[X(0), Y(41)], [X(1), Y(43)]]) + poly([[X(3), Y(46)], [X(4), Y(47)], [X(5), Y(49)]]) + 'M' + f(X(7) - 0.1) + ' ' + f(Y(52)) + 'L' + f(X(7)) + ' ' + f(Y(52));
+        o.main = V.map((v, i) => (v == null ? '' : ci(X(i), Y(v), 2.6))).join('');
+        o.dash = vl(X(2), 22, 76) + vl(X(6), 22, 76);
+      } else {
+        o.grid = base; o.main = V.map((v, i) => (v == null ? '' : r(X(i) - 5, 76 - ((v - 30) / 24) * 54, 10, ((v - 30) / 24) * 54, 1.5))).join('');
+        o.dash = r(X(2) - 5, 40, 10, 36, 1.5) + r(X(6) - 5, 40, 10, 36, 1.5);
+      }
+    } else if (kind === 'top10') {
+      const T = tbl(10, [[20, 30], [60, 22], [92, 18], [124, 16]]);
+      o.light = r(14, 14, 132, 6, 2) + r(14, 70, 132, 8, 2); o.grid = T.g; o.txt = T.t;
+      o.main = r(14, 14, 132, 6, 2);
+      o.light = r(14, 71, 132, 7, 2); o.txt = T.t.split('M').filter(Boolean).slice(0, 36).map((s) => 'M' + s).join('') + hl(20, 74.5, 64);
+    } else if (kind === 'pages') {
+      for (let i = 0; i < 24; i += 1) {
+        const x = 16 + (i % 6) * 22, y = 16 + Math.floor(i / 6) * 15;
+        o.light += r(x, y, 18, 11, 2); o.txt += hl(x + 3, y + 4, x + 11);
+      }
+    }
+    this.dsMC[kind] = o;
+    return o;
+  }
+
+  // строки карточки в «Почему так»: тип колонки → класс тега
+  dsType(t) {
+    return { 'дата': 'dx-t-d', 'число': 'dx-t-n', 'категория': 'dx-t-c', 'текст': 'dx-t-t' }[t] || 'dx-t-c';
+  }
+
+  dsStop() {
+    if (this.dtI) { clearInterval(this.dtI); this.dtI = null; }
+    if (this.dtT0) { clearTimeout(this.dtT0); this.dtT0 = null; }
+    if (this.dtT1) { clearTimeout(this.dtT1); this.dtT1 = null; }
+    if (this.bbT) { clearTimeout(this.bbT); this.bbT = null; }
+    if (this.dwT) { clearTimeout(this.dwT); this.dwT = null; }
+    if (this.bbClr) { clearTimeout(this.bbClr); this.bbClr = null; }
+  }
+
+  // файлы данных прикреплены: панель «Данные» въезжает (сетка 520 мс), карточки разбираются по очереди —
+  // такт 240 мс: карточка i в работе с такта i, готова с такта i + 3
+  dtAttach(ids, extra) {
+    if (this.dtI) clearInterval(this.dtI);
+    if (this.dtT1) clearTimeout(this.dtT1);
+    const s = this.state;
+    const cur = (s.dt || []).filter((id) => ids.indexOf(id) < 0);
+    this.setState(Object.assign({ dt: cur.concat(ids), dtT: 0, dtUp: '', dtKeep: false, dtIn: true, dtOut: '', dtSh: {}, txMenu: false, txImp: false, txErr: '', open: 'text', more: false }, extra || {}));
+    this.dtT1 = setTimeout(() => { this.dtT1 = null; this.setState({ dtIn: false }); }, 560);
+    if (this.props.frozen) { this.setState({ dtT: 99 }); return; }
+    this.dtI = setInterval(() => {
+      const t = (this.state.dtT || 0) + 1;
+      this.setState({ dtT: t });
+      if (t >= (this.state.dt || []).length + 3) { clearInterval(this.dtI); this.dtI = null; }
+    }, 240);
+  }
+
+  // «Пример: данные продаж»: бриф, 7 файлов и брендбук VK Cloud сразу
+  dtExample() {
+    const D = this.dsData();
+    this.twStop();
+    this.dtAttach(D.FILES.map((x) => x.id), { text: D.BRIEF, txSrc: D.BRIEF, count: 9, bbOn: true, bbSrc: 'pdf', bbUp: '', bbMenu: false });
+  }
+
+  // «Файлы с данными»: файлы над полем (как C-upload); через 1600 мс или по щелчку — отпустить
+  dtDrag() {
+    if (this.dtT0) clearTimeout(this.dtT0);
+    this.setState({ txMenu: false, dtUp: 'drag' });
+    this.dtT0 = setTimeout(() => this.dtDrop(), 1600);
+  }
+
+  dtDrop() {
+    if (this.dtT0) { clearTimeout(this.dtT0); this.dtT0 = null; }
+    if (this.state.dtUp !== 'drag') return;
+    this.dtAttach(this.dsData().FILES.map((x) => x.id));
+  }
+
+  // убрать файл: карточка гаснет 240 мс, нижние подъезжают на её место (transform); последний — панель уезжает
+  dtRemove(id) {
+    if (this.state.dtOut) return;
+    this.setState({ dtOut: id });
+    this.dtT1 = setTimeout(() => {
+      this.dtT1 = null;
+      const s = this.state;
+      const list = (s.dt || []).slice();
+      const k = list.indexOf(id);
+      if (k < 0) { this.setState({ dtOut: '' }); return; }
+      list.splice(k, 1);
+      const sh = Object.assign({}, s.dtSh);
+      list.slice(k).forEach((x) => { sh[x] = sh[x] === 'a' ? 'b' : 'a'; });
+      this.setState({ dt: list, dtOut: '', dtSh: sh, dtKeep: list.length === 0 });
+      if (!list.length) this.dtT1 = setTimeout(() => { this.dtT1 = null; this.setState({ dtKeep: false }); }, 560);
+    }, 240);
+  }
+
+  // Брендбук: меню у кнопки шага 01 — шаг раскрывается (плита 02 уезжает вниз), меню над лентой шаблонов
+  bbToggleMenu() {
+    const s = this.state;
+    if (s.tpUp || s.bbUp) return;
+    this.setState({ bbMenu: !s.bbMenu, open: 'tpl', more: false, txMenu: false });
+  }
+
+  // выбор в меню: разбор брендбука в теле шага (как разбор шаблона): 6 шагов по 640 мс, галочки держатся 560 мс, гаснет 240
+  bbPick(src) {
+    if (this.bbT) clearTimeout(this.bbT);
+    this.setState({ bbMenu: false, open: 'tpl', more: false, bbUp: 'run', bbStep: 0, bbSrc: src, bbOn: false });
+    if (this.props.frozen) return;
+    this.bbT = setTimeout(() => this.bbTick(), 640);
+  }
+
+  bbTick() {
+    this.bbT = null;
+    const n = Math.min(6, (this.state.bbStep || 0) + 1);
+    this.setState({ bbStep: n });
+    if (n < 6) { this.bbT = setTimeout(() => this.bbTick(), 640); return; }
+    this.bbT = setTimeout(() => {
+      this.setState({ bbUp: 'out' });
+      this.bbT = setTimeout(() => { this.bbT = null; this.setState({ bbUp: '', bbStep: 0, bbOn: true }); }, 240);
+    }, 560);
+  }
+
+  // «Пересобрать слайд так»: строка статуса у действия 1600 мс, затем вариант встаёт на слайд (картинка — заглушка)
+  dwRebuild(slide, k) {
+    if (this.state.dwBusy) return;
+    this.setState({ dwBusy: slide + ':' + k });
+    this.dwT = setTimeout(() => {
+      this.dwT = null;
+      const p = Object.assign({}, this.state.dwPick);
+      p[slide] = k;
+      this.setState({ dwPick: p, dwBusy: '' });
+    }, 1600);
+  }
+
+  // сборка колоды с данными: тот же ход и такты, что у «Интеграла», 9 слайдов, роль «Аналитик данных»
+  bdDataD() {
+    const bb = !!this.state.bbOn;
+    if (!this.bdDD) this.bdDD = {};
+    if (this.bdDD[bb]) return this.bdDD[bb];
+    const B = this.bdData();
+    const D = this.dsData();
+    const rr = (x, y, w, h, r) => `M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+    const ci = (cx, cy, r) => `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`;
+    const hl = (x1, y, x2) => `M${x1} ${y}H${x2}`;
+    const vl = (x, y1, y2) => `M${x} ${y1}V${y2}`;
+    const sk = (o) => Object.assign({ head: '', txt: '', ln: '', acc: '', bar: '', dot: '', tint: '' }, o);
+    const SK = Object.assign({}, B.SK, {
+      kpi: sk({ head: hl(12, 16, 100), ln: rr(12, 28, 66, 24, 5) + rr(82, 28, 66, 24, 5) + rr(12, 58, 66, 24, 5) + rr(82, 58, 66, 24, 5),
+        bar: hl(20, 37, 40) + hl(90, 37, 108) + hl(20, 67, 38) + hl(90, 67, 100), txt: hl(20, 45, 58) + hl(90, 45, 126) + hl(20, 75, 60) + hl(90, 75, 122) }),
+      line: sk({ head: hl(12, 16, 92), ln: 'M20 24V76H148', acc: 'M24 70L36 68L48 66L60 63L72 60L84 56L96 59L108 54L120 50L132 46L144 36', dot: ci(144, 36, 3) }),
+      hbar: sk({ head: hl(12, 14, 92) + hl(12, 22, 70), txt: [32, 39, 46, 53, 60, 67, 74, 81].map((y) => hl(14, y, 30)).join(''),
+        bar: [100, 44, 24, 20, 17, 16, 15, 14].map((w, i) => hl(38, 32 + i * 7, 38 + w)).join('') }),
+      donut: sk({ head: hl(12, 16, 104), ln: ci(54, 52, 22) + ci(54, 52, 12), acc: 'M54 30A22 22 0 0 1 59.5 73.3', tint: 'M54 30A22 22 0 0 1 59.5 73.3L57 63.7A12 12 0 0 0 54 40Z',
+        dot: ci(92, 40, 2) + ci(92, 48, 2) + ci(92, 56, 2) + ci(92, 64, 2), txt: hl(100, 40, 136) + hl(100, 48, 128) + hl(100, 56, 132) + hl(100, 64, 120) }),
+      hist: sk({ head: hl(12, 16, 92), ln: 'M20 78H148', bar: vl(28, 78, 34) + vl(46, 78, 46) + vl(64, 78, 57) + vl(82, 78, 64) + vl(100, 78, 68) + vl(118, 78, 71) + vl(136, 78, 63) }),
+      line6: sk({ head: hl(12, 16, 104), ln: 'M20 24V76H148', acc: 'M26 68L50 64L74 56L98 54L122 48L144 38', dot: ci(26, 68, 2.5) + ci(50, 64, 2.5) + ci(74, 56, 2.5) + ci(98, 54, 2.5) + ci(122, 48, 2.5) + ci(144, 38, 3) }),
+      table: sk({ head: hl(12, 14, 84), ln: rr(12, 24, 136, 56, 5) + hl(12, 40, 148) + hl(12, 48, 148) + hl(12, 56, 148) + hl(12, 64, 148) + hl(12, 72, 148),
+        bar: hl(16, 29, 144), txt: [44, 52, 60, 68, 76].map((y) => hl(18, y, 54) + hl(68, y, 92) + hl(124, y, 140)).join('') })
+    });
+    const PH = B.PH.slice();
+    PH[1] = 'Пишу текст по брифу';
+    PH[2] = 'Изучаю данные';
+    const R = B.ROLES.map((x) => Object.assign({}, x));
+    R[0] = Object.assign(R[0], { hint: 'пишет текст по брифу', notes: { 4: '· 9 слайдов' }, lines: [{ at: 4, a: 'Написал текст по брифу: ', b: '9 слайдов' }] });
+    R[1] = Object.assign(R[1], { name: 'Аналитик данных', hint: 'изучает файлы: природа данных, задача, график',
+      p: 'M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5', notes: { 5: '· 7 файлов' },
+      lines: [{ at: 5, a: '7 файлов: ', b: 'временной ряд, сравнение, доли', c: '…' }, { at: 5, a: 'Выбрал: ', b: 'линию, столбцы, кольцо, интервалы' }] });
+    R[2] = Object.assign(R[2], { lines: [{ at: 7, a: 'Сюжет: ', b: 'итоги → рост → регионы → узкие места' }] });
+    R[3] = Object.assign(R[3], { notes: { 9: '· 3 слайда', 10: '· 6 слайдов', 11: '· 9 слайдов' },
+      lines: [{ at: 9, b: 'Слайд 3', c: ' — линия, 21 месяц, рост +23 %' }, { at: 10, b: 'Слайд 4', c: ' — столбцы по 8 регионам' }, { at: 11, b: 'Слайд 8', c: ' — топ-10 и «остальные 230»' }] });
+    R[4] = Object.assign(R[4], { notes: { 13: '· 1 замечание · слайд 6', 14: '· 2 замечания · слайды 6, 7', 15: '· 3 замечания · слайды 6, 7, 9' },
+      lines: [{ at: 13, b: 'Слайд 6:', c: ' выбросы тянут шкалу', d: 'интервал «больше 180»' }, { at: 14, b: 'Слайд 7:', c: ' пропуск похож на падение', d: 'пояснение' }, { at: 15, b: 'Слайд 9:', c: ' вывод повторял заголовок', d: 'новый вывод' }] });
+    R[5] = Object.assign(R[5], { lines: [{ at: 17, b: 'Слайд 6', c: ' — 3 выброса вынесены в текст' }, { at: 18, b: 'Слайд 7', c: ' — пропуски объяснены под графиком' }] });
+    R[6] = Object.assign(R[6], { notes: { 20: '· 3 из 9', 21: '· 6 из 9', 22: '· 9 из 9', 24: '· {v}' } });
+    R[7] = Object.assign(R[7], { lines: [{ at: 25, a: 'Сверил ', b: 'числа на слайдах', c: ' с файлами — все совпали' },
+      bb ? { at: 26, a: 'Брендбук важнее шаблона: ', b: 'шрифт и акцент' } : { at: 26, a: 'Шрифты, цвета, отступы: ', b: '4 исправления' }] });
+    R[8] = Object.assign(R[8], { lines: [{ at: 28, a: 'Посмотрел на ', b: '9 слайдов', c: ': пересобрал 1' }] });
+    this.bdDD[bb] = Object.assign({}, B, {
+      NS: 9, NG: 8, T: D.SL.map((x) => x.t), SK, PH, ROLES: R,
+      SKS: { 9: 3, 10: 6, 11: 9 }, SKC: { 9: 2, 10: 4, 11: 6, 16: 9 }, LDN: { 20: 3, 21: 6, 22: 9 },
+      REM: { 5: 13, 6: 14 }, FIX: { 8: 15, 5: 17, 6: 18 }, CUR: { 13: 5, 14: 6, 15: 8, 17: 5, 18: 6 },
+      FORM: [['cover', 'Обложка'], ['kpi', 'Карточки'], ['line', 'Линейный график'], ['hbar', 'Столбцы'], ['donut', 'Кольцевая'],
+        ['hist', 'Столбцы по интервалам'], ['line6', 'Линейный график'], ['table', 'Таблица'], ['cards', 'Итог']],
+      VIS: {}
+    });
+    return this.bdDD[bb];
+  }
+
   img(v, i) {
     const alt = this.D.ALT[v];
     return (alt && alt[i]) || this.D.S[i];
@@ -6124,7 +7328,11 @@ class Component extends DCLogic {
 
     // Сборка: подготовка (B-start) → роли агента, эскизы и критик (B-sketch) → правка, вёрстка, проверка → готово;
     // неудача (B-failed) — на шаге критика. bdBt — такт, по которому строится содержимое (при неудаче — такт критика)
-    const bdB = this.bdData();
+    // колода с данными (модуль ds): та же сборка на 9 слайдов, роль «Аналитик данных», фаза «Изучаю данные»
+    const dataDoc = st.doc === 'dt';
+    const bdB = dataDoc ? this.bdDataD() : this.bdData();
+    const bdNS = bdB.NS || 12;
+    const bdT = bdB.T || D.T;
     const bdFr = !!this.props.frozen;
     const bdTk = Math.max(0, Math.min(bdB.END, st.tick || 0));
     const bdFailed = isBuild && ((!!st.bdErr && bdTk >= bdB.FT) || (bdFr && !!this.props.bdFail));
@@ -6138,7 +7346,8 @@ class Component extends DCLogic {
     // (колонка без места «03»: 880 − 320 − 24 − 192 = 344 px при 1440); ширины при 36 px — замер, иначе по числу знаков
     const PHW = { 'Готовлюсь к сборке': 433, 'Пишу текст по теме': 431, 'Читаю текст': 273, 'Выстраиваю сюжет': 445,
       'Продумываю слайды': 486, 'Сверяю план с текстом': 515, 'Переделываю слайды': 502, 'Раскладываю по макетам': 586,
-      'Проверяю шрифты и цвета': 608, 'Смотрю на слайды целиком': 633, 'Презентация готова': 450, 'Сборка остановилась': 493 };
+      'Проверяю шрифты и цвета': 608, 'Смотрю на слайды целиком': 633, 'Презентация готова': 450, 'Сборка остановилась': 493,
+      'Пишу текст по брифу': 471, 'Изучаю данные': 349 };
     const bdPhs = (name) => Math.min(0.75, 340 / (PHW[name] || name.length * 27)).toFixed(3);
     const bdPhases = bdB.PH.map((name, i) => ({ name, phs: bdPhs(name), cls: i === bdPi ? 'p2-ph-on' : (i < bdPi ? 'p2-ph-past' : 'p2-ph-next') }));
     const bdSec = bdFailed ? bdB.FCLK : bdB.CLK[bdBt];
@@ -6150,12 +7359,12 @@ class Component extends DCLogic {
     const bdLay = bdBt >= bdB.LAY;
     const bdLd = bdAt(bdB.LDN);
     const bdPlan = bdBt >= bdB.PT;
-    const bdDone = !bdPlan ? 'план ещё не готов' : (bdLay ? 'сверстано ' + bdLd + ' из 12' : 'продумано ' + bdSk(bv) + ' из 12');
+    const bdDone = !bdPlan ? 'план ещё не готов' : (bdLay ? 'сверстано ' + bdLd + ' из ' + bdNS : 'продумано ' + bdSk(bv) + ' из ' + bdNS);
     const bdCrit = bv !== 'c';
-    const bdCur = bdLay ? (bdLd < 12 ? bdLd : -1) : (bdCrit && bdB.CUR[bdBt] !== undefined ? bdB.CUR[bdBt] : -1);
+    const bdCur = bdLay ? (bdLd < bdNS ? bdLd : -1) : (bdCrit && bdB.CUR[bdBt] !== undefined ? bdB.CUR[bdBt] : -1);
     const bdBoard = [];
-    for (let i = 0; i < (bdBt < bdB.N12 ? 10 : 12); i += 1) {
-      const title = D.T[i];
+    for (let i = 0; i < (bdBt < bdB.N12 ? (bdB.NG || 10) : bdNS); i += 1) {
+      const title = bdT[i];
       const f = (bv === 'v' && bdB.VIS[i]) || bdB.FORM[i];
       const g = bdB.SK[f[0]];
       const ready = bdPlan && i < bdSk(bv);
@@ -6169,7 +7378,7 @@ class Component extends DCLogic {
           (remark ? ', замечание критика' : '') + (redone ? ', переделан по замечанию критика' : '') +
           (cur ? (bdLay ? ', сейчас верстается' : ', о нём сейчас говорит агент') : '');
       bdBoard.push({
-        n: i + 1, title, form: f[1], img: this.img(bv, i),
+        n: i + 1, title, form: f[1], img: dataDoc ? D.DATA_SLIDES[i].th : this.img(bv, i),
         ghost: !bdPlan, w1: bdB.GHOST[i][0] + '%', w2: bdB.GHOST[i][1] + '%',
         numbered: bdPlan, empty: bdPlan && !ready, ready, done,
         isForm: ready && !done, isTitle: done,
@@ -6182,7 +7391,7 @@ class Component extends DCLogic {
     }
     const bdVars = enabled.map((k) => {
       const n = bdSk(k);
-      const fin = bdLay ? bdLd >= 12 : n >= 12;
+      const fin = bdLay ? bdLd >= bdNS : n >= bdNS;
       let tip = VD[k];
       if (bdBt < 2) tip += ' · в очереди';
       else if (!bdPlan) tip += ' · ждёт плана';
@@ -6250,7 +7459,7 @@ class Component extends DCLogic {
 
     // Результат
     const rv = st.vars[st.rvar] ? st.rvar : (enabled[0] || 's');
-    const rs = Math.max(0, Math.min(11, st.rslide || 0));
+    const rs = Math.max(0, Math.min(dataDoc ? 8 : 11, st.rslide || 0));
     const rvars = enabled.map((k) => ({
       label: VN[k], score: SC[k], pressed: String(k === rv), cls: k === rv ? 'p2-rseg-on' : '',
       pick: () => this.setState({ rvar: k })
@@ -6258,7 +7467,20 @@ class Component extends DCLogic {
     const fullDoc = (st.doc || 'int') === 'int';
     const docItem = [].concat(...D.GROUPS.map((g) => g.items)).find((x) => x.id === st.doc) || {};
     const docSlides = (docItem.meta || '').split(' · ')[2] || '';
-    const thumbs = fullDoc ? D.T.map((title, i) => ({
+    const DS = this.dsData();
+    // колода с данными: 9 слайдов, картинки — D.DATA_SLIDES; multi — у документа есть слайды и варианты (не только обложка)
+    const multi = fullDoc || dataDoc;
+    const nS = dataDoc ? 9 : 12;
+    const docT = dataDoc ? DS.SL[0].t : (fullDoc ? 'Интеграл' : docItem.title);
+    const slT = dataDoc ? DS.SL[rs].t : (fullDoc ? D.T[rs] : docItem.title);
+    const scoreV = multi ? SC[rv] : docItem.score;
+    const thumbs = dataDoc ? DS.SL.map((x, i) => ({
+      img: D.DATA_SLIDES[i].th,
+      label: 'Слайд ' + (i + 1) + ': ' + x.t,
+      pressed: String(i === rs),
+      cls: i === rs ? 'p2-th-on' : '',
+      pick: () => this.setState({ rslide: i })
+    })) : fullDoc ? D.T.map((title, i) => ({
       img: this.img(rv, i),
       label: 'Слайд ' + (i + 1) + ': ' + title,
       pressed: String(i === rs),
@@ -6273,6 +7495,10 @@ class Component extends DCLogic {
     const txErr = txOpen && st.text === st.txSrc ? (st.txErr || '') : '';
     // «Улучшить готовую»: плита 01 свёрнута в полосу, плита 02 встаёт под неё (40 px), плита 03 — на месте
     if (txImpOn) Y[1] = 40;
+    // данные прикреплены (модуль ds): плита 01 сворачивается в полосу (как в «Улучшить готовую») — у плиты 02 место под панель «Данные»
+    const dataOn = (st.dt || []).length > 0;
+    const dtCol = txOpen && dataOn && !txImpOn;
+    if (dtCol) Y[1] = 40;
     if (txLong) this.txLast = this.txParse(st.text);
     const txHintLong = st.writes
       ? 'Это готовый текст — агент разложит его по слайдам и допишет недостающее'
@@ -6491,13 +7717,18 @@ class Component extends DCLogic {
       });
       return { n: i + 1, title: s.title, parts };
     });
-    const rtLbSlides = fullDoc ? D.T.map((title, i) => ({
+    const rtLbSlides = dataDoc ? DS.SL.map((x, i) => ({
+      img: D.DATA_SLIDES[i].img,
+      alt: 'Слайд ' + (i + 1) + ': ' + x.t,
+      cls: i === rs ? 'lb-img lb-img-on' : 'lb-img',
+      hidden: String(i !== rs)
+    })) : fullDoc ? D.T.map((title, i) => ({
       img: this.img(rv, i),
       alt: 'Слайд ' + (i + 1) + ': ' + title,
       cls: i === rs ? 'lb-img lb-img-on' : 'lb-img',
       hidden: String(i !== rs)
     })) : [{ img: docItem.img, alt: 'Слайд 1: ' + docItem.title, cls: 'lb-img lb-img-on', hidden: 'false' }];
-    const rtN = fullDoc ? '12' : (docSlides.split(' ')[0] || '1');
+    const rtN = dataDoc ? '9' : fullDoc ? '12' : (docSlides.split(' ')[0] || '1');
 
     // «Подробнее» (модуль details): живые вкладки; слой «Слайд N шаблона» и меню варианта сбрасываются, когда лист уехал
     const dlOn = isResult && !!st.dd;
@@ -6510,7 +7741,7 @@ class Component extends DCLogic {
     }
     const dlc = { isResult, dlOn, rv, rs, enabled, keys, VN, SC, ON, OFF, ty };
     const dlq = this.dlQ(dlc);
-    const dlw = this.dlW(dlc);
+    const dlw = dataDoc ? this.dlWD(dlc) : this.dlW(dlc);
     const dla = this.dlA();
     const dlp = this.dlP(dlc);
     const dlt = this.dlT();
@@ -6564,9 +7795,78 @@ class Component extends DCLogic {
     const hpTxt = String(st.hpText || '');
     const hpLines = hpTxt.split('\n').length;
     // компактная колонка: те же варианты, что в полной колонке, с подсказкой оценки (как G-helper)
-    const hpVars = (fullDoc ? rvars : [{ label: VN.s, score: docItem.score, pressed: 'true', cls: 'p2-rseg-on', pick: () => {} }])
+    const hpVars = (multi ? rvars : [{ label: VN.s, score: docItem.score, pressed: 'true', cls: 'p2-rseg-on', pick: () => {} }])
       .map((x) => Object.assign({}, x, { tip: x.label + ' · оценка качества ' + x.score + ' из 100' }));
 
+    // ── Данные и брендбук (модуль ds)
+    const bbS = DS.BB.SRC[st.bbSrc] || DS.BB.SRC.pdf;
+    const bbUp = st.bbUp || '';
+    const bbRunOn = isCreate && (bbUp === 'run' || bbUp === 'out');
+    const bbN = Math.max(0, Math.min(6, st.bbStep || 0));
+    const bbHas = !!st.bbOn && !bbRunOn;
+    const bbWins = st.bbPri !== 'tpl';
+    const bbPal = DS.BB.pal.map((x) => ({ hex: x[0], role: x[1] }));
+    const bbSteps = [bbS.step, ['палитра: ', '6 цветов'], ['шрифты: ', 'VK Sans Display, VK Sans Text'], ['логотипы: ', '4'], ['правила: ', '3'],
+      ['сверка с шаблоном VK Tech: ', '2 расхождения']].map((x, i) => {
+      const k = i < bbN ? 'done' : (i === bbN ? 'cur' : 'pend');
+      return { a: x[0], b: x[1], c: '', cls: 'an-' + k + (i === 5 ? ' an-last' : ''), current: k === 'cur' ? 'step' : 'false', now: k === 'cur' ? 'сейчас' : '', sr: k === 'done' ? ' — готово' : '' };
+    });
+    const bbT = (name, meta, at, extra, d) => Object.assign({ name, meta: bbN >= at ? meta : '…', on: bbN >= at ? 'bb-at-on' : '', delay: d,
+      aria: name + (bbN >= at ? ': ' + meta : ' — разбираю'), isFont: false, isPal: false, isLogo: false, cut: '', wo: '' }, extra);
+    const bbMenuOn = isCreate && tplOpen && !more && !!st.bbMenu && !bbRunOn;
+    const bbPvOn = isCreate && !!st.bbPv && !!st.bbOn && !sect && !bbRunOn;
+    // меню и слой брендбука живут, пока жив их контекст (шаг 01 раскрыт / экран «Создать» без раздела); ушёл контекст —
+    // уезжают вместе с ним и сами не возвращаются (как «Слайды шаблона»)
+    if (((st.bbMenu && !bbMenuOn) || (st.bbPv && !bbPvOn)) && !this.bbClr) {
+      this.bbClr = setTimeout(() => {
+        this.bbClr = null;
+        const s2 = this.state;
+        const u = {};
+        if (s2.bbMenu && !(s2.screen === 'create' && s2.open === 'tpl' && !s2.more)) u.bbMenu = false;
+        if (s2.bbPv && !(s2.screen === 'create' && !s2.sect && s2.bbOn)) u.bbPv = false;
+        if (Object.keys(u).length) this.setState(u);
+      }, 560);
+    }
+    // файлы данных: карточки, разбор по тактам
+    const dtIds = st.dt || [];
+    const dtT = st.dtT || 0;
+    let dtDoneN = 0;
+    const dtCards = dtIds.map((id, k) => {
+      const F = DS.FILES.find((x) => x.id === id) || DS.FILES[0];
+      const done = dtT >= k + 3;
+      const run = !done && dtT >= k;
+      if (done) dtDoneN += 1;
+      const size = F.rows + ' ' + this.pl(F.rows, 'строка', 'строки', 'строк') + ' · ' + F.cols + ' ' + this.pl(F.cols, 'колонка', 'колонки', 'колонок');
+      const sh = (st.dtSh || {})[id];
+      return {
+        name: F.name, icon: DS.I[F.ic], nature: F.nature, size, sizeN: F.rows + ' ' + this.pl(F.rows, 'строка', 'строки', 'строк'),
+        run: F.run, runCls: run ? ON : OFF, waitCls: !run && !done ? ON : OFF, pfCls: done ? ON : OFF,
+        tip: F.name + ' · ' + F.fmt + ' · ' + size + (done ? ' · ' + F.nature : ''),
+        cls: (st.dtOut === id ? 'dt-out' : '') + (sh ? ' dt-up' + sh : ''),
+        delay: (160 + k * 40) + 'ms',
+        remove: () => this.dtRemove(id), rmLabel: 'Убрать файл «' + F.name + '»'
+      };
+    });
+    const dtAll = dtIds.length;
+    const dtBusy = dtDoneN < dtAll;
+    // цели из брифа: «покажи рост», «сравни регионы» — влияют на выбор графика (ТЗ, ограничения)
+    const dtGoals = [];
+    const gRost = st.text.match(/покажи\s+рост[^,.;\n]*/i);
+    const gReg = st.text.match(/сравни\s+регион[^,.;\n]*/i);
+    if (gRost) dtGoals.push({ q: gRost[0].charAt(0).toLowerCase() + gRost[0].slice(1).trim(), to: 'линейный график' });
+    if (gReg) dtGoals.push({ q: gReg[0].charAt(0).toLowerCase() + gReg[0].slice(1).trim(), to: 'столбцы' });
+    // полоса 02: бриф коротко (первая фраза до 44 знаков) и сколько файлов
+    const brief = (() => {
+      const t = st.text.trim();
+      if (!t) return 'Тема ещё не задана';
+      let f = t.split(/[.!?\n]/)[0].trim();
+      if (f.length > 44) f = f.slice(0, 45).replace(/\s+\S*$/, '');
+      return f + (f.length < t.length ? '…' : '');
+    })();
+    const s2Data = isCreate ? dataOn : dataDoc;
+    // «Почему так» в колонке результата — про открытый слайд колоды с данными
+    const dsWS = DS.SL[Math.max(0, Math.min(8, rs))];
+    const dsWF = dsWS.f ? DS.FILES.find((x) => x.id === dsWS.f) : null;
     return {
       isCreate, isBuild, isResult,
       y1: ty(Y[0]), y2: ty(Y[1]), y3: ty(Y[2]),
@@ -6578,8 +7878,14 @@ class Component extends DCLogic {
       num3: (isCreate && !st.enter3) || isBuild ? ON : OFF,
       c4: isResult || !!st.keep4,
       stripCls: isCreate && !more ? OFF : ON,
+      s1Cls: isCreate && !more && !dtCol ? OFF : ON,
+      s1Meta: tpl.n + ' ' + tplWord + ' · ' + tpl.font + (st.bbOn ? ' · брендбук VK Cloud' : ''),
+      s1Btn: more || dtCol,
+      s2Cls: isCreate && !more ? OFF : ON,
+      s2Title: s2Data ? brief : (fullDoc ? 'Интеграл' : docItem.title),
+      s2Sub: s2Data ? dtAll + ' ' + this.pl(dtAll, 'файл', 'файла', 'файлов') + ' данных' : (fullDoc ? 'тема · текст пишет агент' : 'из «Мои презентации»'),
       strip3: isResult ? ON : OFF,
-      head1: isCreate && !more ? ON : OFF,
+      head1: isCreate && !more && !dtCol ? ON : OFF,
       head2: isCreate && !more ? ON : OFF,
       body1: tplOpen && !more ? ON : OFF,
       body2: isCreate && textOpen && !more ? ON : OFF,
@@ -6682,18 +7988,19 @@ class Component extends DCLogic {
       bdRetry: () => this.bdRetry(),
 
       fullDoc,
-      docAria: 'Презентация «' + (fullDoc ? 'Интеграл' : docItem.title) + '»',
-      bigAlt: 'Слайд ' + (fullDoc ? rs + 1 : 1) + ': ' + (fullDoc ? D.T[rs] : docItem.title),
-      noteSrc: fullDoc ? 'По статье Википедии «Интеграл».' : 'По теме «' + docItem.title + '».',
-      ringDash: ((fullDoc ? SC[rv] : docItem.score) / 100 * 119.38).toFixed(2) + ' 119.38',
-      ringTitle: 'Оценка качества ' + (fullDoc ? SC[rv] : docItem.score) + ' из 100 · 100 − 10 за ошибку − 3 за предупреждение',
+      docAria: 'Презентация «' + docT + '»',
+      bigAlt: 'Слайд ' + (multi ? rs + 1 : 1) + ': ' + slT,
+      noteSrc: dataDoc ? 'По брифу и 7 файлам данных.' : fullDoc ? 'По статье Википедии «Интеграл».' : 'По теме «' + docItem.title + '».',
+      ringDash: (scoreV / 100 * 119.38).toFixed(2) + ' 119.38',
+      ringTitle: 'Оценка качества ' + scoreV + ' из 100 · 100 − 10 за ошибку − 3 за предупреждение',
       agent: D.AG.map((x) => ({ name: x.name, text: x.text, p1: x.p[0], p2: x.p[1], p3: x.p[2] })),
       // уведомление: false — таблетка, true — раскрыто с основанием и кнопками
       // «Подробнее»: лист над результатом; ddLast держит вкладку видимой, пока лист уезжает вниз
       ddLay: isResult && st.dd ? '' : 'p2-lay-off',
       ddY: ty(isResult && st.dd ? 160 : 880),
       ddBack: isResult && st.dd ? ON : OFF,
-      ddTabs: [['quality', 'Качество'], ['why', 'Почему так'], ['agent', 'Агент'], ['plan', 'План'], ['template', 'Шаблон'], ['files', 'Файлы']].map(([key, label]) => ({
+      // у колоды с данными в макете пока одна вкладка — «Почему так»
+      ddTabs: [['quality', 'Качество'], ['why', 'Почему так'], ['agent', 'Агент'], ['plan', 'План'], ['template', 'Шаблон'], ['files', 'Файлы']].filter((x) => !dataDoc || x[0] === 'why').map(([key, label]) => ({
         key, label,
         sel: String(key === st.ddLast),
         cls: key === st.ddLast ? 'p2-rseg-on' : '',
@@ -6713,7 +8020,7 @@ class Component extends DCLogic {
       ddFiles: () => this.openDd('files'),
       closeDd: () => this.setState({ dd: '' }),
       qCardCls: fullDoc ? '' : 'ra-card-static',
-      rvName: fullDoc ? VN[rv] : VN.s,
+      rvName: multi ? VN[rv] : VN.s,
       noteStr: String(!!st.note),
       rebuild: () => this.go('build'),
       // Помощник: класс на обёртке колоды переключает сетку, плиту, компактный вид результата; таблетка в шапке — p2-nav-on
@@ -6726,7 +8033,7 @@ class Component extends DCLogic {
       hpClose: () => this.setState({ hpOpen: false }),
       hpDHead: hpDl(160), hpDChips: hpDl(440), hpDComp: hpDl(480),
       hpMsgs, hpChips, hpHasChips: hpChips.length > 0,
-      hpPh: 'Что поменять на слайде ' + (fullDoc ? rs + 1 : 1) + '?',
+      hpPh: 'Что поменять на слайде ' + (multi ? rs + 1 : 1) + '?',
       hpText: hpTxt,
       hpOnText: (e) => this.setState({ hpText: e.target.value }),
       hpTaH: (Math.min(8, Math.max(1, hpLines)) * 24 + 16) + 'px',
@@ -6737,8 +8044,8 @@ class Component extends DCLogic {
       hpSendDis: !hpTxt.trim(),
       hpSend: () => hpPost(this.state.hpText),
       hpVars,
-      hpVTitle: 'Вариант ' + (fullDoc ? keys.indexOf(rv) + 1 : 1) + ' · ' + (fullDoc ? VN[rv] : VN.s),
-      hpSrc: fullDoc ? 'Текст написал агент — по статье «Интеграл» в Википедии' : 'Текст написал агент — по теме «' + docItem.title + '»',
+      hpVTitle: 'Вариант ' + (multi ? keys.indexOf(rv) + 1 : 1) + ' · ' + (multi ? VN[rv] : VN.s),
+      hpSrc: dataDoc ? 'Текст написал агент — по брифу и 7 файлам данных' : fullDoc ? 'Текст написал агент — по статье «Интеграл» в Википедии' : 'Текст написал агент — по теме «' + docItem.title + '»',
       ofBrand: 'of-brand' + (ofOff ? ' p2-offline' : '') + (this.ofMode === 'land' ? ' of-land' : ''),
       ofMv: ofRun ? 'p2-lmove' : '', ofTr: ofRun ? 'p2-ltrain' : '',
       ofB1: ofRun ? 'p2-lb1' : '', ofB2: ofRun ? 'p2-lb2' : '', ofB3: ofRun ? 'p2-lb3' : '',
@@ -6762,13 +8069,13 @@ class Component extends DCLogic {
       rtCloseLb: () => this.setState({ rtLb: false }),
       rtLbLay: rtLbOn ? '' : 'p2-lay-off',
       rtLbY: ty(rtLbOn ? 0 : 880),
-      rtLbCount: (fullDoc ? rs + 1 : 1) + ' / ' + rtN,
-      rtLbTitle: fullDoc ? D.T[rs] : docItem.title,
+      rtLbCount: (multi ? rs + 1 : 1) + ' / ' + rtN,
+      rtLbTitle: slT,
       rtLbSlides,
-      rtLbPrev: () => { if ((this.state.doc || 'int') === 'int') this.setState({ rslide: Math.max(0, (this.state.rslide || 0) - 1) }); },
-      rtLbNext: () => { if ((this.state.doc || 'int') === 'int') this.setState({ rslide: Math.min(11, (this.state.rslide || 0) + 1) }); },
-      rtLbPrevCls: !fullDoc || rs <= 0 ? 'lb-hide' : '',
-      rtLbNextCls: !fullDoc || rs >= 11 ? 'lb-hide' : '',
+      rtLbPrev: () => { const d = this.state.doc || 'int'; if (d === 'int' || d === 'dt') this.setState({ rslide: Math.max(0, (this.state.rslide || 0) - 1) }); },
+      rtLbNext: () => { const d = this.state.doc || 'int'; if (d === 'int' || d === 'dt') this.setState({ rslide: Math.min(d === 'dt' ? 8 : 11, (this.state.rslide || 0) + 1) }); },
+      rtLbPrevCls: !multi || rs <= 0 ? 'lb-hide' : '',
+      rtLbNextCls: !multi || rs >= nS - 1 ? 'lb-hide' : '',
       // resulttools · «Изображение на слайде»: клик по картинке — рамка и колонка с карточкой, раскрытой в форму
       rtPicOk,
       rtPicStr: String(rtPicOn),
@@ -6817,7 +8124,7 @@ class Component extends DCLogic {
       rmShow: () => this.setState({ rslide: rmF.show, rmIn: false }),
       rmUndo: () => this.rmUndo(rs),
       // ── Шаблоны (модуль tp)
-      tpRibOn: !tpRunOn,
+      tpRibOn: !tpRunOn && !bbRunOn,
       tpRows,
       tpMoreTip: tpHid.map((x) => x.name).join(', '),
       tpGalOpen: () => this.setState({ sect: 'tpls' }),
@@ -6837,7 +8144,7 @@ class Component extends DCLogic {
       // шаблон, справа на две колонки ход разбора
       tpAn2: tpL.slice(0, 2).map((x, i) => Object.assign(tpCard(x, i, 40, 'step'), { cut: i === 0 ? 'tp-cut' : '', wo: i === 0 ? 'hp-wo' : '' })),
       tpAnMore: tpAnHid > 0,
-      tpAnl: tpRunOn ? 'tp-anl' : '',
+      tpAnl: tpRunOn || bbRunOn ? 'tp-anl' : '',
       tpAnText: 'ещё ' + tpAnHid + ' ' + this.pl(tpAnHid, 'шаблон', 'шаблона', 'шаблонов'),
       tpAnTip: tpL.slice(2).map((x) => x.name).join(', '),
       tpGal: tpL.map((x, i) => tpCard(x, i, 200, 'gal')),
@@ -6890,6 +8197,69 @@ class Component extends DCLogic {
         }
         this.setState(upd);
       },
+      // ── Данные и брендбук (модуль ds)
+      dataDoc,
+      bbNone: !st.bbOn && !bbRunOn, bbBusy: bbRunOn, bbHas,
+      bbToggle: () => this.bbToggleMenu(),
+      bbMenuStr: String(bbMenuOn), bbMenuCls: bbMenuOn ? 'tx-menu-on' : '', bbMenuOn,
+      bbMenuClose: () => this.setState({ bbMenu: false }),
+      bbItems: [
+        { name: 'PDF-гайдлайн', meta: 'палитра, шрифты, правила', icon: DS.I.file, sep: false, pick: () => this.bbPick('pdf') },
+        { name: 'Токены (JSON)', meta: 'цвета, шрифты, отступы', icon: DS.I.json, sep: false, pick: () => this.bbPick('json') },
+        { name: 'Папка или архив', meta: 'логотипы и примеры слайдов', icon: DS.I.folder, sep: false, pick: () => this.bbPick('dir') },
+        { name: 'Figma — файл или ссылка', meta: 'стили и компоненты', icon: DS.I.frame, sep: false, pick: () => this.bbPick('figma') },
+        { name: 'Пример: Брендбук VK Cloud', meta: 'PDF · 24 стр.', icon: DS.I.book, sep: true, pick: () => this.bbPick('pdf') }
+      ],
+      bbPal, bbMeta: bbS.meta,
+      bbOpen: () => this.setState({ bbPv: true, bbMenu: false }),
+      bbClose: () => this.setState({ bbPv: false }),
+      bbRemove: () => this.setState({ bbPv: false, bbOn: false }),
+      bbTplCls: bbHas ? 'bb-tpl-n' : '',
+      bbRunOn, bbOut: bbUp === 'out' ? 'tp-out' : '',
+      bbFile: bbS.file, bbStepN: bbN, bbProg: (bbN / 6).toFixed(4), bbWord: bbN >= 6 ? 'готово' : 'разбираю…',
+      bbSteps,
+      bbTiles: [
+        bbT('Шрифты', '2 шрифта', 3, { isFont: true, cut: 'tp-cut', wo: 'hp-wo' }, '40ms'),
+        bbT('Палитра', '6 цветов', 2, { isPal: true }, '80ms'),
+        bbT('Логотипы', '4', 4, { isLogo: true, cut: 'tp-cut', wo: 'hp-wo' }, '120ms')
+      ],
+      bbLogos: DS.BB.logos.map((x) => ({ name: x[0], cls: x[1] })),
+      bbPvOn, bbLay: bbPvOn ? '' : 'p2-lay-off', bbY: ty(bbPvOn ? 120 : 880),
+      bbLayMeta: bbS.file + ' · ' + (st.bbSrc === 'pdf' ? '24 страницы · ' : '') + 'применяется к шаблону ' + tpl.name,
+      bbFonts: DS.BB.fonts.map((x) => ({ name: x[0], role: x[1], w: x[2] })),
+      bbRules: DS.BB.rules.map((x) => ({ s: x })),
+      bbSeg: [['bb', 'Брендбук'], ['tpl', 'Шаблон']].map((x) => {
+        const on = (x[0] === 'bb') === bbWins;
+        return { label: x[1], on: String(on), cls: on ? 'p2-rseg-on' : '', pick: () => this.setState({ bbPri: x[0] }) };
+      }),
+      bbConf: [
+        { k: 'Шрифт заголовков', a: 'Play', b: 'VK Sans Display', sw: false, res: bbWins ? 'VK Sans Display, замена — Play' : 'Play, как в шаблоне' },
+        { k: 'Второй акцент', a: '#FF3885', b: '#FF3985', sw: true, res: bbWins ? '#FF3985' : '#FF3885, как в шаблоне' }
+      ],
+      bbOnR: !!st.bbOn,
+      dtMenu: [
+        { name: 'Файлы с данными', meta: 'CSV, XLSX, JSON, таблица в тексте', icon: DS.I.tbl, pick: () => this.dtDrag() },
+        { name: 'Пример: данные продаж', meta: '7 файлов, бриф, брендбук', icon: DS.I.chart, pick: () => this.dtExample() }
+      ],
+      dtZoneCls: txOpen && st.dtUp === 'drag' ? 'tp-zone-on' : '',
+      dtDrop: () => this.dtDrop(),
+      dtG: (dataOn || st.dtKeep ? 'dt-on' : '') + (dataOn ? ' dt-w' : '') + (st.dtIn ? ' dt-in' : ''),
+      dtHide: String(!dataOn),
+      dtCards,
+      dtStatus: !dtAll ? '' : (dtBusy ? 'разбираю ' + Math.min(dtAll, dtDoneN + 1) + ' из ' + dtAll + '…'
+        : dtAll + ' ' + this.pl(dtAll, 'файл разобран', 'файла разобраны', 'файлов разобраны')),
+      dtStCls: dtBusy ? 'dt-st-run' : '',
+      dtGoalOn: dataOn || !!st.dtKeep, dtGoalCls: dataOn ? ON : OFF,
+      dtGoals,
+      dtGoalLbl: dtGoals.length ? 'Цели из текста — влияют на выбор графика' : 'Целей в тексте нет — графики выберу по данным',
+      dtGoalLblN: dtGoals.length ? 'Цели из текста' : 'Целей в тексте нет',
+      txTa: dataOn ? 'c-tad' : 'c-ta',
+      txHintShortN: dataOn ? 'Бриф — текст по данным' : 'Это тема — агент напишет полный текст',
+      dsWhySum: dsWS.sum,
+      dsWhyFile: !!dsWF, dsWhyFileName: dsWF ? dsWF.name + ' · ' + dsWF.nature.toLowerCase() : '', dsWhyIc: dsWF ? DS.I[dsWF.ic] : '',
+      dsLookTag: st.bbOn ? (bbWins ? 'брендбук важнее' : 'шаблон важнее') : 'по шаблону',
+      dsLook: st.bbOn ? (bbWins ? 'VK Tech и брендбук VK Cloud: заголовки — VK Sans Display, замена — Play; акцент #FF3985' : 'VK Tech и брендбук VK Cloud: при расхождении — как в шаблоне')
+        : 'Палитра, шрифт Play и сетка — из шаблона VK Tech',
       txHead: txOpen ? ON : OFF,
       txFmt: txOpen && !txErr ? ON : OFF,
       txFileBtn: () => this.setState({ txMenu: !this.state.txMenu }),
@@ -6904,7 +8274,7 @@ class Component extends DCLogic {
       ],
       txHintTop: txOpen && txLong && !txImpOn && !txErr ? ON : OFF,
       txHintLong,
-      txHintShort: 'Это тема — агент напишет полный текст: ключевые факты, даты, формулы с пояснениями',
+      txHintShort: dataOn ? 'Это бриф — агент напишет текст по данным' : 'Это тема — агент напишет полный текст: ключевые факты, даты, формулы с пояснениями',
       txStrip: txImpOn ? ON : OFF,
       txBack: () => this.txBack(),
       txNote: txImpOn ? ON : OFF,
@@ -6926,30 +8296,30 @@ class Component extends DCLogic {
       noteTip: st.note ? 'Свернуть' : 'Показать действия',
       toggleNote: () => this.setState({ note: !this.state.note }),
       closeNote: () => this.setState({ note: false }),
-      docTitle: fullDoc ? 'Интеграл' : docItem.title,
-      docLine: fullDoc ? tpl.name + ' · 12 слайдов · сегодня, 17:38' : (() => {
+      docTitle: docT,
+      docLine: dataDoc ? tpl.name + (st.bbOn ? ' · брендбук VK Cloud' : '') + ' · 9 слайдов · только что' : fullDoc ? tpl.name + ' · 12 слайдов · сегодня, 17:38' : (() => {
         const p = (docItem.meta || '').split(' · ');
         const g = D.GROUPS.find((x) => x.items.indexOf(docItem) >= 0) || { day: '' };
         const day = g.day === 'Сегодня' || g.day === 'Вчера' ? g.day.toLowerCase() : g.day;
         const when = /^\d\d:\d\d$/.test(p[0]) && g.day !== 'Раньше' ? day + ', ' + p[0] : p[0];
         return p[1] + ' · ' + p[2] + ' · ' + when;
       })(),
-      docSub: fullDoc ? 'тема · текст пишет агент' : 'из «Мои презентации»',
-      resultMeta: fullDoc ? nVar + ' ' + varWord + ' · 12 слайдов' : 'оценка ' + docItem.score + ' · ' + docSlides,
-      nSlides: fullDoc ? '12' : docSlides.split(' ')[0],
-      bigImg: fullDoc ? this.img(rv, rs) : docItem.img,
-      bigN: fullDoc ? rs + 1 : 1,
-      bigTitle: fullDoc ? D.T[rs] : docItem.title,
+      docSub: dataDoc ? 'бриф и 7 файлов данных' : fullDoc ? 'тема · текст пишет агент' : 'из «Мои презентации»',
+      resultMeta: multi ? nVar + ' ' + varWord + ' · ' + nS + ' слайдов' : 'оценка ' + docItem.score + ' · ' + docSlides,
+      nSlides: multi ? String(nS) : docSlides.split(' ')[0],
+      bigImg: dataDoc ? D.DATA_SLIDES[rs].img : fullDoc ? this.img(rv, rs) : docItem.img,
+      bigN: multi ? rs + 1 : 1,
+      bigTitle: slT,
       prev: () => this.setState({ rslide: Math.max(0, (this.state.rslide || 0) - 1) }),
-      next: () => this.setState({ rslide: Math.min(11, (this.state.rslide || 0) + 1) }),
-      prevDis: !fullDoc || rs <= 0, nextDis: !fullDoc || rs >= 11,
+      next: () => this.setState({ rslide: Math.min(this.state.doc === 'dt' ? 8 : 11, (this.state.rslide || 0) + 1) }),
+      prevDis: !multi || rs <= 0, nextDis: !multi || rs >= nS - 1,
       thumbs,
-      rvars: fullDoc ? rvars : [{ label: VN.s, score: docItem.score, pressed: 'true', cls: 'p2-rseg-on', pick: () => {} }],
-      score: fullDoc ? SC[rv] : docItem.score,
+      rvars: multi ? rvars : [{ label: VN.s, score: docItem.score, pressed: 'true', cls: 'p2-rseg-on', pick: () => {} }],
+      score: scoreV,
       editText: () => { this.go('create'); this.setState({ open: 'text' }); },
-      restart: () => { this.go('create'); this.setState({ text: '', audience: '', open: 'text' }); },
+      restart: () => { this.go('create'); this.setState({ text: '', audience: '', open: 'text', dt: [], dtT: 0, dtKeep: false }); },
       // логотип: на главный экран, текущая презентация закрывается, открытые разделы и меню сворачиваются
-      goHome: () => { this.go('create'); this.setState({ text: '', audience: '', open: 'text', sect: '', more: false, hOpen: '' }); }
+      goHome: () => { this.go('create'); this.setState({ text: '', audience: '', open: 'text', sect: '', more: false, hOpen: '', dt: [], dtT: 0, dtKeep: false, bbPv: false, bbMenu: false }); }
     };
   }
 }
