@@ -22,7 +22,7 @@ __all__ = [
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
     "period_text", "period_dative", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
     "stem", "stems_of", "same_stem", "stems_match", "file_title", "period_acc", "period_in", "fmt_count",
-    "fmt_pct_any", "round_pct_any",
+    "fmt_pct_any", "round_pct_any", "is_event_name", "count_gen", "count_dat", "is_period_name",
 ]
 
 NBSP = " "
@@ -150,6 +150,31 @@ def fmt_value(x: float, unit: Optional[str], case: str = "nom") -> str:
 def count_words(n: int, one: str, few: str, many: str) -> str:
     """«21 точка», «8 регионов», «512 значений» (разряды — неразрывным пробелом)."""
     return f"{_group(int(n))} {plural(n, one, few, many)}"
+
+
+def count_gen(n: int, one: str, many: str) -> str:
+    """Число со словом в родительном («из …»): «из 31 дня», «из 30 дней», «из 21 недели», «из 5 недель»."""
+    k = abs(int(n))
+    return f"{_group(int(n))} {one if k % 10 == 1 and k % 100 != 11 else many}"
+
+
+def count_dat(n: int, one: str, many: str) -> str:
+    """Число со словом в дательном («по …»): «по 6 утверждениям», «по 21 утверждению»."""
+    k = abs(int(n))
+    return f"{_group(int(n))} {one if k % 10 == 1 and k % 100 != 11 else many}"
+
+
+_PERIOD_HEADS = {"неделя", "недели", "месяц", "месяцы", "день", "дни", "год", "годы", "квартал", "кварталы", "этап",
+                 "этапы", "шаг", "шаги", "волна", "волны", "раунд", "сезон", "когорта", "период", "час", "смена"}
+
+
+def is_period_name(name: Optional[str]) -> bool:
+    """Название ряда — номер периода или этапа («Неделя 1», «Месяц 3», «2025»): подлежащим его не делают
+    («Неделя 1 выросла» — неверно), вывод — через двоеточие («Неделя 1: +5 п.п.»)."""
+    s = str(name or "").strip().lower()
+    if re.search(r"\d", s):
+        return True
+    return (s.split(" ")[0] if s else "") in _PERIOD_HEADS
 
 
 def lower_first(s: str) -> str:
@@ -302,6 +327,10 @@ def _noun(w: str) -> Optional[_Word]:
         # мягкая основа: отрасли, пользователи, области
         fem = (st + "ь") in _FEM_SOFT or st.endswith(("ост", "ест"))
         return _Word(st + "ь", st + ("и" if fem else "я"), st + ("и" if fem else "ю"), st + "ей", st + "ям", w, "pl")
+    # «поступления», «отчисления», «задания» — мн. число от «-ение/-ание» («компания», «Германия» — ед.)
+    if len(w) > 5 and (w.endswith("ения") or (w.endswith("ания") and w[-5] in "вдзстрл")):
+        st = w[:-1]
+        return _Word(st + "е", st, st + "ю", w[:-2] + "ий", st + "ям", w, "pl")
     # единственное число
     if w.endswith("мя"):
         st = w[:-2]
@@ -421,8 +450,8 @@ def phrase(name: Optional[str]) -> Optional[Phrase]:
     while h < len(toks) - 1 and _is_adj(low[h]):
         h += 1
     head = low[h]
-    if re.search(r"(?:лось|лся|лась|лись)$", head):
-        return None  # «Уволилось», «Пришло» — глагол, а не название величины
+    if re.search(r"(?:лось|лся|лась|лись)$", head) or (h == 0 and _past_verb(head)):
+        return None  # «Уволилось», «Оплатили» — глагол, а не название величины
     if is_counter(s) and h == 0:
         return None  # «Клиентов», «Довольных клиентов» — не именительный падеж; см. metric_phrase
     if not _CYR.match(head.replace("ё", "е")):
@@ -475,8 +504,11 @@ def phrase(name: Optional[str]) -> Optional[Phrase]:
 
 
 _COUNTER_OK = {"сделок", "заявок", "покупок", "поставок", "оценок", "ошибок", "отгрузок", "продаж", "минут", "часов",
-               "дней", "недель", "лет", "штук", "единиц", "задач", "услуг"}
-_NOT_COUNTER = {"музей", "лицей", "юбилей", "хоккей", "ростов", "остров", "ков"}
+               "дней", "недель", "лет", "штук", "единиц", "задач", "услуг", "доставок", "звонков", "статей", "людей",
+               "детей", "гостей", "вещей", "ночей", "площадей"}
+_NOT_COUNTER = {"музей", "лицей", "юбилей", "хоккей", "ростов", "остров", "ков", "рынок", "звонок", "урок", "срок",
+                "поток", "остаток", "приток", "отток", "восток", "станок", "кусок", "игрок", "порок", "сток",
+                "критерий", "сценарий", "комментарий", "гений", "сочинений"}
 
 
 def is_counter(name: Optional[str]) -> bool:
@@ -491,7 +523,60 @@ def is_counter(name: Optional[str]) -> bool:
         return True
     if re.search(r"(?:лось|лись)$", first):
         return True  # «Уволилось», «Пришли» — счёт событий
+    if len(first) >= 6 and first.endswith("ок") and not first.endswith(("ток", "рок", "нок")):
+        return True  # родительный мн. женского рода: «Доставок», «Поездок», «Перевозок»
+    if len(first) >= 6 and first.endswith(("ений", "аний", "ций", "тий")):
+        return True  # «Обращений», «Операций», «Посещений», «Событий»
     return len(first) >= 5 and first.endswith(("ов", "ев", "ых", "их", "елей", "телей", "лей"))
+
+
+# причастие («Доставлено», «Утверждено») и глагол прошедшего времени («Оплатили», «Добавили в корзину») в названии —
+# счёт событий или людей: в заголовке «Число доставок», «Число оплативших», а не «Доставлено выросло»
+_PARTICIPLE_NOUN = {"доставлено": "доставок", "продано": "продаж", "отгружено": "отгрузок", "поставлено": "поставок",
+                    "куплено": "покупок", "выдано": "выдач", "заказано": "заказов"}
+_NOT_VERB = {"автомобили", "профили", "стили", "модели", "цели", "недели", "детали", "медали", "рубли", "роли", "отрасли",
+             "области", "нули", "ноли", "сабли", "корабли", "фамилии", "дели", "скалли", "числа"}
+
+
+def _past_verb(word: str) -> bool:
+    """Глагол прошедшего времени во мн. числе или с «-ся»: «оплатили», «начали», «уволилось», «записались»."""
+    w = word.lower()
+    if w in _NOT_VERB or not _CYR.match(w) or len(w) < 5:
+        return False
+    if re.search(r"(?:лись|лось|лся|лась)$", w):
+        return True
+    return bool(re.search(r"[аеиоуыя]ли$", w)) and not w.endswith("тели")
+
+
+def _active_gen_pl(word: str) -> Optional[str]:
+    """Действительное причастие в родительном мн.: «оплатили» → «оплативших», «уволилось» → «уволившихся»; основа на
+    согласный («пришли») — None."""
+    w = word.lower()
+    m = re.match(r"^(.+?)(?:лись|лось|лся|лась)$", w)
+    if m:
+        st = m.group(1)
+        return st + "вшихся" if st[-1:] in "аеиоуыя" else None
+    if w.endswith("ли") and w[-3:-2] in "аеиоуыя":
+        return w[:-2] + "вших"
+    return None
+
+
+def _participle_gen_pl(word: str) -> Optional[str]:
+    """Краткое страдательное причастие → родительный мн. полного: «доставлено» → «доставленных», «принято» →
+    «принятых»."""
+    w = word.lower()
+    if w.endswith(("ено", "ано", "ёно")):
+        return w[:-1] + "ных"
+    if w.endswith(("ято", "ыто", "ито", "уто", "ото")):
+        return w[:-1] + "ых"
+    return None
+
+
+def is_event_name(name: Optional[str]) -> bool:
+    """Название — счёт событий или людей глаголом или причастием: «Доставлено», «Оплатили», «Добавили в корзину»,
+    «Уволилось»."""
+    first = str(name or "").strip().split(" ")[0].lower()
+    return is_participle(first) or _past_verb(first)
 
 
 def metric_phrase(name: Optional[str], mtype: str = "number") -> Optional[Phrase]:
@@ -499,8 +584,22 @@ def metric_phrase(name: Optional[str], mtype: str = "number") -> Optional[Phrase
     После «N% …» счётчик остаётся собой: «35% клиентов», а не «35% числа клиентов» (поле `gen`)."""
     if not name:
         return None
+    base = re.sub(r"\s*[,(].*$", "", str(name).strip())
+    if is_event_name(base) and mtype != "percent":
+        # «Доставлено» → «Число доставок», «Добавили в корзину» → «Число добавивших в корзину»; деньги («Утверждено,
+        # тыс. ₽») — «утверждённого»
+        toks = base.split(" ")
+        first = toks[0].lower()
+        rest = (" " + " ".join(toks[1:])) if len(toks) > 1 else ""
+        if mtype == "money" and is_participle(first):
+            st = first[:-1] + ("н" if first.endswith("но") else "")
+            return Phrase(base, st + "ого" + rest, st + "ому" + rest, st + "ых" + rest, st + "ым" + rest, base, "n")
+        gen = _PARTICIPLE_NOUN.get(first) or (_participle_gen_pl(first) if is_participle(first) else _active_gen_pl(first))
+        if gen is None:
+            return None
+        gen += rest
+        return Phrase("Число " + gen, gen, "числу " + gen, "чисел " + gen, "числам " + gen, "Числа " + gen, "n")
     if is_counter(name):
-        base = re.sub(r"\s*[,(].*$", "", str(name).strip())
         p = phrase(("Доля " if mtype == "percent" else "Число ") + lower_first(base))
         if p is not None and mtype != "percent":
             p = Phrase(p.nom, base, p.dat, p.gen_pl, p.dat_pl, p.nom_pl, p.gender, p.sure)

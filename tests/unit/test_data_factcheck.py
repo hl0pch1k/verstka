@@ -1,16 +1,17 @@
-"""Независимая проверка чисел анализа (страховочная сетка, ревью rev7b). Для каждого плана, построенного по реальной
-или случайной, но правдоподобной таблице, каждое число заголовка и подписи пересчитывается ЗАНОВО по сырым строкам
-таблицы — без видов анализа (`Data`, `CatView`, `TimeView`): суммы, доли, изменения между полными периодами, доли «не
-больше X», доля топ-10, r, исполнение плана, конверсия воронки. Плюс правила:
-- состав (накопительные столбцы, доли частей) — только при признаке целого в данных (итог = сумма частей, группа шапки,
-  строки по 100); годы, периоды, план и факт — не части;
-- «100%» — только когда все;
-- пункты (п., п.п.) — только у процентов и безразмерных индексов;
-- каждое число заголовка есть среди фактов.
+"""Независимая проверка чисел анализа (страховочная сетка, ревью rev7b и rev7c). Для каждого плана, построенного по
+реальной или случайной, но правдоподобной таблице, проверка решает САМА, по сырым строкам таблицы, о какой величине
+должен быть вывод (цель, затем колонка-итог для сравнения, затем поток денег), складывается ли она (по единице и
+названию: °C, ц/га, «/», статистика, код валюты — нет; штуки, люди, потоки денег, итог = сумма — да), как собрать
+период (сумма, среднее, среднее за неделю) и какой период полный (по ритму ряда: рабочие дни, 90% дней). И уже потом
+сверяет каждое число заголовка и фактов: лидера, последнего, долю, доли кольца, каждое изменение (%, п.п., «в N раз»,
+несколько рядов, «N из M», ключевые показатели), исполнение плана, конверсию, r, долю топ-N. Плюс правила: «Итого» и
+доли — только у того, что складывается; ориентир («Среднее по стране») — не категория; порядковые группы не пропадают;
+номера — не график; пункты — только у процентов и индексов; «100%» — только когда все.
 
-Корпус: 32 таблицы ревьюера (`scratchpad/s2/rev7b/gen.py`, `gen2.py` и пробы data3–data5 — перенесены сюда, без
-случайности) и сотни случайных таблиц 12 семейств с фиксированным зерном. Таблицы идут через настоящее чтение
-(`read_bytes`) и профиль."""
+Корпус: таблицы ревьюера rev7b (`scratchpad/s2/rev7b`) и rev7c (`scratchpad/s2/rev7c/gen3.py`, `gen4.py`) —
+перенесены сюда без случайности, и сотни случайных таблиц 19 семейств с фиксированным зерном. Таблицы идут через
+настоящее чтение (`read_bytes`) и профиль; анализ (`Data` и виды) проверка не использует. Каждая ошибка, которую сетка
+должна ловить, подложена в план и поймана (`test_checker_catches_planted_errors`)."""
 
 from __future__ import annotations
 
@@ -24,14 +25,14 @@ import numpy as np
 import pytest
 
 from verstka.data.headline import numbers_in
-from verstka.data.parse import is_total_label, period_parts, quantity, split_unit
-from verstka.data.plan import NotBuilt, chart_spec_of, plan_dataset
+from verstka.data.parse import period_parts, quantity, split_unit
+from verstka.data.plan import NotBuilt, chart_spec_of, plan_dataset, plan_datasets
 from verstka.data.profile import profile_table
 from verstka.data.readers import read_bytes
 from verstka.schemas.data import DatasetPlan, Table
 from verstka.schemas.outline import ChartSpec, NumberCallout, TableData
 
-NB = " "
+NB = "\u00a0"
 INDEX_HEAD = re.compile(r"^(?:nps|enps|csat|индекс\w*|рейтинг\w*|оценк\w*|балл\w*|доля|доли|конверси\w*|удовлетвор\w*)$",
                         re.I)
 
@@ -176,6 +177,187 @@ def corpus() -> list[tuple[str, str]]:
     return out
 
 
+
+
+# ═══════════════════════════════════════════ корпус ревьюера (rev7c) ═══════════════════════════════════════════════
+def _dec(x: float, n: int = 1) -> str:
+    return f"{x:.{n}f}".replace(".", ",")
+
+
+def corpus_rev7c() -> list[tuple[str, str]]:
+    """Свежая охота rev7c (`scratchpad/s2/rev7c/gen3.py`, `gen4.py`): 20 доменов и 10 проб, перенесены сюда без
+    случайности; таблицы XLSX — тем же содержимым в CSV."""
+    out: list[tuple[str, str]] = []
+    whs = {"Подольск": (1450, 22, 4.1), "Химки": (1180, 15, 6.3), "Казань": (760, 9, 3.2),
+           "Екатеринбург": (690, -6, 8.7), "Новосибирск": (540, 4, 5.5), "Краснодар": (480, 12, 2.9)}
+    rows = [["Неделя", "Склад", "Доставлено, шт.", "Опозданий, шт.", "Доля опозданий, %"]]
+    for w in range(12):
+        d = dt.date(2025, 9, 1) + dt.timedelta(weeks=w)
+        for s, (b, g, late) in whs.items():
+            n = b + g * w + (25 if w % 4 == 3 else 0)
+            lp = late + (0.4 * w if s == "Екатеринбург" else -0.1 * w)
+            k = round(n * lp / 100)
+            rows.append([d.strftime("%d.%m.%Y"), s, n, k, _dec(k / n * 100, 1)])
+    out.append(("Доставки по складам.csv", _csv(rows)))
+    deps = {"Терапия": (820, 6), "Хирургия": (410, -3), "Кардиология": (290, 4), "Неврология": (240, 2),
+            "Педиатрия": (530, -8)}
+    months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
+              "Декабрь"]
+    rows = [["Месяц", *deps, "Всего"]]
+    for mo in range(1, 13):
+        vals = [b + s * (mo - 1) + (60 if mo in (1, 2, 12) and d in ("Терапия", "Педиатрия") else 0)
+                for d, (b, s) in deps.items()]
+        rows.append([f"{months[mo - 1]} 2025", *vals, sum(vals)])
+    out.append(("Пациенты по отделениям 2025.csv", _csv(rows)))
+    dist = [("Центральный", 312.4, 7.8, 410), ("Петроградский", 287.9, 9.1, 265), ("Василеостровский", 241.3, 6.2, 388),
+            ("Московский", 218.6, 5.4, 512), ("Приморский", 205.2, 4.9, 934), ("Выборгский", 189.7, 3.8, 701),
+            ("Калининский", 184.1, 4.4, 642), ("Невский", 176.5, 2.1, 588), ("Фрунзенский", 171.9, 3.0, 455),
+            ("Кировский", 168.2, 1.7, 367), ("Красносельский", 162.8, 5.9, 803), ("Колпинский", 128.4, -1.2, 214)]
+    out.append(("Цена квадратного метра по районам.csv", _csv(
+        [["Район", "Цена за м², тыс. ₽", "Изменение за год, %", "Предложений, шт."]]
+        + [[a, _dec(b), _dec(c), e] for a, b, c, e in dist])))
+    crops = {"Пшеница озимая": [38.2, 41.5, 35.9, 44.1, 46.3], "Ячмень яровой": [29.4, 31.2, 27.8, 33.0, 32.1],
+             "Кукуруза на зерно": [58.7, 62.4, 49.3, 66.8, 71.2], "Подсолнечник": [21.3, 23.9, 19.6, 24.7, 25.8],
+             "Соя": [16.9, 18.2, 15.1, 19.4, 20.6], "Сахарная свёкла": [412.0, 445.5, 398.2, 468.9, 481.3]}
+    out.append(("Урожайность по культурам.csv", _csv([["Культура", "Год", "Значение"]]
+                                                    + [[c, 2021 + k, _dec(v[k])] for c, v in crops.items() for k in range(5)])))
+    out.append(("Урожайность культур, ц на га.csv", _csv([["Год", "Культура", "Урожайность, ц/га"]]
+                                                         + [[2021 + k, c, _dec(v[k])] for k in range(5)
+                                                            for c, v in crops.items()])))
+    gr = [("G1 Стажёр", 45, 52, 60, 34), ("G2 Специалист", 70, 85, 105, 128), ("G3 Старший специалист", 110, 132, 160, 96),
+          ("G4 Ведущий специалист", 150, 178, 215, 61), ("G5 Руководитель группы", 200, 240, 290, 27),
+          ("G6 Руководитель отдела", 280, 335, 410, 12), ("G7 Директор", 420, 510, 640, 4)]
+    out.append(("Зарплаты по грейдам.csv", _csv([["Грейд", "Минимум, тыс. ₽", "Медиана, тыс. ₽", "Максимум, тыс. ₽",
+                                                  "Сотрудников"]] + [list(g) for g in gr])))
+    out.append(("Брошенные корзины по устройствам.csv", _csv(
+        [["Устройство", "Добавили в корзину", "Начали оформление", "Оплатили", "Доля брошенных корзин, %"],
+         ["Смартфон", 48200, 21300, 12650, _dec((1 - 12650 / 48200) * 100)],
+         ["Компьютер", 21400, 13100, 9870, _dec((1 - 9870 / 21400) * 100)],
+         ["Планшет", 5300, 2600, 1710, _dec((1 - 1710 / 5300) * 100)]])))
+    sch = [("Лицей № 2", 81.4, 112), ("Гимназия № 5", 78.9, 96), ("Школа № 17", 71.2, 140), ("Школа № 44", 68.5, 87),
+           ("Школа № 8", 64.3, 121), ("Школа № 112", 61.8, 64), ("Школа № 31", 58.9, 103)]
+    out.append(("Результаты ЕГЭ по школам.csv", _csv([["Школа", "Средний балл", "Участников"]]
+                                                    + [[a, _dec(b), c] for a, b, c in sch[:4]]
+                                                    + [["Среднее по стране", "66,4", ""]]
+                                                    + [[a, _dec(b), c] for a, b, c in sch[4:]])))
+    out.append(("Баллы школ и среднее по стране.csv", _csv([["Школа", "Средний балл", "Участников"]]
+                                                          + [[a, _dec(b), c] for a, b, c in sch[:4]]
+                                                          + [["Среднее по стране", "62,3", ""]])))
+    cf = [(4200, 4650), (3900, 4410), (5100, 4380), (5600, 4720), (5400, 5080), (4800, 5310), (4300, 5020), (4650, 4890),
+          (5900, 5050), (6400, 5230), (6800, 5600), (7900, 6100)]
+    out.append(("Денежный поток 2025.csv", _csv([["Месяц", "Поступления, тыс. ₽", "Платежи, тыс. ₽",
+                                                 "Чистый денежный поток, тыс. ₽"]]
+                                               + [[f"2025-{k + 1:02d}", a, b, a - b] for k, (a, b) in enumerate(cf)])))
+    out.append(("Почему клиенты выбирают нас.csv", _csv(
+        [["Причина выбора", "Доля ответивших, %"], ["Цена", 54], ["Быстрая доставка", 47], ["Широкий ассортимент", 38],
+         ["Отзывы друзей", 21], ["Программа лояльности", 17], ["Удобное приложение", 12]])))
+    sched = [("Понедельник", "09:00", "Математика", 301, "Иванова Е. П."), ("Понедельник", "10:45", "Физика", 214, "Сидоров А. В."),
+             ("Понедельник", "12:30", "История", 118, "Ким О. Л."), ("Вторник", "09:00", "Информатика", 412, "Петров Д. С."),
+             ("Вторник", "10:45", "Математика", 301, "Иванова Е. П."), ("Вторник", "12:30", "Английский язык", 205, "Смит Дж."),
+             ("Среда", "09:00", "Химия", 220, "Орлова Т. Н."), ("Среда", "10:45", "Физика", 214, "Сидоров А. В."),
+             ("Четверг", "09:00", "Литература", 118, "Ким О. Л."), ("Четверг", "10:45", "Информатика", 412, "Петров Д. С."),
+             ("Пятница", "09:00", "Математика", 301, "Иванова Е. П."), ("Пятница", "10:45", "Физкультура", 1, "Белов И. И.")]
+    out.append(("Расписание 10Б.csv", _csv([["День", "Время", "Предмет", "Аудитория", "Преподаватель"]]
+                                           + [list(s) for s in sched])))
+    q = {"Северо-Запад": [412, 438, 465, 520], "Центр": [1210, 1185, 1302, 1460], "Поволжье": [356, 371, 349, 402],
+         "Урал": [288, 301, 315, 337], "Сибирь": [241, 236, 259, 281], "Юг": [305, 342, 398, 361]}
+    out.append(("Выручка по кварталам 2025.csv", _csv([["Регион", "I кв., млн ₽", "II кв., млн ₽", "III кв., млн ₽",
+                                                       "IV кв., млн ₽", "Итого за год, млн ₽"]]
+                                                     + [[r_, *v, sum(v)] for r_, v in q.items()])))
+    pv = {"Электроника": [12450, 8320, 3110], "Бытовая техника": [9870, 11240, 4520], "Товары для дома": [4310, 6780, 2950],
+          "Одежда": [7650, 5420, 980], "Детские товары": [3120, 2890, 1430]}
+    rows = [["Категория", "Онлайн, тыс. ₽", "Розница, тыс. ₽", "Опт, тыс. ₽", "Общий итог, тыс. ₽"]]
+    rows += [[k, *v, sum(v)] for k, v in pv.items()]
+    rows.append(["Общий итог", *[sum(v[i] for v in pv.values()) for i in range(3)], sum(sum(v) for v in pv.values())])
+    out.append(("Сводная выручка по каналам.csv", _csv(rows)))
+    teams = [("Зенит", 64, 20, 4, 6), ("Краснодар", 61, 19, 4, 7), ("Спартак", 55, 16, 7, 7), ("Локомотив", 52, 15, 7, 8),
+             ("ЦСКА", 50, 14, 8, 8), ("Динамо", 47, 13, 8, 9), ("Ростов", 41, 11, 8, 11), ("Рубин", 38, 10, 8, 12),
+             ("Ахмат", 33, 9, 6, 15), ("Крылья Советов", 31, 8, 7, 15), ("Оренбург", 27, 7, 6, 17), ("Факел", 22, 5, 7, 18)]
+    out.append(("Турнирная таблица.csv", _csv([["Место", "Команда", "Очки", "Победы", "Ничьи", "Поражения"]]
+                                              + [[k + 1, t, o, w, d, l] for k, (t, o, w, d, l) in enumerate(teams)])))
+    temps = [("Якутск", -38.6, 19.5, -8.8), ("Норильск", -27.4, 14.1, -9.6), ("Новосибирск", -16.5, 19.4, 1.7),
+             ("Екатеринбург", -12.6, 19.0, 3.0), ("Москва", -6.2, 19.2, 6.2), ("Санкт-Петербург", -5.5, 18.8, 5.9),
+             ("Калининград", -0.9, 18.0, 8.1), ("Сочи", 6.1, 23.6, 14.8)]
+    out.append(("Температура по городам.csv", _csv([["Город", "Январь, °C", "Июль, °C", "Среднегодовая, °C"]]
+                                                   + [[a, _dec(b), _dec(c), _dec(e)] for a, b, c, e in temps])))
+    rows = [["Дата", "USD, ₽", "EUR, ₽", "CNY, ₽"]]
+    d, k = dt.date(2025, 9, 1), 0
+    while d <= dt.date(2025, 11, 28):
+        if d.weekday() < 5:
+            rows.append([d.strftime("%d.%m.%Y"), f"{81.25 + 0.031 * k + 0.6 * math.sin(k / 6):.4f}".replace(".", ","),
+                         f"{94.10 + 0.024 * k + 0.7 * math.sin(k / 5 + 1):.4f}".replace(".", ","),
+                         f"{11.302 + 0.0035 * k + 0.05 * math.sin(k / 7):.4f}".replace(".", ",")])
+            k += 1
+        d += dt.timedelta(days=1)
+    out.append(("Курсы валют ЦБ.csv", _csv(rows)))
+    out.append(("Итоги двух лет.csv", _csv([["Год", "Выручка, млн ₽", "Клиентов", "Средний чек, тыс. ₽"],
+                                            [2024, "842,5", 3120, "270,0"], [2025, "1 017,3", 3415, "297,9"]])))
+    cats = ["Продукты", "Транспорт", "Кафе и рестораны", "Одежда", "Здоровье", "Развлечения", "Связь"]
+    base = {"Продукты": 1850, "Транспорт": 420, "Кафе и рестораны": 1600, "Одежда": 5400, "Здоровье": 2300,
+            "Развлечения": 2100, "Связь": 650}
+    ops = []
+    for i in range(500):
+        day = dt.date(2025, 1, 1) + dt.timedelta(days=(i * 263) % 365)
+        c = cats[(i * 5 + i // 7) % 7]
+        ops.append((day, c, round(base[c] * (0.4 + ((i * 37) % 100) / 60) * (1 + day.month / 40), 2),
+                    ["Карта", "СБП", "Наличные"][(i * 3 + i // 5) % 3]))
+    ops.sort(key=lambda o: o[0])
+    out.append(("Операции по карте 2025.csv", _csv([["Дата операции", "Категория", "Сумма, ₽", "Способ оплаты"]]
+                                                   + [[o[0].strftime("%d.%m.%Y"), o[1], _dec(o[2], 2), o[3]] for o in ops])))
+    ages = ["0–4", "5–9", "10–14", "15–19", "20–24", "25–29", "30–34", "35–39", "40–44", "45–49", "50–54", "55–59",
+            "60–64", "65–69", "70 и старше"]
+    men = [3810, 4520, 4310, 3620, 3290, 3780, 5710, 5920, 5340, 4810, 4320, 4610, 4230, 3410, 4120]
+    wom = [3620, 4310, 4120, 3460, 3190, 3740, 5800, 6120, 5650, 5230, 4860, 5470, 5450, 4850, 8930]
+    out.append(("Население по возрасту.csv", _csv([["Возрастная группа, лет", "Мужчины, тыс. чел.", "Женщины, тыс. чел."]]
+                                                  + [[a, m_, w] for a, m_, w in zip(ages, men, wom)])))
+    prod = [("Кофе зерновой 1 кг", 1490, 8200), ("Чай чёрный 100 пак.", 520, 14100), ("Капсулы для кофемашин", 890, 9600),
+            ("Кофе молотый 250 г", 460, 12400), ("Сироп ванильный", 380, 6100), ("Чай зелёный 50 пак.", 340, 7900),
+            ("Шоколад горячий", 610, 3900), ("Сахар порционный", 190, 11200), ("Сливки порционные", 240, 8700),
+            ("Какао-порошок", 430, 2600), ("Печенье к кофе", 290, 5400), ("Матча 100 г", 1290, 900)]
+    out.append(("Продажи по товарам.csv", _csv([["Товар", "Цена, ₽", "Продано, шт.", "Выручка, тыс. ₽"]]
+                                               + [[a, p_, n, _dec(p_ * n / 1000, 1)] for a, p_, n in prod]
+                                               + [["Прочее", "", 48300, "21 940,0"]])))
+    pct = [92.4, 95.1, 101.3, 98.7, 103.9, 106.2, 97.5, 99.1, 104.4, 108.0, 102.6, 111.3]
+    out.append(("Выполнение плана продаж.csv", _csv([["Месяц", "Выполнение плана, %"]]
+                                                    + [[f"2025-{k + 1:02d}", _dec(v)] for k, v in enumerate(pct)])))
+    rows = [["Дата", "Доставок"]]
+    d, k = dt.date(2025, 1, 1), 0
+    while d <= dt.date(2025, 6, 30):
+        if d.weekday() < 5:
+            rows.append([d.isoformat(), 400 + k])
+            k += 1
+        d += dt.timedelta(days=1)
+    out.append(("Доставки по рабочим дням.csv", _csv(rows)))
+    out.append(("Исполнение бюджета.csv", _csv([["Статья", "Утверждено, тыс. ₽", "Исполнено, тыс. ₽"],
+                                                ["Оплата труда", 48200, 47100], ["Коммунальные услуги", 6400, 6950],
+                                                ["Ремонт", 9800, 4100], ["Закупки", 12300, 11900]])))
+    out.append(("Продажи по неделям.csv", _csv([["Неделя", "Продажи, шт."]]
+                                               + [[(dt.date(2025, 1, 6) + dt.timedelta(weeks=k)).isoformat(), 1000 + 10 * k]
+                                                  for k in range(40)])))
+    out.append(("Участники и выручка по кодам.csv", _csv([["Код", "Участников", "Выручка, тыс. ₽"]]
+                                                         + [[f"М-{100 + i}", 20 + 3 * i, 150 + 25 * i + (i % 4) * 9]
+                                                            for i in range(40)])))
+    rows = [["Дата", "Отгрузки, шт."]]
+    d, k = dt.date(2024, 1, 1), 0
+    while d <= dt.date(2025, 12, 31):
+        if d.weekday() < 5:
+            rows.append([d.isoformat(), 500 + k // 5])
+            k += 1
+        d += dt.timedelta(days=1)
+    out.append(("Отгрузки по рабочим дням 2024-2025.csv", _csv(rows)))
+    rows = [["Дата", "Выручка, тыс. ₽"]]
+    d, k = dt.date(2025, 1, 2), 0
+    while d <= dt.date(2025, 12, 31):
+        rows.append([d.isoformat(), _dec(100 + k * 0.2, 1)])
+        k += 1
+        d += dt.timedelta(days=1)
+    out.append(("Выручка магазина с 2 января.csv", _csv(rows)))
+    out.append(("Расходы с итогом сверху.csv", _csv([["Статья", "Сумма, тыс. ₽"], ["Итого", 1000], ["Аренда", 400],
+                                                     ["Зарплата", 450], ["Прочее", 150]])))
+    out.append(("Два показателя.csv", _csv([["Показатель", "Значение"], ["Выручка, млн ₽", "412,7"], ["Клиентов", "1 845"]])))
+    return out
+
+
 # ═══════════════════════════════════════════ случайные таблицы ═════════════════════════════════════════════════════
 def _num(x: float, dec: int = 1) -> str:
     return (f"{x:.{dec}f}" if dec else str(int(round(x)))).replace(".", ",")
@@ -317,9 +499,132 @@ def fam_parts_total(r: random.Random) -> tuple[str, str]:
     return "Приём.csv", _csv(rows)
 
 
+
+
+def fam_levels(r: random.Random) -> tuple[str, str]:
+    """Уровни с единицами: температура (°C, в минусе), урожайность (ц/га), минимум · медиана · максимум, курсы валют
+    по рабочим дням — их не складывают: ни долей, ни «Итого», при ресэмплинге — среднее."""
+    kind = r.choice(["temp", "yield", "stats", "rates"])
+    if kind == "temp":
+        rows = [["Город", "Январь, °C", "Июль, °C", "Среднегодовая, °C"]]
+        for c in r.sample(REGIONS, r.randint(4, 12)):
+            jan = r.uniform(-40, 8)
+            rows.append([c, _num(jan, 1), _num(jan + r.uniform(18, 45), 1), _num(jan + r.uniform(8, 20), 1)])
+        return "Температура по городам.csv", _csv(rows)
+    if kind == "yield":
+        crops = ["Пшеница", "Ячмень", "Кукуруза", "Подсолнечник", "Соя", "Рожь", "Овёс", "Рапс", "Гречиха", "Свёкла"]
+        cs = r.sample(crops, r.randint(3, 8))
+        if r.random() < 0.5:
+            rows = [["Год", "Культура", "Урожайность, ц/га"]]
+            for y in range(2019, 2019 + r.randint(3, 7)):
+                for c in cs:
+                    rows.append([y, c, _num(r.uniform(15, 80), 1)])
+            return "Урожайность по годам.csv", _csv(rows)
+        rows = [["Культура", "Урожайность, ц/га", "Площадь, тыс. га"]]
+        rows += [[c, _num(r.uniform(15, 80), 1), _num(r.uniform(5, 900), 0)] for c in cs]
+        return "Урожайность по культурам.csv", _csv(rows)
+    if kind == "stats":
+        rows = [["Грейд", "Минимум, тыс. ₽", "Медиана, тыс. ₽", "Максимум, тыс. ₽", "Сотрудников"]]
+        lo = r.uniform(30, 60)
+        for g in range(1, r.randint(4, 9)):
+            mn = lo * (1.3 ** g)
+            rows.append([f"G{g}", _num(mn, 0), _num(mn * 1.2, 0), _num(mn * 1.5, 0), r.randint(2, 150)])
+        return "Зарплаты по грейдам.csv", _csv(rows)
+    rows = [["Дата", "USD, ₽", "EUR, ₽"]]
+    d = dt.date(2025, r.randint(1, 6), r.randint(1, 28))
+    u, e = r.uniform(70, 100), r.uniform(80, 110)
+    for _ in range(r.randint(40, 300)):
+        if d.weekday() < 5:
+            u, e = u * (1 + r.uniform(-0.01, 0.011)), e * (1 + r.uniform(-0.01, 0.011))
+            rows.append([d.strftime("%d.%m.%Y"), f"{u:.4f}".replace(".", ","), f"{e:.4f}".replace(".", ",")])
+        d += dt.timedelta(days=1)
+    return "Курсы валют.csv", _csv(rows)
+
+
+def fam_weekly(r: random.Random) -> tuple[str, str]:
+    """Недельный ряд (понедельники или воскресенья): до 60 недель — неделями, дальше — в среднем за неделю."""
+    col = r.choice(["Продажи, шт.", "Выручка, тыс. ₽", "Заказов", "Средний чек, ₽"])
+    start = dt.date(2024, 1, 1) + dt.timedelta(days=r.randint(0, 300))
+    start -= dt.timedelta(days=start.weekday() if r.random() < 0.6 else (start.weekday() + 1) % 7)
+    v = r.uniform(500, 3000)
+    rows = [["Неделя", col]]
+    for k in range(r.randint(10, 120)):
+        v *= 1 + r.uniform(-0.03, 0.04)
+        rows.append([(start + dt.timedelta(weeks=k)).isoformat(), _num(v, 0)])
+    return "Недельный ряд.csv", _csv(rows)
+
+
+def fam_bins(r: random.Random) -> tuple[str, str]:
+    """Порядковые группы больше 12 («0–4», «5–9», …, «70 и старше»): ни одна не пропадает молча."""
+    w = r.choice([5, 10])
+    k = r.randint(13, 25)
+    labs = [f"{i * w}–{i * w + w - 1}" for i in range(k - 1)] + [f"{(k - 1) * w} и старше"]
+    two = r.random() < 0.5
+    rows = [["Возрастная группа"] + (["Мужчины, тыс. чел.", "Женщины, тыс. чел."] if two else ["Население, тыс. чел."])]
+    for lab in labs:
+        rows.append([lab] + [r.randint(500, 9000) for _ in range(2 if two else 1)])
+    return "Население по возрасту.csv", _csv(rows)
+
+
+def fam_benchmark(r: random.Random) -> tuple[str, str]:
+    """Строка-ориентир («Среднее по стране») среди категорий: не категория — не лидер, не последний, не доля."""
+    col = r.choice(["Средний балл", "Средняя зарплата, тыс. ₽", "Выручка, млн ₽"])
+    names = [f"Школа № {r.randint(1, 300)}" for _ in range(r.randint(4, 12))]
+    names = list(dict.fromkeys(names))
+    rows = [["Школа", col]] + [[n, _num(r.uniform(40, 95), 1)] for n in names]
+    bench = [r.choice(["Среднее по стране", "В среднем по России", "Норматив"]), _num(r.uniform(40, 95), 1)]
+    rows.insert(r.randint(1, len(rows)), bench)
+    return "Сравнение с ориентиром.csv", _csv(rows)
+
+
+def fam_ids(r: random.Random) -> tuple[str, str]:
+    """Номера, а не величины: расписание (кабинеты повторяются) и номера договоров."""
+    if r.random() < 0.5:
+        days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница"]
+        subj = ["Математика", "Физика", "Химия", "История", "Литература", "Биология", "Информатика"]
+        rooms = [r.choice([101, 102, 205, 214, 301, 312]) for _ in subj]
+        rows = [["День", "Время", "Предмет", "Кабинет", "Учитель"]]
+        for dd in days:
+            for t_ in r.sample(["08:30", "10:15", "12:00", "13:45"], r.randint(2, 4)):
+                s_ = r.randrange(len(subj))
+                rows.append([dd, t_, subj[s_], rooms[s_], f"Учитель {chr(1040 + s_)}."])
+        return "Расписание.csv", _csv(rows)
+    rows = [["Номер договора", "Клиент", "Сумма, тыс. ₽"]]
+    for i in range(r.randint(5, 40)):
+        rows.append([r.randint(10000, 99999), f"Клиент {i + 1}", _num(r.uniform(10, 900), 1)])
+    return "Договоры.csv", _csv(rows)
+
+
+def fam_plan_syn(r: random.Random) -> tuple[str, str]:
+    """План и факт другими словами: «Утверждено · Исполнено», «Лимит · Освоено», «Бюджет · Фактически»."""
+    p_name, f_name = r.choice([("Утверждено", "Исполнено"), ("Лимит", "Освоено"), ("Бюджет", "Фактически"),
+                               ("Норматив", "Выполнено"), ("План", "Факт")])
+    rows = [["Статья", f"{p_name}, тыс. ₽", f"{f_name}, тыс. ₽"]]
+    for i in range(r.randint(3, 10)):
+        p_ = r.randint(500, 60000)
+        rows.append([f"Статья {chr(1040 + i)}", p_, int(p_ * r.uniform(0.4, 1.25))])
+    return "Исполнение.csv", _csv(rows)
+
+
+def fam_business_days(r: random.Random) -> tuple[str, str]:
+    """Рабочие дни (без выходных, иногда без праздников) — полный месяц из 20–23 дней, не «неполный»."""
+    start = dt.date(2024 + r.randint(0, 1), r.randint(1, 12), 1)
+    end = start + dt.timedelta(days=r.randint(80, 700))
+    holidays = {dt.date(y, 1, d) for y in (2024, 2025, 2026) for d in range(1, 9)} if r.random() < 0.5 else set()
+    rows = [["Дата", r.choice(["Отгрузки, шт.", "Выручка, тыс. ₽", "Заявок"])]]
+    d, v = start, r.uniform(200, 900)
+    while d <= end:
+        if d.weekday() < 5 and d not in holidays:
+            v *= 1 + r.uniform(-0.01, 0.012)
+            rows.append([d.isoformat(), _num(v, 0)])
+        d += dt.timedelta(days=1)
+    return "Рабочие дни.csv", _csv(rows)
+
+
 FAMILIES: list[Callable[[random.Random], tuple[str, str]]] = [
     fam_daily, fam_monthly_level, fam_categories, fam_plan_fact, fam_years, fam_long, fam_distribution, fam_kpi,
     fam_relationship, fam_likert, fam_reference, fam_parts_total,
+    fam_levels, fam_weekly, fam_bins, fam_benchmark, fam_ids, fam_plan_syn, fam_business_days,
 ]
 
 
@@ -343,300 +648,868 @@ def _raw(cell) -> Optional[float]:
     return None if q is None else q.full
 
 
-def _rows(t: Table) -> list[int]:
-    totals = set(t.totals or [])
-    return [i for i, r in enumerate(t.rows) if i not in totals and not any(is_total_label(v) for v in r[:2])]
+# ═══════════════════════════════════════════ независимая проверка ══════════════════════════════════════════════════
+# Всё ниже — свои правила теста, а не код анализа: какая колонка — величина вывода (цель, затем колонка-итог для
+# сравнения, затем поток денег), складывается ли она (по единице и названию), как собрать период (сумма, среднее,
+# среднее за неделю) и какой период полный (по ритму ряда). С кодом общие только чтение и профиль (они проверяются
+# своими тестами) и разбор чисел и дат (`parse.py`).
+TOTAL_LAB = re.compile(r"^(?:итого|всего|total|общий итог|grand total)(?:\b|:|$)", re.I)
+BENCH_LAB = re.compile(r"^(?:среднее|в\s+среднем|средн\w*\s+по|по\s+(?:стране|россии|рф|миру|отрасли)|норматив|норма)"
+                       r"(?:\s|$|,)", re.I)
+OTHER_LAB = re.compile(r"^(?:прочее|прочие|другое|другие|остальное|остальные)$", re.I)
+REST_LAB = re.compile(r"^Остальные \d+")
+CHANGE_COL = re.compile(r"изменени|прирост|(?:^|\s)рост(?:\s|$|,)|динамик|разниц|отклонени|δ|г/г", re.I)
+BIN_LAB = re.compile(r"^\s*(?:до|от|свыше|более|больше|менее|меньше)?\s*\d+(?:[.,]\d+)?\s*(?:[–—-]\s*\d|\+|"
+                     r"(?:лет\s+)?(?:и|или)\s+(?:старше|более|больше|выше|младше))", re.I)
+T_LEVEL_UNIT = re.compile(r"/|°|‰|балл|очк|^п\.|^%$|^(?:мин|ч|час|дн|с|сек)\.?$", re.I)
+T_LEVEL_NAME = re.compile(r"средн|медиан|минимум|максимум|мин\.|макс\.|(?:^|\s)цен[аы]?(?:\s|$|,)|курс\w*\s|ставк|"
+                          r"температур|урожайн|индекс|рейтинг|балл|оценк|очки|доля|конверси|процент|nps|(?:^|\s)чек|"
+                          r"возраст|время|срок|минут|часов|удовлетвор|за\s+м²", re.I)
+T_CURRENCY = {"USD", "EUR", "CNY", "GBP", "JPY", "CHF", "KZT"}
+T_COUNT_UNIT = re.compile(r"^(?:(?:тыс|млн|млрд)\.?\s*)?(?:шт|чел|человек|ед|экз|статей|заказов|кг|т|л|м²|га|"
+                          r"квт·ч)\.?$", re.I)
+T_MONEY = re.compile(r"₽|руб|\$|€", re.I)
+T_FLOW = re.compile(r"выручк|доход|расход|затрат|продаж|продано|сумм|оплат|поступлен|плат[её]ж|бюджет|фонд|прибыл|"
+                    r"оборот|выпуск|брак|отгруз|доставк|доставлен|заказ|количеств|число|клиент|сотрудник|студент|"
+                    r"участник|пользовател|сделк|численност|населен|мужчин|женщин|побед|ничь|поражен|добавили|"
+                    r"начали|оплатили|уволил|сеанс|ответ|утвержд|исполн|освоен|лимит|норматив|факт|план|заяв|"
+                    r"обращен|опоздан|доставок|предложен|операци|потреблен|учеников|пациент|статей|публикац", re.I)
+T_LEVEL_TITLE = re.compile(r"курс\w*\s+валют|урожайн|температур|(?:^|\s)цен[аы]?(?:\s|$)|тариф", re.I)
+T_STOCK = re.compile(r"клиент|пользовател|сотрудник|абонент|подписчик|остат|численност|штат", re.I)
+T_PLAN = re.compile(r"план|утвержд|бюджет|лимит|норматив|прогноз|(?:^|\s)цел[ьи]", re.I)
+T_FACT = re.compile(r"факт|исполн|выполн|освоен|израсход", re.I)
+T_STOP = {"покажи", "покажите", "сравни", "сравните", "как", "что", "это", "между", "есть", "связь", "структуру",
+          "структура", "менялось", "менялась", "менялся", "менялись", "росли", "растёт", "росла", "выполнялся"}
 
 
-def _col(t: Table, name: str) -> Optional[int]:
-    base = re.sub(r"\s*,[^,]*$", "", name).strip()
-    for j, c in enumerate(t.columns):
-        if c == name or c == base:
-            return j
-    return None
+def _stem4(w: str) -> str:
+    w = w.lower().replace("ё", "е")
+    return w[:min(5, len(w) - 1)] if len(w) > 3 else w
+
+
+def _hits(goal: str, name: str) -> int:
+    gw = [_stem4(w) for w in re.findall(r"[а-яёa-z]+", goal.lower()) if len(w) >= 4 and w not in T_STOP]
+    nw = [_stem4(w) for w in re.findall(r"[а-яёa-z]+", name.lower()) if len(w) >= 3]
+    return sum(1 for g in gw if any(min(len(g), len(n)) >= 3 and (g.startswith(n) or n.startswith(g)) for n in nw))
+
+
+class Raw:
+    """Сырые строки таблицы глазами теста."""
+
+    def __init__(self, t: Table, prof):
+        self.t, self.prof = t, prof
+        self.title = re.sub(r"\.[a-z]+$", "", t.file)
+        n = len(t.rows)
+        tot = set(t.totals or []) | {i for i, r in enumerate(t.rows) if any(isinstance(v, str) and TOTAL_LAB.match(
+            v.strip()) for v in r[:2])}
+        bench = {i: " ".join(str(r[k]).split()) for i, r in enumerate(t.rows) if i not in tot
+                 for k in range(min(2, len(r))) if isinstance(r[k], str) and BENCH_LAB.match(" ".join(r[k].split()))}
+        self.bench = bench if n - len(tot) - len(bench) >= 2 else {}
+        self.tot_rows = sorted(tot)
+        self.rows = [i for i in range(n) if i not in tot and i not in self.bench]
+        self.cols = [c.name for c in prof.columns]
+        self.units = [c.unit for c in prof.columns]
+        self.types = [c.type for c in prof.columns]
+        self.roles = [c.role for c in prof.columns]
+        self.num: dict[int, list[Optional[float]]] = {}
+        for j, c in enumerate(prof.columns):
+            if c.role == "metric":
+                vals = [_raw(r[j]) if j < len(r) else None for r in t.rows]
+                if any(vals[i] is not None for i in self.rows):
+                    self.num[j] = vals
+
+    def col(self, name: str) -> Optional[int]:
+        base = re.sub(r"\s*,[^,]*$", "", name).strip()
+        for j, c in enumerate(self.cols):
+            if c == name or c == base or re.sub(r"\s*,[^,]*$", "", c).strip() == base:
+                return j
+        return None
+
+    def vals(self, j: int) -> list[float]:
+        return [v for v in (self.num[j][i] for i in self.rows) if v is not None]
+
+    def text(self, i: int, j: int) -> str:
+        v = self.t.rows[i][j] if j < len(self.t.rows[i]) else None
+        if v is None:
+            return ""
+        if isinstance(v, float) and v.is_integer():
+            v = int(v)
+        return " ".join(str(v).split())
+
+    def total_col(self) -> Optional[int]:
+        tc = getattr(self.prof, "total_column", None)
+        if tc and self.col(tc) is not None:
+            return self.col(tc)
+        return next((j for j in self.num if TOTAL_LAB.match(self.cols[j])), None)
+
+    def sums_match(self, j: int) -> bool:
+        """Итог в таблице равен сумме: строка «Итого», колонка «Всего» как сумма частей или строки по 100."""
+        s = sum(self.vals(j))
+        for i in self.tot_rows:
+            tv = _raw(self.t.rows[i][j]) if j < len(self.t.rows[i]) else None
+            if tv is not None and s and abs(tv - s) <= max(0.51, 0.005 * abs(s)):
+                return True
+        tj = self.total_col()
+        if tj is not None:
+            if j == tj:
+                return True
+            parts = [k for k in self.num if k != tj and (self.units[k] or "") == (self.units[tj] or "")
+                     and not CHANGE_COL.search(self.cols[k])]
+            if j in parts and all(abs(sum(self.num[k][i] or 0 for k in parts) - (self.num[tj][i] or 0)) <= 0.51
+                                  for i in self.rows):
+                return True
+        return False
+
+    def additive(self, j: int) -> bool:
+        name, unit = self.cols[j], (self.units[j] or "").strip()
+        if unit == "%" or self.types[j] == "percent":
+            return False
+        if T_LEVEL_UNIT.search(unit) or T_LEVEL_NAME.search(name) or name.strip().upper() in T_CURRENCY:
+            return False
+        if self.sums_match(j):
+            return True
+        if T_COUNT_UNIT.match(unit) or T_FLOW.search(name):
+            return True
+        if T_LEVEL_TITLE.search(self.title):
+            return False
+        return bool(T_MONEY.search(unit))
+
+    def metrics(self) -> list[int]:
+        return [j for j in self.num if not CHANGE_COL.search(self.cols[j]) and self.roles[j] == "metric"]
+
+    def expected_metric(self, goal: Optional[str], task: str) -> Optional[int]:
+        """Величина вывода по таблице: названная целью; для сравнения — колонка-итог; иначе поток денег; иначе —
+        не определена (тогда проверяется только арифметика заявленной колонки)."""
+        ms = self.metrics()
+        if goal:
+            hits = [(_hits(goal, self.cols[j]), -k) for k, j in enumerate(ms)]
+            if hits and max(hits)[0] > 0:
+                return ms[hits.index(max(hits))]
+        tj = self.total_col()
+        if task == "comparison" and tj is not None:
+            return tj
+        money = [j for j in ms if T_MONEY.search(self.units[j] or "") and self.additive(j)]
+        years = [(int(y.group(0)), j) for j in money if (y := re.search(r"(?:19|20)\d\d", self.cols[j]))]
+        if len(years) >= 2 and len(years) == len(money):
+            return max(years)[1]  # колонки-периоды («Выручка 2025 · Выручка 2026») — последний период
+        return money[0] if money else None
+
+    def dims(self) -> list[int]:
+        out = [j for j, c in enumerate(self.prof.columns) if c.role in ("dimension", "text", "id")
+               and len({self.text(i, j) for i in self.rows} - {""}) >= 2]
+        for child, parent in getattr(self.prof, "hierarchies", []) or []:
+            pj = self.cols.index(parent) if parent in self.cols else None
+            if pj is not None and pj not in out:
+                out.append(pj)
+        return out
+
+    def by_cat(self, dj: int, j: int, add: bool) -> dict[str, float]:
+        groups: dict[str, list[float]] = {}
+        for i in self.rows:
+            lab, v = self.text(i, dj), self.num[j][i]
+            if lab and v is not None:
+                groups.setdefault(lab, []).append(v)
+        return {k: (sum(v) if add else sum(v) / len(v)) for k, v in groups.items()}
 
 
 def _close(a: float, b: float, rel: float = 0.006, absol: float = 0.51) -> bool:
     return abs(a - b) <= max(absol, rel * max(abs(a), abs(b)))
 
 
+def _shown(fact: float, true: float) -> bool:
+    """Число, как его пишет вывод: процент от 10 — целым, меньше — с десятыми; остальное — до двух знаков."""
+    a = abs(true)
+    for d in (0, 1, 2):
+        if abs(round(a, d) - abs(fact)) < 1e-9:
+            return True
+    return abs(abs(fact) - a) <= 1e-6
+
+
+def _pct_shown(fact: float, pct: float) -> bool:
+    a = abs(pct)
+    want = float(round(a)) if a >= 9.95 else round(a, 1)
+    return abs(abs(fact) - want) < 1e-6 or (a < 1 and abs(abs(fact) - a) < 0.01)
+
+
 def _labels(t: Table) -> list[str]:
     """Тексты таблицы (подписи, названия колонок и числа в названиях — «2026» в «Выручка 2026»): их цифры — имена."""
-    out = list(t.columns) + [w for c in t.columns for w in re.findall(r"\d+", c)]
+    out = list(t.columns) + [w for c in t.columns for w in re.findall(r"\d+", c)] + [t.file, re.sub(r"\.\w+$", "", t.file)]
     for r in t.rows:
         out += [str(v) for v in r if isinstance(v, str)]
     return out
 
 
-# ═══════════════════════════════════════════ проверка ═══════════════════════════════════════════════════════════════
-def check(name: str, t: Table, p: DatasetPlan) -> list[str]:
-    """Пересчёт чисел плана по сырым строкам. Возвращает список нарушений (пусто — всё верно)."""
+def _claimed(explain: str) -> Optional[str]:
+    m = re.search(r"по колонке «([^»]+)»", explain or "")
+    return m.group(1) if m else None
+
+
+# ── ряд по времени ────────────────────────────────────────────────────────────────────────────────────────────────
+_ORDER = ["hour", "day", "week", "month", "quarter", "year"]
+
+
+def _key(gran: str, o: int, f: str, week_src: bool = False):
+    """Номер периода `f` для точки (`gran`, `o`); недельный ряд — по четвергу недели."""
+    if week_src and gran == "day" and f != "week":
+        o = ((o - 1) // 7) * 7 + 4
+    if gran == "hour":
+        if f == "hour":
+            return o
+        o, gran = o // 24, "day"
+    if gran == "day":
+        d = dt.date.fromordinal(o)
+        return {"day": o, "week": (o - 1) // 7, "month": (d.year, d.month), "quarter": (d.year, (d.month - 1) // 3),
+                "year": d.year}[f]
+    if gran == "month":
+        y, m_ = divmod(o, 12)
+        return {"month": (y, m_ + 1), "quarter": (y, m_ // 3), "year": y}[f]
+    if gran == "quarter":
+        return {"quarter": divmod(o, 4), "year": o // 4}[f]
+    return o
+
+
+def _span(keys: list, f: str) -> int:
+    ks = sorted(set(keys))
+    if f in ("month",):
+        return (ks[-1][0] - ks[0][0]) * 12 + ks[-1][1] - ks[0][1] + 1
+    if f == "quarter":
+        return (ks[-1][0] - ks[0][0]) * 4 + ks[-1][1] - ks[0][1] + 1
+    return ks[-1] - ks[0] + 1
+
+
+def _days_of(f: str, k) -> list[dt.date]:
+    if f == "week":
+        return [dt.date.fromordinal(k * 7 + 1 + i) for i in range(7)]
+    if f == "month":
+        y, m_ = k
+        a = dt.date(y, m_, 1)
+        b = dt.date(y + m_ // 12, m_ % 12 + 1, 1)
+        return [a + dt.timedelta(days=i) for i in range((b - a).days)]
+    if f == "quarter":
+        y, q = k
+        return [d for mm in range(3) for d in _days_of("month", (y, q * 3 + mm + 1))]
+    if f == "year":
+        return [dt.date(k, 1, 1) + dt.timedelta(days=i) for i in range((dt.date(k + 1, 1, 1) - dt.date(k, 1, 1)).days)]
+    return []
+
+
+def t_series(raw: Raw, j: Optional[int], cat: Optional[str] = None, dim_j: Optional[int] = None):
+    """Ожидаемый ряд по времени: [(период, значение)], частота, способ («sum», «mean», «last», «week_mean»).
+    `j=None` — число строк; `cat` — только строки этой категории (длинный формат)."""
+    ax = raw.prof.time_axis
+    if ax is None or ax.freq == "irregular":
+        return None
+    tj = raw.col(ax.column)
+    if tj is None:
+        return None
+    pts = []
+    for i in raw.rows:
+        if cat is not None and raw.text(i, dim_j) != cat:
+            continue
+        cell = raw.t.rows[i][tj]
+        if isinstance(cell, (int, float)) and not isinstance(cell, bool) and 1900 <= cell <= 2100:
+            pp = ("year", int(cell))
+        else:
+            pp = period_parts(" ".join(str(cell).split()), with_time=True) if cell is not None else None
+        if pp is None:
+            continue
+        v = 1.0 if j is None else raw.num[j][i]
+        if v is not None:
+            pts.append((pp[0], pp[1], v))
+    if not pts:
+        return None
+    if any(g == "hour" for g, _, _ in pts):
+        pts = [("hour", o * 24, v) if g == "day" else (g, o, v) for g, o, v in pts]
+    gran = min({g for g, _, _ in pts}, key=_ORDER.index)
+    pts = [p for p in pts if p[0] == gran]
+    name = raw.cols[j] if j is not None else ""
+    add = j is None or raw.additive(j)
+    # длинный формат: строки одной даты (по категориям) — сначала вместе: сумма у потока и остатка, среднее у уровня
+    same: dict = {}
+    for g, o, v in pts:
+        same.setdefault(o, []).append(v)
+    pts = [(gran, o, (sum(vs) if add else sum(vs) / len(vs))) for o, vs in same.items()]
+    # частота ряда — по профилю, если она крупнее записи даты (месяцы, записанные первым числом)
+    src = ax.freq if ax.freq in _ORDER and _ORDER.index(ax.freq) > _ORDER.index(gran) else gran
+    week_src = src == "week" and gran == "day"
+    src_keys = [_key(gran, o, src) for _, o, _ in pts]
+    limit = 168 if src == "hour" else 60 if src == "week" else 36
+    target = src
+    if _span(src_keys, src) > limit:
+        for f in _ORDER[_ORDER.index(src) + 1:]:
+            if _span([_key(gran, o, f, week_src) for _, o, _ in pts], f) <= 36:
+                target = f
+                break
+        else:
+            target = "year"
+    how = "sum" if add else "mean"
+    if add and j is not None and T_STOCK.search(name) and not T_MONEY.search(raw.units[j] or ""):
+        how = "last"
+    if target != src and src == "week" and how == "sum":
+        how = "week_mean"
+    buckets: dict = {}
+    seen: dict = {}
+    for g, o, v in sorted(pts, key=lambda p: p[1]):
+        k = _key(g, o, target, week_src)
+        buckets.setdefault(k, []).append(v)
+        seen.setdefault(k, set()).add(o)
+    keys = sorted(buckets)
+    if how == "sum" and target != src and len(keys) > 2 and src == gran:
+        # полнота — по ритму ряда: будни у рабочих дней; 90% дней — полный период
+        cad = set(range(7))
+        if gran == "day":
+            os_ = sorted({o for _, o, _ in pts})
+            weeks = max(1.0, (os_[-1] - os_[0] + 1) / 7)
+            cnt: dict = {}
+            for o in os_:
+                cnt[dt.date.fromordinal(o).weekday()] = cnt.get(dt.date.fromordinal(o).weekday(), 0) + 1
+            cad = {wd for wd, c in cnt.items() if c >= 0.5 * weeks} or set(range(7))
+        drop = []
+        for k in (keys[0], keys[-1]):
+            if gran in ("day", "hour"):
+                need = sum(1 for d in _days_of(target, k) if d.weekday() in cad) * (24 if gran == "hour" else 1)
+                full = len(seen[k]) >= 0.9 * need
+            elif gran == "month":
+                need = {"quarter": 3, "year": 12}.get(target, 1)
+                full = len(seen[k]) >= need
+            else:
+                full = True
+            if not full:
+                drop.append(k)
+        keys = [k for k in keys if k not in drop]
+    agg = {"sum": sum, "last": lambda xs: xs[-1]}.get(how, lambda xs: sum(xs) / len(xs))
+    return [(k, float(agg(buckets[k]))) for k in keys], target, how
+
+
+_LAG = {"month": 12, "quarter": 4, "week": 52, "year": 1, "day": 365}
+
+
+def _lagged(series, target, k_last):
+    """Значение того же периода годом раньше."""
+    if target == "month":
+        want = (k_last[0] - 1, k_last[1])
+    elif target == "quarter":
+        want = (k_last[0] - 1, k_last[1])
+    elif target == "year":
+        want = k_last - 1
+    elif target == "week":
+        want = k_last - 52
+    else:
+        want = k_last - 365
+    return next((v for k, v in series if k == want), None)
+
+
+# ── проверка плана ────────────────────────────────────────────────────────────────────────────────────────────────
+def check(name: str, t: Table, p: DatasetPlan, specs: Optional[dict] = None, prof=None) -> list[str]:
+    """Пересчёт чисел и правил плана по сырым строкам. Возвращает нарушения (пусто — всё верно)."""
     bad: list[str] = []
+    prof = prof or p.profile
+    raw = Raw(t, prof)
     facts = {f.id: f for f in p.headline_facts}
     head = p.headline or ""
-    rows = _rows(t)
+    task = p.task.task
+    goal = p.task.goal
+    if specs is None:
+        specs = {k: chart_spec_of(p, t, option=k) for k in range(len(p.options))}
+    body = specs.get(0)
+    spec = body if isinstance(body, ChartSpec) else None
 
-    # каждое число заголовка — среди фактов (цифры подписей и названий колонок не в счёт)
+    # каждое число заголовка — среди фактов
     vals = [f.value for f in p.headline_facts]
     for n in numbers_in(head, _labels(t) + [p.plain_headline]):
-        if not any(abs(n - abs(v)) < 1e-9 or any(abs(round(abs(v), k) - n) < 1e-9 for k in (0, 1, 2, 3)) for v in vals):
+        if not any(_shown(n, v) for v in vals):
             bad.append(f"число {n} заголовка не из фактов: {head}")
+    bad += _check_points(raw, p, body, facts)
+    bad += _check_guards(raw, p, specs, facts)
+    if task in ("comparison", "reference", "shares"):
+        bad += _check_categories(raw, p, specs, facts, goal)
+    if task == "shares":
+        bad += _check_shares(raw, p, spec, facts, goal)
+    if task == "dynamics":
+        bad += _check_dynamics(raw, p, spec, facts, goal)
+    if task == "kpi" or any(k in facts for k in ("kpi_a", "kpi_b")):
+        bad += _check_kpi(raw, p, facts)
+    bad += _check_misc(raw, p, spec, facts, goal)
+    return bad
 
-    # пункты — только у процентов и индексов
+
+def _check_points(raw: Raw, p: DatasetPlan, body, facts) -> list[str]:
+    """Пункты (п., п.п.) — только у процентов и индексов."""
+    bad = []
+
     def point_ok(label: str, unit: Optional[str]) -> bool:
         u = unit or split_unit(label)[1]
         if u:
             return u == "%" or u.startswith("п.п")
         h = re.sub(r"[^а-яёa-z ]", " ", split_unit(label)[0].lower()).split()
-        heads = [w for w in h if len(w) > 2]
-        return any(INDEX_HEAD.match(w) for w in heads[:3])
+        return any(INDEX_HEAD.match(w) for w in [w for w in h if len(w) > 2][:3])
 
-    body = chart_spec_of(p, t) if p.options else None
     if isinstance(body, list):
-        ru = t.row_units or []
+        ru = raw.t.row_units or []
         for c in body:
             if re.search(r"\bп\.(?:п\.)?", c.label):
-                row = next((i for i, r in enumerate(t.rows) if r and str(r[0]).strip() and c.label.startswith(
+                row = next((i for i, r in enumerate(raw.t.rows) if r and str(r[0]).strip() and c.label.startswith(
                     split_unit(str(r[0]))[0])), None)
-                unit = (ru[row] if row is not None and row < len(ru) else None) or (quantity(c.value.replace(NB, " ")).unit
-                                                                                       if quantity(c.value.replace(NB, " ")) else None)
+                q = quantity(c.value.replace(NB, " "))
+                unit = (ru[row] if row is not None and row < len(ru) else None) or (q.unit if q else None)
                 if not point_ok(c.label, unit):
                     bad.append(f"пункты у не-процента: {c.value} — {c.label}")
     ch = facts.get("change")
     if ch is not None and ch.unit in ("п.", "п.п.") and p.task.task == "dynamics":
-        m = p.chosen_option
-        spec = body if isinstance(body, ChartSpec) else None
-        mname = spec.series[0].name if spec and spec.series else ""
-        j = _col(t, mname)
-        unit = t.units[j] if j is not None and j < len(t.units) else None
-        if not point_ok(mname, unit if ch.unit != "п.п." else (unit or "%")):
-            bad.append(f"пункты у не-процента в динамике: {mname} {unit}")
-        _ = m
+        col = _claimed(ch.explain) or ""
+        j = raw.col(col)
+        unit = raw.units[j] if j is not None else None
+        if not point_ok(col, unit if ch.unit != "п.п." else (unit or "%")):
+            bad.append(f"пункты у не-процента в динамике: {col} {unit}")
+    return bad
 
-    # «100%» — только когда все
+
+def _check_guards(raw: Raw, p: DatasetPlan, specs: dict, facts) -> list[str]:
+    """Правила без арифметики: «Итого» и доли — только у того, что складывается; ориентир — не категория; порядковые
+    группы не пропадают; номера — не график."""
+    bad = []
+    bench = set(raw.bench.values())
+    for k, b in specs.items():
+        if isinstance(b, TableData):
+            for row in b.rows:
+                if row and row[0] == "Итого":
+                    for c, cell in zip(b.columns[1:], row[1:]):
+                        j = raw.col(c)
+                        if cell and j is not None and j in raw.num and not raw.additive(j):
+                            bad.append(f"«Итого» у величины, которая не складывается: {c}")
+        if isinstance(b, ChartSpec):
+            cats = set(b.categories)
+            if bench & cats:
+                bad.append(f"ориентир на графике как категория: {bench & cats}")
+            if b.type in ("pie", "doughnut") and p.task.task == "comparison":
+                j = raw.expected_metric(p.task.goal, "comparison")
+                if j is not None and not raw.additive(j):
+                    bad.append(f"круговая по величине, которая не складывается: {raw.cols[j]}")
+    for fid in ("leader_value", "last_value", "leader_share"):
+        f = facts.get(fid)
+        if f is not None and any(f.text.startswith(b_) for b_ in bench):
+            bad.append(f"ориентир назван категорией: {f.text}")
+    # номера, а не величины: единственная «метрика» без единицы с повторами среди трёх текстовых колонок
+    texts = [j for j, c in enumerate(raw.prof.columns) if c.role in ("dimension", "text") and c.type in ("category", "text")]
+    ms = raw.metrics()
+    if len(ms) == 1 and len(texts) >= 3 and not raw.units[ms[0]] and not raw.additive(ms[0]):
+        vs = raw.vals(ms[0])
+        if vs and all(float(v).is_integer() for v in vs) and len(set(vs)) <= 0.7 * len(vs):
+            if p.options and p.options[0].kind != "table":
+                bad.append(f"номера «{raw.cols[ms[0]]}» показаны графиком")
+            if any(fid in facts for fid in ("leader_share", "top_share", "leader_value")):
+                bad.append("у номеров посчитаны лидер или доля")
+    return bad
+
+
+def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> list[str]:
+    """Лидер, последний и доля лидера — по ожидаемой величине и правильной сборке (сумма или среднее)."""
+    bad = []
+    lv = facts.get("leader_value")
+    task = p.task.task
+    if lv is None or task == "shares" and "leader_value" not in facts:
+        return bad
+    exp = raw.expected_metric(goal, task)
+    cands = [exp] if exp is not None else raw.metrics()
+    dims = raw.dims()
+    hits = []
+    for j in cands:
+        add = raw.additive(j)
+        for dj in dims:
+            agg = raw.by_cat(dj, j, add)
+            real = {k: v for k, v in agg.items() if not OTHER_LAB.match(k)}
+            if real and _close(lv.value, max(real.values()), rel=1e-4, absol=0.051):
+                hits.append((j, dj, add, agg, real))
+        if hits:
+            break
+    if not hits:
+        what = f"«{raw.cols[exp]}»" if exp is not None else "ни одной колонке"
+        bad.append(f"значение лидера {lv.value} не сходится с {what} (сумма — у потока, среднее — у уровня)")
+        return bad
+
+    def named(h) -> bool:
+        real = h[4]
+        top = max(real.values())
+        return any(lv.text.startswith(k) for k, v in real.items() if _close(v, top, rel=1e-9, absol=1e-9))
+
+    # подпись лидера — из той колонки, по которой он назван (подпись строки, код или группа иерархии)
+    hit = next((h for h in hits if named(h)), None)
+    if hit is None:
+        j, dj, add, agg, real = hits[0]
+        bad.append(f"лидер «{lv.text}» вместо «{max(real, key=lambda k: real[k])}»")
+        return bad
+    j, dj, add, agg, real = hit
+    leader = max(real, key=lambda k: real[k])
+    last = facts.get("last_value")
+    if last is not None and not _close(last.value, min(real.values()), rel=1e-4, absol=0.051):
+        bad.append(f"последний {last.value} против {min(real.values())} по сырым")
+    ls = facts.get("leader_share") or facts.get("total")
+    if ls is not None:
+        if not add or any(v < 0 for v in agg.values()):
+            bad.append(f"доля или итог у величины, которая не складывается: «{raw.cols[j]}»")
+        elif facts.get("leader_share") is not None:
+            tv = next((_raw(raw.t.rows[i][j]) for i in raw.tot_rows if _raw(raw.t.rows[i][j])), None)
+            expect = real[leader] / (tv or sum(agg.values())) * 100
+            if not _pct_shown(facts["leader_share"].value, expect):
+                bad.append(f"доля лидера {facts['leader_share'].value} против {expect:.2f}")
+    # порядковые группы: на графике все (до 20) или хвост одной подписанной группой
+    labs = [raw.text(i, dj) for i in raw.rows]
+    if labs and sum(1 for x in set(labs) if BIN_LAB.match(x)) >= 0.8 * len(set(labs)):
+        for k, b in specs.items():
+            if isinstance(b, ChartSpec) and b.categories and set(b.categories) & set(labs):
+                n = len(set(labs))
+                merged = [c for c in b.categories if " … " in c]
+                if (n <= 20 and len(b.categories) != n) or (n > 20 and not merged):
+                    bad.append(f"порядковые группы обрезаны: {len(b.categories)} из {n}")
+    return bad
+
+
+def _check_shares(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, goal) -> list[str]:
+    """Доли — через категории кольца: у каждой доля от целого по сырым строкам, вместе 100%."""
+    bad = []
+    if spec is None or spec.type not in ("doughnut", "pie") or not spec.series:
+        return bad
+    cats, vals = spec.categories, spec.series[0].values
+    if abs(sum(v or 0 for v in vals) - 100) > 0.6:
+        bad.append(f"доли в сумме {sum(v or 0 for v in vals):.1f}%")
+    # колонка долей (сумма ≈ 100) — сама доля; иначе величина, которая складывается
+    pj = next((j for j in raw.num if (raw.units[j] == "%" or raw.types[j] == "percent")
+               and 95 <= sum(raw.vals(j)) <= 105), None)
+    for dj in raw.dims():
+        if pj is not None:
+            agg = raw.by_cat(dj, pj, True)
+        else:
+            j = raw.expected_metric(goal, "shares")
+            if j is None:
+                j = next((k for k in raw.metrics() if raw.additive(k)), None)
+            if j is None:
+                bad.append("доли у величины, которая не складывается")
+                return bad
+            agg = raw.by_cat(dj, j, raw.additive(j))
+            if not raw.additive(j):
+                bad.append(f"доли у величины, которая не складывается: «{raw.cols[j]}»")
+        if not set(c for c in cats if not REST_LAB.match(c)) <= set(agg):
+            continue
+        tot = sum(agg.values())
+        shown = [c for c in cats if not REST_LAB.match(c)]
+        for c, v in zip(cats, vals):
+            want = (tot - sum(agg[x] for x in shown)) if REST_LAB.match(c) else agg[c]
+            if v is None or abs(v - want / tot * 100) > 0.06:
+                bad.append(f"доля «{c}» {v} против {want / tot * 100:.2f}")
+        ls = facts.get("leader_share")
+        real = {k: v for k, v in agg.items() if not OTHER_LAB.match(k)}
+        if ls is not None and real:
+            top = max(real, key=lambda k: real[k])
+            if not _pct_shown(ls.value, real[top] / tot * 100) or not ls.text.startswith(top):
+                bad.append(f"доля лидера {ls.text} против {top} — {real[top] / tot * 100:.2f}%")
+        return bad
+    bad.append(f"категории кольца не из таблицы: {cats}")
+    return bad
+
+
+def _check_change(fid: str, f, base: float, last: float, kinds: tuple[str, ...] = ("%", "п.п.", "п.", "раз")) -> list[str]:
+    """Изменение `base → last` в единице факта."""
+    if f.unit == "%":
+        if base <= 0:
+            return [f"{fid}: проценты от неположительного {base}"]
+        if not _pct_shown(f.value, (last / base - 1) * 100):
+            return [f"{fid}: {f.value}% против {(last / base - 1) * 100:.2f}% по сырым"]
+    elif f.unit in ("п.п.", "п."):
+        if abs(abs(f.value) - round(abs(last - base), 1)) > 0.051:
+            return [f"{fid}: {f.value} {f.unit} против {last - base:.2f}"]
+    elif f.unit == "раз":
+        r = last / base if last >= base else base / last
+        if abs(f.value - round(r, 1)) > 0.051:
+            return [f"{fid}: в {f.value} раза против {r:.3f}"]
+    elif not _close(abs(f.value), abs(last - base), rel=0.005, absol=0.051):
+        return [f"{fid}: {f.value} против {last - base:.2f}"]
+    return []
+
+
+def _check_dynamics(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, goal) -> list[str]:
+    bad = []
+    exp = raw.expected_metric(goal, "dynamics")
+    ch = facts.get("change")
+    # части целого по времени: целое — колонка-итог или сумма частей; самая подвижная часть
+    if "mover" in facts:
+        tj = raw.total_col()
+        parts = [j for j in raw.metrics() if j != tj]
+        whole = t_series(raw, tj) if tj is not None else None
+        if whole is None:
+            ser = [t_series(raw, j) for j in parts]
+            if not all(ser):
+                return bad
+            whole = ([(k, sum(s[0][i][1] for s in ser)) for i, (k, _) in enumerate(ser[0][0])], ser[0][1], "sum")
+        s_, _, _ = whole
+        if ch is not None:
+            bad += _check_change("change", ch, s_[0][1], s_[-1][1])
+        moves = []
+        for j in parts:
+            sj = t_series(raw, j)
+            if sj and sj[0] and sj[0][0][1] > 0:
+                moves.append((raw.cols[j], (sj[0][-1][1] / sj[0][0][1] - 1) * 100))
+        mv = facts["mover"]
+        if moves:
+            nm, mp = max(moves, key=lambda t_: abs(t_[1]))
+            if not mv.text.startswith(nm) or not _pct_shown(mv.value, mp):
+                bad.append(f"сильнее всех частей — {mv.text}, а по сырым {nm}: {mp:.2f}%")
+        return bad
+    # несколько рядов: у каждого — своё изменение от первой точки до последней
+    for fid, f in facts.items():
+        if not fid.startswith("series_"):
+            continue
+        nm = f.text.split(":")[0]
+        j = raw.col(nm) or next((k for k in raw.num if raw.cols[k].startswith(nm)), None)
+        if j is None:
+            bad.append(f"ряд «{nm}» не найден в таблице")
+            continue
+        sj = t_series(raw, j)
+        if sj is None or len(sj[0]) < 2:
+            continue
+        bad += _check_change(fid, f, sj[0][0][1], sj[0][-1][1])
+    # уровень по категориям: «выросла в N из M»
+    if "moved" in facts:
+        ax = raw.prof.time_axis
+        dj = next((j for j in raw.dims() if raw.cols[j] != (ax.column if ax else None)
+                   and 2 <= len({raw.text(i, j) for i in raw.rows}) <= 12), None)
+        col = _claimed(facts["leader_value"].explain) if "leader_value" in facts else None
+        j = raw.col(col) if col else exp
+        if dj is not None and j is not None:
+            up = down = 0
+            cats_ = sorted({raw.text(i, dj) for i in raw.rows} - {""})
+            for c in cats_:
+                sj = t_series(raw, j, c, dj)
+                if sj and len(sj[0]) >= 2:
+                    up += sj[0][-1][1] > sj[0][0][1]
+                    down += sj[0][-1][1] < sj[0][0][1]
+            if int(facts["moved"].value) != max(up, down) or int(facts["of"].value) != len(cats_):
+                bad.append(f"«{facts['moved'].value:g} из {facts['of'].value:g}» против {max(up, down)} из {len(cats_)}")
+        return bad
+    if ch is None and "max" not in facts:
+        return bad
+    # один ряд: величина — цель или поток денег, иначе заявленная колонка
+    col = _claimed((ch or facts["max"]).explain)
+    j = exp if exp is not None else (raw.col(col) if col else None)
+    if col and exp is not None and raw.col(col) != exp and not (raw.prof.time_axis is None):
+        bad.append(f"динамика по «{col}», а по таблице — «{raw.cols[exp]}»")
+    if col == "Число строк" or (col is None and j is None):
+        j = None
+    elif j is None:
+        return bad
+    sr = t_series(raw, j)
+    if sr is None:
+        return bad
+    s_, target, how = sr
+    if len(s_) < 2:
+        return bad
+    # значения на графике — тот же ряд (сумма, среднее, среднее за неделю), без неполных краёв
+    if spec is not None and len(spec.series) == 1 and spec.type in ("line", "column", "area"):
+        got = [v for v in spec.series[0].values if v is not None]
+        want = [v for _, v in s_]
+        if len(got) != len(want) or any(not _close(a, b, rel=0.005, absol=0.051) for a, b in zip(got, want)):
+            bad.append(f"ряд на графике ({how}, {target}) не тот: {got[:4]}… против {[round(v, 2) for v in want[:4]]}…")
+    if "mean" in facts and "max" in facts and target == "hour":
+        vs = [v for _, v in s_]
+        if not _close(facts["max"].value, max(vs), rel=1e-4, absol=0.051) or \
+                not _close(facts["mean"].value, sum(vs) / len(vs), rel=0.005, absol=0.51):
+            bad.append("пик или среднее за час не по сырым")
+        return bad
+    if ch is None:
+        return bad
+    k_last, last = s_[-1]
+    yoy = "год к году" in ch.text
+    cands = []
+    if yoy or ch.unit in ("п.", "п.п.") or "abs_change" in ch.text:
+        b_ = _lagged(s_, target, k_last)
+        if b_ is not None:
+            cands.append(b_)
+    if not yoy:
+        cands.append(s_[0][1])
+    if not cands:
+        bad.append(f"изменение {ch.text}: базы год назад нет")
+        return bad
+    errs = [_check_change("change", ch, b_, last) for b_ in cands]
+    if all(errs):
+        bad += errs[0]
+    rf = facts.get("ratio")
+    if rf is not None and not any(abs(rf.value - round(last / b_, 1)) <= 0.051 for b_ in cands if b_ > 0):
+        bad.append(f"«в {rf.value} раза» против {[round(last / b_, 3) for b_ in cands if b_ > 0]}")
+    return bad
+
+
+def _kpi_rows(raw: Raw):
+    """(подпись, текущее, прошлое, изменение, единица строки) по таблице показателей — широкой или длинной."""
+    lab_j = next((j for j, c in enumerate(raw.prof.columns) if c.role in ("dimension", "text")), None)
+    if lab_j is None:
+        return []
+    per = [(j, period_parts(raw.cols[j].strip()) or ((("year", int(raw.cols[j])) if re.fullmatch(r"\d{4}",
+                                                                                               raw.cols[j]) else None)))
+           for j in raw.num]
+    per = [(j, pp) for j, pp in per if pp is not None]
+    chj = next((j for j in raw.num if CHANGE_COL.search(raw.cols[j])), None)
+    out = []
+    ru = raw.t.row_units or []
+    if len(per) >= 2:
+        per.sort(key=lambda t_: (t_[1][0], t_[1][1]))
+        cur, prev = per[-1][0], per[-2][0]
+        for i in raw.rows:
+            lab = raw.text(i, lab_j)
+            u = (ru[i] if i < len(ru) else None) or split_unit(lab)[1]
+            out.append((lab, raw.num[cur][i], raw.num[prev][i], raw.t.rows[i][chj] if chj is not None else None, u))
+        return out
+    ax = raw.prof.time_axis
+    if ax is not None and raw.metrics():
+        tj = raw.col(ax.column)
+        j = raw.metrics()[0]
+        by: dict = {}
+        for i in raw.rows:
+            pp = period_parts(str(raw.t.rows[i][tj]))
+            if pp is not None:
+                by.setdefault(raw.text(i, lab_j), []).append((pp, raw.num[j][i], i))
+        for lab, xs in by.items():
+            xs.sort()
+            if len(xs) >= 2:
+                i = xs[-1][2]
+                u = (ru[i] if i < len(ru) else None) or split_unit(lab)[1] or raw.units[j]
+                out.append((lab, xs[-1][1], xs[-2][1], raw.t.rows[i][chj] if chj is not None else None, u))
+    return out
+
+
+def _check_kpi(raw: Raw, p: DatasetPlan, facts) -> list[str]:
+    bad = []
+    rows = _kpi_rows(raw)
+    for fid in ("kpi_a", "kpi_b"):
+        f = facts.get(fid)
+        if f is None:
+            continue
+        lab = f.text.split(":")[0].strip()
+        row = next((r for r in rows if r[0] == lab or split_unit(r[0])[0] == split_unit(lab)[0]), None)
+        if row is None:
+            bad.append(f"{fid}: строки «{lab}» в таблице нет")
+            continue
+        _, cur, prev, chg, u = row
+        if chg is not None:
+            q = _raw(chg)
+            if q is not None and abs(abs(q) - abs(f.value)) > 0.051 * max(1, abs(q)) and \
+                    not _pct_shown(f.value, q):
+                bad.append(f"{fid}: {f.value} против колонки изменения {q}")
+            continue
+        if cur is None or prev is None:
+            bad.append(f"{fid}: у «{lab}» нет двух значений")
+            continue
+        bad += _check_change(fid, f, prev, cur)
+    return bad
+
+
+def _check_misc(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, goal) -> list[str]:
+    """«100%», топ-N, исполнение плана, воронка, r."""
+    bad = []
     sw = facts.get("share_within")
     if sw is not None:
         th = facts["threshold"]
-        j = next((k for k in range(len(t.columns)) if k > 0 or len(t.columns) == 1), 0)
-        jcol = max(range(len(t.columns)), key=lambda k: sum(1 for i in rows if _raw(t.rows[i][k]) is not None))
-        xs = [v for v in (_raw(t.rows[i][jcol]) for i in rows) if v is not None]
+        jcol = max(raw.num, key=lambda k: len(raw.vals(k)))
+        xs = raw.vals(jcol)
         to_min = {"ч": 60, "мин": 1, "дн.": 1440, "с": 1 / 60}.get(th.unit or "", None)
-        thr = th.value * to_min if to_min is not None and re.search(r"мин", t.columns[jcol], re.I) else th.value
+        thr = th.value * to_min if to_min is not None and re.search(r"мин", raw.cols[jcol], re.I) else th.value
         within = sum(1 for v in xs if v <= thr + 1e-9)
         share = within / len(xs) * 100
         if sw.value >= 100 and within < len(xs):
             bad.append(f"«100%» при {within} из {len(xs)}")
-        if not (abs(sw.value - round(share)) <= 1 or (sw.value == 99 and within < len(xs))):
+        if not (_pct_shown(sw.value, share) or (sw.value == 99 and within < len(xs))):
             bad.append(f"доля «не больше» {sw.value} против {share:.2f} по сырым")
-        _ = j
-    if re.search(r"(?<![\d,])100%", head) and sw is not None and sw.value < 100:
+    if re.search(r"(?<![\d,])100%", p.headline or "") and sw is not None and sw.value < 100:
         bad.append("«100%» в заголовке без всех значений")
-
-    spec = body if isinstance(body, ChartSpec) else None
-    # сравнение и доли: лидер, его значение и доля — по сырым суммам категорий
-    lead = facts.get("leader_share") or facts.get("leader_value")
-    if p.task.task in ("comparison", "shares") and lead is not None and spec is not None and spec.x_title and spec.series:
-        dj = _col(t, spec.x_title)
-        # колонка метрики — та из рядов графика, по которой посчитан лидер (у сгруппированных их несколько)
-        cand = [_col(t, s_.name) for s_ in spec.series if s_.name != "Доля"]
-        cand = [j for j in cand if j is not None]
-        lvf = facts.get("leader_value")
-
-        def _lead_sum(j: int) -> float:
-            sums_: dict[str, float] = {}
-            for i in rows:
-                lab, v = str(t.rows[i][dj]).strip(), _raw(t.rows[i][j])
-                if v is not None and lab:
-                    sums_[lab] = sums_.get(lab, 0.0) + v
-            return max(sums_.values()) if sums_ else float("nan")
-
-        mj = next((j for j in cand if lvf is None or _close(lvf.value, _lead_sum(j))), cand[0] if cand else None)
-        if dj is not None and mj is not None:
-            sums: dict[str, list[float]] = {}
-            for i in rows:
-                lab, v = str(t.rows[i][dj]).strip(), _raw(t.rows[i][mj])
-                if v is not None and lab:
-                    sums.setdefault(lab, []).append(v)
-            agg = {k: sum(v) for k, v in sums.items()}
-            leader = max(agg, key=lambda k: agg[k])
-            total = sum(agg.values())
-            lv = facts.get("leader_value")
-            if lv is not None and not _close(lv.value, agg[leader]) and not _close(lv.value, np.mean(sums[leader])):
-                bad.append(f"значение лидера {lv.value} против {agg[leader]} по сырым")
-            ls = facts.get("leader_share")
-            if ls is not None and all(v >= 0 for v in agg.values()):
-                tot_row = [i for i in range(len(t.rows)) if i not in rows]
-                tv = next((_raw(t.rows[i][mj]) for i in tot_row if _raw(t.rows[i][mj])), None)
-                expect = agg[leader] / (tv or total) * 100
-                if abs(ls.value - expect) > 0.6:
-                    bad.append(f"доля лидера {ls.value} против {expect:.2f}")
-    # состав — только при признаке целого
-    if p.chosen_option and p.chosen_option.kind in ("stacked_bar", "stacked_column") and p.task.task == "shares":
-        parts = [s.name for s in spec.series] if spec else []
-        if any(re.search(r"(?:19|20)\d\d|план|факт", s, re.I) for s in parts):
-            bad.append(f"годы или план/факт как части: {parts}")
-        pj = [j for j in (_col(t, s) or next((k for k, c in enumerate(t.columns) if c.endswith(s)), None) for s in parts)
-              if j is not None]
-        totj = next((k for k, c in enumerate(t.columns) if is_total_label(c)), None)
-        evid = bool(t.column_groups and any(t.column_groups))
-        sums = [sum(_raw(t.rows[i][j]) or 0 for j in pj) for i in rows]
-        if totj is not None:
-            evid = evid or all(_close(s_, _raw(t.rows[i][totj]) or 0) for s_, i in zip(sums, rows))
-        evid = evid or (bool(sums) and all(97 <= s_ <= 103 for s_ in sums))
-        if not evid:
-            bad.append(f"состав без признака целого: {parts}")
-        # доли частей — по сырым суммам колонок
-        whole = sum(sums)
-        for k in range(len(parts)):
-            f = facts.get(f"part_{k}")
-            if f is None:
-                continue
-            nm = re.match(r"^(.*?) — ", f.text)
-            if nm is None:
-                continue
-            j = _col(t, nm.group(1)) or next((jj for jj, c in enumerate(t.columns) if c.endswith(nm.group(1))), None)
-            if j is not None and whole:
-                expect = sum(_raw(t.rows[i][j]) or 0 for i in rows) / whole * 100
-                if abs(f.value - expect) > 0.6:
-                    bad.append(f"доля части {nm.group(1)} {f.value} против {expect:.2f}")
-    # справочник: доля топ-10
     top = facts.get("top_share")
     if top is not None:
-        mj = next((k for k, c in enumerate(t.columns) if (t.units[k] if k < len(t.units) else None) in ("млн ₽", "тыс. ₽", "₽")),
-                  None)
-        if mj is not None:
-            xs = sorted((v for v in (_raw(t.rows[i][mj]) for i in rows) if v is not None), reverse=True)
-            expect = sum(xs[:10]) / sum(xs) * 100
-            if abs(top.value - expect) > 0.6:
-                bad.append(f"доля топ-10 {top.value} против {expect:.2f}")
-    # план и факт: исполнение
+        n_top = int(facts["top_n"].value)
+        exp = raw.expected_metric(goal, "reference")
+        j = exp if exp is not None else raw.col(_claimed(facts["top_n"].explain) or "")
+        if j is None:
+            bad.append("доля топ-N: колонка не найдена")
+        elif not raw.additive(j):
+            bad.append(f"доля топ-N у величины, которая не складывается: «{raw.cols[j]}»")
+        else:
+            xs = sorted(raw.vals(j), reverse=True)
+            expect = sum(xs[:n_top]) / sum(xs) * 100
+            if not _pct_shown(top.value, expect):
+                bad.append(f"доля топ-{n_top} {top.value} против {expect:.2f}")
     ex = facts.get("execution")
     if ex is not None:
-        pj = next(k for k, c in enumerate(t.columns) if re.search(r"план", c, re.I))
-        fj = next(k for k, c in enumerate(t.columns) if re.search(r"факт", c, re.I))
-        ps = sum(_raw(t.rows[i][pj]) or 0 for i in rows if _raw(t.rows[i][pj]))
-        fsum = sum(_raw(t.rows[i][fj]) or 0 for i in rows if _raw(t.rows[i][pj]))
-        if abs(ex.value - fsum / ps * 100) > 0.6:
-            bad.append(f"исполнение {ex.value} против {fsum / ps * 100:.2f}")
-    # воронка: конверсия
+        pj = next((j for j in raw.num if T_PLAN.search(raw.cols[j]) and raw.types[j] != "percent"), None)
+        fj = next((j for j in raw.num if T_FACT.search(raw.cols[j]) and j != pj and raw.types[j] != "percent"), None)
+        if pj is None or fj is None:
+            bad.append("исполнение без колонок плана и факта")
+        else:
+            ps = sum(raw.num[pj][i] or 0 for i in raw.rows if (raw.num[pj][i] or 0) > 0)
+            fs_ = sum(raw.num[fj][i] or 0 for i in raw.rows if (raw.num[pj][i] or 0) > 0)
+            e = fs_ / ps * 100
+            if not (abs(ex.value - round(e, 1)) <= 0.051 or _pct_shown(ex.value, e)):
+                bad.append(f"исполнение {ex.value} против {e:.2f}")
     cv = facts.get("conversion")
     if cv is not None:
-        xs = [v for v in (_raw(t.rows[i][1]) for i in rows) if v is not None]
+        j = raw.metrics()[0]
+        xs = raw.vals(j)
         expect = xs[-1] / xs[0] * 100
         if not _close(cv.value, expect, rel=0.05, absol=0.0005 if expect < 1 else 0.6):
             bad.append(f"конверсия {cv.value} против {expect:.4f}")
-    # взаимосвязь: r по сырым парам
     rf = facts.get("r")
-    if rf is not None and spec is not None and spec.xy:
-        xj = _col(t, spec.x_title or "")
-        yj = _col(t, spec.y_title or "")
-        if xj is not None and yj is not None:
-            pairs = [(_raw(t.rows[i][xj]), _raw(t.rows[i][yj])) for i in rows]
-            pairs = [(a, b) for a, b in pairs if a is not None and b is not None]
-            r = float(np.corrcoef([a for a, _ in pairs], [b for _, b in pairs])[0, 1])
-            if abs(rf.value - min(0.99, round(abs(r), 2))) > 0.011:
-                bad.append(f"r {rf.value} против {r:.3f}")
-            if rf.value > 0.99:
-                bad.append("r больше 0,99")
-    # динамика: изменение между полными периодами по сырым дням/месяцам
-    if p.task.task == "dynamics" and spec is not None and spec.series and facts.get("change") is not None \
-            and facts["change"].unit == "%" and len(spec.series) == 1:
-        bad += _check_dynamics(t, rows, spec, facts["change"].value)
-    return bad
-
-
-_FREQ_OF_LABEL = [
-    (re.compile(r"^[а-я]{3} \d{4}$"), "month"), (re.compile(r"^[IV]+ кв\. \d{4}$"), "quarter"),
-    (re.compile(r"^\d{4}$"), "year"), (re.compile(r"^нед\. \d+, \d{4}$"), "week"),
-    (re.compile(r"^\d{1,2} [а-я]{3} \d{4}$"), "day"),
-]
-
-
-def _bucket(day: dt.date, freq: str):
-    if freq == "month":
-        return day.year, day.month
-    if freq == "quarter":
-        return day.year, (day.month - 1) // 3
-    if freq == "year":
-        return day.year
-    if freq == "week":
-        return day.isocalendar()[:2]
-    return day.toordinal()
-
-
-def _calendar_days(key, freq: str) -> int:
-    if freq == "month":
-        y, m = key
-        return (dt.date(y + m // 12, m % 12 + 1, 1) - dt.date(y, m, 1)).days
-    if freq == "quarter":
-        y, q = key
-        return sum(_calendar_days((y, q * 3 + k), "month") for k in (1, 2, 3))
-    if freq == "year":
-        return 366 if (key % 4 == 0 and (key % 100 or key % 400 == 0)) else 365
-    if freq == "week":
-        return 7
-    return 1
-
-
-def _check_dynamics(t: Table, rows: list[int], spec: ChartSpec, change: float) -> list[str]:
-    bad: list[str] = []
-    freq = next((f for rx, f in _FREQ_OF_LABEL if spec.categories and rx.match(spec.categories[0])), None)
-    tj = 0
-    mj = _col(t, spec.series[0].name)
-    if freq is None or mj is None:
-        return bad
-    days = []
-    for i in rows:
-        pp = period_parts(str(t.rows[i][tj]))
-        v = _raw(t.rows[i][mj])
-        if pp is None or v is None:
-            continue
-        g, o = pp
-        if g == "day":
-            days.append((dt.date.fromordinal(o), v, "day"))
-        elif g == "month":
-            days.append((dt.date(o // 12, o % 12 + 1, 1), v, "month"))
-        elif g == "quarter":
-            days.append((dt.date(o // 4, (o % 4) * 3 + 1, 1), v, "quarter"))
-        elif g == "year":
-            days.append((dt.date(o, 1, 1), v, "year"))
-    if not days or days[0][2] != "day" or freq == "day":
-        return bad  # проверяем ресэмплинг дней — главный источник ошибок; остальное сверено выше
-    buckets: dict = {}
-    cnt: dict = {}
-    for d, v, _ in days:
-        k = _bucket(d, freq)
-        buckets[k] = buckets.get(k, 0.0) + v
-        cnt[k] = cnt.get(k, 0) + 1
-    vals = [v for v in spec.series[0].values if v is not None]
-    if not vals:
-        return bad
-    keys = sorted(buckets)
-    full = [k for k in keys if cnt[k] >= _calendar_days(k, freq)]
-    # первая и последняя точки графика — полные периоды
-    for v in (vals[0], vals[-1]):
-        k = next((kk for kk in keys if _close(buckets[kk], v, rel=1e-6, absol=0.01)), None)
-        if k is not None and k not in full:
-            bad.append(f"на графике неполный период {k}: {cnt[k]} из {_calendar_days(k, freq)} дней")
-    if len(full) >= 2:
-        first, last = buckets[full[0]], buckets[full[-1]]
-        lag = {"month": 12, "quarter": 4, "week": 52, "year": 1}.get(freq, 0)
-        cands = [(last / first - 1) * 100]
-        if len(full) > lag and lag:
-            prev = full[-1 - lag] if len(full) > lag else None
-            if prev is not None and buckets[prev]:
-                cands.append((last / buckets[prev] - 1) * 100)
-        ratio_ok = any(abs(abs(c) - change) <= 0.6 or abs(abs(c) - round(abs(c), 1)) < 1e-9 and abs(abs(c) - change) < 0.06
-                       for c in cands) or any(_close(c / 100 + 1, change, rel=0.02, absol=0.06) for c in cands)
-        if not ratio_ok:
-            bad.append(f"изменение {change}% против {[round(c, 2) for c in cands]} по полным периодам")
+    if rf is not None:
+        names = re.findall(r"«([^»]+)»", rf.explain)
+        if len(names) >= 2:
+            xj, yj = raw.col(names[0]), raw.col(names[1])
+            if xj is not None and yj is not None:
+                pairs = [(raw.num[xj][i], raw.num[yj][i]) for i in raw.rows]
+                pairs = [(a, b) for a, b in pairs if a is not None and b is not None]
+                r = float(np.corrcoef([a for a, _ in pairs], [b for _, b in pairs])[0, 1])
+                if abs(rf.value - min(0.99, round(abs(r), 2))) > 0.011:
+                    bad.append(f"r {rf.value} против {r:.3f}")
+                if rf.value > 0.99:
+                    bad.append("r больше 0,99")
+    # состав — только при признаке целого в данных; доли частей — по сырым суммам колонок
+    if p.chosen_option and p.chosen_option.kind in ("stacked_bar", "stacked_column") and p.task.task == "shares" \
+            and spec is not None:
+        parts = [s.name for s in spec.series]
+        if any(re.search(r"(?:19|20)\d\d|план|факт", s, re.I) for s in parts):
+            bad.append(f"годы или план/факт как части: {parts}")
+        pj = [j for j in (raw.col(s) or next((k for k, c in enumerate(raw.cols) if c.endswith(s)), None) for s in parts)
+              if j is not None and j in raw.num]
+        sums = [sum(raw.num[j][i] or 0 for j in pj) for i in raw.rows]
+        tj = raw.total_col()
+        evid = bool(raw.t.column_groups and any(raw.t.column_groups))
+        if tj is not None:
+            evid = evid or all(_close(s_, raw.num[tj][i] or 0) for s_, i in zip(sums, raw.rows))
+        evid = evid or (bool(sums) and all(97 <= s_ <= 103 for s_ in sums))
+        if not evid:
+            bad.append(f"состав без признака целого: {parts}")
+        whole = sum(sums)
+        for k in range(len(parts)):
+            f = facts.get(f"part_{k}")
+            nm = re.match(r"^(.*?) — ", f.text) if f is not None else None
+            if nm is None:
+                continue
+            j = raw.col(nm.group(1)) or next((jj for jj, c in enumerate(raw.cols) if c.endswith(nm.group(1))), None)
+            if j is not None and whole:
+                expect = sum(raw.num[j][i] or 0 for i in raw.rows) / whole * 100
+                if not _pct_shown(f.value, expect):
+                    bad.append(f"доля части {nm.group(1)} {f.value} против {expect:.2f}")
     return bad
 
 
 # ═══════════════════════════════════════════ тесты ═════════════════════════════════════════════════════════════════
-def _plan_of(name: str, text: str) -> tuple[Table, DatasetPlan]:
-    t = read_bytes(name.split("-", 2)[-1] if name.startswith("fam_") else name, text.encode("utf-8"))[0]
-    return t, plan_dataset(profile_table(t), t)
+def _read(name: str, text: str) -> Table:
+    return read_bytes(name.split("-", 2)[-1] if name.startswith("fam_") else name, text.encode("utf-8"))[0]
+
+
+def _plan_of(name: str, text: str, brief: str = "") -> tuple[Table, DatasetPlan]:
+    t = _read(name, text)
+    prof = profile_table(t)
+    p = plan_datasets([t], brief, profiles=[prof])[0] if brief else plan_dataset(prof, t)
+    return t, p
+
+
+def _case(name: str, cases: Optional[list[tuple[str, str]]] = None) -> tuple[Table, DatasetPlan]:
+    text = dict(cases or corpus_rev7c())[name]
+    return _plan_of(name, text)
 
 
 @pytest.mark.parametrize("name,text", corpus(), ids=[n for n, _ in corpus()])
@@ -647,10 +1520,16 @@ def test_reviewer_corpus_numbers_from_raw_rows(name, text):
         assert chart_spec_of(p, t, option=k) is not None
 
 
+@pytest.mark.parametrize("name,text", corpus_rev7c(), ids=[n for n, _ in corpus_rev7c()])
+def test_rev7c_corpus_numbers_from_raw_rows(name, text):
+    t, p = _plan_of(name, text)
+    assert not check(name, t, p), (p.headline, check(name, t, p))
+
+
 def test_random_tables_numbers_from_raw_rows():
-    """Сотни случайных таблиц 12 семейств: ни одного неверного числа и ни одного нарушения правил."""
-    cases = random_cases()
-    assert len(cases) >= 300
+    """Сотни случайных таблиц 19 семейств: ни одного неверного числа и ни одного нарушения правил."""
+    cases = random_cases(n_per=24)
+    assert len(cases) >= 400
     failures = []
     for name, text in cases:
         t, p = _plan_of(name, text)
@@ -664,27 +1543,255 @@ def test_random_tables_numbers_from_raw_rows():
     assert not failures, failures[:5]
 
 
+# ── подложенные ошибки: каждую сетка ловит ────────────────────────────────────────────────────────────────────────
+def _broken(p: DatasetPlan, **values) -> DatasetPlan:
+    b = p.model_copy(deep=True)
+    for f in b.headline_facts:
+        if f.id in values:
+            v = values[f.id]
+            if isinstance(v, tuple):
+                f.value, f.text = v
+            else:
+                f.value = v
+    return b
+
+
+def _specs(t: Table, p: DatasetPlan) -> dict:
+    return {k: chart_spec_of(p, t, option=k) for k in range(len(p.options))}
+
+
+def _caught(t: Table, p: DatasetPlan, words: str, specs: Optional[dict] = None) -> bool:
+    errs = check("planted", t, p, specs=specs)
+    return any(re.search(words, e) for e in errs), errs
+
+
 def test_checker_catches_planted_errors():
-    """Сетка ловит то, ради чего она есть: подменённое число, «100%» не у всех, пункты у денег."""
+    found: dict[str, bool] = {}
+
+    def plant(kind: str, t: Table, p: DatasetPlan, words: str, specs: Optional[dict] = None) -> None:
+        ok, errs = _caught(t, p, words, specs)
+        found[kind] = ok
+        assert ok, (kind, errs)
+
+    # сравнение: доля лидера, значение лидера (среднее вместо суммы), последний, не та величина
     t, p = _plan_of("Категории.csv", _csv([["Регион", "Выручка, млн ₽"], ["Москва", 500], ["Казань", 300], ["Омск", 200]]))
     assert not check("ok", t, p)
-    broken = p.model_copy(deep=True)
-    for f in broken.headline_facts:
-        if f.id == "leader_share":
-            f.value = 60.0
-    assert any("доля лидера" in e for e in check("bad", t, broken))
+    plant("доля лидера", t, _broken(p, leader_share=60.0), "доля лидера")
+    plant("последний", t, _broken(p, last_value=250.0), "последний")
+    t, p = _plan_of("Продажи по городам.csv", _csv([["Город", "Выручка, млн ₽"], ["Москва", 300], ["Москва", 200],
+                                                     ["Казань", 300], ["Омск", 100]]))
+    assert not check("ok", t, p)
+    plant("сумма, а не среднее", t, _broken(p, leader_value=250.0), "значение лидера")
+    t, p = _case("Продажи по товарам.csv")
+    assert not check("ok", t, p)
+    plant("не та величина", t, _broken(p, leader_value=(1490.0, "Кофе зерновой 1 кг — 1 490 ₽")), "не сходится с «Выручка»")
+    # уровень: доля и «Итого» у температуры
+    t, p = _case("Температура по городам.csv")
+    assert not check("ok", t, p)
+    fake = p.model_copy(deep=True)
+    lv = next(f for f in fake.headline_facts if f.id == "leader_value")
+    fake.headline_facts.append(lv.model_copy(update={"id": "leader_share", "value": 20.0, "unit": "%"}))
+    plant("доля у уровня", t, fake, "не складывается")
+    specs = _specs(t, p)
+    k = next(k for k, b in specs.items() if isinstance(b, TableData))
+    specs[k] = specs[k].model_copy(update={"rows": specs[k].rows + [["Итого", "−5,2", "", ""]]})
+    plant("«Итого» у уровня", t, p, "«Итого» у величины", specs)
+    # доли через кольцо: доля категории и доля лидера
+    t, p = _plan_of("Структура расходов.csv", dict(corpus())["Структура расходов.csv"])
+    assert p.task.task == "shares" and p.options[0].kind == "doughnut" and not check("ok", t, p)
+    specs = _specs(t, p)
+    sp = specs[0]
+    specs[0] = sp.model_copy(update={"series": [sp.series[0].model_copy(update={"values": [60.0] + sp.series[0].values[1:]})]})
+    plant("доля в кольце", t, p, "доля «", specs)
+    plant("доля лидера в кольце", t, _broken(p, leader_share=52.0), "доля лидера")
+    # динамика: изменение за период, год к году, «в N раз», п.п., ряд на графике
+    t, p = _plan_of("Выручка по месяцам.csv", _csv([["Месяц", "Выручка, млн ₽"]] + [[f"2025-{m:02d}", 100 + 2 * m]
+                                                                                   for m in range(1, 13)]))
+    assert not check("ok", t, p)
+    plant("изменение за период", t, _broken(p, change=25.0), "change:")
+    specs = _specs(t, p)
+    sp = specs[0]
+    specs[0] = sp.model_copy(update={"series": [sp.series[0].model_copy(update={"values": [v * 5 for v in sp.series[0].values]})]})
+    plant("ряд на графике (сумма вместо среднего)", t, p, "ряд на графике", specs)
+    specs = _specs(t, p)
+    specs[0] = sp.model_copy(update={"series": [sp.series[0].model_copy(update={"values": [50.0] + sp.series[0].values})]})
+    plant("неполный период на графике", t, p, "ряд на графике", specs)
+    t, p = _plan_of("Выручка два года.csv", _csv([["Месяц", "Выручка, млн ₽"]] + [[f"{2025 + (m - 1) // 12}-{(m - 1) % 12 + 1:02d}",
+                                                                                 100 + 3 * m] for m in range(1, 22)]))
+    assert "год к году" in next(f.text for f in p.headline_facts if f.id == "change") and not check("ok", t, p)
+    plant("год к году", t, _broken(p, change=40.0), "change:")
+    t, p = _plan_of("Рост в разы.csv", _csv([["Год", "Статей"]] + [[2010 + k, 40 + 30 * k] for k in range(12)]))
+    assert any(f.id == "ratio" for f in p.headline_facts) and not check("ok", t, p)
+    plant("в N раз", t, _broken(p, ratio=1.4), "раза» против")
+    t, p = _plan_of("Конверсия по месяцам.csv", _csv([["Месяц", "Конверсия, %"]] + [[f"2025-{m:02d}", f"{2 + m / 10:.1f}".replace(".", ",")]
+                                                                                for m in range(1, 13)]))
+    assert next(f.unit for f in p.headline_facts if f.id == "change") == "п.п." and not check("ok", t, p)
+    plant("п.п.", t, _broken(p, change=3.0), "п.п. против")
+    # несколько рядов, «N из M», части целого
+    t, p = _plan_of("Штат по месяцам.csv", dict(corpus())["Штат по месяцам.csv"])
+    assert not check("ok", t, p)
+    plant("несколько рядов", t, _broken(p, series_1=40.0), "series_1")
+    t, p = _plan_of("Средний чек по регионам и месяцам.csv", dict(corpus())["Средний чек по регионам и месяцам.csv"])
+    assert not check("ok", t, p)
+    plant("N из M", t, _broken(p, moved=6.0), "из")
+    t, p = _case("Пациенты по отделениям 2025.csv")
+    assert not check("ok", t, p)
+    plant("часть целого", t, _broken(p, mover=(40.0, "Хирургия: +40%")), "сильнее всех")
+    # ключевые показатели
+    t, p = _plan_of("Итоги банка.csv", dict(corpus())["Итоги банка.csv"])
+    assert not check("ok", t, p)
+    plant("ключевой показатель", t, _broken(p, kpi_a=40.0), "kpi_a")
+    # справочник, план-факт, воронка, связь, «не больше X»
+    t, p = _plan_of("fam_reference-0-Клиенты.csv", fam_reference(random.Random(7))[1])
+    assert any(f.id == "top_share" for f in p.headline_facts) and not check("ok", t, p)
+    plant("доля топ-10", t, _broken(p, top_share=80.0), "доля топ")
+    t, p = _case("Исполнение бюджета.csv")
+    assert not check("ok", t, p)
+    plant("исполнение", t, _broken(p, execution=99.0), "исполнение")
+    t, p = _plan_of("Воронка продаж.csv", dict(corpus())["Воронка продаж.csv"])
+    assert not check("ok", t, p)
+    plant("конверсия", t, _broken(p, conversion=1.0), "конверсия")
+    t, p = _plan_of("Связь.csv", fam_relationship(random.Random(3))[1])
+    assert not check("ok", t, p)
+    plant("r", t, _broken(p, r=0.2), "^r ")
     t2, p2 = _plan_of("Распределение.csv", _csv([["Номер", "Минут доставки"]] + [[f"N-{i}", 70 + i % 50] for i in range(399)]
-                                                + [["N-x", 131]]))
-    broken = p2.model_copy(deep=True)
-    for f in broken.headline_facts:
-        if f.id == "share_within":
-            f.value = 100.0
-    assert any("100%" in e for e in check("bad", t2, broken))
+                                                 + [["N-x", 131]]))
+    plant("«100%» не у всех", t2, _broken(p2, share_within=100.0), "100%")
+    # правила: ориентир, порядковые группы, номера, пункты, число не из фактов
+    t, p = _case("Результаты ЕГЭ по школам.csv")
+    assert not check("ok", t, p)
+    specs = _specs(t, p)
+    specs[0] = specs[0].model_copy(update={"categories": specs[0].categories[:-1] + ["Среднее по стране"]})
+    plant("ориентир как категория", t, p, "ориентир", specs)
+    t, p = _case("Население по возрасту.csv")
+    assert not check("ok", t, p)
+    specs = _specs(t, p)
+    sp = specs[0]
+    specs[0] = sp.model_copy(update={"categories": sp.categories[:12],
+                                     "series": [s_.model_copy(update={"values": s_.values[:12]}) for s_ in sp.series]})
+    plant("порядковые группы обрезаны", t, p, "обрезаны", specs)
+    t, p = _plan_of("Расписание.csv", _csv([["День", "Время", "Предмет", "Кабинет", "Учитель"]] + [
+        [d_, "09:00", s_, room, f"Учитель {k}."] for k, (d_, s_, room) in enumerate(
+            [("Понедельник", "Математика", 301), ("Понедельник", "Физика", 214), ("Вторник", "Математика", 301),
+             ("Вторник", "Химия", 220), ("Среда", "Физика", 214), ("Среда", "Математика", 301),
+             ("Четверг", "Химия", 220), ("Пятница", "Физика", 214)])]))
+    # профиль мог принять кабинеты за величину — анализ всё равно показывает таблицу «не для графика»
+    prof = p.profile.model_copy(deep=True)
+    k = next(k for k, c in enumerate(prof.columns) if c.name == "Кабинет")
+    prof.columns[k] = prof.columns[k].model_copy(update={"role": "metric", "type": "number"})
+    p = plan_dataset(prof, t)
+    assert p.options[0].kind == "table" and (p.message or "").startswith("Не для графика") and not check("ok", t, p)
+    charted = p.model_copy(deep=True)
+    charted.options[0] = charted.options[0].model_copy(update={"kind": "bar"})
+    plant("номера графиком", t, charted, "номера")
+    t, p = _plan_of("Выручка по месяцам.csv", _csv([["Месяц", "Выручка, млн ₽"]] + [[f"2025-{m:02d}", 100 + 2 * m]
+                                                                                   for m in range(1, 13)]))
+    fake = p.model_copy(deep=True)
+    for f in fake.headline_facts:
+        if f.id == "change":
+            f.unit = "п."
+    plant("пункты у денег", t, fake, "пункты")
+    plant("число не из фактов", t, p.model_copy(update={"headline": "Выручка выросла на 77% за 11 месяцев"}), "не из фактов")
+    assert all(found.values()), found
+    assert len(found) >= 25
+
+
+# ── формы rev7c, которые правила должны держать ───────────────────────────────────────────────────────────────────
+def test_rev7c_shapes_hold():
+    t, p = _case("Курсы валют ЦБ.csv")
+    s = chart_spec_of(p, t)
+    assert 80 < s.series[0].values[0] < 84 and not any(f.id in ("leader_share", "total") for f in p.headline_facts)
+    t, p = _case("Урожайность культур, ц на га.csv")
+    assert "ц/га" in p.headline and not any(o.kind.startswith("stacked") for o in p.options)
+    t, p = _case("Зарплаты по грейдам.csv")
+    assert p.options[0].kind == "grouped_bar" and "по медиане" in p.headline and "%" not in p.headline
+    t, p = _case("Температура по городам.csv")
+    assert p.headline.startswith("Теплее всего — Сочи")
+    for k in range(len(p.options)):
+        b = chart_spec_of(p, t, option=k)
+        assert not (isinstance(b, TableData) and any(r[0] == "Итого" for r in b.rows))
+    t, p = _case("Продажи по неделям.csv")
+    assert p.headline == "Продажи выросли на 39% за 39 недель" and len(chart_spec_of(p, t).categories) == 40
+    t, p = _case("Население по возрасту.csv")
+    assert len(chart_spec_of(p, t).categories) == 15
+    t, p = _case("Расписание 10Б.csv")
+    assert p.message and p.message.startswith("Не для графика") and p.options[0].kind == "table"
+    t, p = _case("Результаты ЕГЭ по школам.csv")
+    assert "Среднее по стране" not in chart_spec_of(p, t).categories and "Среднее по стране — 66,4" in (p.caption or "")
+    t, p = _case("Отгрузки по рабочим дням 2024-2025.csv")
+    assert len(chart_spec_of(p, t).categories) == 24 and "неполн" not in (p.caption or "")
+    t, p = _case("Выручка магазина с 2 января.csv")
+    assert chart_spec_of(p, t).categories[0] == "янв 2025"
+    t, p = _case("Пациенты по отделениям 2025.csv")
+    assert p.headline.startswith("Число пациентов")
+    t, p = _case("Исполнение бюджета.csv")
+    assert p.headline.startswith("Бюджет исполнен на 91%") and p.options[0].kind == "grouped_bar"
+    t, p = _case("Два показателя.csv")
+    assert p.headline.replace(NB, " ") == "Выручка — 413 млн ₽"
+    t, p = _case("Продажи по товарам.csv")
+    assert p.headline.startswith("Кофе зерновой 1 кг даёт 17% выручки")
+    t, p = _case("Сводная выручка по каналам.csv")
+    assert not check("ok", t, p)
+
+
+def test_weekly_series_long_and_short():
+    """До 60 недель — неделями; дольше — месяцы в среднем за неделю, неделя на стыке — по большей части дней."""
+    rows = [["Неделя", "Продажи, шт."]] + [[(dt.date(2024, 1, 1) + dt.timedelta(weeks=k)).isoformat(), 1000 + 10 * k]
+                                           for k in range(80)]
+    t, p = _plan_of("Продажи по неделям.csv", _csv(rows))
+    s = chart_spec_of(p, t)
+    assert s.categories[0] == "янв 2024" and "в среднем за неделю" in (p.caption or "").replace(NB, " ")
+    jan = [1000 + 10 * k for k in range(80) if (dt.date(2024, 1, 1) + dt.timedelta(weeks=k, days=3)).month == 1
+           and (dt.date(2024, 1, 1) + dt.timedelta(weeks=k, days=3)).year == 2024]
+    assert abs(s.series[0].values[0] - sum(jan) / len(jan)) < 1e-6
+    assert not check("weekly", t, p)
+
+
+# ── подписи осей: у каждой диаграммы с осью значений — ось значений с единицей и ось категорий ───────────────────
+def _axes_errors(name: str, spec) -> list[str]:
+    if not isinstance(spec, ChartSpec) or spec.type in ("pie", "doughnut"):
+        return []
+    if spec.type == "scatter":
+        return [] if spec.x_title and spec.y_title else [f"{name}: у рассеяния не подписаны оси"]
+    errs = []
+    if spec.categories and not spec.x_title:
+        errs.append(f"{name}: нет подписи оси категорий ({spec.type})")
+    if not spec.y_title:
+        errs.append(f"{name}: нет подписи оси значений ({spec.type}, {len(spec.series)} рядов)")
+    units = {s_.unit for s_ in spec.series if s_.unit}
+    if spec.split:
+        # части рядом: у каждой своя единица (движок дописывает её к подписи оси части)
+        if units and any(not s_.unit for s_ in spec.series):
+            errs.append(f"{name}: у части без единицы")
+    elif units and not (spec.unit or any(u in (spec.y_title or "") for u in units)):
+        errs.append(f"{name}: у оси значений нет единицы {units}")
+    return errs
+
+
+def test_every_chart_has_axis_titles_with_units():
+    """Оба набора-примера, корпуса ревьюера и случайные таблицы: у каждого варианта-диаграммы — подпись оси категорий
+    (где она есть) и оси значений, единица — у оси (общая у рядов одной единицы, своя у каждой части)."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "examples"
+    cases = [(f.name, f.read_bytes()) for d_ in ("data-sales-2026", "data-science-2026")
+             for f in sorted((root / d_).glob("*")) if f.suffix in (".csv", ".xlsx", ".json", ".txt")]
+    cases += [(n, x.encode("utf-8")) for n, x in corpus() + corpus_rev7c() + random_cases(n_per=8)]
+    errs, charts = [], 0
+    for name, data in cases:
+        t = read_bytes(name.split("-", 2)[-1] if name.startswith("fam_") else name, data)[0]
+        p = plan_dataset(profile_table(t), t)
+        for k in range(len(p.options)):
+            spec = chart_spec_of(p, t, option=k)
+            charts += isinstance(spec, ChartSpec)
+            errs += _axes_errors(f"{name} · {p.options[k].kind}", spec)
+    assert not errs, errs[:10]
+    assert charts >= 300
 
 
 # ── таблицы ≤ 10 строк данных на слайд и подписи без «..» (правило организаторов, аудит `table_too_big`) ──────────
 def _all_cases() -> list[tuple[str, str]]:
-    return corpus() + random_cases(n_per=10)
+    return corpus() + corpus_rev7c() + random_cases(n_per=8)
 
 
 def test_every_table_option_has_at_most_ten_rows_per_slide():
@@ -700,6 +1807,8 @@ def test_every_table_option_has_at_most_ten_rows_per_slide():
                     assert len(body.rows) <= 10, (name, o.title, part, len(body.rows))
                     checked += 1
         assert ".." not in (p.caption or "").replace("...", ""), (name, p.caption)
+        for f in p.headline_facts:
+            assert ".." not in (f.text + f.explain).replace("...", ""), (name, f.text, f.explain)
     assert checked >= 100
 
 
@@ -713,6 +1822,7 @@ def test_sample_sets_tables_and_captions():
         t = read_bytes(f.name, f.read_bytes())[0]
         p = plan_dataset(profile_table(t), t)
         assert ".." not in (p.caption or "").replace("...", ""), (f.name, p.caption)
+        assert not check(f.name, t, p), (f.name, p.headline, check(f.name, t, p))
         for k, o in enumerate(p.options):
             for part in (1, 2, 3):
                 body = chart_spec_of(p, t, option=k, part=part)

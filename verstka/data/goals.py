@@ -39,6 +39,7 @@ class Goal(BaseModel):
     viz: VizKind  # к какому виду ведёт
     to: str  # «линейный график» — подпись в интерфейсе
     subject: list[str] = Field(default_factory=list)  # основы слов предмета: ["выручк"]
+    metric: list[str] = Field(default_factory=list)  # основы величины после «по»: «по среднему баллу» → ["средн", "балл"]
     at: int = 0  # позиция в тексте
 
 
@@ -47,8 +48,9 @@ _END = r"[^,.;:!?\n]*"
 _PATTERNS: list[tuple[TaskKind, re.Pattern[str]]] = [
     ("dynamics", re.compile(
         _V + r"\s+(?:рост|снижени|падени|динамик|изменени|тренд|как\s+(?:рос|рас|меня|измен|пада|сниж))" + _END
-        + r"|как\s+(?:росл[аио]?|рос|раст[её]т|растут|менял[аи]?с[ья]|меня[её]тся|изменял[аи]?с[ья]|снижал[аи]?с[ья]"
-          r"|сниж[аеи]ется|падает|падают)" + _END
+        + r"|как\s+(?:росл[аио]?|рос|раст[её]т|растут|менял[аио]?с[ья]|меня[её]тся|меняются|изменял[аио]?с[ья]|"
+          r"изменя[её]тся|снижал[аио]?с[ья]|сниж[аеи]ется|снижаются|падал[аио]?|пада[её]т|падают|увеличивал[аио]?с[ья]|"
+          r"уменьшал[аио]?с[ья]|сокращал[аио]?с[ья]|выполнял[аио]?с[ья]|исполнял[аио]?с[ья])" + _END
         + r"|динамик[аиуе]\s+" + _END, re.I)),
     ("comparison", re.compile(
         r"(?:сравни(?:те)?|сравнить|сопоставь(?:те)?|сопоставить|сравнение)\s+" + _END
@@ -79,6 +81,10 @@ _PATTERNS: list[tuple[TaskKind, re.Pattern[str]]] = [
 _CLAUSE = re.compile(r"\s+(?:и|а|но)\s+(?=(?:где|как|что|кто|почему|какие|какой|какая|зачем|когда|покажи|сравни|"
                      r"на\s+что|в\s+чём|в\s+чем|за\s+счёт|за\s+счет|из\s+чего)\b)", re.I)
 
+# глаголы изменения и исполнения в любой форме — слова цели, а не предмет («как менялось число клиентов»)
+_VERB_WORD = re.compile(r"^(?:из)?меня\w*|^сниж\w*|^рос\w*|^раст\w*|^пада\w*|^увелич\w*|^уменьш\w*|^сокращ\w*|"
+                        r"^выполня\w*|^исполня\w*|^вырос\w*", re.I)
+
 # служебные слова и слова самих целей — не предмет
 _STOP = frozenset({
     "и", "в", "во", "по", "за", "на", "с", "со", "от", "до", "из", "как", "что", "у", "к", "для", "между", "а", "или", "их",
@@ -94,11 +100,29 @@ _STOP = frozenset({
     "тратится", "растёт", "растет", "растут", "делится", "кто", "какие", "какой", "какая", "лидирует", "лидируют", "впереди", "отстаёт", "отстает", "отстают", "рейтинг",
     "лидеры", "лидер", "лидеров", "росла", "рос", "росло", "росли", "менялась", "менялся", "менялись", "изменялась",
     "снижалась", "году", "год", "года", "месяц", "месяцев", "данные", "данных", "файл", "файлах", "приложенных", "цифрах",
-    "визуализируй", "продемонстрируй", "самые", "самых", "разные", "разных", "чем", "тем", "насколько",
+    "визуализируй", "продемонстрируй", "самые", "самых", "разные", "разных", "чем", "тем", "насколько", "как",
+    "выполнялся", "выполнялась", "исполнялся", "исполнялась",
 })
 def stems_of(text: str) -> list[str]:
     """Основы значимых слов (без служебных и слов целей), по порядку, без повторов."""
-    return _stems_of(text, _STOP)
+    words = [w for w in re.findall(r"[a-zа-яё0-9]+", (text or "").lower()) if not _VERB_WORD.match(w)]
+    return _stems_of(" ".join(words), _STOP)
+
+
+def _metric_of(phrase_: str) -> list[str]:
+    """Величина цели — слова после «по» («сравни классы по среднему баллу» → средн, балл); «по годам», «по
+    кварталам» — разрез, а не величина."""
+    m = re.search(r"\bпо\s+(.+)$", phrase_, re.I)
+    if not m:
+        return []
+    out = stems_of(m.group(1))
+    return [x for x in out if x not in _PERIOD_STEMS]
+
+
+_PERIOD_STEMS = {"год", "года", "годам", "месяц", "месяцам", "квартал", "кварталам", "недел", "неделям", "дням", "дн"}
+# «сравни A по X и B по Y» — две цели: «сравни районы по цене … и школы по среднему баллу»
+_SPLIT_AND = re.compile(r"^(?P<verb>(?:сравни(?:те)?|сравнить|сопоставь(?:те)?|сопоставить)\s+)(?P<a>.+?\s+по\s+.+?)\s+и\s+"
+                        r"(?P<b>\S+(?:\s+\S+)?\s+по\s+.+)$", re.I)
 
 
 def goals_of(text: str) -> list[Goal]:
@@ -107,17 +131,30 @@ def goals_of(text: str) -> list[Goal]:
     found: list[Goal] = []
     if not text:
         return found
+    # придаточные — отдельно: «как менялось число пациентов … и как росли доставки» — две цели
+    segs: list[tuple[int, str]] = []
+    pos = 0
+    for part in _CLAUSE.split(text):
+        at = text.find(part, pos)
+        segs.append((max(at, 0), part))
+        pos = max(at, 0) + len(part)
     for task, rx in _PATTERNS:
-        for m in rx.finditer(text):
-            q = " ".join(m.group(0).split()).strip(" -—–")
-            q = _CLAUSE.split(q)[0].strip(" -—–")
-            if not q:
-                continue
-            q = q[0].lower() + q[1:]
-            viz, to = GOAL_VIZ[task]
-            g = Goal(phrase=q, task=task, viz=viz, to=to, subject=stems_of(q), at=m.start())
-            if not any(x.task == g.task and x.phrase == g.phrase for x in found):
-                found.append(g)
+        for at0, seg in segs:
+            for m in rx.finditer(seg):
+                q = " ".join(m.group(0).split()).strip(" -—–")
+                if not q:
+                    continue
+                q = q[0].lower() + q[1:]
+                viz, to = GOAL_VIZ[task]
+                parts = [q]
+                sp = _SPLIT_AND.match(q) if task == "comparison" else None
+                if sp:
+                    parts = [sp.group("verb") + sp.group("a"), sp.group("verb") + sp.group("b")]
+                for k, ph in enumerate(parts):
+                    g = Goal(phrase=ph, task=task, viz=viz, to=to, subject=stems_of(ph),
+                             metric=_metric_of(ph) if task == "comparison" else [], at=at0 + m.start() + k)
+                    if not any(x.task == g.task and x.phrase == g.phrase for x in found):
+                        found.append(g)
     found.sort(key=lambda g: (g.at, list(GOAL_VIZ).index(g.task)))
     return found
 

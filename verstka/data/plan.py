@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Optional, Sequence, Union
 
 import numpy as np
@@ -25,7 +26,7 @@ from verstka.data.headline import compose
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, decide_task, task_scores
 from verstka.data.viz import find_candidate, rank_options
-from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_signed, fmt_value, phrase
+from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_signed, fmt_value, phrase, upper_first
 from verstka.schemas.data import NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption
 from verstka.schemas.outline import ChartSpec, InlineSeries, NumberCallout, TableData, XYSeries
 
@@ -61,9 +62,9 @@ def _relevant(goals: Sequence[Goal], d: Data) -> list[Goal]:
 
 
 def data_of(plan: DatasetPlan, table: Table) -> Data:
-    """Тот же `Data`, что видел план (главная метрика — по цели, которая решила задачу)."""
+    """Тот же `Data`, что видел план (главная метрика — по цели, которая решила задачу; у сравнения — колонка-итог)."""
     subject = tuple(stems_of(plan.task.goal)) if plan.task.goal else ()
-    return Data(table, plan.profile, subject=subject)
+    return Data(table, plan.profile, subject=subject, compare=plan.task.task == "comparison")
 
 
 def _source(p: DatasetProfile) -> str:
@@ -93,6 +94,9 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
                            message=msg)
 
     task = decision.task
+    if task == "comparison":
+        # сравнение категорий — по колонке-итогу («Итого за год»), если она есть, а не по первой части
+        d = Data(table, profile, subject=subject, compare=True)
     data_task = max(base, key=lambda k: base[k])
     raised = decision.goal is not None and base[data_task] > base[task]
     options = rank_options(task, d, [g for g in rel if base.get(g.task, 0) >= FEASIBLE or g.task == task], raised)
@@ -102,6 +106,15 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     message = None
     if not profile.typable and options and options[0].kind == "table":
         message = f"Не для графика: {profile.untypable_reason or 'данные не складываются в график'} — показываю таблицей"
+    elif d.not_numbers and not d.measures and options and options[0].kind == "table":
+        message = (f"Не для графика: в колонке «{d.not_numbers[0]}» — номера, а не величины (повторяются, без единицы) "
+                   f"— показываю таблицей")
+    if message and task == "reference":
+        # перечень (расписание, список) — заголовок называет его, а не «12 аудиторий из 5 дней»; без чисел из имени
+        # файла («10Б»): в заголовке каждое число — факт
+        words = [w for w in title.split() if not re.search(r"\d", w)]
+        name = " ".join(words[:3]) if words else "Перечень"
+        headline = f"{upper_first(name)}: {count_words(d.n, 'строка', 'строки', 'строк')}"
     plan = DatasetPlan(
         profile=profile, task=decision, options=options, chosen=0, headline=headline or plain, headline_facts=fs.facts,
         plain_headline=plain, caption=caption, source=source, slides=1, message=message,
@@ -121,15 +134,28 @@ def _file_match(g: Goal, d: Data) -> bool:
     return all(any(same_stem(s, w) for w in words) for s in g.subject)
 
 
+def _metric_ok(g: Goal, d: Data) -> bool:
+    """Величина цели («по прибыли») есть в колонках или в названии файла; цель без величины — да."""
+    if not g.metric:
+        return True
+    words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(c.name for c in d.profile.columns))
+    return all(any(same_stem(s_, w) for w in words) for s_ in g.metric)
+
+
 def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal]]:
     """Цель — каждому датасету, который она называет по имени файла и где её задача осуществима; если по имени не
     назван ни один — тем, о которых она больше всего говорит (совпадение предмета с файлом, колонками и значениями плюс
     половина балла задачи по данным). Цель без предмета — лучшему по задаче."""
     out: list[list[Goal]] = [[] for _ in datas]
-    scores = [task_scores(d) for d in datas]
     values = [_values_for_match(d) for d in datas]
     for g in goals:
-        named = [k for k, d in enumerate(datas) if scores[k].get(g.task, 0.0) >= FEASIBLE and _file_match(g, d)]
+        # данные глазами цели: главная метрика — по её предмету («структура выручки» — выручка, а не цена)
+        gd = [Data(d.table, d.profile, subject=tuple(g.subject)) if g.subject else d for d in datas]
+        scores = [task_scores(x) for x in gd]
+        # величина цели («по прибыли», «по среднему баллу») должна быть в данных — иначе цель не об этом датасете
+        ok = [_metric_ok(g, x) for x in gd]
+        named = [k for k, d in enumerate(datas)
+                 if ok[k] and scores[k].get(g.task, 0.0) >= FEASIBLE and _file_match(g, d)]
         if named:
             for k in named:
                 out[k].append(g)
@@ -137,7 +163,7 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
         best, who = 0.0, []
         for k, d in enumerate(datas):
             s = scores[k].get(g.task, 0.0)
-            if s < FEASIBLE:
+            if s < FEASIBLE or not ok[k]:
                 continue
             mt = goal_match(g, d.profile, values[k])
             if mt <= 0:
@@ -151,7 +177,8 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
             # предмет не назван так, чтобы датасет мог ответить («как растёт наука»: «наук» есть лишь в названиях
             # институтов бюджета, где нет ряда по годам) — цель достаётся единственному датасету, где её задача
             # осуществима лучше всего; при равенстве — никому
-            feas = [(scores[k].get(g.task, 0.0), k) for k in range(len(datas)) if scores[k].get(g.task, 0.0) >= FEASIBLE]
+            feas = [(scores[k].get(g.task, 0.0), k) for k in range(len(datas))
+                    if scores[k].get(g.task, 0.0) >= FEASIBLE and ok[k]]
             if feas:
                 best_s = max(s_ for s_, _ in feas)
                 top = [k for s_, k in feas if abs(s_ - best_s) < 1e-9]
@@ -298,8 +325,8 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
     tv = d.time
     if tv is None:
         return _spec_reference(d, opt, src, part, plan)
-    unit = tv.measure.unit_text if tv.measure.j >= 0 else None
-    yname = tv.measure.name if tv.measure.j >= 0 else "Число строк"
+    unit = tv.measure.unit_text if tv.measure.j != -1 else None
+    yname = tv.measure.name if tv.measure.j != -1 else "Число строк"
     if opt.kind == "table":
         cols = [tv.axis_title] + [_col_title(s.name, s.unit) for s in tv.series]
         rows = [[lab] + [_cell(s.values[i]) for s in tv.series] for i, lab in enumerate(tv.labels)]
@@ -313,10 +340,25 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
     last = max((i for i, v in enumerate(tv.main.values) if v is not None), default=None)
     if tv.split:
         kind = "line" if kind in ("stacked_column", "grouped_column") else kind
+    # подпись оси значений есть всегда (единицу дописывает движок): один ряд — его имя; ряды одной единицы — общее
+    # имя по датасету («Публикации», «Денежный поток»); ряды в разных единицах — у каждой части своя единица
+    if tv.split:
+        y_title = "Значение"
+    elif len(series) == 1 or tv.dim:
+        y_title = yname
+    else:
+        y_title = d.group_name or _series_title(d)
     return ChartSpec(type=kind, categories=list(tv.labels), series=series, unit=None if tv.split else unit,
                      highlight_index=last if kind in ("line", "column", "area") and len(series) == 1 else None,
-                     x_title=tv.axis_title, y_title=yname if (len(series) == 1 or tv.dim) and not tv.split else None,
-                     gaps=tv.gaps, source=src, split=tv.split)
+                     x_title=tv.axis_title, y_title=y_title, gaps=tv.gaps, source=src, split=tv.split)
+
+
+def _series_title(d: Data) -> str:
+    """Общее имя нескольких рядов одной единицы — по названию датасета без периода и чисел: «Публикации по годам» →
+    «Публикации», «Денежный поток 2025» → «Денежный поток»."""
+    title = re.split(r"\s+(?:по|за|в|на|с)\s+", file_title(d.profile.file, d.profile.sheet), maxsplit=1)[0]
+    words = [w for w in title.split() if not re.search(r"\d", w)]
+    return upper_first(" ".join(words)) if words else "Значение"
 
 
 def _argmax(values: Sequence[Optional[float]]) -> Optional[int]:
@@ -349,7 +391,8 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
             ms.append((mm.name, cv.extra.get(mm.name, []), mm.unit_text))
         cols = [cv.dim] + [_col_title(n, u) for n, _, u in ms]
         rows = [[lab] + [_cell(v[i] if i < len(v) else None) for _, v, _ in ms] for i, lab in enumerate(cv.labels)]
-        if cv.total is not None and cv.measure is not None and cv.measure.additive and len(rows) % TABLE_ROWS:
+        if cv.total is not None and cv.measure is not None and cv.measure.additive and not d.funnel \
+                and len(rows) % TABLE_ROWS:
             # «Итого» — только если помещается на последнем слайде таблицы (≤ 10 строк), иначе итог — в подписи
             rows.append(["Итого", _cell(cv.total)] + [""] * (len(ms) - 1))
         bad = _pages_ok(rows, part)
@@ -509,7 +552,7 @@ def _spec_reference(d: Data, opt: VizOption, src: str, part: int, plan: DatasetP
         vals = [float(v) if v is not None else None for v in rv.values[:k]]
         return ChartSpec(type="bar", categories=labs, series=[InlineSeries(name=m.name, values=vals, unit=m.unit_text)],
                          unit=m.unit_text, highlight_index=0 if vals and vals[0] is not None else None,
-                         x_title=rv.label, y_title=m.name, source=src)
+                         x_title=rv.label or "Строка", y_title=m.name, source=src)
     if opt.kind == "kpi_cards":
         return _summary_cards(d)
     mode = _table_mode(opt) if opt.kind == "table" else "top"

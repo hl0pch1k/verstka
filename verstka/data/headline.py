@@ -15,7 +15,8 @@ from typing import Optional, Sequence
 from verstka.data.facts import FactSet
 from verstka.data.words import (
     PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_pct_any, fmt_signed, fmt_value,
-    fraction_words, is_plural_value, lower_first, number_word, phrase, plural, times_word, upper_first, verb,
+    fraction_words, is_period_name, is_plural_value, lower_first, number_word, phrase, plural, round_pct, times_word,
+    upper_first, verb,
 )
 from verstka.schemas.data import HeadlineFact, TaskKind
 
@@ -138,6 +139,8 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
         u = c.get("unit_short")
         return (f"{c['subject']}: пик {fmt_value(mx.value, u)}, в среднем {fmt_value(mean.value, u)} в час",
                 c.get("caption"))
+    if c.get("comp_time"):
+        return _dynamics_parts(fs)
     if c.get("dim_level"):
         moved, of, lv = _f(fs, "moved"), _f(fs, "of"), _f(fs, "leader_value")
         gen1, genp = c["dim_forms"]
@@ -206,6 +209,42 @@ def _move(kind: str, v: float, unit: Optional[str]) -> tuple[bool, str]:
     return v >= 0, f"на {fmt_value(abs(v), unit)}"
 
 
+def _signed_move(kind: str, v: float, unit: Optional[str]) -> str:
+    """«+5 п.п.», «−8%», «рост в 2,1 раза», «+33 млн ₽» — изменение со знаком для формы через двоеточие."""
+    if kind == "ratio":
+        r = v if v >= 1 else 1 / v
+        return f"{'рост' if v >= 1 else 'снижение'} в {fmt_num(round(r, 1), 1)} {times_word(round(r, 1))}"
+    if kind == "pct":
+        return fmt_signed(round_pct(v), "%")
+    if kind == "pp":
+        return fmt_signed(round(v, 1), "п.п.")
+    return fmt_signed(v, unit or "")
+
+
+def _dynamics_parts(fs: FactSet) -> tuple[str, Optional[str]]:
+    """Части целого по времени: «Число пациентов выросло на 0,5% за 11 месяцев, а педиатрия снизилась на 15%»."""
+    c = fs.ctx
+    subj, g = c["subject"], c["gender"]
+    u = c.get("unit_short")
+    ch, last = _f(fs, "change"), _f(fs, "last")
+    delta = c.get("delta", 0.0)
+    if ch is None or abs(delta) < 1:
+        head = f"{subj} {verb('hold', g, past=False)} на уровне {fmt_value(last.value, u)}" if last is not None else subj
+    else:
+        head = f"{subj} {verb('grow' if delta > 0 else 'fall', g)} на {fmt_pct(ch.value)}% {c.get('when', '')}".strip()
+    mv = _f(fs, "mover")
+    if mv is not None and c.get("mover"):
+        nm, mp = c["mover"], c["mover_pct"]
+        p = phrase(nm)
+        if ch is not None and abs(delta) >= 1 and (mp > 0) == (delta > 0):
+            head += f", сильнее всех — {_mid(nm)}: {fmt_signed(round_pct(mp), '%')}"
+        elif p is not None and p.sure:
+            head += f", а {_mid(nm)} {verb('grow' if mp > 0 else 'fall', p.gender)} на {fmt_pct(abs(mp))}%"
+        else:
+            head += f", {nm}: {fmt_signed(round_pct(mp), '%')}"
+    return head, c.get("caption")
+
+
 def _mid(name: str) -> str:
     """Название ряда внутри фразы: нарицательное — со строчной («факт», «брак»), аббревиатура и латиница — как есть."""
     p = phrase(name)
@@ -219,6 +258,13 @@ def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
     unit = c.get("unit_short")
     parts = []
     up0 = None
+    if any(is_period_name(nm) for nm in names[:2]):
+        # ряды-номера («Неделя 1», «Неделя 2»): подлежащим их не делают — через двоеточие
+        for k, name in enumerate(names[:2]):
+            kind, v = c[f"s{k}"]
+            parts.append(f"{name if k == 0 else _mid(name)}: {_signed_move(kind, v, unit)}"
+                         + (f" {c.get('when', '')}" if k == 0 else ""))
+        return ", ".join(p_.strip() for p_ in parts), c.get("caption")
     for k, name in enumerate(names[:2]):
         kind, v = c[f"s{k}"]
         up, how = _move(kind, v, unit)
@@ -246,10 +292,12 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         ex, fa, pl = _f(fs, "execution"), _f(fs, "fact_total"), _f(fs, "plan_total")
         if ex is None or fa is None or pl is None:
             return c.get("plain", ""), c.get("caption")
-        return (f"План исполнен на {fmt_num(ex.value, 0 if float(ex.value).is_integer() else 1)}%: {fmt_num(fa.value)} из "
-                f"{fmt_value(pl.value, c.get('unit_short'))}"), c.get("caption")
+        word = c.get("plan_word", "План")
+        done = "выполнен" if word == "Норматив" else "исполнен"
+        return (f"{word} {done} на {fmt_num(ex.value, 0 if float(ex.value).is_integer() else 1)}%: {fmt_num(fa.value)} "
+                f"из {fmt_value(pl.value, c.get('unit_short'))}"), c.get("caption")
     leader = c["leader"]
-    pl = "pl" if is_plural_value(leader) else "m"
+    pl = "pl" if c.get("lead_plural") or is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
     grow_leader = c.get("growth_leader")
     m: Optional[Phrase] = c.get("metric")
@@ -264,10 +312,25 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             head += f": {fmt_num(lv.value)} из {fmt_value(total.value, c.get('unit_short'))}"
     elif _f(fs, "leader_value") is not None:
         lv = _f(fs, "leader_value")
-        head = f"{leader} впереди: {fmt_value(lv.value, c.get('unit_short'))}"
+        u = c.get("unit_short")
         last = _f(fs, "last_value")
-        if last is not None and c.get("last_label"):
-            head += f", {c['last_label']} — {fmt_value(last.value, c.get('unit_short'))}"
+        w = c.get("wording", "lead")
+        top_w, low_w = {"temp": ("Теплее всего", "холоднее всего"), "price": ("Дороже всего", "дешевле всего"),
+                        "most": ("Больше всего", "меньше всего")}.get(w, (None, None))
+        second = _f(fs, "second_value")
+        if w == "most" and second is not None and c.get("second_leader"):
+            # две величины рядом по порядковым группам: у каждой своя самая большая группа
+            head = (f"{c['first_name']}: больше всего — {leader} ({fmt_value(lv.value, u)}), "
+                    f"{_mid(c['second_name'])}: {c['second_leader']} ({fmt_value(second.value, u)})")
+        elif top_w:
+            head = f"{top_w} — {leader}: {fmt_value(lv.value, u)}"
+            if last is not None and c.get("last_label"):
+                head += f", {low_w} — {c['last_label']}: {fmt_value(last.value, u)}"
+        else:
+            by = f" по {c['by_metric']}" if c.get("by_metric") else ""
+            head = f"{leader} впереди{by}: {fmt_value(lv.value, u)}"
+            if last is not None and c.get("last_label"):
+                head += f", {c['last_label']} — {fmt_value(last.value, u)}"
     else:
         head = c.get("plain", leader)
     if grow_leader:
@@ -292,6 +355,10 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
         if p0 is None or len(parts) < 2 or p1 is None:
             return c.get("plain", ""), c.get("caption")
         w = f" {whole.low.gen}" if whole is not None else ""
+        if c.get("rows_dat"):
+            # ответы по шкале: доли — средние по строкам, и это сказано
+            return (f"В среднем по {c['rows_dat']}: {lower_first(parts[0])} — {fmt_pct(p0.value)}%, "
+                    f"{lower_first(parts[1])} — {fmt_pct(p1.value)}%"), c.get("caption")
         return f"{parts[0]} — {fmt_pct(p0.value)}%{w}, {lower_first(parts[1])} — {fmt_pct(p1.value)}%", c.get("caption")
     leader = c["leader"]
     pl = "pl" if is_plural_value(leader) else "m"

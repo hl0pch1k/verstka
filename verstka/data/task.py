@@ -15,11 +15,12 @@ from typing import Optional
 from verstka.data.aggregate import Data
 from verstka.data.goals import Goal
 from verstka.data.words import (
-    PERIOD_WORDS, count_words, lower_first, metric_phrase, number_word, parts_words, phrase, plural, upper_first,
+    PERIOD_WORDS, count_words, file_title, lower_first, metric_phrase, number_word, parts_words, phrase, plural,
+    same_stem, stems_of, upper_first,
 )
 from verstka.schemas.data import TASK_TITLES, TaskDecision, TaskKind
 
-__all__ = ["task_scores", "decide_task", "GOAL_BONUS", "FEASIBLE"]
+__all__ = ["task_scores", "decide_task", "covers", "GOAL_BONUS", "FEASIBLE"]
 
 GOAL_BONUS = 0.5
 FEASIBLE = 0.25  # ниже — задача для этих данных не годится (цель её не поднимет)
@@ -35,8 +36,8 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     cats = d.cat_dim()
     cat_count = d.cols[cats].distinct if cats is not None else 0
     s: dict[TaskKind, float] = {k: 0.0 for k in _ORDER}
-    if not p.typable and not ms:
-        # нетипизируемое: осмысленная таблица — справочник, иначе ничего
+    if (not p.typable or d.not_numbers) and not ms:
+        # нетипизируемое или номера вместо величин (расписание): осмысленная таблица — справочник, иначе ничего
         s["reference"] = 0.6 if n >= 2 and len(d.cols) >= 2 else 0.0
         return s
 
@@ -55,6 +56,8 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
             s["dynamics"] = 0.6  # одни даты с повторами — число событий по периодам
         if d.kpi_like:
             s["dynamics"] = min(s["dynamics"], 0.3)
+    elif d.columns_time is not None and ms:
+        s["dynamics"] = 0.45  # колонки-периоды («I кв. · II кв. · …»): ось времени, если о ней просит цель
 
     m = d.main
     # структура долей
@@ -118,8 +121,22 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     return {k: round(v, 3) for k, v in s.items()}
 
 
-def _best(scores: dict[TaskKind, float]) -> TaskKind:
-    return max(_ORDER, key=lambda k: (scores[k], -_ORDER.index(k)))
+def _best(scores: dict[TaskKind, float], prefer: Optional[TaskKind] = None) -> TaskKind:
+    """Лучшая задача; при равенстве — задача цели («сравни склады по доле опозданий» при равных баллах — сравнение)."""
+    return max(_ORDER, key=lambda k: (round(scores[k], 6), k == prefer, -_ORDER.index(k)))
+
+
+def covers(g: Goal, d: Data) -> bool:
+    """Каждое слово предмета цели есть в данных: в названии файла, колонках или значениях подписей."""
+    if not g.subject:
+        return True
+    words = stems_of(" ".join([file_title(d.profile.file, d.profile.sheet)] + [c.name for c in d.cols]))
+    vals: list[str] = []
+    for j in d.dims + ([d.label] if d.label is not None else []):
+        for i in d.rows_idx[:300]:
+            vals.append(d.text(i, j))
+    words += stems_of(" ".join(vals))
+    return all(any(same_stem(s_, w) for w in words) for s_ in g.subject)
 
 
 def _infeasible_reason(task: TaskKind, d: Data) -> str:
@@ -141,6 +158,9 @@ def _why(task: TaskKind, d: Data) -> str:
     mlow = lower_first(mp.nom if mp is not None else m.name) if m is not None else "значения"
     if task == "dynamics" and d.time is not None:
         tv = d.time
+        if tv.from_columns:  # колонки-периоды: ряд — по всем строкам, назван по датасету
+            mp = metric_phrase(tv.measure.name, tv.measure.type)
+            mlow = lower_first(mp.nom if mp is not None else tv.measure.name)
         pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
         k = len(tv.series)
         metrics = "одна главная метрика" if k <= 1 or tv.dim else f"{count_words(k, 'ряд', 'ряда', 'рядов')}"
@@ -236,7 +256,7 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
             notes.append(f"Цель «{g.phrase}» здесь не подходит: {_infeasible_reason(g.task, d)}.")
     if used is not None:
         scores[used.task] = round(scores[used.task] + GOAL_BONUS, 3)
-    task = _best(scores)
+    task = _best(scores, used.task if used is not None else None)
     data_task = _best(base)
     reasons = [_why(task, d)]
     goal_phrase = None
@@ -245,7 +265,9 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
         if data_task != task:
             reasons.append(f"Цель «{used.phrase}» подняла эту задачу: без неё по данным задача была бы "
                            f"«{TASK_TITLES[data_task].lower()}».")
-        else:
+        elif covers(used, d):
             reasons.append(f"Цель «{used.phrase}» совпала с тем, что видно по данным.")
+        else:
+            reasons.append(f"Цель «{used.phrase}» ведёт к той же задаче.")
     reasons.extend(notes)
     return TaskDecision(task=task, reasons=reasons, goal=goal_phrase, scores=scores)

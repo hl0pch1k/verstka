@@ -153,8 +153,22 @@ def _comparison(d: Data) -> list[_Cand]:
                 title="Ранжированные горизонтальные столбцы" if cv.ranked else "Горизонтальные столбцы", aggregation=agg)
     if long_:
         bar.reasons.append(f"{upper_first(cats)} с длинными названиями: подписи слева, порядок — {by}.")
+    elif not cv.ranked:
+        bar.reasons.append(f"{upper_first(cats)}: подписи слева, порядок — как в файле.")
     else:
         bar.reasons.append(f"{upper_first(cats)}: подписи слева, порядок — {by}.")
+    if cv.cut:
+        bar.reasons.append(f"Показаны первые {cv.n} из {cv.distinct}: значения не складываются, в «Остальные» их не "
+                           f"собрать.")
+    if cv.merged:
+        bar.reasons.append(f"Последние {count_words(cv.merged, 'группа', 'группы', 'групп')} — одной: «{cv.labels[-1]}».")
+    # колонка той же единицы, что не на графике (другая величина: прибыль рядом с выручкой) — названа
+    dropped = [x.name for x in d.measures if m is not None and x is not m and not x.change and not x.mixed
+               and x not in d.parallel and (x.unit or "") == (m.unit or "") and x is not d.total_metric]
+    dropped_txt = (f"На графике — одна величина; {describe_dropped([f'«{x}»' for x in dropped])} — в таблице."
+                   if dropped and not grouped else "")
+    if dropped_txt:
+        bar.reasons.append(dropped_txt)
     bar.why_not = "Тоже подойдёт, но при коротких подписях вертикальные столбцы привычнее."
     out.append(bar)
     # вертикальные столбцы
@@ -168,6 +182,8 @@ def _comparison(d: Data) -> list[_Cand]:
     else:
         col.why_not = "Тоже подойдёт, но длинные подписи под столбцами читать труднее."
     col.reasons.append(f"{upper_first(cats)} — каждая отдельным столбцом, сравнение по высоте.")
+    if dropped_txt:
+        col.reasons.append(dropped_txt)
     if not cv.ranked:
         col.score += 0.1
         col.reasons.append("Подписи по порядку (интервалы, ступени) — столбцы сохраняют этот порядок.")
@@ -265,7 +281,8 @@ def _composition(d: Data) -> list[_Cand]:
               reasons=["Части рядом — сравнивать их внутри категории легко."],
               why_not=f"{upper_first(count_words(C * k, 'столбец', 'столбца', 'столбцов'))}: состав сравнить легко, а "
                       f"общий размер — нет."),
-        _Cand("doughnut", 0.5, title=f"Кольцевая диаграмма {by_group(d.group_name)}", key="parts_total",
+        _Cand("doughnut", 0.5, title=f"Кольцевая диаграмма {by_group(d.group_name)}" if d.group_name else
+              "Кольцевая диаграмма: доли частей в целом", key="parts_total",
               reasons=[f"{upper_first(parts_words(k, d.group_name))} одного целого — сразу видно, что больше."],
               why_not=f"Читается, но {dp.low.nom_pl if dp is not None and dp.sure else 'категории'} потеряны."),
     ]
@@ -504,8 +521,9 @@ def _relationship(d: Data) -> list[_Cand]:
     xy = d.xy
     if xy is None:
         return []
+    r_show = max(-0.99, min(0.99, round(xy.r, 2)))  # r = 1 на реальных данных не бывает
     sc = _Cand("scatter", 0.9 if xy.n >= 8 else 0.2, title="Диаграмма рассеяния", feasible=xy.n >= 8,
-               reasons=[f"Две метрики, {_points(xy.n)} — видно, есть ли связь (r = {fmt_num(xy.r, 2)})."],
+               reasons=[f"Две метрики, {_points(xy.n)} — видно, есть ли связь (r = {fmt_num(r_show, 2)})."],
                why_not="Связь видна, но значения каждой строки — нет.")
     if xy.group:
         sc.reasons.append(f"Точки окрашены по колонке «{xy.group}».")
@@ -574,16 +592,21 @@ def rank_options(task: TaskKind, d: Data, goals: Optional[list[Goal]] = None,
     cands = candidates(task, d)
     bonus: dict[VizKind, float] = {}
     goal_for: dict[VizKind, Goal] = {}
-    family = {"doughnut": ("doughnut", "pie", "stacked_bar", "stacked_column"), "bar": ("bar", "column")}
-    for g in goals:
-        # цель поднимает лучший вариант своего рода: «как устроен …» — накопительные столбцы, если данные — состав
-        kinds = family.get(g.viz, (g.viz,))
-        own = [c for c in cands if c.kind in kinds and c.feasible]
-        kind = max(own, key=lambda c: c.score).kind if own else g.viz
-        if kind not in bonus:
-            bonus[kind] = GOAL_VIZ_BONUS
-            goal_for[kind] = g
     plain = _order(cands, {})
+    # виды, которыми цель своей задачи отвечает: сравнение — любые столбцы, в том числе план и факт рядом; доли —
+    # кольцо, круговая и накопительные
+    family = {"doughnut": ("doughnut", "pie", "stacked_bar", "stacked_column"),
+              "bar": ("bar", "column", "grouped_bar", "grouped_column")}
+    for g in goals:
+        # цель поднимает лучший вариант своей задачи («как исполнен бюджет» — план и факт рядом, а не один план);
+        # цель другой задачи вид не меняет
+        if g.task != task:
+            continue
+        kinds = family.get(g.viz, (g.viz,))
+        own = [c for c in plain if c.kind in kinds and c.feasible]
+        if own and own[0].kind not in bonus:
+            bonus[own[0].kind] = GOAL_VIZ_BONUS
+            goal_for[own[0].kind] = g
     ranked = _order(cands, bonus)
     for c in ranked:
         if c.feasible:
