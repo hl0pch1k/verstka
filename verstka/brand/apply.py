@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "4"
+APPLY_VERSION = "5"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"

@@ -20,6 +20,7 @@ from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
 from verstka.rendering.assets_pick import pick_asset, pick_icon
 from verstka.rendering.charts import add_chart, add_ring
+from verstka.rendering.brand_logo import hold_brand_logos, put_back_brand_logos
 from verstka.rendering.deck import DeckBuilder, abs_bbox, element_bbox, is_nested, materialize_xfrm, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.rendering.fit import fit_size, grow_size
@@ -6240,8 +6241,16 @@ def _logo_mark(ctx: _SlideCtx, el: etree._Element) -> bool:
 
 def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, keep_photos: bool = True) -> tuple[Slide, list[str]]:
     """`keep_photos`: a cover's, divider's or closing slide's photo beside its title stays (`_bookend_photo`); the
-    renderer sets the cover again without it when the kept photo leaves the title no room."""
+    renderer sets the cover again without it when the kept photo leaves the title no room.
+
+    A brand logo a branded copy put on the sample (`verstka.rendering.brand_logo`) is set aside while the slide is
+    built — no layout decision sees it — and comes back in its place unless the slide's new content reaches it."""
     slide = builder.clone_slide(pattern.source_slide)
+    hold_brand_logos(slide)
+    return put_back_brand_logos(*_render_clone(slide, builder, plan_slide, oslide, pattern, manifest, ws, outline, keep_photos))
+
+
+def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, keep_photos: bool) -> tuple[Slide, list[str]]:
     ctx = _SlideCtx(builder, slide, pattern, manifest, ws, outline)
     ctx.keep_photos = keep_photos
     # the room the slide's conclusion and footnote take under the content (clone_notes sets them there), measured

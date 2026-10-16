@@ -20,6 +20,9 @@ C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 PR = "http://schemas.openxmlformats.org/package/2006/relationships"
 CT = "http://schemas.openxmlformats.org/package/2006/content-types"
 IMG_REL = R + "/image"
+# метка добавленного логотипа бренда (`p:cNvPr/@title`; `descr` остаётся подписью «Логотип …» для чтения с экрана):
+# по ней сборка колоды узнаёт логотип на склонированном образце и оставляет его, а не убирает как картинку содержимого
+BRAND_LOGO_MARK = "verstka:brand-logo"
 
 Box = tuple[float, float, float, float]  # x, y, w, h в EMU слайда
 

@@ -30,7 +30,7 @@ from typing import Optional
 
 from lxml import etree
 
-from verstka.brand.package import A, IMG_REL, P, R, Box, Package, overlap, shape_box, xfrm_box
+from verstka.brand.package import A, BRAND_LOGO_MARK, IMG_REL, P, R, Box, Package, overlap, shape_box, xfrm_box
 from verstka.brand.palette import lightness
 from verstka.schemas.brand import BrandLogo, BrandSpec, LogoPlace
 from verstka.schemas.template import TemplateManifest
@@ -738,6 +738,7 @@ def _new_pic(pkg: Package, part: str, rid: str, img: BrandImage, box: Box, brand
         f'<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
     )
     _set_blip(pic, rid, img, brand_name)
+    pic.find(f"{{{P}}}nvPicPr/{{{P}}}cNvPr").set("title", BRAND_LOGO_MARK)
     _set_box(pic, [], box)
     return pic
 
@@ -1267,7 +1268,11 @@ def part_lines(pkg: Package, part: Optional[str]) -> list[Box]:
     tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
     if tree is None:
         return []
-    sw, _ = pkg.slide_size()
+    return tree_lines(tree, pkg.slide_size()[0])
+
+
+def tree_lines(tree: etree._Element, sw: float) -> list[Box]:
+    """То же для дерева фигур (`p:spTree`) — части пакета или живого слайда собираемой колоды."""
     tol = 0.004 * sw
     out: list[Box] = []
     for el in tree.iter(f"{{{P}}}sp", f"{{{P}}}cxnSp"):

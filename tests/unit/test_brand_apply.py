@@ -1459,3 +1459,148 @@ def test_layout_logo_matches_the_layout_own_ground(tmp_path, fonts_here):
     assert all("white" in n for n in on_layout), on_layout
     on_slides = _slide_logo_media(out)
     assert on_slides and all("primary" in n for n in on_slides), on_slides
+
+
+# ============================================================================================== круг 4: логотип в колоде
+
+
+def test_added_logo_carries_the_brand_logo_mark(tmp_path, fonts_here):
+    """Добавленный логотип помечен (`p:cNvPr/@title`), подпись для чтения с экрана — «Логотип …»; заменённый логотип
+    шаблона — нет (он и так часть оформления шаблона)."""
+    from verstka.brand.package import BRAND_LOGO_MARK
+
+    src = build_custom(tmp_path, "mark", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "mark-brand.pptx"
+    apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    tags = re.findall(r'<p:cNvPr [^>]*name="Логотип[^"]*"[^>]*>', _all(out, r"ppt/(slides|slideLayouts)/[^/]*\.xml$"))
+    assert tags and all(f'title="{BRAND_LOGO_MARK}"' in t and 'descr="Логотип Облако"' in t for t in tags)
+    rep = tmp_path / "rep-brand.pptx"
+    src2 = build_custom(tmp_path, "rep", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], logos=[("Logo ACME", 0.04)])
+    apply_brand(src2, rep, _brand(), manifest=_analyze(src2, tmp_path / "ws2"), brand_dir=_brand_dir(tmp_path))
+    assert BRAND_LOGO_MARK not in _all(rep, r"ppt/slides/[^/]*\.xml$")
+
+
+def _marked_logo_slide(tmp_path):
+    """Слайд колоды python-pptx с логотипом бренда (меткой) в правом нижнем углу и текстом сверху."""
+    from verstka.brand.package import BRAND_LOGO_MARK
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, "Итоги квартала", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "1F2937")
+    png = _logo_png(tmp_path / "logo.png", (0, 119, 255, 255), (11, 18, 32, 255))
+    pic = s.shapes.add_picture(str(png), Emu(int(W * 0.86)), Emu(int(H * 0.9)), Emu(int(W * 0.1)), Emu(int(H * 0.045)))
+    pic.name = "Логотип Облако"
+    pic._element.nvPicPr.cNvPr.set("title", BRAND_LOGO_MARK)
+    return prs, s
+
+
+def test_brand_logo_is_set_aside_and_put_back_in_place(tmp_path):
+    """Сборка колоды откладывает логотип бренда склонированного образца и возвращает его на то же место поверх
+    слайда, если новое содержимое туда не зашло; зашло (рамка текста до самого угла) — логотип не возвращается, его
+    картинка уходит из связей слайда, а в предупреждениях сказано почему."""
+    from verstka.rendering.brand_logo import DROPPED, hold_brand_logos, put_back_brand_logos
+
+    prs, s = _marked_logo_slide(tmp_path)
+    box = (s.shapes[-1].left, s.shapes[-1].top, s.shapes[-1].width, s.shapes[-1].height)
+    assert hold_brand_logos(s) == 1 and not any(sh.name.startswith("Логотип") for sh in s.shapes)
+    _text(s, "Выручка выросла", int(W * 0.05), int(H * 0.3), int(W * 0.5), int(H * 0.1), "Verdana", 16, "1F2937")
+    warns: list[str] = []
+    put_back_brand_logos(s, warns)
+    logo = [sh for sh in s.shapes if sh.name.startswith("Логотип")]
+    assert len(logo) == 1 and (logo[0].left, logo[0].top, logo[0].width, logo[0].height) == box and warns == []
+    assert s.shapes[-1].name.startswith("Логотип")  # поверх всего
+    ids = [sh.shape_id for sh in s.shapes]
+    assert len(ids) == len(set(ids))
+
+    prs, s = _marked_logo_slide(tmp_path)
+    hold_brand_logos(s)
+    _text(s, "Вывод слайда во всю ширину низа", int(W * 0.05), int(H * 0.86), int(W * 0.92), int(H * 0.1), "Verdana", 16, "1F2937")
+    rels_before = len(s.part.rels)
+    warns = []
+    put_back_brand_logos(s, warns)
+    assert not any(sh.name.startswith("Логотип") for sh in s.shapes) and warns == [DROPPED]
+    assert len(s.part.rels) == rels_before - 1
+
+
+def test_brand_off_slides_are_untouched(tmp_path):
+    """Обычная колода (без метки логотипа бренда): отложить нечего, вернуть нечего — слайд не меняется ни в одном
+    байте."""
+    from verstka.rendering.brand_logo import hold_brand_logos, put_back_brand_logos
+
+    prs = Presentation()
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    png = _logo_png(tmp_path / "plain.png", (0, 119, 255, 255), (11, 18, 32, 255))
+    s.shapes.add_picture(str(png), Emu(100), Emu(100), Emu(1000000), Emu(250000)).name = "Логотип шаблона"
+    before = etree.tostring(s._element)
+    assert hold_brand_logos(s) == 0
+    assert put_back_brand_logos(s, []) == (s, [])
+    assert etree.tostring(s._element) == before and "_verstka_brand_logos" not in s.__dict__
+
+
+def _deck(src: Path, out: Path) -> tuple[object, Path]:
+    """Колода без модели по демо-плану, один вариант (structured)."""
+    from verstka.pipeline.generate import generate_variants
+    from verstka.schemas.outline import DeckOutline
+
+    d = json.loads((ROOT / "tests" / "fixtures" / "outline_demo.json").read_text(encoding="utf-8"))
+    d.pop("_source", None)
+    got = generate_variants(src, outline=DeckOutline.model_validate(d), strategies=["structured"], out_dir=out, workspace_root=out / "ws",
+                            use_llm=False, use_vlm=False, render_images=False, audit=False, autofix=False, exports=[], pictures=False, eyes=False)
+    return got.variants[0], next(out.rglob("deck.pptx"))
+
+
+def _no_logo_hooks(monkeypatch) -> None:
+    """Сборка как до логотипа бренда на склонированных слайдах: ничего не откладывается и не возвращается."""
+    import verstka.rendering.clone as cl
+    import verstka.rendering.synth as sy
+
+    for mod in (cl, sy):
+        monkeypatch.setattr(mod, "hold_brand_logos", lambda slide: 0)
+        monkeypatch.setattr(mod, "put_back_brand_logos", lambda slide, warns: (slide, warns))
+
+
+def test_generated_deck_keeps_brand_logo_on_cloned_slides(tmp_path, fonts_here, monkeypatch):
+    """Колода, собранная без модели на брендированной копии lo_vivid (логотип — на самих образцах): склонированные
+    образцы и слайды на их холсте несут логотип бренда, без столкновений с содержимым; раньше сборка убирала его как
+    картинку содержимого."""
+    src = FIX / "templates" / "lo_vivid.pptx"
+    copy = tmp_path / "vivid-brand.pptx"
+    res = apply_brand(src, copy, _brand(), manifest=_analyze(src, tmp_path / "ws"), brand_dir=_brand_dir(tmp_path))
+    assert res.logo_covered >= 1 and _slide_logo_media(copy)
+    v, deck = _deck(copy, tmp_path / "out")
+    assert any(s.mode == "clone" for s in v.render.slides)
+    kept = _slide_logo_media(deck)
+    assert len(kept) >= len(v.render.slides) // 2, kept
+    assert _ir_collisions(deck) == []
+    _no_logo_hooks(monkeypatch)
+    _, deck0 = _deck(copy, tmp_path / "out0")
+    assert len(_slide_logo_media(deck0)) < len(kept)
+
+
+def test_ordinary_deck_is_the_same_with_and_without_logo_hooks(tmp_path, monkeypatch):
+    """Обычная колода (шаблон без брендбука): каждая часть файла та же, что у сборки без отложенного логотипа."""
+    src = FIX / "templates" / "lo_vivid.pptx"
+    _, deck = _deck(src, tmp_path / "out")
+    _no_logo_hooks(monkeypatch)
+    _, deck0 = _deck(src, tmp_path / "out0")
+    assert _parts_of(deck) == _parts_of(deck0)
+
+
+def _parts_of(pptx: Path) -> dict[str, bytes]:
+    """Части файла; у книги Excel диаграммы — её части без времени создания (оно своё у каждой сборки)."""
+    import io as _io
+
+    out = {}
+    with zipfile.ZipFile(pptx) as z:
+        for n in z.namelist():
+            data = z.read(n)
+            if n.endswith(".xlsx"):
+                with zipfile.ZipFile(_io.BytesIO(data)) as x:
+                    for m in x.namelist():
+                        if m != "docProps/core.xml":
+                            out[f"{n}!{m}"] = x.read(m)
+            else:
+                out[n] = data
+    return out

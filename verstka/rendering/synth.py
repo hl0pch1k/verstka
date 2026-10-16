@@ -24,6 +24,7 @@ from verstka.rendering.assets_pick import pick_asset
 from verstka.rendering.charts import add_chart
 from verstka.rendering.clone import _fill_hex, _SlideCtx, clear_width, renumber_page_chrome
 from verstka.rendering.fonts import text_width_pt
+from verstka.rendering.brand_logo import hold_brand_logos, put_back_brand_logos
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, slide_shape_elements
 from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
@@ -278,6 +279,7 @@ def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep
 
     names = template_names(manifest) if manifest is not None else ()
     slide = builder.clone_slide(canvas.source_slide)
+    hold_brand_logos(slide)  # a branded copy's logo: back in its place when the slide is composed (render_synth)
     els = slide_shape_elements(slide)
     title = _top_title(canvas)
     # chrome that is the template's sample copy («DEMO SLIDE», «Title Text Demo») or a sample value of its header or
@@ -1001,8 +1003,8 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         # the picture where the structured one squeezed it under the heading and broke its words)
         outline = outline.model_copy(update={"strategy": style})
     if comp in _COVER_COMPS:
-        return _render_cover(builder, plan_slide, oslide, manifest, ws, outline)
-    return _render_content(builder, comp, oslide, manifest, ws, outline)
+        return put_back_brand_logos(*_render_cover(builder, plan_slide, oslide, manifest, ws, outline))
+    return put_back_brand_logos(*_render_content(builder, comp, oslide, manifest, ws, outline))
 
 
 @dataclass
