@@ -105,6 +105,8 @@ class DataStory:
     # long as its slides are built
     files: list[dict] = field(default_factory=list)
     dataset_ids: list[str] = field(default_factory=list)
+    # the text around a table in a text file («Опрос NPS во II квартале не проводился…»): what the files explain
+    notes: list[dict] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)  # {"file", "sheet", "message"}: datasets with no slide
     dropped: list[str] = field(default_factory=list)  # slides the slide count left out (their headlines)
@@ -311,20 +313,24 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
         # the analysis chose this kind (or the person did, rebuilding the slide): the engine never turns it
         body = body.model_copy(update={"kind_locked": True})
     total = max(1, plan.slides)
-    head = plan.headline or plan.plain_headline
+    series_names = [x.name for x in body.series] if isinstance(body, ChartSpec) else []
+    head = tidy_text(plan.headline or plan.plain_headline, series_names)
     if part > 1:
         head = f"{head.rstrip('. ')} (продолжение)"
+    caption = tidy_text(plan.caption, series_names) if plan.caption else None
+    if isinstance(body, list):
+        body = [n.model_copy(update={"label": tidy_text(n.label, [])}) for n in body]
     slide = OutlineSlide(
         id=slide_id,
         kind=_kind_of(body),
         headline=head,
         content=_content_of(body),
-        takeaway=(plan.caption or None) if part >= total else None,
+        takeaway=caption if part >= total else None,
         footnote=plan.source or None,
         rationale=_rationale(plan),
         alternatives=_alternatives(plan),
         notes=_notes(plan) if part == 1 else "",
-        data=slide_data_of(plan, part).model_copy(update={"prepared": prepared_of(body, plan.caption)}),
+        data=slide_data_of(plan, part).model_copy(update={"prepared": prepared_of(body, caption)}),
     )
     if not data_text_ok(slide.headline, slide):
         # the story says what the audit accepts: a headline whose number the data checks would refuse gives way to the
@@ -333,6 +339,26 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
         log.warning("data story: headline «%s» fails the data check — «%s» instead", slide.headline, alt or plan.plain_headline)
         slide.headline = upper_first(alt) if alt else (plan.plain_headline or slide.headline)
     return slide
+
+
+_PERIOD_GLUE = [
+    (re.compile(r"\b([IV]{1,3})\s+(кв\.)\s*(\d{4})"), "\\1\u00a0\\2\u00a0\\3"),  # «III кв. 2026» never splits
+    (re.compile(r"\b([IV]{1,3})\s+(кв\.|квартал\w*)"), "\\1\u00a0\\2"),
+    (re.compile(r"\b(кв\.)\s+(\d{4})"), "\\1\u00a0\\2"),
+    (re.compile(r"(\d)\s+(чел\.|шт\.|тыс\.|млн|млрд|руб\.|₽|%|п\.\s?п\.|п\.)"), "\\1\u00a0\\2"),
+]
+
+
+def tidy_text(text: Optional[str], names: Sequence[str] = ()) -> str:
+    """The data layer's words set for a slide: a period and a figure with its unit never split across lines («III кв.
+    2026», «1 290 чел.»), a series name inside a sentence in lower case («…: платное — 1 290 чел.»)."""
+    t = text or ""
+    for rx, rep_ in _PERIOD_GLUE:
+        t = rx.sub(rep_, t)
+    for name in names:
+        if name and len(name) > 1 and name[0].isupper() and not name[1].isupper():
+            t = re.sub(r"(?<=[,:;—–] )" + re.escape(name) + r"\b", name[0].lower() + name[1:], t)
+    return t
 
 
 def prepared_of(body: Any, caption: Optional[str] = None) -> PreparedValues:
@@ -399,15 +425,17 @@ def slide_values(s: OutlineSlide) -> list[float]:
     return out
 
 
-def data_text_ok(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None) -> bool:
+def data_text_ok(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None, years: Sequence[str] = ()) -> bool:
     """Every number of `text` on data slide `s` is one of its facts (`values`: or one of these), not counting the digits
     of the data's names («1 курс», «Филиал 1») and the years the data names («бюджета 2026»)."""
-    return not bad_numbers(text, s, values=values)
+    return not bad_numbers(text, s, values=values, years=years)
 
 
-def bad_numbers(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None) -> list[float]:
+def bad_numbers(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None, years: Sequence[str] = ()) -> list[float]:
+    """The numbers of `text` that are no fact of slide `s` (nor one of `values`); the years the data names and `years`
+    (the brief's: «итоги 2026 года») date the sentence, they are not figures."""
     labels = data_labels(s)
-    plain = _without_years(text, data_years(s))
+    plain = _without_years(text, data_years(s) | set(years))
     facts = list(s.data.headline_facts) if s.data is not None else []
     if values is not None:
         facts = facts + [HeadlineFact(id=f"v{k}", text="", value=float(v), kind="count") for k, v in enumerate(values)]
@@ -537,14 +565,16 @@ def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[Numb
     return out
 
 
-def _summary_lines(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[tuple[str, str]]:
-    """(topic, conclusion) of the first three datasets of the story: the goals' first."""
+def _summary_lines(plans: Sequence[DatasetPlan], order: Sequence[int], heads: Optional[dict] = None) -> list[tuple[str, str]]:
+    """(topic, conclusion) of the first three datasets of the story: the goals' first; `heads` — the headlines their
+    slides carry (the story's self-check may have replaced the plan's)."""
     out = []
     for k in order:
         p = plans[k]
-        if p.slides <= 0 or not p.headline or p.headline == p.plain_headline:
+        head = (heads or {}).get(k, p.headline)
+        if p.slides <= 0 or not head or head == p.plain_headline:
             continue
-        out.append((p.plain_headline or p.profile.file, p.headline))
+        out.append((p.plain_headline or p.profile.file, head))
         if len(out) == 3:
             break
     return out
@@ -589,7 +619,8 @@ def build_data_story(
     ids = list(dataset_ids) if dataset_ids is not None else [p.profile.table_id for p in plans]
     order = story_order(plans, brief_text)
     files = [{"id": i, "file": t.file, "sheet": t.sheet} for i, t in zip(ids, tables)]
-    story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids)
+    notes = [{"file": t.file, "text": " ".join(t.notes.split())[:1500]} for t in tables if (t.notes or "").strip()]
+    story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids, notes=notes)
 
     # what the analyst decided, dataset by dataset
     for k in order:
@@ -700,7 +731,8 @@ def build_data_story(
 
     kept = {e.plan_index for e in entries if e.plan_index is not None}
     # the summary's conclusions: the goals' datasets first (what the text asked about), then the story's order
-    lines = _summary_lines(plans, sorted(kept, key=lambda k: (0 if plans[k].task.goal else 1, order.index(k))))
+    heads = {e.plan_index: e.slide.headline for e in entries if e.plan_index is not None and e.slide.data is not None and e.slide.data.part[0] == 1}
+    lines = _summary_lines(plans, sorted(kept, key=lambda k: (0 if plans[k].task.goal else 1, order.index(k))), heads)
     if want_summary and lines:
         items = [SlideItem(title=topic, text=concl) for topic, concl in lines]
         summary = OutlineSlide(id="summary", kind=PatternKind.cards, headline=_COUNT_WORD.get(len(items), "Главные выводы"), content=SlideContent(items=items), rationale="Три вывода из фактов данных: по одному из главных файлов истории.")
@@ -780,6 +812,7 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
         "summary_title": summary.headline if summary is not None else "",
         "summary": [it.text for it in summary.content.items] if summary is not None else [],
         "audience": (brief.audience if brief is not None else None) or "",
+        "notes": list(story.notes),
     }
     voice.say("модель формулирует связку истории и проверяет заголовки-выводы", 0.1)
     rec, answered = _recording(providers, story.stats)
@@ -800,6 +833,7 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     story.model = (answered[0] if answered else None) or getattr(res, "model", None)
     story.written = w.model_dump()
     brief_nums = _brief_numbers(brief_text)
+    brief_years = sorted({m.group(1) for m in _YEAR_RE.finditer(brief_text)})
     used = False
 
     def note(what: str, slide: Optional[str], before: str, after: str, ok: bool, why: str = "") -> None:
@@ -835,20 +869,23 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             o.slides[0].subtitle = st
             used = True
 
+    # which data slide each summary card was made of (its text is the slide's headline before any rewording)
+    summary_slides = {s.headline: s.id for s in data_slides}
     # the conclusions: each against its own dataset's facts (and the data's own names)
     by_id = {h.id: h.headline for h in w.headlines}
     for s in data_slides:
         new = clean(by_id.get(s.id, ""), MAX_HEADLINE)
         if not new or new == s.headline:
             continue
-        labels = data_slide_labels(s)
-        ok = headline_ok(new, s.data.headline_facts, labels)
+        bad = bad_numbers(new, s, years=brief_years)
+        ok = not bad
         why = ""
         if not ok:
-            bad = [n for n in numbers_in(new, labels) if not any(abs(n - abs(f.value)) < 1e-9 or abs(round(abs(f.value), d) - n) < 1e-9 for f in s.data.headline_facts for d in (0, 1, 2))]
-            why = "число " + ", ".join(_num(n) for n in bad[:3]) + " не из фактов данных" if bad else "число не из фактов данных"
+            why = "число " + ", ".join(_num(n) for n in bad[:3]) + " не из фактов данных"
         elif new.lower() == (s.data.plain_headline or "").lower():
             ok, why = False, "это тема, а не вывод"
+        elif is_description(new) and not is_description(s.headline):
+            ok, why = False, "это описание чисел, а не вывод"
         note("headline", s.id, s.headline, new, ok, why)
         if ok:
             old = s.headline
@@ -860,28 +897,38 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
                 for it in summary.content.items:
                     if it.text == old:
                         it.text = new
+                summary_slides[new] = s.id
             used = True
 
     # the summary and the next steps: a line with numbers speaks of ONE data slide — its facts hold every number and
     # the line names that slide's own subject; true numbers recombined across slides («Выручка выросла на 41%», where
     # 41% is Moscow's share) are refused
     if summary is not None:
+        cards = [(it, _item_slide(it, data_slides, summary_slides)) for it in summary.content.items]
         lines = [clean(x, MAX_LINE) for x in w.summary][:3]
-        lines = [x for x in lines if x]
-        if lines:
-            good: list[tuple[str, OutlineSlide]] = []
-            for x in lines:
-                src, why = source.of(x)
-                note("summary", "summary", "", x, src is not None, why)
-                if src is not None and all(src is not g[1] for g in good):
-                    good.append((x, src))
-            if len(good) == len(summary.content.items) or len(good) >= 2:
-                summary.content.items = [SlideItem(title=src.data.plain_headline or src.data.file, text=x) for x, src in good]
-                summary.headline = _COUNT_WORD.get(len(good), "Главные выводы")
+        taken: set[str] = set()
+        for x in [x for x in lines if x]:
+            src, why = source.of(x)
+            slot = next((it for it, sl in cards if sl is not None and src is not None and sl.id == src.id and sl.id not in taken), None)
+            if src is not None and slot is None:
+                src, why = None, "о файле, которого нет среди выводов итога"
+            if src is not None and is_description(x):
+                src, why = None, "это описание чисел, а не вывод"
+            note("summary", "summary", "", x, src is not None, why)
+            if src is not None and slot is not None:
+                slot.text = x  # one for one: the conclusion of the same slide, the others stay
+                taken.add(src.id)
                 used = True
         sh = clean(w.summary_title, MAX_HEADLINE)
         if sh and sh != summary.headline:
             ok, why = source.free_or_attributed(sh)
+            # the summary's headline says what its cards back: a subject of no card («…опережает рост клиентской базы»
+            # over cards about revenue, regions and channels) is refused
+            backs = {sl.id for _, sl in cards if sl is not None}
+            named = source.subjects(sh)
+            texts = [x for it in summary.content.items for x in (it.title or "", it.text or "")]
+            if ok and ((named and not named <= backs) or source.unbacked(sh, backs, texts)):
+                ok, why = False, "заголовок итога говорит о том, чего нет в его карточках"
             note("summary_title", "summary", summary.headline, sh, ok, why)
             if ok:
                 summary.headline = sh
@@ -889,12 +936,15 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     steps = [clean(x, MAX_LINE) for x in w.next_steps][:3]
     steps = [x for x in steps if x]
     good_steps = []
+    explained = _explained(story.notes)
     for x in steps:
         ok, why = source.free_or_attributed(x)
+        if ok and explained and _asks_why_missing(x):
+            ok, why = False, "это объясняют сами файлы: " + explained
         note("next_step", "next", "", x, ok, why)
         if ok:
             good_steps.append(x)
-    if good_steps and (limit is None or len(o.slides) < limit):
+    if len(good_steps) >= 2 and (limit is None or len(o.slides) < limit):
         at = next((k + 1 for k, s in enumerate(o.slides) if s.id == "summary"), len(o.slides))
         o.slides.insert(at, OutlineSlide(id="next-steps", kind=PatternKind.bullets, headline="Что дальше", content=SlideContent(bullets=good_steps), rationale="Следующие шаги по выводам данных — сформулированы моделью, без новых чисел."))
         used = True
@@ -963,6 +1013,50 @@ _GENERIC = frozenset({
 })
 
 
+_CLAIM_RE = re.compile(
+    r"(?i)(больше|меньше|быстрее|медленнее|выше|ниже|почти|половин|треть|четверт|вдвое|втрое|втрое|\bв\s+[\d,]+\s+раз|"
+    r"лидир|впереди|отста|опережа|рост|рост[уа]?|раст|вырос|упал|пада|снизил|сниж|сократил|сокращ|увеличил|увелич|"
+    r"дает|даёт|дают|принос|держ|составля|достиг|получа|укладыва|закрыва|каждый|чем\b|связан|влия|зависит|"
+    r"крупнейш|наибольш|наименьш|главн|основн|только|лишь|уже|ещё|еще|подним|опуска|тянут|завыша|занижа)"
+)
+_PAIR_RE = re.compile(r"^\s*[^—:,;]{1,60}\s*[—:]\s*[+\-−–]?\d[^,;]*$")
+
+
+def is_description(text: str) -> bool:
+    """«Медиана стипендии — 3 590 ₽, среднее — 5 740 ₽»: the line only lists values against names — no verb, no
+    comparison — a description of the numbers, not a conclusion about them."""
+    t = " ".join((text or "").split())
+    if not t or _CLAIM_RE.search(t):
+        return False
+    parts = [p for p in re.split(r"[,;]\s+(?:а\s+|и\s+)?", t) if p.strip()]
+    return bool(parts) and all(_PAIR_RE.match(p) for p in parts)
+
+
+_MISSING_RE = re.compile(r"(?i)(отсутстви|нет\s+данных|не\s+хватает\s+данных|пропуск|пропущ|пробел)")
+_WHY_RE = re.compile(r"(?i)(причин|выясн|разобра|провер|понять|установить)")
+_EXPLAINS_RE = re.compile(r"(?i)[^.]*(не\s+проводил|не\s+собирал|не\s+измеря|переходил|не\s+вел|не\s+велся|прерв)[^.]*\.")
+
+
+def _explained(notes: Sequence[dict]) -> str:
+    """The sentence of the files' own text that explains missing data («Опрос NPS во II квартале … не проводился»),
+    or ""."""
+    for n in notes:
+        m = _EXPLAINS_RE.search(n.get("text") or "")
+        if m:
+            return m.group(0).strip()[:160]
+    return ""
+
+
+def _asks_why_missing(step: str) -> bool:
+    return bool(_MISSING_RE.search(step) and _WHY_RE.search(step))
+
+
+def _item_slide(item: SlideItem, slides: Sequence[OutlineSlide], before: dict) -> Optional[OutlineSlide]:
+    """The data slide a summary card was made of (by its conclusion as the story wrote it)."""
+    sid = before.get(item.text)
+    return next((s for s in slides if s.id == sid), None)
+
+
 def _stem_hit(word: str, own: set[str]) -> Optional[str]:
     """`word` names one of `own` (stems): equal, or one a prefix of the other of 3 letters and more («сентябр» —
     «сен»)."""
@@ -991,6 +1085,7 @@ class _Attribution:
             if d.prepared is not None:
                 words += [name for name, _ in d.prepared.series] + [name for name, _ in d.prepared.points]
             vocab[s.id] = {w for w in stems_of(" ".join(x for x in words if x)) if not w.isdigit() and w not in _GENERIC}
+        self.vocab = vocab
         self.own = {s.id: vocab[s.id] - set().union(*(vocab[o.id] for o in self.slides if o is not s)) for s in self.slides}
         self.all_labels = [x for v in self.labels.values() for x in v]
 
@@ -1034,6 +1129,18 @@ class _Attribution:
                     return None, f"число {_num(n)} в данных относится к другой категории"
         return s, ""
 
+    def subjects(self, line: str) -> set[str]:
+        """The data slides whose own subject the line names."""
+        return {s.id for s in self.slides if self._names(line, s)}
+
+    def unbacked(self, line: str, backs: set[str], texts: Sequence[str]) -> list[str]:
+        """The words of `line` that name data — a topic, a label of some data slide — that neither the `backs` slides
+        nor the `texts` carry («…рост клиентской базы» over cards about revenue, regions and channels)."""
+        have = set().union(*(self.vocab[i] for i in backs if i in self.vocab)) if backs else set()
+        have |= {w for w in stems_of(" ".join(texts)) if not w.isdigit()}
+        anywhere = set().union(*self.vocab.values()) if self.vocab else set()
+        return [w for w in stems_of(line) if not w.isdigit() and w not in _GENERIC and _stem_hit(w, anywhere) and not _stem_hit(w, have)]
+
     def free_or_attributed(self, line: str) -> tuple[bool, str]:
         """A line without numbers stands on its own; a line with numbers must belong to one data slide."""
         if not numbers_in(line, self.all_labels):
@@ -1076,6 +1183,32 @@ def _merge_usage(a: dict, b: dict) -> dict:
             by[k] = dict(v)
     out["by_skill"] = by
     return out
+
+
+def stamp_steps(result: Any, seconds: dict) -> None:
+    """The steps before `generate_variants` — the brandbook (read, branded copy, its analysis), the data story — in
+    each variant's run manifest (`timings_s.brand`, `timings_s.data`) and in its total, so the manifest and the «N s
+    total» line tell the whole run."""
+    extra = {k: round(float(v), 2) for k, v in (seconds or {}).items() if v}
+    if not extra:
+        return
+    for v in getattr(result, "variants", []) or []:
+        timings = getattr(v, "timings", None)
+        if isinstance(timings, dict):
+            timings.update(extra)
+            timings["total"] = round(float(timings.get("total", 0.0)) + sum(extra.values()), 2)
+        path = Path(v.out_dir) / "run_manifest.json"
+        try:
+            rm = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        t = rm.get("timings_s") if isinstance(rm.get("timings_s"), dict) else {}
+        t.update(extra)
+        t["total"] = round(float(t.get("total", 0.0)) + sum(extra.values()), 2)
+        rm["timings_s"] = t
+        path.write_text(json.dumps(rm, ensure_ascii=False, indent=2), encoding="utf-8")
+    if hasattr(result, "seconds"):
+        result.seconds = round(float(result.seconds or 0.0) + sum(extra.values()), 2)
 
 
 def stamp_variants(result: Any, story: DataStory, out_dir: Optional[Path] = None) -> None:

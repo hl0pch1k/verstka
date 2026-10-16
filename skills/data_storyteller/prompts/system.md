@@ -21,10 +21,13 @@ What to return (JSON only, all texts in Russian):
   sentence, no period at the end, the main finding first. Keep the draft's headline when it is already good — return it
   as it is.
 - summary_title: the summary slide's headline — the deck's main conclusion in one line (no new numbers).
-- summary: exactly three conclusions for the summary slide, one sentence each, each from a different data slide, in the
-  order of importance for the audience.
-- next_steps: up to three next steps the conclusions suggest, each one short imperative sentence («Проверить причины
-  задержек ответа поддержки»); no numbers unless they are facts; an empty list if the data suggests nothing.
+- summary: one conclusion for each draft summary conclusion, in the same order, each about the same data slide as the
+  draft line it replaces (the numbers of that slide only); keep a draft line as it is when it is already good.
+- next_steps: two or three next steps the conclusions suggest, each one short imperative sentence about the business
+  («Сократить хвост обращений дольше двух часов»); no numbers unless they are facts; an empty list if the data
+  suggests nothing. Never ask to investigate what the files' own text already explains (a survey that was not run, a
+  quarter without data). If the brief asks about something (bottlenecks — «узкие места», risks, where growth comes
+  from), name it where the data supports it.
 
 Style: calm and precise, plain Russian business language without English words (except names such as NPS, VK Cloud,
 Scopus), no exclamation marks, no «мы» or «вы», no hedging words («примерно», «около») in front of an exact fact.

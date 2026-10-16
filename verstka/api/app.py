@@ -716,9 +716,12 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         data = _generation_data(req)
     progress = job_progress(job)
     template_id = req.template_id
+    steps: dict = {}  # the steps before the pipeline (brandbook, data story): their seconds go into the run manifest
     if data.brand is not None:
+        tb = time.monotonic()
         template_id = _branded_template_id(req, data, gdir, progress)
         manifest = store.manifest(template_id) or manifest
+        steps["brand"] = time.monotonic() - tb
     brief = None
     outline = None
     if req.outline is not None:
@@ -740,6 +743,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
             skills=skills() if use_models else None, providers=providers() if use_models else None, progress=progress,
         )
         outline, brief = story.outline, None  # the figures of a data deck are checked against the data, not the text
+        steps["data"] = story.seconds
         data.tables, data.profiles = [], []  # the rows are not needed any more: only the plans and the slides stay
     # «Улучшить готовую» laid out in another template: the original deck's pictures come from its own workspace
     source_pictures = None
@@ -771,6 +775,9 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         pictures=req.pictures,
         image_provider=image_provider() if req.pictures is not False else None,
     )
+    from verstka.data.story import stamp_steps
+
+    stamp_steps(res, steps)  # the brandbook and the data story: part of the run's time (timings_s.brand / .data, total)
     if story is not None:
         from verstka.data.story import stamp_variants
 
@@ -2650,9 +2657,17 @@ def _picture_ask(message: str) -> tuple[Optional[int], Optional[str], str]:
 def _is_edit(message: str, intent: str) -> bool:
     """A change of the deck on screen («на слайде 3 покажи расходы таблицей», «сделай слайд 4 таблицей», «верни как
     было») — not a question about it, a new deck («сделай презентацию…») or «покажи план»."""
-    from verstka.api.edits import looks_like_edit
+    from verstka.api.edits import EDIT_RX, looks_like_edit
 
-    if intent in ("explain_slide", "agent", "fix_all", "audit", "export") or not looks_like_edit(message):
+    if not looks_like_edit(message):
+        return False
+    if intent == "explain_slide":
+        # «на слайде 7 добавь в заголовок, почему нет данных»: an order to change the slide that mentions «почему» —
+        # the imperative comes first; «почему слайд 3 такой» has none
+        verb = EDIT_RX.search(message)
+        why = re.search(r"почему|объясни|why", message, re.I)
+        return bool(verb and why and verb.start() < why.start())
+    if intent in ("agent", "fix_all", "audit", "export"):
         return False
     return not (intent == "plan" and re.search(r"(покажи|какой|расскажи)\s+(мне\s+)?план", message, re.I))
 

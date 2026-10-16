@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -156,9 +157,12 @@ def generate(
     outline_obj = DeckOutline.model_validate_json(Path(outline).read_text(encoding="utf-8")) if outline else None
     template = Path(template)
     story = None
+    steps: dict = {}  # the steps before the pipeline (brandbook, data story): their seconds go into the run manifest
     with console.status("Generating…") as status:
         if brand:
-            template = _branded(template, brand, brand_priority, workspace, providers, skills, use_vlm=not no_vlm and use_models, status=status)
+            tb = time.monotonic()
+            template = _branded(template, brand, brand_priority, workspace, providers, skills, use_vlm=not no_vlm and use_models, use_llm=use_models, status=status)
+            steps["brand"] = time.monotonic() - tb
         if data and outline_obj is None:
             from verstka.data.story import build_data_story
 
@@ -193,6 +197,11 @@ def generate(
             image_provider=_image_provider(models) if models and not (no_llm and no_vlm) else None,
             progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"),
         )
+    from verstka.data.story import stamp_steps
+
+    if story is not None:
+        steps["data"] = story.seconds
+    stamp_steps(res, steps)  # (before the data story's own stamp: that one writes the deck's story beside the manifest)
     if story is not None:
         from verstka.data.story import stamp_variants
 
@@ -252,7 +261,7 @@ def _read_data(items: list[str]):
     return tables
 
 
-def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path], providers, skills, *, use_vlm: bool, status) -> Path:
+def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path], providers, skills, *, use_vlm: bool, status, use_llm: bool = False) -> Path:
     """The template's branded copy (verstka/brand/apply.py): the brandbook read (its logos kept in the workspace's
     brandbooks/<hash>/), applied to the analysed template; returns the copy's source.pptx."""
     import hashlib
@@ -269,7 +278,10 @@ def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path
     assets.mkdir(parents=True, exist_ok=True)
     spec = read_brandbook(brand, providers=providers if use_vlm else None, skills=skills if use_vlm else None, use_vlm=use_vlm, assets_dir=assets)
     spec.id = assets.name
-    m = analyze_template(template, workspace_root=root, use_llm=False, use_vlm=False, progress=lambda s, f: status.update(f"[brand] analyse: {s}"))
+    # (with models on, the template met here for the first time is analysed with them: the cache a later model run
+    # reuses is not the poorer no-model one)
+    m = analyze_template(template, workspace_root=root, providers=providers if (use_llm or use_vlm) else None, skills=skills if (use_llm or use_vlm) else None,
+                         use_llm=use_llm, use_vlm=use_vlm, progress=lambda s, f: status.update(f"[brand] analyse: {s}"))
     tid = branded_template(m.template_id, spec, priority, workspace_root=root, brand_dir=assets, progress=lambda s, f: status.update(f"[brand] {s}"))
     console.print(f"Brandbook «{spec.name or Path(brand).name}» → branded copy {tid} (priority: {priority})")
     return TemplateWorkspace.open(tid, root).source

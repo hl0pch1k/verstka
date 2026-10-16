@@ -31,6 +31,13 @@ Data slides (in the order of the story):
 {% endfor %}
 {% endfor %}
 
+{% if notes %}
+What the files themselves say (their text around the tables — it already explains these things):
+{% for n in notes %}
+- «{{ n.file }}»: {{ n.text }}
+{% endfor %}
+
+{% endif %}
 Draft summary title: {{ summary_title or "—" }}
 Draft summary conclusions:
 {% for line in summary %}

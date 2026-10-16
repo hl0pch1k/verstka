@@ -12,7 +12,7 @@ import pytest
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.readers import read_file
 from verstka.data.story import (
-    STORY_FILE, StoryWriting, build_data_outline, build_data_story, data_slide_labels, read_story, stamp_variants, story_plan,
+    STORY_FILE, StoryWriting, build_data_outline, build_data_story, data_slide_labels, data_text_ok, read_story, stamp_variants, story_plan,
 )
 from verstka.providers.base import ProviderError
 from verstka.providers.mock import MockProvider
@@ -199,11 +199,11 @@ ANSWER = {
         {"id": "data-3", "headline": "Выручка за год выросла на 23%"},  # ok: 23 is a fact
         {"id": "data-7", "headline": "Москва — 41% выручки, а Казань растёт на 45% в год"},  # 45 is not a fact
         {"id": "data-5", "headline": "Почти половину выручки приносят прямые продажи"},  # ok: no number
-        {"id": "data-1", "headline": "NPS вырос до 52 в 2026 году"},  # 2026 is not a fact of the dataset
+        {"id": "data-1", "headline": "NPS вырос до 52 в 2026 году"},  # ok: 2026 is the brief's year, not a figure
     ],
-    "summary_title": "Рост держится на крупных клиентах и регионах",
+    "summary_title": "Рост держится на Москве и прямых продажах",  # backed by its cards (regions, channels)
     "summary": ["Выручка выросла на 23% к сентябрю", "Москва даёт 41% выручки", "Прямые продажи — 46% выручки"],
-    "next_steps": ["Разобрать узкие места поддержки", "Удержать 50 крупных клиентов"],
+    "next_steps": ["Разобрать узкие места поддержки", "Удержать 50 крупных клиентов", "Сократить время ответа поддержки"],
 }
 
 
@@ -218,19 +218,21 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
     assert by["Каналы продаж.json"].headline == "Почти половину выручки приносят прямые продажи"
     # refused: a number the data does not give — the analysis's own headline stays
     assert by["Регионы.xlsx"].headline == "Москва даёт 41% выручки, Казань растёт быстрее всех"
-    assert by["NPS по кварталам.csv"].headline == "NPS вырос до 52, за два квартала данных нет"
+    # the year the brief names dates the sentence: it is not a figure to find in the data
+    assert by["NPS по кварталам.csv"].headline == "NPS вырос до 52 в 2026 году"
     refused = {r["to"]: r["why"] for r in st.rejected}
     assert "45" in refused["Москва — 41% выручки, а Казань растёт на 45% в год"]
     assert "Удержать 50 крупных клиентов" in refused
-    # every headline of the deck still passes the check against its own facts
+    # every headline of the deck still passes the check against its own facts (the audit's: the years of the data and
+    # the brief date a sentence, they are no figures)
     for s in o.slides:
         if s.data is not None:
-            assert headline_ok(s.headline, s.data.headline_facts, data_slide_labels(s)), s.headline
+            assert data_text_ok(s.headline, s, years=["2026"]), s.headline
     summary = next(s for s in o.slides if s.id == "summary")
-    assert summary.headline == "Рост держится на крупных клиентах и регионах"
+    assert summary.headline == "Рост держится на Москве и прямых продажах"
     assert [it.title for it in summary.content.items] == ["Выручка по месяцам", "Выручка по регионам", "Каналы продаж"]
     steps = next(s for s in o.slides if s.id == "next-steps")
-    assert steps.content.bullets == ["Разобрать узкие места поддержки"]
+    assert steps.content.bullets == ["Разобрать узкие места поддержки", "Сократить время ответа поддержки"]
     assert o.planned_by == "model" and st.model == "qwen-test" and st.model_used
     assert st.usage()["calls"] == 1 and st.usage()["failed"] == 0
     assert any("не принято" in x for x in o.agent_log)
@@ -343,8 +345,9 @@ def test_true_numbers_recombined_across_slides_are_refused(sales):
     assert [(i.title, i.text) for i in summary.content.items] == [(i.title, i.text) for i in det_summary.content.items]
     refused = {r["to"] for r in st.rejected}
     assert {"Выручка выросла на 41%", "Выручка выросла на 41% к сентябрю", "Москва даёт 23% выручки", "Прямые продажи — 52% выручки"} <= refused
-    # a step without numbers stands on its own
-    assert next(s for s in st.outline.slides if s.id == "next-steps").content.bullets == ["Разобрать узкие места поддержки"]
+    # a step without numbers stands on its own, but one step alone makes no «Что дальше» slide (a mostly empty slide)
+    assert "Разобрать узкие места поддержки" not in refused
+    assert not any(s.id == "next-steps" for s in st.outline.slides)
 
 
 def test_a_summary_card_carries_the_topic_of_the_slide_its_line_came_from(sales):
@@ -353,7 +356,10 @@ def test_a_summary_card_carries_the_topic_of_the_slide_its_line_came_from(sales)
     _, reg = _model({"summary": lines})
     st = build_data_story(Brief(text=SALES_BRIEF, slide_count=10), sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
     summary = next(s for s in st.outline.slides if s.id == "summary")
-    assert [(i.title, i.text) for i in summary.content.items] == list(zip(["Выручка по регионам", "Каналы продаж", "Выручка по месяцам"], lines))
+    det = next(s for s in build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales).slides if s.id == "summary")
+    # one for one: each line replaces the conclusion of its own slide, in the summary's own order — no card is lost
+    mine = dict(zip(["Выручка по регионам", "Каналы продаж", "Выручка по месяцам"], lines))
+    assert [(i.title, i.text) for i in summary.content.items] == [(i.title, mine[i.title]) for i in det.content.items]
 
 
 def test_the_slide_count_without_a_brief_holds_for_the_model_too(sales):
