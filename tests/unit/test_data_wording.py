@@ -1,4 +1,4 @@
-"""Слова слоя данных: русские числа и формы, падежи названий колонок, род глагола, периоды (verstka/data/headline.py),
+"""Слова слоя данных: русские числа и формы, падежи названий колонок, род глагола, периоды (verstka/data/words.py),
 проверка «каждое число заголовка — среди фактов», и цели из текста (verstka/data/goals.py): разбор фраз, предмет,
 сопоставление с датасетом и распределение целей по датасетам (verstka/data/plan.py, `assign_goals`)."""
 
@@ -8,9 +8,10 @@ import pytest
 
 from verstka.data.aggregate import Data
 from verstka.data.goals import goal_match, goals_of, stem, stems_match
-from verstka.data.headline import (
-    fmt_num, fmt_pct, fmt_signed, headline_ok, is_counter, is_plural_value, metric_phrase, numbers_in, period_dative,
-    period_label, phrase, plural, verb,
+from verstka.data.headline import headline_ok, numbers_in
+from verstka.data.words import (
+    fmt_num, fmt_pct, fmt_signed, is_counter, is_plural_value, metric_phrase, period_dative, period_label, phrase,
+    plural, verb,
 )
 from verstka.data.plan import assign_goals
 from verstka.data.profile import profile_table

@@ -3,7 +3,7 @@
 
 Каждая задача получает балл по свойствам профиля (ось времени и метрика → динамика; категории и метрика → сравнение;
 доли с суммой ≈ 100 → структура; одна числовая колонка ≥ 30 значений → распределение; две метрики без времени и ≥ 8
-строк → взаимосвязь; больше 30 строк и ≥ 4 колонок → справочник; до 6 показателей с изменениями или в разных единицах →
+строк → взаимосвязь; больше 30 строк и ≥ 4 колонок или id-колонка → справочник; до 6 показателей с изменениями или в разных единицах →
 ключевые значения). Задача с нулевым баллом неосуществима: цель из текста её не поднимет. Цель («покажи рост выручки»),
 если она о датасете и её задача осуществима, прибавляет +0,5 — так «покажи структуру» превращает сравнение регионов в
 структуру долей. Причины — короткие русские фразы для «Почему так»."""
@@ -14,7 +14,9 @@ from typing import Optional
 
 from verstka.data.aggregate import Data
 from verstka.data.goals import Goal
-from verstka.data.headline import PERIOD_WORDS, count_words, lower_first, metric_phrase, number_word, phrase, plural
+from verstka.data.words import (
+    PERIOD_WORDS, count_words, lower_first, metric_phrase, number_word, phrase, plural, upper_first,
+)
 from verstka.schemas.data import TASK_TITLES, TaskDecision, TaskKind
 
 __all__ = ["task_scores", "decide_task", "GOAL_BONUS", "FEASIBLE"]
@@ -60,9 +62,9 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         s["shares"] = 0.92
     elif p.parts_of_whole and m is not None and m.additive and m.nonneg and cats is not None and cat_count <= 12:
         s["shares"] = 0.9  # части целого: строка «Итого» равна сумме
-    elif m is not None and m.additive and m.nonneg and cats is not None and 2 <= cat_count <= 12 and not has_time \
+    elif m is not None and m.additive and m.nonneg and cats is not None and 2 <= cat_count <= 60 and not has_time \
             and not d.mixed_units:
-        s["shares"] = 0.35
+        s["shares"] = 0.35 if cat_count <= 12 else 0.3  # больше 12 частей — крупнейшие и «Остальные»
 
     # сравнение категорий
     if cats is not None and not d.mixed_units:
@@ -96,6 +98,8 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     # справочник
     if n > 30 and len(d.cols) >= 4:
         s["reference"] = 0.8
+    elif d.id_col is not None and n > 1:
+        s["reference"] = 0.7  # §2.3: id-колонка — справочник (список строк с кодами)
     elif d.label is not None and n > 12:
         s["reference"] = 0.65 if not ms else 0.5
     else:
@@ -149,7 +153,7 @@ def _why(task: TaskKind, d: Data) -> str:
         grow = any(x.change for x in cv.extra_measures)
         tail = "важно, кто больше и кто растёт быстрее" if grow else "важно, кто больше и насколько"
         metric = "одна главная метрика" if m is not None else "число строк в каждой"
-        s = f"{upper_first_(what)} и {metric} — {tail}."
+        s = f"{upper_first(what)} и {metric} — {tail}."
         if cv.others:
             s += f" Крупнейшие {cv.n - 1} — отдельно, остальные {cv.others} — одной строкой."
         return s
@@ -161,9 +165,9 @@ def _why(task: TaskKind, d: Data) -> str:
             if dp is not None and dp.sure and dp.gender != "pl":
                 each = {"m": "каждый", "f": "каждая", "n": "каждое"}[dp.gender] + " " + dp.low.nom
             if d.parts_measure is not None:
-                return (f"{upper_first_(count_words(cv.n, 'доля', 'доли', 'долей'))} в сумме дают 100% — важно, какую "
+                return (f"{upper_first(count_words(cv.n, 'доля', 'доли', 'долей'))} в сумме дают 100% — важно, какую "
                         f"часть целого даёт {each}.")
-            return f"{upper_first_(mlow)} складывается из {count_words(cv.n, 'части', 'частей', 'частей')} — важно, какую часть целого даёт {each}."
+            return f"{upper_first(mlow)} складывается из {count_words(cv.n, 'части', 'частей', 'частей')} — важно, какую часть целого даёт {each}."
     if task == "distribution" and d.dist is not None:
         typical = "типичное время" if m is not None and m.time_unit else "типичное значение"
         return (f"Одна числовая колонка из {count_words(d.dist.n, 'значения', 'значений', 'значений')} — важны форма "
@@ -184,19 +188,15 @@ def _why(task: TaskKind, d: Data) -> str:
         nums = count_words(k, "итоговое число", "итоговых числа", "итоговых чисел")
         if kv.with_change:
             since = f" к {kv.prev_period}" if kv.prev_period else ""
-            return f"{upper_first_(nums)} с изменением{since} — важны сами значения и их рост."
+            return f"{upper_first(nums)} с изменением{since} — важны сами значения и их рост."
         if kv.mixed_units:
-            return f"{upper_first_(nums)} в разных единицах — важны сами значения, сравнивать их столбцами нельзя."
-        return f"{upper_first_(nums)} — важны сами значения."
+            return f"{upper_first(nums)} в разных единицах — важны сами значения, сравнивать их столбцами нельзя."
+        return f"{upper_first(nums)} — важны сами значения."
     if task == "relationship" and d.xy is not None:
         xy = d.xy
         return (f"Две метрики без оси времени, {count_words(xy.n, 'точка', 'точки', 'точек')} — важно, связаны ли "
                 f"{lower_first(xy.x.name)} и {lower_first(xy.y.name)}.")
     return f"Задача — {TASK_TITLES[task].lower()}."
-
-
-def upper_first_(s: str) -> str:
-    return s[:1].upper() + s[1:] if s else s
 
 
 def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:

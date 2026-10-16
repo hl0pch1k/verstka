@@ -190,10 +190,7 @@ def test_total_row_gives_shares_and_stays_off_the_chart():
 def test_marked_total_rows_are_excluded_when_reader_keeps_them():
     t = _t(["Канал", "Выручка"], [["Прямые", 50], ["Партнёры", 30], ["Все каналы", 100], ["Онлайн", 20]],
            units=[None, "млн ₽"])
-    if "totals" not in Table.model_fields:
-        object.__setattr__(t, "totals", [2])
-    else:
-        t.totals = [2]  # type: ignore[attr-defined]
+    t.totals = [2]
     d = Data(t, profile_table(t))
     assert d.totals == {2} and d.n == 3
     assert d.cats is not None and d.cats.labels == ["Прямые", "Партнёры", "Онлайн"] and d.cats.total == 100

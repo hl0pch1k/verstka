@@ -3,31 +3,39 @@
 `plan_dataset(profile, table, goals)` — задача, 2–3 ранжированных варианта, заголовок-вывод с фактами, подпись,
 источник, число слайдов и сообщение для нетипизируемых данных. `plan_datasets(tables, brief_text)` — то же для всех
 файлов: цели из текста сопоставляются с датасетами (цель достаётся тому, о котором она говорит и где её задача
-осуществима). `chart_spec_of(plan, table, option)` — данные слайда для выбранного (или другого — «Пересобрать слайд
-так») варианта: `ChartSpec`, `TableData` или карточки `NumberCallout`. `slide_data_of(plan)` — `SlideData` для
-«Почему так».
+осуществима). `chart_spec_of(plan, table, option, part)` — данные слайда для выбранного (или другого — «Пересобрать
+слайд так») варианта: `ChartSpec`, `TableData` или карточки `NumberCallout`; отвергнутый вариант не строится — вместо
+данных `NotBuilt` с причиной. `slide_data_of(plan, part)` — `SlideData` для «Почему так».
 
 Шаблон не входит ни в один вход: один датасет при любом шаблоне и любом формате файла даёт один и тот же вид."""
 
 from __future__ import annotations
 
 import math
-import re
 from typing import Optional, Sequence, Union
 
-from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data
+from pydantic import BaseModel
+
+from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import facts_for
 from verstka.data.goals import Goal, goal_match, goals_of, stems_of
-from verstka.data.headline import compose, fmt_num, fmt_signed, fmt_value, phrase
-from verstka.data.profile import count_ru, profile_table
+from verstka.data.headline import compose
+from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, decide_task, task_scores
-from verstka.data.viz import rank_options
-from verstka.schemas.data import (
-    NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption,
-)
+from verstka.data.viz import find_candidate, rank_options
+from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, phrase
+from verstka.schemas.data import NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption
 from verstka.schemas.outline import ChartSpec, InlineSeries, NumberCallout, TableData, XYSeries
 
-__all__ = ["plan_dataset", "plan_datasets", "assign_goals", "chart_spec_of", "slide_data_of", "data_of", "SlideBody"]
+__all__ = ["plan_dataset", "plan_datasets", "assign_goals", "chart_spec_of", "slides_of", "slide_data_of", "data_of",
+           "SlideBody", "NotBuilt"]
+
+
+class NotBuilt(BaseModel):
+    """Вариант не строится (отвергнут по данным): причина — для «Пересобрать слайд так» и ленты агента."""
+
+    reason: str
+
 
 SlideBody = Union[ChartSpec, TableData, list[NumberCallout]]
 _KIND_LABEL = {"csv": "CSV", "tsv": "TSV", "xlsx": "XLSX", "json": "JSON", "text": "TXT"}
@@ -70,13 +78,14 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     d = Data(table, profile, subject=subject) if subject else d0
     decision = decide_task(d, rel)
     source = _source(profile)
+    title = file_title(profile.file, profile.sheet)
 
     base = task_scores(d)
     if not profile.typable and base.get("reference", 0.0) <= 0.0 and not d.measures:
         reason = profile.untypable_reason or "данные не складываются в график"
         msg = f"Не для графика: {reason}"
         return DatasetPlan(profile=profile, task=TaskDecision(task="reference", reasons=[msg + "."], scores=base),
-                           options=[], chosen=0, headline="", plain_headline=_stem(profile), source=source, slides=0,
+                           options=[], chosen=0, headline="", plain_headline=title, source=source, slides=0,
                            message=msg)
 
     task = decision.task
@@ -85,7 +94,7 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     options = rank_options(task, d, [g for g in rel if base.get(g.task, 0) >= FEASIBLE or g.task == task], raised)
     fs = facts_for(task, d)
     headline, caption = compose(task, fs)
-    plain = fs.ctx.get("plain") or _stem(profile)
+    plain = fs.ctx.get("plain") or title
     message = None
     if not profile.typable and options and options[0].kind == "table":
         message = f"Не для графика: {profile.untypable_reason or 'данные не складываются в график'} — показываю таблицей"
@@ -95,11 +104,6 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     )
     plan.slides = slides_of(plan, table, 0, d)
     return plan
-
-
-def _stem(p: DatasetProfile) -> str:
-    s = re.sub(r"\.[A-Za-z0-9]+$", "", p.file or "").strip() or "Данные"
-    return s[:1].upper() + s[1:]
 
 
 def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal]]:
@@ -171,8 +175,10 @@ def _table_rows_count(plan: DatasetPlan, d: Data) -> int:
     t = plan.task.task
     if t == "dynamics" and d.time is not None:
         return d.time.points
-    if t in ("comparison", "shares") and d.cats is not None:
+    if t == "comparison" and d.cats is not None:
         return d.cats.n
+    if t == "shares" and d.shares is not None:
+        return len(d.shares[0].labels)
     if t == "kpi" and d.kpi is not None:
         return len(d.kpi.items)
     return d.n
@@ -191,21 +197,52 @@ def _cell(v: Optional[float]) -> str:
     return "—" if v is None else fmt_num(v)
 
 
-def chart_spec_of(plan: DatasetPlan, table: Table, option: Optional[int] = None, part: int = 1) -> Optional[SlideBody]:
+def chart_spec_of(plan: DatasetPlan, table: Table, option: Optional[int] = None,
+                  part: int = 1) -> Union[SlideBody, NotBuilt, None]:
     """Данные слайда для варианта `option` (по умолчанию — выбранного): `ChartSpec` для графиков, `TableData` для
-    таблиц (`part` — номер слайда при разбиении), список `NumberCallout` для карточек. None — датасет пропущен."""
+    таблиц (`part` — номер слайда при разбиении, с 1), список `NumberCallout` для карточек. Отвергнутый по данным
+    вариант (круговая на 8 долях, гистограмма из одного интервала) — `NotBuilt` с причиной. None — датасет пропущен."""
     opt = _option(plan, option)
     if opt is None:
         return None
     d = data_of(plan, table)
     task = plan.task.task
+    cand = find_candidate(task, d, opt.kind, opt.title)
+    if cand is not None and not cand.feasible:
+        return NotBuilt(reason=cand.why_not or "Этот вариант не подходит к данным.")
     src = plan.source or _source(plan.profile)
+    if opt.title == "Карточки: итог и среднее":
+        return _summary_cards(d)
+    if opt.title.startswith("Столбцы: число строк по группам"):
+        return _groups_spec(d, src)
     fn = {
         "dynamics": _spec_dynamics, "comparison": _spec_comparison, "shares": _spec_shares,
         "distribution": _spec_distribution, "reference": _spec_reference, "kpi": _spec_kpi,
         "relationship": _spec_relationship,
     }[task]
     return fn(d, opt, src, part, plan)
+
+
+def _summary_cards(d: Data) -> Union[list[NumberCallout], NotBuilt]:
+    m = d.main
+    if m is None:
+        return NotBuilt(reason="Чисел нет — карточкам нечего показать.")
+    vals = m.present
+    unit = m.unit_text
+    out = []
+    if m.additive and m.nonneg:
+        out.append(NumberCallout(value=fmt_value(sum(vals), unit), label=f"{m.name}: итог"))
+    out.append(NumberCallout(value=fmt_value(sum(vals) / len(vals), unit), label=f"{m.name}: среднее"))
+    out.append(NumberCallout(value=fmt_num(len(vals)), label="Строк"))
+    return out
+
+
+def _groups_spec(d: Data, src: str) -> Union[ChartSpec, NotBuilt]:
+    j = next((j for j in d.dims if j != d.label and 1 < d.cols[j].distinct < d.n), None)
+    cv = d.cat_view(None, dim=j) if j is not None else None
+    if cv is None:
+        return NotBuilt(reason="Нет колонки с группами — считать нечего.")
+    return _cats_spec(cv, "bar", src)
 
 
 def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:
@@ -232,20 +269,26 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
                      gaps=tv.gaps, source=src, split=tv.split)
 
 
+def _argmax(values: Sequence[Optional[float]]) -> Optional[int]:
+    ks = [k for k, v in enumerate(values) if v is not None]
+    return max(ks, key=lambda k: (values[k], -k)) if ks else None
+
+
 def _cats_spec(cv: CatView, kind: str, src: str, values: Optional[list[float]] = None, unit: Optional[str] = None,
-               y_title: Optional[str] = None, extra: Optional[list[tuple[str, list[Optional[float]]]]] = None,
-               highlight: Optional[int] = 0) -> ChartSpec:
+               y_title: Optional[str] = None, extra: Optional[list[tuple[str, list[Optional[float]]]]] = None) -> ChartSpec:
+    """Столбцы по категориям; выделен лидер — по значению (у порядковых подписей он не обязательно первый)."""
     vals = values if values is not None else cv.values
     name = y_title or (cv.measure.name if cv.measure else "Число строк")
     series = [InlineSeries(name=name, values=list(vals), unit=unit)]
     for nm, vs in extra or []:
         series.append(InlineSeries(name=nm, values=list(vs), unit=unit))
+    real = list(vals[:-1]) + [None] if cv.others else list(vals)
     return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit,
-                     highlight_index=highlight if cv.ranked and len(series) == 1 else None,
+                     highlight_index=_argmax(real) if len(series) == 1 else None,
                      x_title=cv.dim, y_title=name, source=src)
 
 
-def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:
+def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Union[SlideBody, NotBuilt, None]:
     cv = d.cats
     if cv is None:
         return _spec_reference(d, opt, src, part, plan)
@@ -258,8 +301,9 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
         rows = [[lab] + [_cell(v[i] if i < len(v) else None) for _, v, _ in ms] for i, lab in enumerate(cv.labels)]
         return TableData(columns=cols, rows=_part(rows, part))
     if opt.kind in ("pie", "doughnut"):
-        shares = cv.shares or cv.values
-        return _cats_spec(cv, opt.kind, src, values=[round(s, 1) for s in shares], unit="%")
+        if cv.shares is None:
+            return NotBuilt(reason="Значения не складываются в целое — круговая здесь неверна.")
+        return _cats_spec(cv, opt.kind, src, values=[round(s, 1) for s in cv.shares], unit="%", y_title="Доля")
     if opt.kind in ("grouped_bar", "grouped_column"):
         m = cv.measure
         same = [x for x in cv.extra_measures if m is not None and not x.change and (x.unit or "") == (m.unit or "")
@@ -271,32 +315,30 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
     return _cats_spec(cv, kind, src, unit=unit)
 
 
-def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:
-    parts = d.parts_measure
-    cv = d.cat_view(parts) if parts is not None else d.cats
-    if cv is None:
-        return None
-    if parts is not None:
-        s = sum(cv.values) or 1.0
-        scale = 100.0 / s if 0.95 <= s <= 1.05 else 1.0
-        shares = [v * scale for v in cv.values]
-    else:
-        shares = cv.shares or cv.values
+def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Union[SlideBody, NotBuilt, None]:
+    got = d.shares
+    if got is None:
+        return NotBuilt(reason="Значения не складываются в целое.")
+    cv, shares = got
     labels = list(cv.labels)
     if opt.kind in ("doughnut", "pie") and len(labels) > 6:
-        rest = sum(shares[5:])
-        labels, shares = labels[:5] + [f"Остальные {len(labels) - 5}"], shares[:5] + [rest]
+        # крупнейшие пять — отдельно, остальные одним сектором (одна свёртка полного списка)
+        order = sorted(range(len(shares)), key=lambda k: (-shares[k], k))
+        top = sorted(order[:5])
+        rest = [k for k in range(len(shares)) if k not in top]
+        labels = [cv.labels[k] for k in top] + [f"Остальные {len(rest)}"]
+        shares = [shares[k] for k in top] + [sum(shares[k] for k in rest)]
     vals = [round(x, 1) for x in shares]
-    name = plan.plain_headline or "Доля"
+    lead = _argmax(vals[:-1] + [None]) if labels[-1].startswith("Остальные ") else _argmax(vals)
     if opt.kind == "table":
         return TableData(columns=[cv.dim, "Доля, %"], rows=_part([[a, fmt_num(b, 1)] for a, b in zip(labels, vals)], part))
     if opt.kind in ("stacked_column", "stacked_bar"):
-        return ChartSpec(type=opt.kind, categories=[name],
+        return ChartSpec(type=opt.kind, categories=[plan.plain_headline or "Доли"],
                          series=[InlineSeries(name=a, values=[b], unit="%") for a, b in zip(labels, vals)], unit="%",
-                         y_title="Доля", source=src)
+                         x_title=cv.dim, y_title="Доля", source=src)
     kind = opt.kind if opt.kind in ("doughnut", "pie", "column", "bar") else "doughnut"
     return ChartSpec(type=kind, categories=labels, series=[InlineSeries(name="Доля", values=vals, unit="%")], unit="%",
-                     highlight_index=0, x_title=cv.dim, y_title="Доля", source=src)
+                     highlight_index=lead, x_title=cv.dim, y_title="Доля", source=src)
 
 
 def _spec_distribution(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:
@@ -314,29 +356,30 @@ def _spec_distribution(d: Data, opt: VizOption, src: str, part: int, plan: Datas
         if dv.outliers:
             out.append(NumberCallout(value=fmt_num(len(dv.outliers)), label="Выбросы"))
         return out
+    b = dv.bins
     if opt.kind == "table":
-        b = dv.bins
         return TableData(columns=[_col_title(m.name, m.unit), count_name],
                          rows=_part([[lab, fmt_num(c)] for lab, c in zip(b.labels, b.counts)], part))
-    b = dv.bins
     return ChartSpec(type="histogram", categories=list(b.labels),
                      series=[InlineSeries(name=count_name, values=[float(c) for c in b.counts])], unit=None,
                      x_title=_col_title(m.name, m.unit), y_title=count_name, source=src)
 
 
-def _spec_reference(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:
+def _spec_reference(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Union[SlideBody, NotBuilt]:
     rv = d.ref
-    if opt.kind == "bar" and rv.measure is not None:
-        m = rv.measure
-        labs = [r[0] for r in rv.rows]
-        order = sorted(d.rows_idx, key=lambda i: (-(m.values[i] if m.values[i] is not None else -math.inf), i))
-        vals = [float(m.values[i] or 0) for i in order[:rv.top_n]]
-        return ChartSpec(type="bar", categories=labs, series=[InlineSeries(name=m.name, values=vals, unit=m.unit_text)],
-                         unit=m.unit_text, highlight_index=0, x_title=rv.label, y_title=m.name, source=src)
     if opt.kind == "bar":
-        cv = d.cat_view(None)
-        if cv is not None:
-            return _cats_spec(cv, "bar", src)
+        if rv.measure is None:
+            return _groups_spec(d, src)
+        m = rv.measure
+        # одно упорядочение: подписи и значения — из одних и тех же строк
+        k = min(rv.top_n, len(rv.labels))
+        labs = rv.labels[:k]
+        vals = [float(v) if v is not None else None for v in rv.values[:k]]
+        return ChartSpec(type="bar", categories=labs, series=[InlineSeries(name=m.name, values=vals, unit=m.unit_text)],
+                         unit=m.unit_text, highlight_index=0 if vals and vals[0] is not None else None,
+                         x_title=rv.label, y_title=m.name, source=src)
+    if opt.kind == "kpi_cards":
+        return _summary_cards(d)
     mode = _table_mode(opt) if opt.kind == "table" else "top"
     if mode == "top":
         rows = list(rv.rows) + ([rv.rest] if rv.rest else [])
@@ -346,7 +389,7 @@ def _spec_reference(d: Data, opt: VizOption, src: str, part: int, plan: DatasetP
     return TableData(columns=list(rv.full_columns), rows=_part(rv.all_rows, part))
 
 
-def _kpi_label(it, prev: Optional[str]) -> str:
+def _kpi_label(it: KpiItem, prev: Optional[str]) -> str:
     if it.change is None:
         return it.label
     s = f"{it.label}, {fmt_signed(it.change, it.change_unit or '')}"
@@ -379,7 +422,7 @@ def _spec_kpi(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -
     unit = kv.items[0].unit if kv.items else None
     return ChartSpec(type="column", categories=[it.label for it in kv.items],
                      series=[InlineSeries(name=kv.period or "Значение", values=[it.value for it in kv.items], unit=unit)],
-                     unit=unit, source=src)
+                     unit=unit, x_title="Показатель", y_title=kv.period or "Значение", source=src)
 
 
 def _spec_relationship(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:
@@ -400,21 +443,23 @@ def _spec_relationship(d: Data, opt: VizOption, src: str, part: int, plan: Datas
 
 
 # ── «Почему так» ──────────────────────────────────────────────────────────────────────────────────────────────────────
-def slide_data_of(plan: DatasetPlan, part: tuple[int, int] = (1, 1)) -> SlideData:
-    """Данные слайда для «Почему так»: профиль кратко, задача, варианты, факты заголовка. У справочника выбросы не
-    показываются: крупнейшие клиенты в списке — это данные, а не проблема."""
+def slide_data_of(plan: DatasetPlan, part: int = 1) -> SlideData:
+    """Данные слайда для «Почему так» (`part` — номер слайда датасета, с 1, как у `chart_spec_of`): профиль кратко,
+    задача, варианты, факты заголовка. У справочника и карточек выбросы не показываются: крупнейшие клиенты в списке —
+    это данные, а не проблема."""
     p = plan.profile
     line = " · ".join([
         _KIND_LABEL.get(p.kind, p.kind.upper()),
-        f"{count_ru(p.rows, 'строка', 'строки', 'строк')} × {count_ru(p.cols, 'колонка', 'колонки', 'колонок')}",
+        f"{count_words(p.rows, 'строка', 'строки', 'строк')} × {count_words(p.cols, 'колонка', 'колонки', 'колонок')}",
         NATURE_LABELS[p.nature].lower(),
     ])
     opt = plan.chosen_option
     outliers = [] if plan.task.task in ("reference", "kpi") else list(p.outliers)
+    total = max(1, plan.slides)
     return SlideData(
         dataset_id=p.table_id, file=p.file, profile_line=line, nature=p.nature, columns=list(p.columns),
         time_axis=p.time_axis, metrics=list(p.metrics), dimensions=list(p.dimensions), missing_total=p.missing_total,
         outliers=outliers, task=plan.task, options=list(plan.options), chosen=plan.chosen,
         headline_facts=list(plan.headline_facts), plain_headline=plan.plain_headline,
-        aggregation=opt.aggregation if opt else None, part=part,
+        aggregation=opt.aggregation if opt else None, part=(min(max(1, part), total), total),
     )

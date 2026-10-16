@@ -13,6 +13,8 @@ from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field
 
+from verstka.data.words import file_title, same_stem, stem, stems_match
+from verstka.data.words import stems_of as _stems_of
 from verstka.schemas.data import DatasetProfile, TaskKind, VizKind
 
 __all__ = ["Goal", "goals_of", "stem", "stems_of", "stems_match", "goal_match", "GOAL_VIZ"]
@@ -71,7 +73,7 @@ _PATTERNS: list[tuple[TaskKind, re.Pattern[str]]] = [
 _CLAUSE = re.compile(r"\s+(?:и|а|но)\s+(?=(?:где|как|что|кто|почему|какие|какой|какая|зачем|когда|покажи|сравни)\b)", re.I)
 
 # служебные слова и слова самих целей — не предмет
-_STOP = {
+_STOP = frozenset({
     "и", "в", "во", "по", "за", "на", "с", "со", "от", "до", "из", "как", "что", "у", "к", "для", "между", "а", "или", "их",
     "его", "её", "ее", "это", "эти", "этот", "все", "всех", "весь", "наш", "наши", "нашей", "наших", "мы", "где", "ли",
     "есть", "покажи", "покажите", "показать", "отрази", "отразить", "сравни", "сравните", "сравнить", "сопоставь",
@@ -84,47 +86,10 @@ _STOP = {
     "лидеры", "лидер", "лидеров", "росла", "рос", "росло", "росли", "менялась", "менялся", "менялись", "изменялась",
     "снижалась", "году", "год", "года", "месяц", "месяцев", "данные", "данных", "файл", "файлах", "приложенных", "цифрах",
     "визуализируй", "продемонстрируй", "самые", "самых", "разные", "разных", "чем", "тем", "насколько",
-}
-_ENDINGS = sorted(
-    ["ями", "ами", "ого", "его", "ому", "ему", "ыми", "ими", "иях", "ах", "ях", "ов", "ев", "ей", "ий", "ый", "ой",
-     "ая", "яя", "ое", "ее", "ые", "ие", "ую", "юю", "ом", "ем", "ам", "ям", "ию", "ия", "ие", "ье", "ья", "а", "я",
-     "о", "е", "ы", "и", "у", "ю", "ь", "й"],
-    key=len, reverse=True,
-)
-
-
-def stem(word: str) -> str:
-    """Грубая основа русского слова: «выручки», «выручка», «выручку» → «выручк»; «регионы» → «регион»."""
-    w = word.lower().replace("ё", "е")
-    for e in _ENDINGS:
-        if w.endswith(e) and len(w) - len(e) >= 3:
-            return w[: -len(e)]
-    return w
-
-
+})
 def stems_of(text: str) -> list[str]:
     """Основы значимых слов (без служебных и слов целей), по порядку, без повторов."""
-    out: list[str] = []
-    for w in re.findall(r"[a-zа-яё0-9]+", (text or "").lower()):
-        if w in _STOP or len(w) < 3:
-            continue
-        s = stem(w)
-        if s not in out:
-            out.append(s)
-    return out
-
-
-def _same(a: str, b: str) -> bool:
-    if a == b:
-        return True
-    short, long_ = sorted((a, b), key=len)
-    return len(short) >= 4 and long_.startswith(short)
-
-
-def stems_match(subject: Iterable[str], text: str) -> bool:
-    """Есть ли среди основ текста хоть одна из основ предмета («выручк» ~ «Выручка, млн ₽»)."""
-    words = stems_of(text)
-    return any(_same(s, w) for s in subject for w in words)
+    return _stems_of(text, _STOP)
 
 
 def goals_of(text: str) -> list[Goal]:
@@ -153,22 +118,21 @@ def goal_match(goal: Goal, profile: DatasetProfile, values: Optional[Iterable[st
     Цель без предмета — 0,5 (относится к любому подходящему датасету); предмет не совпал ни с чем — 0."""
     if not goal.subject:
         return 0.5
-    file_stem = re.sub(r"\.[a-z0-9]+$", "", profile.file or "", flags=re.I)
-    names = stems_of(file_stem + " " + (profile.sheet or ""))
+    names = stems_of(file_title(profile.file, profile.sheet))
     score = 0.0
     used: set[str] = set()
     for s in goal.subject:
-        if any(_same(s, w) for w in names):
+        if any(same_stem(s, w) for w in names):
             score += 1.0
             used.add(s)
     col_words = stems_of(" ".join(c.name for c in profile.columns))
     for s in goal.subject:
-        if any(_same(s, w) for w in col_words):
+        if any(same_stem(s, w) for w in col_words):
             score += 0.6
             used.add(s)
     if values:
         val_words = stems_of(" ".join(values))
         for s in goal.subject:
-            if s not in used and any(_same(s, w) for w in val_words):
+            if s not in used and any(same_stem(s, w) for w in val_words):
                 score += 0.6
     return score
