@@ -17,7 +17,19 @@ A chart is drawn the way a designer would finish it, whatever the template:
 * the plot area has a manual layout that reserves room for every label, so nothing is cut and the bars fill the
   frame exactly; chart and plot area are transparent, so the chart sits on the slide's own ground;
 * lines are 2.25 pt with ringed markers and labels placed off the line; an area is a soft fill under a 2.25 pt edge;
-  pies and doughnuts show percentages inside the slices that fit them, no leader lines.
+  pies and doughnuts show percentages inside the slices that fit them, no leader lines;
+* a missing value is a break in the line (dispBlanksAs gap), never a zero: the end label and the default highlight go
+  to the last point that has a value; `highlight_index` = −1 asks for no highlight at all;
+* a histogram's bins touch (no gap, a hairline of the ground between them) and are read like columns; stacked bars
+  are parts of one whole: the template's categorical colours (a remainder quiet), a hairline of the ground between
+  the segments, each value inside its segment where it fits, else a quiet value axis; grouped bars are the
+  several-series bars above; several series with a highlighted category ease the other categories toward the ground;
+* a scatter shows points only: translucent ringed markers on two quiet value axes on round ticks;
+* axis titles (`x_title` the categories or X, `y_title` the values or Y) are set in the template's face at the label
+  size in the muted text colour, along their axis; the value axis's title carries the word unit, so no caption repeats
+  it; an axis whose ticks the labels replace stays only to carry its title;
+* a source line («Источник: …») in small muted print under the chart, inside its frame, when the caller does not
+  print it on the slide (`source_said`).
 """
 
 from __future__ import annotations
@@ -31,10 +43,11 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
 from lxml import etree
-from pptx.chart.data import CategoryChartData
+from pptx.chart.data import CategoryChartData, XyChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_MARKER_STYLE, XL_TICK_LABEL_POSITION, XL_TICK_MARK
 from pptx.enum.dml import MSO_LINE_DASH_STYLE
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.opc.constants import CONTENT_TYPE as CT
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.slide import Slide
@@ -52,7 +65,16 @@ _TYPE_MAP = {
     "area": XL_CHART_TYPE.AREA,
     "pie": XL_CHART_TYPE.PIE,
     "doughnut": XL_CHART_TYPE.DOUGHNUT,
+    "histogram": XL_CHART_TYPE.COLUMN_CLUSTERED,
+    "stacked_column": XL_CHART_TYPE.COLUMN_STACKED,
+    "stacked_bar": XL_CHART_TYPE.BAR_STACKED,
+    "scatter": XL_CHART_TYPE.XY_SCATTER,
 }
+_GROUPED = {"grouped_column": "column", "grouped_bar": "bar"}  # several series side by side: the clustered bars
+_HORIZONTAL = ("bar", "stacked_bar")
+_STACKED = ("stacked_column", "stacked_bar")
+_BARS = ("column", "bar", "histogram", "stacked_column", "stacked_bar")
+NO_HIGHLIGHT = -1  # highlight_index: no point stands out (a line's last point is not accented either)
 
 _C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -72,6 +94,10 @@ MAX_COLUMNS = 7  # more categories than this: horizontal bars
 HOLE_SIZE = 56  # doughnut hole, % of the diameter
 BOLD_VOICE_SHARE = 0.3  # the template sets its display / h1 in bold at least this often: emphasis may be bold
 LABEL_SEP = ": "  # «Было: 48» — a series named on its label
+SEAM_PT = 0.75  # the hairline of the ground between a histogram's bins and between stacked segments
+STACK_GAP = (40, 180)  # gapWidth range of stacked bars: one bar per category, wider than a cluster's
+SCATTER_ALPHA = (0.85, 0.65)  # marker fill opacity: a few points, many points (overlaps stay visible)
+TITLE_LINE = 1.25  # an axis title's line height over its size
 
 
 def _c(tag: str) -> str:
@@ -186,6 +212,18 @@ def muted_tint(accent: str, ground: str, toward: float = MUTED_TOWARD_GROUND) ->
         # an accent that barely differs from its ground (pale accent on white): step toward the text side instead
         out = _mix(accent, "000000" if not _is_dark(ground) else "FFFFFF", 0.6)
     return out
+
+
+def eased(fill: str, ground: str, share: float = 0.45) -> str:
+    """A series colour stepped back toward the ground — a category that is not the highlighted one: `share` of the
+    colour over the ground (the same for every series, so a group keeps its order of strength), more of it only where
+    the step would sink into the ground (every bar ≥ 1.4:1 off it). Never another hue, never past the colour itself."""
+    fill, ground = _norm(fill) or "0077FF", _norm(ground) or "FFFFFF"
+    for s in (share, 0.55, 0.65, 0.75, 0.85):
+        c = _mix(fill, ground, s)
+        if contrast_ratio(c, ground) >= MIN_FILL_CONTRAST:
+            return c
+    return fill
 
 
 def _readable_text(text_hex: Optional[str], ground: str) -> str:
@@ -1203,6 +1241,8 @@ def resolve_series(spec: ChartSpec, outline: DeckOutline) -> list[Series]:
     (`categories` + `series`); else — ids that name nothing and no data of its own — the deck's first series, unless
     the ids name facts: a chart «of f1, f2» asks for those figures, and another series of the deck would be someone
     else's data."""
+    if spec.type == "scatter":
+        return []  # a scatter draws its (x, y) points (`xy_series`), never a category series of the deck
     out = [s for sid in spec.series_ids if (s := outline.series_by_id(sid)) is not None]
     if not out:
         out = inline_series(spec)
@@ -1211,10 +1251,54 @@ def resolve_series(spec: ChartSpec, outline: DeckOutline) -> list[Series]:
     return out
 
 
+def xy_series(spec: ChartSpec) -> list[tuple[str, list[float], list[float]]]:
+    """The points of a scatter as (name, xs, ys): pairs where both coordinates are numbers, series without one left out."""
+    out = []
+    for s in spec.xy or []:
+        pairs = [(float(x), float(y)) for x, y in zip(s.x or [], s.y or []) if x is not None and y is not None and math.isfinite(float(x)) and math.isfinite(float(y))]
+        if pairs:
+            out.append(((s.name or spec.title or "").strip(), [p[0] for p in pairs], [p[1] for p in pairs]))
+    return out
+
+
+def last_value_index(values: Sequence[Optional[float]]) -> Optional[int]:
+    """The last point of a series that has a value: a line with a missing tail ends (and is labelled) there."""
+    return next((j for j in range(len(values) - 1, -1, -1) if values[j] is not None), None)
+
+
+_SOURCE_HEAD_RE = re.compile(r"(?i)^\s*(источник|источники|данные|по данным|source)\b")
+
+
+def source_text(source: Optional[str]) -> Optional[str]:
+    """The source line under a chart: «Источник: Выручка по месяцам.csv» (a line that names itself as a source stays
+    as written)."""
+    s = " ".join((source or "").split())
+    if not s:
+        return None
+    return s if _SOURCE_HEAD_RE.match(s) else f"Источник: {s}"
+
+
+def _source_key(text: str) -> str:
+    t = _SOURCE_HEAD_RE.sub("", " ".join((text or "").replace(" ", " ").split()).lower()).strip(" :—-–.")
+    return t.replace("ё", "е")
+
+
+def source_said(source: Optional[str], *texts: Optional[str]) -> bool:
+    """The caller already prints the chart's source on the slide (its footnote «Источник: …» names it): the chart
+    draws no second source line."""
+    key = _source_key(source or "")
+    if not key:
+        return True
+    return any(key in _source_key(t or "") for t in texts if t)
+
+
 def chart_data_ok(spec: Optional[ChartSpec], outline: DeckOutline) -> bool:
-    """True when `add_chart` has something to draw: a series with categories and at least one value."""
+    """True when `add_chart` has something to draw: a series with categories and at least one value (a scatter: one
+    (x, y) point)."""
     if spec is None:
         return False
+    if spec.type == "scatter":
+        return bool(xy_series(spec))
     series = resolve_series(spec, outline)
     if not series or not series[0].categories:
         return False
@@ -1223,11 +1307,13 @@ def chart_data_ok(spec: Optional[ChartSpec], outline: DeckOutline) -> bool:
 
 
 def prefer_bar(spec: ChartSpec, outline: DeckOutline) -> bool:
-    """A bar/column chart reads better as horizontal bars: a category label longer than 12 characters, or more than 7
-    categories (short labels such as years or quarters fit columns up to 12)."""
-    if spec.type not in ("column", "bar"):
+    """A bar/column chart (grouped or stacked too) reads better as horizontal bars: a category label longer than 12
+    characters, or more than 7 categories (short labels such as years or quarters fit columns up to 12). A histogram's
+    bins always stand as columns."""
+    t = _GROUPED.get(spec.type, spec.type)
+    if t not in ("column", "bar", "stacked_column", "stacked_bar"):
         return False
-    if spec.type == "bar":
+    if t in _HORIZONTAL:
         return True
     series = resolve_series(spec, outline)
     if not series:
@@ -1241,7 +1327,14 @@ def prefer_bar(spec: ChartSpec, outline: DeckOutline) -> bool:
 
 
 def effective_chart_type(spec: ChartSpec, outline: DeckOutline) -> str:
-    return "bar" if prefer_bar(spec, outline) else (spec.type if spec.type in _TYPE_MAP else "column")
+    """The kind drawn: grouped bars are the clustered bars of several series; columns (and stacked columns) with long
+    or many labels turn horizontal."""
+    t = _GROUPED.get(spec.type, spec.type)
+    if t in _STACKED:
+        return "stacked_bar" if prefer_bar(spec, outline) else "stacked_column"
+    if t in ("column", "bar"):
+        return "bar" if prefer_bar(spec, outline) else "column"
+    return t if t in _TYPE_MAP else "column"
 
 
 _OTHER_RE = re.compile(r"^\s*(проч|други|другое|остальн|ины[ея]|иное|other|rest\b|misc)", re.I)
@@ -1548,7 +1641,7 @@ def _sppr(fill: Optional[str] = None, alpha: Optional[float] = None, line: Optio
 
 
 _DLBL_TAIL = ("showLegendKey", "showVal", "showCatName", "showSerName", "showPercent", "showBubbleSize")
-_SER_AFTER_DLBLS = ("trendline", "errBars", "cat", "val", "smooth", "shape", "extLst")
+_SER_AFTER_DLBLS = ("trendline", "errBars", "cat", "val", "xVal", "yVal", "smooth", "shape", "extLst")
 
 
 def _flags(parent, show_val: bool = True, leader_lines: Optional[bool] = None, ser_name: bool = False, sep: Optional[str] = None) -> None:
@@ -1677,6 +1770,48 @@ def _set_child_val(parent, tag: str, val: str, successors: Sequence[str]) -> Non
 
 def _snap(v: float) -> float:
     return round(v * 2) / 2
+
+
+def _set_disp_blanks(chart_space, how: str = "gap") -> None:
+    """c:chart/c:dispBlanksAs: how a missing value is drawn («gap» — a break in the line, never a zero)."""
+    ch = chart_space.find(_c("chart"))
+    if ch is None:
+        return
+    el = ch.find(_c("dispBlanksAs"))
+    if el is None:
+        el = etree.Element(_c("dispBlanksAs"))
+        _insert_before(ch, el, ("showDLblsOverMax", "extLst"))
+    el.set("val", how)
+
+
+def _source_ink(muted_hex: Optional[str], text: str, muted: str, ground: str) -> str:
+    """The source line's colour: the template's secondary text colour where it reads as small print on the ground
+    (≥ 4.5:1), else the template's text colour; the chart's own eased text only for a caller that names neither."""
+    m = _norm(muted_hex)
+    if m and contrast_ratio(m, ground) >= 4.5:
+        return m
+    return text if muted_hex is not None else muted
+
+
+def _source_box(slide: Slide, box: Bbox, text: str, size: float, color: str, family: Optional[str]):
+    """The source line under a chart: a native text box in the template's face, small muted print, no autofit."""
+    tb = slide.shapes.add_textbox(Emu(box.x), Emu(box.y), Emu(box.w), Emu(box.h))
+    tb.name = "Chart source"
+    tf = tb.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.NONE
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = MSO_ANCHOR.TOP
+    run = tf.paragraphs[0].add_run()
+    run.text = text
+    run.font.size = Pt(size)
+    run.font.bold = False
+    run.font.color.rgb = _rgb(color)
+    if family:
+        run.font.name = family
+    run._r.get_or_add_rPr().set("lang", "ru-RU")
+    _fonts_everywhere(tb._element, family)
+    return tb
 
 
 # ---------------------------------------------------------------------------------------------- ring
@@ -1850,6 +1985,16 @@ class _Kit:
     turned: bool = False  # its category labels were turned by 45° or thinned out (every other one blank) to stay whole
     cramped: bool = False  # the plot kept its least width (0.3 of the frame) past the room its axis and end labels leave:
     # the renderer cuts the value axis's labels («1 200 0…»)
+    x_title: Optional[str] = None  # the category axis's title (a scatter: the X axis's)
+    y_title: Optional[str] = None  # the value axis's title (a scatter: the Y axis's), with the word unit
+    inset_l: float = 0.0  # pt kept at the left of the frame for an axis title set along the left axis
+    inset_b: float = 0.0  # pt kept above the legend for an axis title set under the bottom axis
+    xs: list = field(default_factory=list)  # a scatter: the x of every point, per series
+
+    @property
+    def foot(self) -> float:
+        """The room under the plot's labels: the legend and a bottom axis title."""
+        return self.legend_h + self.inset_b
 
     def plain(self, v) -> str:
         return _fmt_value(v, self.unit_plain, self.decimals)
@@ -1926,6 +2071,7 @@ def add_chart(
     accent_hex: Optional[str] = None,
     legend: bool = True,
     amounts: bool = False,
+    muted_hex: Optional[str] = None,
 ):
     """A native chart at `bbox`, finished to the rules in the module docstring. `amounts` (a pie or a doughnut of
     amounts, not percents, drawn with the caller's legend): the chart keeps the amounts as its data and labels its
@@ -1933,17 +2079,33 @@ def add_chart(
     brief; the caller's legend gives each part's amount and its share, headed as a share. `ground_hex` is the colour
     under the chart (read from the slide when omitted); `accent_hex` overrides accent.1 (the highlight). `legend=False`: a pie
     or a doughnut without its own legend (the caller sets one beside it) — the circle takes the whole frame and a
-    slice too thin for its label inside carries none (the caller's legend gives every share)."""
-    series = resolve_series(spec, outline)
-    if not series:
-        raise ValueError("chart has no series data")
+    slice too thin for its label inside carries none (the caller's legend gives every share). `spec.x_title` /
+    `spec.y_title`: axis titles; `spec.source`: a source line under the chart inside `bbox` (a caller that prints the
+    source on the slide clears it — `source_said`); `spec.xy`: the points of a scatter. `muted_hex`: the template's own
+    secondary text colour (the composer's footnote colour) for the source line, which stands on the slide outside the
+    chart — a colour of the template, as the audit wants every text of the slide. The returned graphic frame carries
+    `verstka_source` (the source line's text box, or None)."""
     kind = effective_chart_type(spec, outline)
+    xs_all: list[list[float]] = []
+    if kind == "scatter":
+        pts = xy_series(spec)
+        if not pts:
+            raise ValueError("chart has no series data")
+        series = [Series.model_construct(id=f"xy_{i + 1}", name=nm, categories=[], values=list(ys), unit=spec.unit, source_span=None) for i, (nm, _, ys) in enumerate(pts)]
+        xs_all = [list(xs) for _, xs, _ in pts]
+    else:
+        series = resolve_series(spec, outline)
+        if not series:
+            raise ValueError("chart has no series data")
     if kind in ("pie", "doughnut"):
         series = series[:1]
     cats = [str(c) for c in series[0].categories]
     n = len(cats)
     multi = len(series) > 1
-    values = [[(float(v) if v is not None else None) for v in list(s.values)[:n]] for s in series]
+    if kind == "scatter":
+        values = [[float(v) for v in s.values] for s in series]
+    else:
+        values = [[(float(v) if v is not None else None) for v in list(s.values)[:n]] for s in series]
     unit = spec.unit or series[0].unit
 
     # --- ground, text and colours
@@ -2013,11 +2175,31 @@ def add_chart(
         fs_value = max(fs, _size_at_most(min(fs_value, 1.25 * fs, max(0.03 * hpt, fs)), typography))
         fs_hl = max(fs_value, _size_at_most(min(fs_hl, 1.12 * fs_value), typography)) if not bold else fs_value
 
+    # --- the source line: small muted print under the chart, inside its frame (the chart takes what is left)
+    src = source_text(spec.source)
+    src_fs = src_h = 0.0
+    chart_box = bbox
+    if src:
+        src_fs = min(fs, max(_font_floor(slide), _size_at_most(fs * 0.9, typography)))
+        lines = max(1, min(2, len(wrap_lines(src, family, src_fs, False, W * 0.98))))
+        src_h = lines * src_fs * 1.3
+        room = src_h + src_fs * 0.6
+        if H - room >= 0.6 * H:
+            H -= room
+            chart_box = Bbox(x=bbox.x, y=bbox.y, w=bbox.w, h=max(1, int(round(H * EMU_PER_PT))))
+        else:
+            src = None  # a frame too small for a chart and its source line: the chart keeps it (the caller's note says it)
+
     # --- data
-    data = CategoryChartData()
-    data.categories = cats
+    data = XyChartData() if kind == "scatter" else CategoryChartData()
     pie_pct = False
-    if kind in ("pie", "doughnut"):
+    if kind == "scatter":
+        for s, xs, ys in zip(series, xs_all, values):
+            ser_data = data.add_series(s.name or "")
+            for x, y in zip(xs, ys):
+                ser_data.add_data_point(x, y)
+    elif kind in ("pie", "doughnut"):
+        data.categories = cats
         vals = [max(0.0, v or 0.0) for v in values[0]]
         total = sum(vals)
         is_pct = pie_values_are_percents(unit, total)
@@ -2028,19 +2210,33 @@ def add_chart(
         unit = unit if keep else "%"
         data.add_series(series[0].name, shares)
     else:
+        data.categories = cats
         for s, vals in zip(series, values):
             data.add_series(s.name, vals)
     all_vals = [v for vs in values for v in vs if v is not None]
 
-    # --- the unit, once
+    # --- the unit, once: the value axis's title, else a caption above the chart, else the labels
     unit_full = " ".join((unit or "").split())
     glyph = glyph_unit(unit_full)
+    pie = kind in ("pie", "doughnut")
+    x_title = None if pie else (" ".join((spec.x_title or "").split()) or None)
+    y_title = None if pie else (" ".join((spec.y_title or "").split()) or None)
+    axis_unit = False  # the value axis's title carries the word unit
+    if y_title and unit_full and not glyph:
+        low = y_title.lower()
+        if unit_full.lower() in low or short_unit(unit_full).lower() in low:
+            axis_unit = True
+        elif not _unit_shown_above(slide, bbox, unit_full):
+            y_title = f"{y_title.rstrip(' ,.:;')}, {unit_full}"
+            axis_unit = True
     head = spec.title or None
     head_is_title = bool(head)
     unit_in_head = False
-    _on_labels = not head and bare_unit_on_labels(spec, outline, unit_full)
-    if kind not in ("pie", "doughnut") and unit_full and not glyph:
-        if head:
+    _on_labels = not head and not axis_unit and bare_unit_on_labels(spec, outline, unit_full)
+    if not pie and unit_full and not glyph:
+        if axis_unit:
+            unit_in_head = True  # the value axis's title says the unit: the labels are plain numbers
+        elif head:
             low = head.lower()
             if unit_full.lower() not in low and short_unit(unit_full).lower() not in low:
                 head = f"{head.rstrip(' ,.:;')}, {unit_full}"
@@ -2052,11 +2248,11 @@ def add_chart(
         else:
             head = unit_full  # a word unit is written once, above the chart: the labels are plain numbers
             unit_in_head = True
-    if kind in ("pie", "doughnut") and unit != "%":
+    if pie and unit != "%":
         decimals = _decimals(all_vals)  # a pie of the brief's amounts: its slices say the amounts
         fmt_unit = fmt_plain = fmt_emph = label_format(unit, all_vals)
         unit_plain = unit_emph = unit
-    elif kind in ("pie", "doughnut"):
+    elif pie:
         decimals = 0
         fmt_unit = fmt_plain = fmt_emph = label_format("%", [])
         unit_plain = unit_emph = "%"
@@ -2068,11 +2264,13 @@ def add_chart(
         unit_plain = unit if glyph or _on_labels else None
         unit_emph = unit_plain if unit_in_head else unit
 
-    gf = slide.shapes.add_chart(_TYPE_MAP[kind], Emu(bbox.x), Emu(bbox.y), Emu(bbox.w), Emu(bbox.h), data)
+    gf = slide.shapes.add_chart(_TYPE_MAP[kind], Emu(chart_box.x), Emu(chart_box.y), Emu(chart_box.w), Emu(chart_box.h), data)
     _OWN_PARTS.add(gf.chart_part)
     chart = gf.chart
     cs = chart._chartSpace
     fix_axis_ids(cs)
+    if kind != "scatter":
+        _set_disp_blanks(cs, "gap")  # a missing value is a break in the line, never a zero
     chart.font.size = Pt(fs)
     if family:
         chart.font.name = family
@@ -2092,7 +2290,7 @@ def add_chart(
         run.font.color.rgb = _rgb(text if head_is_title else muted)
         if family:
             run.font.name = family
-        title_el = cs.find(f".//{_c('title')}")
+        title_el = cs.find(f"{_c('chart')}/{_c('title')}")
         if title_el is not None:
             _manual_layout(title_el, 0.0, 0.0, None, None, inner=False)
             ov = title_el.find(_c("overlay"))
@@ -2112,27 +2310,43 @@ def add_chart(
     k.slice_labels = True
     k.capped = capped
     k.pct_given = pie_pct
-    if multi and kind not in ("pie", "doughnut"):
-        k.roles = series_roles([s.name for s in series])
+    k.x_title, k.y_title, k.xs = x_title, y_title, xs_all
+    # axis titles take a line of room along their axis: the left one at the frame's left edge, the bottom one above
+    # the legend
+    left_t, bottom_t = (x_title, y_title) if kind in _HORIZONTAL else (y_title, x_title)
+    if left_t:
+        k.inset_l = fs * TITLE_LINE + fs * 0.45
+    if bottom_t:
+        k.inset_b = fs * TITLE_LINE + fs * 0.35
+    if multi and not pie and kind != "scatter" and kind not in _STACKED:
+        k.roles = series_roles([s.name for s in series])  # (stacked series are parts of a whole, not a story)
     k.styles = _series_styles(k)
+    if kind in _STACKED and multi:
+        quiet = _quiet_fill(text, ground)
+        for i, s in enumerate(series):
+            if is_other_category(s.name or ""):
+                k.styles[i] = {"fill": quiet, "label": muted, "role": None}  # «Прочее» is present, without a hue
 
     # --- legend: pies always; bars with several series (horizontal bars name their series on the first row
     # instead); lines and areas name each line at its end
     chart.has_legend = False
     k.outside = legend
-    if kind in ("pie", "doughnut") and legend:
+    if pie and legend:
         _legend(k, cats, side=W / max(H, 1) >= 1.45)
-    elif multi and kind == "column":
+    elif multi and kind in ("column", "stacked_column", "histogram", "scatter"):
         _legend(k, [s.name for s in series], side=False)
 
-    if kind in ("column", "bar"):
+    if kind in _BARS:
         _style_bars(k)
     elif kind in ("line", "area"):
         _style_line(k)
+    elif kind == "scatter":
+        _style_scatter(k)
     else:
         _style_pie(k)
     _transparent(chart)
     _fonts_everywhere(cs, family)
+    gf.verstka_source = _source_box(slide, Bbox(x=bbox.x, y=bbox.y + bbox.h - int(round(src_h * EMU_PER_PT)), w=bbox.w, h=int(round(src_h * EMU_PER_PT))), src, src_fs, _source_ink(muted_hex, text, muted, ground), family) if src else None
     # for a caller's own legend: the colour of every slice (series), and for a pie its tint as (base, share over the
     # ground) — a swatch drawn in the base colour at that opacity looks the same and stays a colour of the template
     gf.verstka_colors = list(palette) if kind in ("pie", "doughnut") else [st.get("fill") or st.get("line") or accent for st in k.styles]
@@ -2183,6 +2397,15 @@ def _value_axis(k: _Kit, show: bool, fs: float, lo: Optional[float], hi: Optiona
         va.minimum_scale = lo
     if hi is not None:
         va.maximum_scale = hi
+    if not show and k.y_title:
+        # the labels carry the values: the axis stays only to carry its title — no ticks, no line, no gridlines
+        va.visible = True
+        va.has_major_gridlines = False
+        va.major_tick_mark = XL_TICK_MARK.NONE
+        va.minor_tick_mark = XL_TICK_MARK.NONE
+        va.tick_label_position = XL_TICK_LABEL_POSITION.NONE
+        va.format.line.fill.background()
+        return
     if not show:
         va.has_major_gridlines = False
         va.visible = False
@@ -2216,28 +2439,99 @@ def _plot_layout(k: _Kit, left: float, top: float, pw: float, ph: float) -> None
     pa = k.chart._chartSpace.find(f".//{_c('plotArea')}")
     if pa is not None:
         _manual_layout(pa, left / k.W, top / k.H, pw / k.W, ph / k.H)
+    _axis_titles(k, left, top, pw, ph)
+
+
+def _axis_title(k: _Kit, axis, text: str, vertical: bool, size: float):
+    """A native axis title in the template's face at `size`, the muted text colour, not bold; turned to read bottom-up
+    along a vertical axis. Returns its c:title."""
+    axis.has_title = True
+    tf = axis.axis_title.text_frame
+    tf.text = text
+    run = tf.paragraphs[0].runs[0]
+    run.font.size = Pt(size)
+    run.font.bold = False
+    run.font.color.rgb = _rgb(k.muted)
+    if k.family:
+        run.font.name = k.family
+    run._r.get_or_add_rPr().set("lang", "ru-RU")
+    title_el = axis._element.find(_c("title"))
+    bp = title_el.find(f"{_c('tx')}/{_c('rich')}/{_a('bodyPr')}")
+    if bp is not None:
+        bp.set("rot", "-5400000" if vertical else "0")
+        bp.set("vert", "horz")
+    ov = title_el.find(_c("overlay"))
+    if ov is None:
+        ov = etree.Element(_c("overlay"))
+        _insert_before(title_el, ov, ("spPr", "txPr", "extLst"))
+    ov.set("val", "0")
+    return title_el
+
+
+def _axis_titles(k: _Kit, left: float, top: float, pw: float, ph: float) -> None:
+    """The axis titles set along their axes (`k.x_title` on the category or X axis, `k.y_title` on the value or Y
+    axis): the left one turned, centred on the plot's height at the frame's left edge (the room `k.inset_l`); the
+    bottom one centred under the plot, just above the legend (the room `k.inset_b`). A title longer than its side
+    steps down the template's sizes to the chart's floor."""
+    if not (k.x_title or k.y_title) or k.kind in ("pie", "doughnut"):
+        return
+    horizontal = k.kind in _HORIZONTAL
+    floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+    for text, axis, is_x in ((k.x_title, k.chart.category_axis, True), (k.y_title, k.chart.value_axis, False)):
+        if not text:
+            continue
+        vertical = (is_x and horizontal) or (not is_x and not horizontal)
+        side = (ph if vertical else pw) * 0.98
+        size = k.fs
+        for s in (k.fs, _snap(k.fs * 0.9), _snap(k.fs * 0.82)):
+            size = max(min(floor, k.fs), s)
+            if text_width_pt(text, k.family, size) * 1.04 + 4 <= side:
+                break
+        tw = min(text_width_pt(text, k.family, size) * 1.04 + 4, (k.H if vertical else k.W) * 0.98)
+        title_el = _axis_title(k, axis, text, vertical, size)
+        if vertical:
+            x = 0.0
+            y = min(max(0.0, top + ph / 2 - tw / 2), max(0.0, k.H - tw))
+        else:
+            x = min(max(0.0, left + pw / 2 - tw / 2), max(0.0, k.W - tw))
+            y = max(0.0, k.H - k.legend_h - size * TITLE_LINE)
+        _manual_layout(title_el, x / k.W, y / k.H, None, None, inner=False)
 
 
 # ---------------------------------------------------------------------------------------------- bars
 
 
 def _style_bars(k: _Kit) -> None:
-    horizontal = k.kind == "bar"
+    """Columns and horizontal bars — one series, several side by side, or stacked parts of a whole — and a histogram's
+    touching bins."""
+    horizontal = k.kind in _HORIZONTAL
+    stacked = k.kind in _STACKED
+    hist = k.kind == "histogram"
     cats, values, series, W, H, fs, family = k.cats, k.values, k.series, k.W, k.H, k.fs, k.family
     n = max(1, len(cats))
     ns = len(series)
     multi = ns > 1
     flat = [v for vs in values for v in vs if v is not None]
     has_neg = any(v < 0 for v in flat)
-    hl = k.spec.highlight_index if (k.spec.highlight_index is not None and not multi and 0 <= k.spec.highlight_index < n) else None
+    want = k.spec.highlight_index
+    hl = want if (want is not None and not multi and 0 <= want < n) else None
+    # several series of the data layer's grouped or stacked bars: the highlighted category stands out, the other
+    # categories ease toward the ground (the planner's several-series bars keep ignoring a highlight, as before)
+    data_kind = k.spec.type in ("grouped_column", "grouped_bar", "stacked_column", "stacked_bar")
+    cat_hl = want if (want is not None and multi and data_kind and 0 <= want < n) else None
     # the one label that carries the unit: the highlight, else the top bar (horizontal) or the tallest column
     emph = hl
     if emph is None and not multi and values[0]:
         vals0 = [(v if v is not None else -math.inf) for v in values[0]]
         emph = 0 if horizontal else max(range(len(vals0)), key=lambda j: (vals0[j], j))
-    # horizontal bars with several series name them on the first row («Было: 48») instead of in a legend
+    # a stacked bar reaches the sum of its parts (positives up, negatives down)
+    tops = [sum(max(0.0, vs[j] or 0.0) for vs in values if j < len(vs)) for j in range(n)] if stacked else []
+    bots = [sum(min(0.0, vs[j] or 0.0) for vs in values if j < len(vs)) for j in range(n)] if stacked else []
+    ext = flat + tops + bots  # what the value axis spans
+    # horizontal bars with several series name them on the first row («Было: 48») instead of in a legend; stacked
+    # parts always have their legend
     widest_name = max((text_width_pt(s.name, family, fs) for s in series), default=0.0)
-    direct = horizontal and multi and ns <= 4 and widest_name <= W * 0.3
+    direct = horizontal and multi and not stacked and ns <= 4 and widest_name <= W * 0.3
     if horizontal and multi and not direct:
         _legend(k, [s.name for s in series], side=False)
 
@@ -2277,7 +2571,7 @@ def _style_bars(k: _Kit) -> None:
     # (below) — Ateliers' 7.5 pt labels under 12 pt values read as footnotes
     floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
     if horizontal:
-        row = max(H - k.title_h - k.legend_h - fs, H * 0.3) / n
+        row = max(H - k.title_h - k.foot - fs, H * 0.3) / n
         for size in sorted({fs, max(floor, _snap(fs * 0.9)), max(floor, _snap(fs * 0.82))}, reverse=True):
             cat_fs = size
             cat_w = min(max((text_width_pt(c, family, size) for c in cats), default=20.0), W * 0.42)
@@ -2294,32 +2588,39 @@ def _style_bars(k: _Kit) -> None:
     turned_below = 0.0  # the room turned column labels take under the axis (B3-1: a word never broken inside)
 
     def box(labels_on: bool, axis_on: bool, fsv: float):
+        outside = labels_on and not stacked  # (stacked labels sit inside their segments)
         if horizontal:
-            left = cat_w + cat_fs * 0.8
-            right = (lab_w(fsv) + fsv * 0.7) if labels_on else fs
+            left = k.inset_l + cat_w + cat_fs * 0.8
+            right = (lab_w(fsv) + fsv * 0.7) if outside else fs
             top = k.title_h + (fs * 0.3)
-            bottom = k.legend_h + (fs * 1.8 if axis_on else fs * 0.3)
+            bottom = k.foot + (fs * 1.8 if axis_on else fs * 0.3)
         else:
             pitch0 = W / n
             lines = max((len(wrap_lines(c, family, cat_fs, False, pitch0 * 0.92)) for c in cats), default=1)
             lines = min(lines, 3)
-            left = _axis_room(flat, k.unit, k.decimals, family, fs, 0.8) if axis_on else 1.0
+            left = k.inset_l + (_axis_room(ext, k.unit, k.decimals, family, fs, 0.8) if axis_on else 1.0)
             right = 1.0
-            top = k.title_h + ((lab_top(fsv) * 1.3 + 5) if labels_on else fs * 0.7)
-            bottom = k.legend_h + (turned_below if turned_below else lines * cat_fs * 1.22 + cat_fs * 0.6)
+            top = k.title_h + ((lab_top(fsv) * 1.3 + 5) if outside else fs * 0.7)
+            bottom = k.foot + (turned_below if turned_below else lines * cat_fs * 1.22 + cat_fs * 0.6)
         return left, top, max(W - left - right, W * 0.3), max(H - top - bottom, H * 0.3)
 
     labels_on, axis_on = True, False  # values on the bars replace the value axis
     fs_val = fs_val0
     left, top, pw, ph = box(labels_on, axis_on, fs_val)
     slot = (ph if horizontal else pw) / n
-    # bar thickness: gap 60–80 %, but a few bars in a wide frame keep a designed width instead of turning into slabs
-    cap = (max(fs_val * 2.6, 0.075 * k.sh / EMU_PER_PT) if horizontal else 0.11 * k.sw / EMU_PER_PT) * (1.0 if not multi else min(ns, 3) * 0.9)
-    group = min(slot / 1.7, cap)
-    gap = int(max(60, min(300, round((slot / group - 1) * 100))))
-    group = slot / (1 + gap / 100)
-    bar = group / ns if multi else group
-    if not horizontal:
+    if hist:
+        # a histogram's bins touch: the bars are the intervals, a hairline of the ground between them
+        gap = 0
+        group = slot
+    else:
+        # bar thickness: gap 60–80 %, but a few bars in a wide frame keep a designed width instead of turning into slabs
+        cap = (max(fs_val * 2.6, 0.075 * k.sh / EMU_PER_PT) if horizontal else 0.11 * k.sw / EMU_PER_PT) * (1.0 if (not multi or stacked) else min(ns, 3) * 0.9)
+        group = min(slot / (1.5 if stacked else 1.7), cap)
+        lo_gap, hi_gap = STACK_GAP if stacked else (60, 300)
+        gap = int(max(lo_gap, min(hi_gap, round((slot / group - 1) * 100))))
+        group = slot / (1 + gap / 100)
+    bar = group / ns if (multi and not stacked) else group
+    if not horizontal and not stacked:
         # every value label must fit over its bar (plus a little of the gap)
         room = bar + (slot - group) * 0.5 if not multi else bar * 1.12
         sizes = (fs_val, _snap(fs * 1.15), fs, _snap(fs * 0.9)) if not multi else (fs, _snap(fs * 0.9), max(8.0, _snap(fs * 0.82)))
@@ -2333,7 +2634,7 @@ def _style_bars(k: _Kit) -> None:
             else:
                 fs_val = _snap(fs * 0.9)
         left, top, pw, ph = box(labels_on, axis_on, fs_val)
-    if horizontal and multi and (ph / n / (1 + gap / 100) / ns) < fs * 0.9:
+    if horizontal and multi and not stacked and (ph / n / (1 + gap / 100) / ns) < fs * 0.9:
         labels_on, axis_on = False, True
     if multi and not labels_on and direct:
         direct = False
@@ -2353,7 +2654,7 @@ def _style_bars(k: _Kit) -> None:
                     cat_fs = size
                     break
             else:
-                room_h = H - k.title_h - k.legend_h
+                room_h = H - k.title_h - k.foot
                 fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - max(H * 0.3, 0.42 * room_h)))
                 if fit.mode == "turn":
                     rotate_cols = k.turned = True
@@ -2363,10 +2664,50 @@ def _style_bars(k: _Kit) -> None:
                         _set_categories(k, cats)
                     left, top, pw, ph = box(labels_on, axis_on, fs_val)
 
+    # stacked: each value inside its segment where it fits (its width across the bar, its line along it); a value
+    # that does not fit leaves its segment bare and brings a quiet value axis to read it by
+    inside: dict[tuple[int, int], bool] = {}
+
+    def fit_inside(pw_: float, ph_: float, lo_v: float, hi_v: float) -> dict[tuple[int, int], bool]:
+        span = (hi_v - lo_v) or 1.0
+        along = pw_ if horizontal else ph_
+        thick = (ph_ if horizontal else pw_) / n / (1 + gap / 100)
+        out: dict[tuple[int, int], bool] = {}
+        for i, vs in enumerate(values):
+            for j, v in enumerate(vs):
+                if v is None or v == 0:
+                    continue
+                length = abs(v) / span * along
+                tw = text_width_pt(k.plain(v), family, fs_val) * 1.08 + 4
+                th = fs_val * 1.2
+                out[(i, j)] = (tw + fs_val * 0.4 <= length and th <= thick * 0.92) if horizontal else (th + 2 <= length and tw <= thick)
+        return out
+
+    if stacked and labels_on and flat:
+        fs_val = fs if multi else fs_val
+        inside = fit_inside(pw, ph, min(0.0, min(bots)), max(tops) or 1.0)
+        if not all(inside.values()):
+            axis_on = True
+            left, top, pw, ph = box(labels_on, axis_on, fs_val)
+            lo_n, hi_n, _ = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)))
+            inside = fit_inside(pw, ph, lo_n, hi_n)
+        if not any(inside.values()):
+            labels_on = False
+
     plot = k.plot
     plot.gap_width = gap
-    plot.overlap = -8 if multi else 0
+    plot.overlap = 100 if stacked else (-8 if multi else 0)
     plot.vary_by_categories = False
+    if hist and k.chart_el is not None:
+        _set_child_val(k.chart_el, "overlap", "0", ("serLines", "axId", "extLst"))  # (written out: the bins never overlap)
+
+    def seam(fmt) -> None:
+        # a histogram's bins and stacked segments are set apart by a hairline of the ground; other bars have no edge
+        if hist or stacked:
+            fmt.line.color.rgb = _rgb(k.ground)
+            fmt.line.width = Pt(SEAM_PT)
+        else:
+            fmt.line.fill.background()
 
     # colours: the story's paint for several series; one series steps back behind its highlight
     muted_fill = muted_tint(k.accent, k.ground)
@@ -2376,7 +2717,7 @@ def _style_bars(k: _Kit) -> None:
         if st.get("fill"):
             ser.format.fill.solid()
             ser.format.fill.fore_color.rgb = _rgb(st["fill"])
-            ser.format.line.fill.background()
+            seam(ser.format)
         else:  # a plan: the outline of the bar it aims for
             ser.format.fill.background()
             ser.format.line.color.rgb = _rgb(st.get("line") or k.accent)
@@ -2385,17 +2726,34 @@ def _style_bars(k: _Kit) -> None:
             pt = ser.points[hl]
             pt.format.fill.solid()
             pt.format.fill.fore_color.rgb = _rgb(k.accent)
-            pt.format.line.fill.background()
+            seam(pt.format)
+        if cat_hl is not None and st.get("fill"):
+            back = eased(st["fill"], k.ground)
+            for j, v in enumerate(values[i]):
+                if j != cat_hl and v is not None:
+                    pt = ser.points[j]
+                    pt.format.fill.solid()
+                    pt.format.fill.fore_color.rgb = _rgb(back)
+                    seam(pt.format)
 
     # labels
     plot.has_data_labels = labels_on
     if labels_on and k.chart_el is not None:
-        pos = "outEnd"
+        pos = "ctr" if stacked else "outEnd"
         _set_plot_dlbls(k.chart_el, _dlbls(k.fmt_unit, fs_val, k.text, family, pos))
         for i, ser in enumerate(plot.series):
             st = k.styles[i] if multi else {"label": k.text}
             lab = st.get("label", k.text)
             pts: dict[int, dict] = {}
+            if stacked:
+                fill = st.get("fill") or k.accent
+                for j, v in enumerate(values[i]):
+                    if v is None or v == 0 or not inside.get((i, j)):
+                        pts[j] = {"delete": True}
+                    elif cat_hl is not None and j != cat_hl:
+                        pts[j] = {"color": _label_on(eased(fill, k.ground), k.text, k.ground)}
+                _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, _label_on(fill, k.text, k.ground), family, pos, pts))
+                continue
             for j, v in enumerate(values[i]):
                 if v is None:
                     pts[j] = {"delete": True}
@@ -2404,13 +2762,18 @@ def _style_bars(k: _Kit) -> None:
                     # unless another series' bar fills the row (a «0» beside «38» of the other series is noise)
                     row_shown = multi and any((values[o][j] or 0) != 0 for o in range(len(values)) if o != i and j < len(values[o]))
                     pts[j] = {"fmt": "0", "color": k.muted} if horizontal and not row_shown else {"delete": True}
+                elif cat_hl is not None and j != cat_hl:
+                    pts[j] = {"color": k.muted}
             if not multi and hl is not None and hl not in pts:
                 pts[hl] = k.hl_label(fs_val / k.fs_value if k.fs_value else 1.0)
             elif not multi and emph is not None and emph not in pts:
                 pts[emph] = {"fmt": k.fmt_emph}
-            if direct and 0 not in pts:
+            if direct and (0 not in pts or (cat_hl is not None and set(pts[0]) == {"color"})):
                 fill = st.get("fill") or st.get("line") or lab
-                pts[0] = {"sername": True, "color": fill if contrast_ratio(fill, k.ground) >= 3.0 else lab}
+                color = fill if contrast_ratio(fill, k.ground) >= 3.0 else lab
+                if cat_hl is not None and cat_hl != 0:
+                    color = k.muted  # (the first row is not the highlighted category: its names step back with it)
+                pts[0] = {"sername": True, "color": color}
             _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, lab, family, pos, pts))
 
     # axes: columns stand on one hairline baseline; horizontal bars start at a common edge and need none (unless < 0)
@@ -2419,9 +2782,9 @@ def _style_bars(k: _Kit) -> None:
     if flat and not has_neg:
         lo = 0.0
         if labels_on and not axis_on:
-            hi = max(flat) or None
+            hi = (max(tops) if stacked else max(flat)) or None
     if axis_on and flat:
-        lo, hi, step = _nice_scale(min(0.0, min(flat)), max(0.0, max(flat)))
+        lo, hi, step = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)))
     _value_axis(k, axis_on, fs, lo, hi, step)
     _plot_layout(k, left, top, pw, ph)
 
@@ -2580,9 +2943,12 @@ def _style_line(k: _Kit) -> None:
     multi = ns > 1
     flat = [v for vs in values for v in vs if v is not None]
     has_neg = any(v < 0 for v in flat)
+    # a line ends (and is labelled) at its last point with a value: a missing tail is a break, not a zero
+    lasts = [last_value_index(vs) for vs in values]
     hl = None
-    if not multi and kind == "line":
-        hl = k.spec.highlight_index if (k.spec.highlight_index is not None and 0 <= k.spec.highlight_index < n) else n - 1
+    want = k.spec.highlight_index
+    if not multi and kind == "line" and want != NO_HIGHLIGHT:
+        hl = want if (want is not None and 0 <= want < n and values[0][want] is not None) else lasts[0]
     slot = W / n
     fs_val = k.fs_value if (not multi and n <= 6) else fs
     ratio = k.fs_hl / k.fs_value if k.fs_value else 1.0
@@ -2609,7 +2975,7 @@ def _style_line(k: _Kit) -> None:
         _legend(k, names, side=False)
 
     def end_text(i: int) -> str:
-        last = values[i][-1] if values[i] else None
+        last = values[i][lasts[i]] if lasts[i] is not None else None
         t = k.emph(last) if not multi else k.plain(last)
         return f"{names[i]}{LABEL_SEP}{t}" if named else t
 
@@ -2648,19 +3014,19 @@ def _style_line(k: _Kit) -> None:
     lab_h = fs_val * 1.2
     top = k.title_h + ((max(fs_val, _snap(fs_val * ratio)) * 1.25 + marker / 2 + 6) if every_point else (fs * 0.9 if ends else fs * 0.9))
     if axis_on:
-        left = _axis_room([lo or 0.0, hi or 0.0] + flat, k.unit, k.decimals, family, fs, 1.2)
+        left = k.inset_l + _axis_room([lo or 0.0, hi or 0.0] + flat, k.unit, k.decimals, family, fs, 1.2)
     else:
-        left = max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
+        left = k.inset_l + max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
     right = max(1.0, end_w + fs * 0.9 - slot / 2 + 6) if ends else max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
     pw = max(W - left - right, W * 0.3)
     floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
     sizes = sorted({cat_fs, max(min(floor, cat_fs), _snap(cat_fs * 0.9)), max(min(floor, cat_fs), _snap(cat_fs * 0.82))}, reverse=True)
-    room_h = H - top - k.legend_h
+    room_h = H - top - k.foot
     below_max = max(0.0, room_h - max(H * 0.3, 0.42 * room_h))
     fit = fit_categories(cats, family, sizes, pw / n, below_max, turn_first=n >= 5)
     if fit.mode == "turn" and fit.labels and fit.labels[0]:
-        # the first label turned hangs left of its point: the plot starts clear of it
-        hang = TURN_SIN * (text_width_pt(fit.labels[0], family, fit.size) + CAT_LINE * fit.size) - pw / n / 2 + 2
+        # the first label turned hangs left of its point: the plot starts clear of it (and of a left axis title)
+        hang = k.inset_l + TURN_SIN * (text_width_pt(fit.labels[0], family, fit.size) + CAT_LINE * fit.size) - pw / n / 2 + 2
         if hang > left:
             left = hang
             pw = max(W - left - right, W * 0.3)
@@ -2668,7 +3034,7 @@ def _style_line(k: _Kit) -> None:
     if fit.labels != list(cats):
         cats = k.cats = list(fit.labels)
         _set_categories(k, cats)
-    bottom = k.legend_h + fit.below
+    bottom = k.foot + fit.below
     ph = max(H - top - bottom, H * 0.3)
     real_slot = pw / n
     k.cramped = W - left - right < pw - 0.5
@@ -2761,8 +3127,8 @@ def _style_line(k: _Kit) -> None:
                 k.plot.has_data_labels = True
                 _set_plot_dlbls(k.chart_el, _dlbls(k.fmt_unit, fs_val, k.text, family, "r"))
             targets = area_lines if kind == "area" else [s._element for s in k.plot.series]
-            # end labels right of the last point, pushed apart vertically where two lines end close together
-            ends_y = {i: lines_xy[i][-1][1] for i in range(ns) if lines_xy[i] and lines_xy[i][-1] is not None and values[i][-1] not in (None, 0)}
+            # end labels right of the last point with a value, pushed apart vertically where two lines end close together
+            ends_y = {i: lines_xy[i][lasts[i]][1] for i in range(ns) if lasts[i] is not None and values[i][lasts[i]] != 0}
             moved = _repel(ends_y, lab_h * 1.05, k.title_h, H - bottom) if ends_y else {}
             for i, ser_el in enumerate(targets):
                 st = k.styles[i]
@@ -2776,8 +3142,8 @@ def _style_line(k: _Kit) -> None:
                     dy = moved[i] - ends_y[i]
                     if abs(dy) > 0.5:
                         o["dy"] = dy / H
-                    pts[n - 1] = o
-                if hl is not None and hl != n - 1 and values[i][hl] not in (None, 0):
+                    pts[lasts[i]] = o
+                if hl is not None and hl != lasts[i] and values[i][hl] not in (None, 0):
                     p = lines_xy[i][hl]
                     size = _snap(fs_val * ratio)
                     w = text_width_pt(k.emph(values[i][hl]), family, size, k.bold) * 1.08 + 2
@@ -2795,6 +3161,119 @@ def _style_line(k: _Kit) -> None:
     _set_child_val(ax, "lblOffset", "100", ("tickLblSkip", "tickMarkSkip", "noMultiLvlLbl", "extLst"))
     va = k.chart.value_axis._element
     _set_child_val(va, "crossBetween", "between", ("majorUnit", "minorUnit", "dispUnits", "extLst"))
+    _plot_layout(k, left, top, pw, ph)
+
+
+# ---------------------------------------------------------------------------------------------- scatter
+
+
+def _scatter_range(vals: Sequence[float]) -> tuple[float, float, float]:
+    """(min, max, step) of a scatter axis on round ticks: from zero when the data sit near it (as a line's axis), else
+    from a round value under the lowest point."""
+    mn, mx = min(vals), max(vals)
+    if mn >= 0 and mn <= 0.45 * mx:
+        lo_raw = 0.0
+    else:
+        lo_raw = mn - (mx - mn) * 0.08
+    hi_raw = mx + (mx - mn) * 0.04
+    lo, hi, step = _nice_scale(lo_raw, hi_raw if hi_raw > lo_raw else lo_raw + (abs(lo_raw) or 1.0))
+    if mn >= 0:
+        lo = max(0.0, lo)
+    return lo, hi, step
+
+
+def _style_scatter(k: _Kit) -> None:
+    """Points only, no lines: translucent ringed markers (the accent; several series the template's palette), two
+    quiet value axes on round ticks — the Y axis with gridlines and the unit on its ticks or in its title, the X axis
+    on a hairline baseline. The highlighted point is larger, in the accent, with its value beside it; the others step
+    back into the accent's tint. No other labels: the axes carry the values."""
+    W, H, fs, family = k.W, k.H, k.fs, k.family
+    ns = len(k.series)
+    multi = ns > 1
+    xs_flat = [x for xs in k.xs for x in xs] or [0.0]
+    ys_flat = [y for ys in k.values for y in ys] or [0.0]
+    npts = len(ys_flat)
+    x_lo, x_hi, x_step = _scatter_range(xs_flat)
+    y_lo, y_hi, y_step = _scatter_range(ys_flat)
+    want = k.spec.highlight_index
+    hl = want if (want is not None and not multi and 0 <= want < len(k.values[0])) else None
+    size = 8 if npts <= 30 else (7 if npts <= 120 else 5)
+    alpha = SCATTER_ALPHA[0] if npts <= 30 else SCATTER_ALPHA[1]
+
+    x_dec = tick_decimals(x_step, _decimals(xs_flat))
+    x_ticks = []
+    v = x_lo
+    while v <= x_hi + x_step * 1e-6 and len(x_ticks) < 20:
+        x_ticks.append(_tick_text(v, None, x_dec))
+        v += x_step
+    widest_x = max((text_width_pt(t, family, fs) for t in x_ticks), default=fs)
+    left = k.inset_l + _axis_room([y_lo, y_hi] + ys_flat, k.unit, k.decimals, family, fs, 0.8)
+    right = max(2.0, widest_x / 2 + 2)
+    top = k.title_h + fs * 0.9
+    bottom = k.foot + fs * CAT_LINE + fs * 0.6
+    pw = max(W - left - right, W * 0.3)
+    ph = max(H - top - bottom, H * 0.3)
+
+    muted_fill = muted_tint(k.accent, k.ground)
+    for i, ser in enumerate(k.plot.series):
+        st = k.styles[i] if multi else {"fill": muted_fill if hl is not None else k.accent}
+        color = st.get("fill") or st.get("line") or k.accent
+        el = ser._element
+        _replace(el, "spPr", _sppr(None, no_line=True), ("marker", "dPt", "dLbls", "trendline", "errBars", "xVal", "yVal", "smooth", "extLst"))
+        mk = el.find(_c("marker"))
+        if mk is None:
+            mk = etree.Element(_c("marker"))
+            _insert_before(el, mk, ("dPt", "dLbls", "trendline", "errBars", "xVal", "yVal", "smooth", "extLst"))
+        for child in list(mk):
+            mk.remove(child)
+        etree.SubElement(mk, _c("symbol")).set("val", "circle")
+        etree.SubElement(mk, _c("size")).set("val", str(size))
+        mk.append(_sppr(color, alpha, line=k.ground, line_w=0.75, no_line=False))
+        _set_child_val(el, "smooth", "0", ("extLst",))
+        if hl is not None and i == 0:
+            dpt = etree.Element(_c("dPt"))
+            etree.SubElement(dpt, _c("idx")).set("val", str(hl))
+            m2 = etree.SubElement(dpt, _c("marker"))
+            etree.SubElement(m2, _c("symbol")).set("val", "circle")
+            etree.SubElement(m2, _c("size")).set("val", str(size + 4))
+            m2.append(_sppr(k.accent, None, line=k.ground, line_w=1.5, no_line=False))
+            etree.SubElement(dpt, _c("bubble3D")).set("val", "0")
+            _insert_before(el, dpt, ("dLbls", "trendline", "errBars", "xVal", "yVal", "smooth", "extLst"))
+            if k.chart_el is not None:
+                # its value beside it, on the side clear of the other points (`place_point_labels`, markers only)
+                def at(x: float, y: float) -> tuple[float, float]:
+                    return left + (x - x_lo) / ((x_hi - x_lo) or 1.0) * pw, top + ph * (1 - (y - y_lo) / ((y_hi - y_lo) or 1.0))
+
+                o = k.hl_label()
+                pts = [at(x, y) for xs, ys in zip(k.xs, k.values) for x, y in zip(xs, ys)]
+                me = at(k.xs[0][hl], k.values[0][hl])
+                w = text_width_pt(k.emph(k.values[0][hl]), family, o["size"], k.bold) * 1.08 + 2
+                (pos, dx), = place_point_labels([me], [(w, o["size"] * 1.2)], (0.0, k.title_h, W, H - bottom), (size + 4) / 2 + 3, lines=[[q] for q in pts])
+                o = {**o, "pos": pos}
+                if dx:
+                    o["dx"] = dx / W
+                _set_ser_dlbls(el, _dlbls(k.fmt_plain, k.fs_value, k.hl_color, family, None, {hl: o}, show_val=False))
+    if k.chart_el is not None:
+        for d in k.chart_el.findall(_c("dLbls")):
+            k.chart_el.remove(d)  # (the highlighted point's label is its series' own; no point else is labelled)
+
+    # the X axis: ticks under a hairline baseline, no gridlines; the Y axis: quiet gridlines, the unit on its ticks
+    xa = k.chart.category_axis
+    xa.visible = True
+    xa.has_major_gridlines = False
+    xa.has_minor_gridlines = False
+    xa.major_tick_mark = XL_TICK_MARK.NONE
+    xa.minor_tick_mark = XL_TICK_MARK.NONE
+    xa.tick_label_position = XL_TICK_LABEL_POSITION.LOW
+    xa.minimum_scale, xa.maximum_scale, xa.major_unit = x_lo, x_hi, x_step
+    xa.format.line.color.rgb = _rgb(k.rule)
+    xa.format.line.width = Pt(0.75)
+    xa.tick_labels.number_format = _tick_format(None, x_dec)
+    xa.tick_labels.number_format_is_linked = False
+    _axis_txpr(xa, fs, k.muted, family)
+    _value_axis(k, True, fs, y_lo, y_hi, y_step)
+    va = k.chart.value_axis._element
+    _set_child_val(va, "crossBetween", "midCat", ("majorUnit", "minorUnit", "dispUnits", "extLst"))
     _plot_layout(k, left, top, pw, ph)
 
 

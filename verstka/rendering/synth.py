@@ -3893,7 +3893,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         has_text = bool(c.paragraphs or c.bullets)
         chart_w = int(sw * (0.62 if has_text else 1.0))
         try:
-            add_chart(slide, Bbox(x=sx, y=top, w=chart_w, h=avail_h), c.chart, outline, manifest.components.chart_style, typo, text_hex=pal.text, neutral_hex=t.color_for("neutral.1"))
+            add_chart(slide, Bbox(x=sx, y=top, w=chart_w, h=avail_h), c.chart, outline, manifest.components.chart_style, typo, text_hex=pal.text, neutral_hex=t.color_for("neutral.1"), muted_hex=pal.text2)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"chart failed: {str(e)[:120]}")
         if has_text:

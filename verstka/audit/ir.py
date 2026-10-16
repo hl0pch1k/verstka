@@ -78,6 +78,48 @@ def _series_style(ser: etree._Element, series: IRChartSeries) -> None:
         series.point_labels[int(idx.get("val"))] = o
 
 
+def _cache_points(ref: Optional[etree._Element]) -> Optional[list]:
+    """The points of one c:cat / c:val / c:xVal / c:yVal as written, aligned by their c:idx over c:ptCount: a point the
+    chart has no value for (a gap of a line — python-pptx and PowerPoint leave it out of the cache) is None in its
+    place, so every later value stays against its own category. None when the reference holds no single cache (a
+    multi-level category axis)."""
+    if ref is None:
+        return None
+    cache = None
+    for path in ("c:numRef/c:numCache", "c:strRef/c:strCache", "c:numLit", "c:strLit"):
+        cache = find(ref, path)
+        if cache is not None:
+            break
+    if cache is None:
+        return None
+    pts = [(int(pt.get("idx") or 0), find(pt, "c:v")) for pt in findall(cache, "c:pt")]
+    cnt = find(cache, "c:ptCount")
+    n = int(cnt.get("val")) if cnt is not None and (cnt.get("val") or "").isdigit() else 0
+    n = max(n, max((i + 1 for i, _ in pts), default=0))
+    out: list = [None] * n
+    for i, v in pts:
+        out[i] = v.text if v is not None and v.text is not None else None
+    return out
+
+
+def _numbers(raw: Optional[list]) -> list[Optional[float]]:
+    out: list[Optional[float]] = []
+    for t in raw or []:
+        try:
+            out.append(float(t) if t not in (None, "") else None)
+        except ValueError:
+            out.append(None)
+    return out
+
+
+def _ir_series(name: str, values: list[Optional[float]]) -> IRChartSeries:
+    """The IR of one series. Its values keep None where a point has no value (IRChartSeries.values is declared
+    list[float]: the gap is set after validation — see the stage 2 report: the schema should say Optional[float])."""
+    ser = IRChartSeries(name=name)
+    ser.values = values
+    return ser
+
+
 def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
     if not pkg.exists(chart_part):
         return None
@@ -106,24 +148,28 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
         if not name:
             tx = find(ser, "c:tx")
             name = "".join(t.text or "" for t in tx.iter(q("c:v"))) if tx is not None else f"series{len(series) + 1}"
-        vals: list[float] = []
+        # values aligned with the categories: a missing point stays missing (None), never shifts the rest
         val = find(ser, "c:val")
-        if val is not None:
-            for pt in val.iter(q("c:pt")):
-                v = find(pt, "c:v")
-                try:
-                    vals.append(float(v.text)) if v is not None and v.text else None
-                except ValueError:
-                    pass
+        if val is None:
+            val = find(ser, "c:yVal")  # a scatter: its Y values
+        vals = _numbers(_cache_points(val))
         if not categories:
             cat = find(ser, "c:cat")
-            if cat is not None:
-                categories = ["".join(find(pt, "c:v").text or "" for _ in [0]) if find(pt, "c:v") is not None else "" for pt in cat.iter(q("c:pt"))]
+            if cat is None and ctype == "scatter":
+                # a scatter's X values stand for its categories (the figures the slide shows)
+                xs = _numbers(_cache_points(find(ser, "c:xVal")))
+                categories = [f"{x:.12g}" if x is not None else "" for x in xs]
+            elif cat is not None:
+                raw = _cache_points(cat)
+                if raw is not None:
+                    categories = [t or "" for t in raw]
+                else:  # a multi-level axis: its labels as written, level after level
+                    categories = ["".join(find(pt, "c:v").text or "" for _ in [0]) if find(pt, "c:v") is not None else "" for pt in cat.iter(q("c:pt"))]
         sp = find(ser, "c:spPr")
         clr = find(sp, "a:solidFill/a:srgbClr") if sp is not None else None
         if clr is not None and clr.get("val"):
             colors.append(clr.get("val").upper())
-        series.append(IRChartSeries(name=name, values=vals))
+        series.append(_ir_series(name, vals))
     dlbls = find(chart_el, "c:dLbls")
     has_labels = False
     if dlbls is not None:
@@ -137,7 +183,9 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
                 break
     has_legend = find(root, ".//c:legend") is not None
     val_ax = find(plot, "c:valAx")
-    has_val_axis = val_ax is not None and (find(val_ax, "c:delete") is None or find(val_ax, "c:delete").get("val") in ("0", "false"))
+    # (an axis kept only to carry its title — no tick labels — shows no values)
+    tick_pos = find(val_ax, "c:tickLblPos") if val_ax is not None else None
+    has_val_axis = val_ax is not None and (find(val_ax, "c:delete") is None or find(val_ax, "c:delete").get("val") in ("0", "false")) and not (tick_pos is not None and tick_pos.get("val") == "none")
     nf = find(chart_el, "c:dLbls/c:numFmt")
     for ser, s in zip(findall(chart_el, "c:ser"), series):
         _series_style(ser, s)
@@ -148,7 +196,9 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
             for ser, s in zip(findall(nxt, "c:ser"), series):
                 s.point_labels = {}
                 _series_style(ser, s)
-    title = " ".join(t.text or "" for t in root.iter(q("a:t")) if any(etree.QName(a).localname == "title" for a in t.iterancestors())).strip() or None
+    # the chart's own title (or unit caption), not its axes' titles
+    chart_title = find(root, "c:chart/c:title")
+    title = " ".join(t.text or "" for t in chart_title.iter(q("a:t"))).strip() or None if chart_title is not None else None
     cat_ax = find(plot, "c:catAx")
     orient = find(cat_ax, "c:scaling/c:orientation") if cat_ax is not None else None
     return IRChart(

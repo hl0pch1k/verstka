@@ -4155,7 +4155,7 @@ class Composer:
         # states its own conclusion under the chart, and never on a slide of the author's own words: a computed «×1,6»
         # beside the author's «выросла на 55%» is a second, differently rounded claim the brief never made
         said = " ".join([self.o.headline or "", self.o.subtitle or ""] + side_texts)
-        takeaway = None if (pie or (self.o.takeaway or "").strip() or self.o.verbatim) else _series_takeaway(spec, self.outline, said)
+        takeaway = None if (pie or kind in ("histogram", "scatter") or (self.o.takeaway or "").strip() or self.o.verbatim) else _series_takeaway(spec, self.outline, said)
         aside = self._takeaway_aside()
         take = " ".join((self.o.takeaway or "").split())
         take = take[:1].upper() + take[1:]
@@ -4205,7 +4205,7 @@ class Composer:
             takeaway = (_aside_figure(take) or "", take)  # a column of callouts did not fit: the conclusion leads the lines
         show_side = bool(side_texts) or (takeaway is not None and self.strategy != "structured")
         chart_w = int(area.w * (0.64 if show_side else 1.0))
-        tall = show_side or kind == "bar" or pie
+        tall = show_side or kind in ("bar", "stacked_bar") or pie
         chart_h = tall_h if tall else min(int(area.h * 0.82), int(area.w * 0.42))
         self._pie_mirror = self.strategy == "compact" and pie and not show_side
         err = self._chart_block(Bbox(x=area.x, y=area.y, w=chart_w, h=chart_h), spec, prominent=False, center=not show_side)
@@ -4592,11 +4592,13 @@ class Composer:
         named by its one series («Средний чек»): two charts side by side must say which is which."""
         from verstka.rendering.charts import bare_unit_on_labels, resolve_series, unit_caption
 
-        unit = unit_caption(spec, self.outline)
+        # a value-axis title (the data layer's charts) carries the measure and its unit: no caption repeats them
+        axis_named = bool(getattr(spec, "y_title", None))
+        unit = None if axis_named else unit_caption(spec, self.outline)
         title = " ".join((spec.title or "").split())
         if title and not named and _same_words(title, self.o.headline):
             title = ""  # the slide's heading names the chart already: never twice on one slide
-        if not title:
+        if not title and not (axis_named and not named):
             from verstka.rendering.charts import glyph_unit
 
             series = resolve_series(spec, self.outline)
@@ -4638,12 +4640,16 @@ class Composer:
             # (charts side by side start on one line under captions of one, two or three lines: `cap_h`)
             y += max(ch, cap_h or 0) + int(k.vgap * (0.6 if prominent else 0.3))
         cbox = Bbox(x=box.x, y=y, w=box.w, h=max(box.y2 - y, int(0.2 * k.H)))
-        plain = spec.model_copy(update={"title": None, "highlight_index": _after_index(spec, self.outline)})
+        from verstka.rendering.charts import source_said
+
+        # (the chart's own source line only when the slide's footnote does not print it)
+        src = None if source_said(getattr(spec, "source", None), self.o.footnote) else spec.source
+        plain = spec.model_copy(update={"title": None, "highlight_index": _after_index(spec, self.outline), "source": src})
         try:
             if pie:
                 self._pie(cbox, plain, center=center, head=legend_head)
             else:
-                gf = add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=self._ground_under(cbox, k.colors.ground))
+                gf = add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=self._ground_under(cbox, k.colors.ground), muted_hex=k.colors.muted)
                 self._turned = bool(getattr(self, "_turned", False) or getattr(gf, "verstka_turned", False))
                 from verstka.rendering.charts import chart_plot_bbox
 
@@ -4980,7 +4986,7 @@ class Composer:
         if below and lg["w"] > d:
             cx = x0 + (lg["w"] - d) // 2  # the circle over the middle of its legend
         chart_ground = self._ground_under(Bbox(x=cx, y=box.y, w=d, h=d), colors.ground)
-        gf = add_chart(self.slide, Bbox(x=cx, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=chart_ground, legend=False, amounts=amounts)
+        gf = add_chart(self.slide, Bbox(x=cx, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=chart_ground, legend=False, amounts=amounts, muted_hex=colors.muted)
         if amounts:
             self._doughnut_total(gf, spec, total, unit_txt)
         shades = list(getattr(gf, "verstka_shades", None) or []) or [(colors.accent, 1.0)] * len(cats)

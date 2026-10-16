@@ -719,7 +719,8 @@ def _unit_scale(unit: Optional[str]) -> float:
 
 def _chart_rows(osl: OutlineSlide, ctx: AuditContext) -> list[list[tuple[str, float, float]]]:
     """(category, value, scale) rows of each series the slide's chart shows — the scale of its unit («тыс. ₽»): the
-    source writes 35 of a chart in thousands as «35 000»."""
+    source writes 35 of a chart in thousands as «35 000». A missing value (a gap of a line from a data file) has no
+    row: every other value stays with its own category."""
     out: list[list[tuple[str, float, float]]] = []
     for spec in (osl.content.chart, osl.content.chart2):
         if spec is None:
@@ -728,13 +729,13 @@ def _chart_rows(osl: OutlineSlide, ctx: AuditContext) -> list[list[tuple[str, fl
         for ser in spec.series or []:
             if cats and ser.values:
                 k = _unit_scale(ser.unit or spec.unit)
-                out.append([(c, v, k) for c, v in zip(cats, ser.values)])
+                out.append([(c, v, k) for c, v in zip(cats, ser.values) if v is not None])
         if ctx.outline is not None:
             for sid in spec.series_ids or []:
                 ser = ctx.outline.series_by_id(sid)
                 if ser is not None and ser.categories and ser.values:
                     k = _unit_scale(ser.unit or spec.unit)
-                    out.append([(c, v, k) for c, v in zip(ser.categories, ser.values)])
+                    out.append([(c, v, k) for c, v in zip(ser.categories, ser.values) if v is not None])
     return out
 
 
