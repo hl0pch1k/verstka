@@ -1,4 +1,5 @@
-# Final stage (top-10): the main model, Qwen3.8-27B, served by VK inference — the ТЗ makes VK inference mandatory for
+# Final stage (top-10): the main model, Qwen3.8-27B (fp8, id qwen38-27b-fp8), served by VK inference (organisers'
+# quickstart 16.10: OpenAI-compatible, key in VK_INFERENCE_API_KEY, header «Project-ID» from VK_PROJECT_ID) — the ТЗ makes VK inference mandatory for
 # the top-10 (the organisers: for every model component). Only the endpoint and key change; no other models, no fallback chain: one model.
 # A single model: up to 3 attempts with backoff; a 429 of the hosts gets a short pause and one more try (two in a row:
 # the model is skipped for 2 minutes); per-minute caps are waited out; a 402 / 401 / 403 / 404 is reported after the
@@ -6,10 +7,11 @@
 roles:
   llm:
     backend: openai_compat
-    model: qwen3.8-27b
+    model: qwen38-27b-fp8
     label: Qwen3.8-27B (VK)
-    base_url: ${VK_INFERENCE_BASE_URL}
+    base_url: https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1
     api_key: ${VK_INFERENCE_API_KEY}
+    headers: { Project-ID: "${VK_PROJECT_ID}" }
     # Thinking OFF. Qwen3.8-27B thinks before answering by default; left on, the reasoning is billed as output and
     # uses up the small answers' limits (designer 1800, critic 900 tokens): every answer comes back cut off and the
     # deck is built by the rules after minutes of calls. Two switches, both harmless where unsupported:
@@ -22,10 +24,11 @@ roles:
     system_suffix: "/no_think"
   vlm:
     backend: openai_compat
-    model: qwen3.8-27b
+    model: qwen38-27b-fp8
     label: Qwen3.8-27B (VK)
-    base_url: ${VK_INFERENCE_BASE_URL}
+    base_url: https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1
     api_key: ${VK_INFERENCE_API_KEY}
+    headers: { Project-ID: "${VK_PROJECT_ID}" }
     extra_body:
       chat_template_kwargs: { enable_thinking: false }
     system_suffix: "/no_think"
@@ -40,6 +43,7 @@ roles:
     api_key: ${VK_INFERENCE_API_KEY}
     timeout_s: 120
 limits:
-  max_concurrency: 4
+  # measured 16.10: 16 parallel requests in 5.2 s with no refusals (text 1.6–3.7 s, an image 1.6 s)
+  max_concurrency: 8
   timeout_s: 180
   max_attempts: 3
