@@ -676,7 +676,8 @@ _FIG_RE = re.compile(r"(?<![\w])([+\-−–]?\d[\d\s\u00a0\u202f]*(?:[.,]\d+)?\s
 
 
 def highlight_runs(text: str, size: float, color: str, accent: str, bold: bool = False, accent_bold: bool = True, font: Optional[str] = None) -> list[Run]:
-    """Figures inside a statement («27 млн ₽», «4 GPU») set in the accent colour: the eye finds the ask."""
+    """Figures inside a statement («27 млн ₽», «4 GPU») set in the accent colour: the eye finds the ask. A year
+    («сентябрь 2026 к сентябрю 2025», «III кв. 2026») dates the sentence — it is no figure and keeps the text colour."""
     out: list[Run] = []
     pos = 0
     text = typeset(text)
@@ -684,6 +685,8 @@ def highlight_runs(text: str, size: float, color: str, accent: str, bold: bool =
         s, e = m.span(1)
         val = text[s:e].strip()
         if not any(ch.isdigit() for ch in val) or (len(val) <= 2 and not re.search(r"%|₽", val) and not re.match(r"\d{2}", val)):
+            continue
+        if _is_year(m, text):
             continue
         if s > pos:
             out.append(Run(text[pos:s], size, color, bold, font))
@@ -1007,6 +1010,7 @@ class Composer:
             notes_at_dense, lead_at_dense = self._notes, bool(getattr(self, "_take_lead", False))
 
             def dense_pass() -> None:
+                nonlocal o0
                 self._notes, self._take_lead = notes_at_dense, lead_at_dense
                 self._undo(n0)
                 self.o, self.warnings = o0, list(w0)
@@ -1050,6 +1054,27 @@ class Composer:
                             if not self._overflows(n0, strip_area) and self._conclusion_spot(n0) is not None and not lost_lines():
                                 done = "the conclusion set as the strip under the block: no room over it"
                                 break
+                        take0 = " ".join((o0.takeaway or "").split())
+                        short = _first_sentence(take0) if (done is None and o0.data is not None) else ""
+                        if short and short != take0:
+                            # a data slide's conclusion said shorter before it leaves the slide (live QA, L2): its first
+                            # sentence as the strip under the block (with the template's strip, then the bar alone)
+                            o_full = o0
+                            o0 = o0.model_copy(update={"takeaway": short})
+                            for size, on_strip in [(x, st) for st in (None, False) for x in dict.fromkeys((k.body, k.small))]:
+                                reset()
+                                self._take_lead = False
+                                strip_area = self._takeaway_to_strip(area, size, strip=on_strip)
+                                self._compose_body(comp, strip_area)
+                                if not self._overflows(n0, strip_area) and self._conclusion_spot(n0) is not None and not lost_lines():
+                                    done = "the conclusion said shorter (its first sentence): the rest is in the speaker notes"
+                                    rest = take0[len(short):].strip(" .")
+                                    if rest:
+                                        o_full.notes = " ".join(x for x in ((o_full.notes or "").strip(), rest + ".") if x)
+                                        self.o.notes = o_full.notes
+                                    break
+                            if done is None:
+                                o0 = o_full
                         if done is None:
                             reset()
                             self._take_lead = False
@@ -1217,6 +1242,31 @@ class Composer:
                 self._floor_y, self._area = floor0, area0
                 self.warnings.append("the block set denser: the conclusion keeps its room under it" + ("" if p2 is plan else " (a size smaller)"))
                 return
+        # a data slide's conclusion said shorter before it leaves the slide: its first sentence — the figure the chart
+        # or the table does not show («Остальные 230 клиентов — 2 167 млн ₽, 62%») — at the body or the small size
+        # under the block; the rest is said aloud (live QA, L2)
+        short = _first_sentence(take) if (self.o.data is not None and take) else ""
+        if short and short != take:
+            o_full = o0
+            o0 = o0.model_copy(update={"takeaway": short})
+            for size, on_strip in [(x, st) for st in (None, False) for x in dict.fromkeys((k.body, k.small))]:
+                p2 = self._takeaway_plan(short, full.w, figure=False, sizes=(size,), strip=on_strip)
+                p2["y_max"] = bottom - p2["h"]
+                a2 = Bbox(x=area.x, y=area.y, w=area.w, h=max(p2["y_max"] - int(k.vgap * 1.2) - area.y, int(area.h * 0.4)))
+                for dense in (False, True):
+                    if dense and dense0:
+                        continue
+                    self._notes = (foot_box, p2, full)
+                    if again(a2, a2.y2, False, dense) and self._conclusion_spot(n0) is not None:
+                        self._floor_y, self._area = floor0, area0
+                        rest = take[len(short):].strip(" .")
+                        if rest:
+                            # (said aloud: the slide's own notes, the ones the deck's speaker notes are written from)
+                            o_full.notes = " ".join(x for x in ((o_full.notes or "").strip(), rest + ".") if x)
+                            self.o.notes = o_full.notes
+                        self.warnings.append("the conclusion said shorter (its first sentence): the rest is in the speaker notes")
+                        return
+            o0 = o_full
         # neither: the first setting, the conclusion said aloud
         self._notes = (foot_box, plan, full)
         self._undo(n0)
@@ -3024,14 +3074,16 @@ class Composer:
         k = self.kit
         return k.snap(max(0.02 * k.hpt, 8.0), max(0.017 * k.hpt, 7.5), max(k.small, 8.0))
 
-    def _takeaway_plan(self, text: str, width: int, figure: bool = True, sizes: Optional[tuple] = None) -> dict:
+    def _takeaway_plan(self, text: str, width: int, figure: bool = True, sizes: Optional[tuple] = None, strip: Optional[bool] = None) -> dict:
         """How the conclusion is set: one line at the lead size (a step down, then two lines, when it is longer), on a
         strip of the template's card colour with an accent bar at its left — or, when the template's cards have no
         fill of their own, as an accent bar and the line beside it. `figure=False`: never the visual variant's large
-        key figure; `sizes`: those sizes only (the slimmer forms of `_takeaway_fit`)."""
+        key figure; `sizes`: those sizes only (the slimmer forms of `_takeaway_fit`); `strip=False`: the bar and the
+        line without the strip, whatever the template's cards."""
         k = self.kit
         st = k.card
-        strip = bool(st.fill) and contrast_ratio(st.fill, k.colors.ground) >= 1.04
+        can = bool(st.fill) and contrast_ratio(st.fill, k.colors.ground) >= 1.04
+        strip = can if strip is None else (strip and can)
         colors = st.colors if strip else k.colors
         bar_w = max(_emu(3), int(0.006 * k.H))
         best = None
@@ -3147,6 +3199,30 @@ class Composer:
         plan = None
         if take:
             plan = self._takeaway_plan(take, area.w)
+            if self.o.data is not None and self.o.content.chart is not None and getattr(self, "_comp", None) in ("chart", "chart_text"):
+                # a chart of a data file keeps the height its plot needs (live QA, H1; `chart_need`): its conclusion
+                # steps down a size or two, then says its first sentence only (the rest is said aloud), rather than
+                # flattening the plot into a strip
+                need = max(self.chart_need(self.o.content.chart), int(0.4 * area.h))
+                gap = int(k.vgap * 1.2)
+
+                def room(pl: dict) -> int:
+                    return int((bottom - pl["h"] - gap - area.y) * 0.92)
+
+                # (never under the body size: a conclusion in small print helps no plot enough to be worth it)
+                if room(plan) < need and k.body < plan["size"] - 0.05:
+                    p2 = self._takeaway_plan(take, area.w, figure=False, sizes=(k.body,))
+                    if p2["h"] < plan["h"]:
+                        plan = p2
+                short = _first_sentence(take) if room(plan) < need else ""
+                if short and short != take:
+                    p2 = self._takeaway_plan(short, area.w, figure=False, sizes=(plan["size"],))
+                    if p2["h"] < plan["h"] and room(p2) >= min(need, room(plan) + int(0.06 * area.h)):
+                        plan = p2
+                        rest = take[len(short):].strip(" .")
+                        if rest and rest not in (self.o.notes or ""):
+                            self.o.notes = " ".join(x for x in ((self.o.notes or "").strip(), rest + ".") if x)
+                        self.warnings.append("the conclusion said shorter (its first sentence): the chart keeps the height its plot needs")
             plan["y_max"] = bottom - plan["h"]
             bottom = plan["y_max"] - int(k.vgap * 1.2)
         self._notes = (foot_box, plan, area)
@@ -3198,7 +3274,7 @@ class Composer:
         dy = hh + int(k.vgap * 1.2)
         return Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.5)))
 
-    def _takeaway_to_strip(self, area: Bbox, size: Optional[float] = None) -> Bbox:
+    def _takeaway_to_strip(self, area: Bbox, size: Optional[float] = None, strip: Optional[bool] = None) -> Bbox:
         """The chart the conclusion was to stand beside could not be drawn: the conclusion takes its strip under what
         the slide shows instead (the footnote keeps its place). Returns the area left above the strip."""
         take = " ".join((self.o.takeaway or "").split())
@@ -3206,7 +3282,7 @@ class Composer:
         if not take or (notes and notes[1] is not None):
             return area
         k = self.kit
-        plan = self._takeaway_plan(take, area.w) if size is None else self._takeaway_plan(take, area.w, figure=False, sizes=(size,))
+        plan = self._takeaway_plan(take, area.w, strip=strip) if size is None else self._takeaway_plan(take, area.w, figure=False, sizes=(size,), strip=strip)
         plan["y_max"] = area.y2 - plan["h"]
         self._notes = (notes[0] if notes else None, plan, notes[2] if notes else area)
         return Bbox(x=area.x, y=area.y, w=area.w, h=max(plan["y_max"] - int(k.vgap * 1.2) - area.y, int(area.h * 0.4)))
@@ -4205,7 +4281,8 @@ class Composer:
             takeaway = (_aside_figure(take) or "", take)  # a column of callouts did not fit: the conclusion leads the lines
         show_side = bool(side_texts) or (takeaway is not None and self.strategy != "structured")
         chart_w = int(area.w * (0.64 if show_side else 1.0))
-        tall = show_side or kind in ("bar", "stacked_bar") or pie
+        # (a chart of a data file takes the area's height: its plot is what the slide is for — live QA, H1)
+        tall = show_side or kind in ("bar", "stacked_bar") or pie or self.o.data is not None
         chart_h = tall_h if tall else min(int(area.h * 0.82), int(area.w * 0.42))
         self._pie_mirror = self.strategy == "compact" and pie and not show_side
         err = self._chart_block(Bbox(x=area.x, y=area.y, w=chart_w, h=chart_h), spec, prominent=False, center=not show_side)
@@ -4706,6 +4783,30 @@ class Composer:
             if err is not None:
                 return err
         return None
+
+    def chart_need(self, spec) -> int:
+        """The least frame height (EMU) in which a data chart keeps a readable plot (`charts.min_frame_height`: the plot
+        at least 55 % of the frame) — at the size the deck sets its chart labels, with its axis titles, its legend and
+        a time axis's two-line labels. 0 for a pie (its legend stands beside it)."""
+        from verstka.rendering.charts import effective_chart_type, is_time_axis, min_frame_height, resolve_series
+
+        try:
+            kind = effective_chart_type(spec, self.outline)
+            if kind in ("pie", "doughnut"):
+                return 0
+            series = resolve_series(spec, self.outline)
+            cats = [str(x) for x in (series[0].categories if series else spec.categories)]
+            font = float(self._chart_style().font_size_pt or 10.8)
+            horizontal = kind in ("bar", "stacked_bar")
+            pt = min_frame_height(
+                "line" if kind == "scatter" else kind, max(len(cats), 1), font,
+                legend_rows=1 if len(series) > 1 else 0,
+                x_title=bool(spec.x_title) and not horizontal, value_title=bool(spec.y_title) and horizontal,
+                label_lines=2 if (not horizontal and len(cats) >= 6 and is_time_axis(cats)) else 1,
+            )
+        except Exception:  # noqa: BLE001 - no measure: no demand
+            return 0
+        return _emu(pt)
 
     def _chart_style(self):
         from verstka.rendering.charts import chart_text_capped
@@ -5307,6 +5408,18 @@ def _sole_end_figure(text: str, fig: Optional[str]) -> bool:
     return len(ms) == 1 and bool(fig) and label_without_figure(t, fig) != t
 
 
+def _first_sentence(text: str) -> str:
+    """The first sentence of a conclusion of two or more («Остальные 230 клиентов — 2 167 млн ₽, 62%. Крупнейший …» →
+    «Остальные 230 клиентов — 2 167 млн ₽, 62%»); "" when it is one sentence or its first is too short to stand alone."""
+    t = " ".join((text or "").split())
+    for m in re.finditer(r"[.!?](?=\s+[«\"А-ЯЁA-Z0-9])", t):
+        head = t[: m.start()].strip()
+        if ABBR_END_RE.search(head + "."):
+            continue  # «млн.», «т. е.»: not a sentence's end
+        return head if len(head.split()) >= 3 else ""
+    return ""
+
+
 def label_without_figure(text: str, fig: Optional[str]) -> str:
     """The words under a figure set large, without the figure said again: «Рентабельность увеличится до 22,4%» under
     «22,4%» reads «Рентабельность увеличится», «Месячная выручка составит 1 138 500 ₽» → «Месячная выручка», a figure
@@ -5323,6 +5436,7 @@ def label_without_figure(text: str, fig: Optional[str]) -> str:
         before, after = text[:a], text[b:]
         if before.rstrip().endswith("(") and after.lstrip().startswith(")"):
             out = (before.rstrip()[:-1].rstrip() + " " + after.lstrip()[1:].lstrip()).strip()
+            out = re.sub(r"\s+([,.;:!?])", r"\1", out)  # «2 425 чел. (+6%), отчислено» → «2 425 чел., отчислено»
         elif re.fullmatch(r"\s*(?:в\s+месяц|в\s+год|в\s+день)?\s*[.!]?\s*", after):
             out = _TAIL_LINK_RE.sub("", _HEDGE_TAIL_RE.sub("", " " + before.rstrip())).strip(" ,;:—–-")
         elif re.match(r"\s*(?:в\s+месяц\s*)?,\s*или\s+\S", after):

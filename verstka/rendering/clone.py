@@ -742,7 +742,9 @@ class _SlideCtx:
             free = self._free_band_right(el, bx)
             if free > bx.x2 + int(0.02 * self.W) and not is_nested(el):
                 res = fit_size(texts, bx, family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.typo.line_height, min_ratio=0.97)
-                if not res.fits:
+                # (a data slide's heading in three lines and more of a narrow box takes the free width too: «80%
+                # обращений / получают / ответ за 2 часа» beside an empty band — live QA, L4)
+                if not res.fits or (getattr(self, "data_slide", False) and res.lines >= 3):
                     if self._centred(el):
                         # a centred heading widens about its own centre: widened to the right only, its line stood
                         # off the middle of the slide (Классика's band)
@@ -2570,11 +2572,58 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     box = _clamp_to_safe(box, ctx) if not ctx.filled & {s.shape_id for s in holders} else box
     if not ctx.filled & {s.shape_id for s in holders}:
         box = _grow_into_free_area(box, ctx, oslide)
+        if data and c.chart is not None:
+            box = _free_height(ctx, oslide, box)
     box = _reserve_notes_room(ctx, oslide, box)
     box = _below_heading(ctx, box)
     if data:
         box = _clear_of_decor(ctx, box, own_area)
     _draw_native(ctx, oslide, box)
+
+
+def _free_height(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> Bbox:
+    """A data slide's chart takes the free height of its column (live QA, H1: a line of 21 months in a third of the
+    slide is a strip): up to the heading's last line, down to the safe area's foot — never over a shape the slide keeps
+    above or below it (a filled text, a picture, the template's logo); empty text slots the cleanup removes are no
+    obstacle. The room of the conclusion and the footnote is taken off afterwards (`_reserve_notes_room`)."""
+    from verstka.rendering.clone_check import ink_box
+
+    safe = ctx.manifest.tokens.spacing.safe_area
+    gap = int(0.025 * ctx.H)
+    up = int(safe.y * ctx.H)
+    down = int(safe.y2 * ctx.H)
+    t = next((s for s in ctx.pattern.slots if s.role == SlotRole.title), None)
+    tel = ctx.els.get(t.shape_id) if t is not None else None
+    if tel is not None and tel.getparent() is not None:
+        ib = ink_box(tel, ctx.typo.primary_family)
+        if ib is not None and ib.y2 <= box.y + int(0.01 * ctx.H):
+            up = max(up, ib.y2 + int(0.03 * ctx.H))
+    keeps_text = bool(oslide.content.paragraphs or oslide.content.bullets)
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    for el in tree:
+        if etree.QName(el).localname not in ("sp", "pic", "graphicFrame", "grpSp", "cxnSp"):
+            continue
+        sid = ctx.id_of(el) or ""
+        if sid in ctx.removed or (tel is not None and el is tel):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] * b[3] >= 0.6 * ctx.W * ctx.H:
+            continue
+        slot = ctx.slot_of.get(sid)
+        if slot is not None and slot.role in TEXT_ROLES and sid not in ctx.filled and not has_visible_style(el) and not keeps_text:
+            continue  # an empty text slot: the cleanup removes it
+        o = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+        if min(o.x2, box.x2) - max(o.x, box.x) <= 0.05 * box.w:
+            continue  # beside the column, not above or under it
+        if o.y2 <= box.y + int(0.005 * ctx.H):
+            up = max(up, o.y2 + gap)
+        elif o.y >= box.y2 - int(0.005 * ctx.H):
+            down = min(down, o.y - gap)
+    y = min(box.y, up)
+    y2 = max(box.y2, down)
+    if (y, y2) == (box.y, box.y2):
+        return box
+    return Bbox(x=box.x, y=y, w=box.w, h=y2 - y)
 
 
 def _across_empty_row(ctx: _SlideCtx, box: Bbox) -> Bbox:
@@ -2647,7 +2696,25 @@ def _clear_of_decor(ctx: _SlideCtx, box: Bbox, own_area: Optional[list[Bbox]] = 
     pad = int(0.012 * ctx.W)
     own = list(own_area or [])
     hits = []
-    for d in decor_boxes(ctx.slide, ctx.art_boxes()):
+    from verstka.rendering.cutouts import cutout_boxes, sheet_box
+
+    try:
+        # a picture ground's sheet (Blueprint's paper on its grid): the object stays on it, a margin inside its edge
+        sheet = sheet_box(ctx.slide, box)
+        if sheet is not None:
+            m = int(0.015 * ctx.W)
+            inner = Bbox(x=sheet.x + m, y=sheet.y + m, w=sheet.w - 2 * m, h=sheet.h - 2 * m)
+            x1, y1, x2, y2 = max(box.x, inner.x), max(box.y, inner.y), min(box.x2, inner.x2), min(box.y2, inner.y2)
+            if (x1, y1, x2, y2) != (box.x, box.y, box.x2, box.y2) and (x2 - x1) * (y2 - y1) >= 0.8 * box.area:
+                box = Bbox(x=x1, y=y1, w=x2 - x1, h=y2 - y1)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # (and the objects a picture ground draws on its sheet: Blueprint's pencil and eraser — live QA, L1)
+        cuts = cutout_boxes(ctx.slide, box, pad=0)
+    except Exception:  # noqa: BLE001
+        cuts = []
+    for d in decor_boxes(ctx.slide, ctx.art_boxes()) + cuts:
         if d.intersection(box) <= 0.002 * box.area:
             continue
         if any(a.intersection(d) >= 0.5 * d.area for a in own):
@@ -2860,6 +2927,13 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
             # (the lines went into the sample's own text slots: the pair is drawn without them)
             o_comp = o_comp.model_copy(update={"content": c.model_copy(update={"bullets": [], "paragraphs": []})})
         comp = clone_composer(ctx, o_comp, box)
+        if oslide.data is not None and c.chart is not None and not pair:
+            # a chart of a data file never stands in a frame lower than its plot needs (`Composer.chart_need`, live QA
+            # H1): the renderer takes another sample or composes the slide
+            need = comp.chart_need(c.chart)
+            have = int(box.h * (0.92 if by_chart else 1.0))
+            if need and have < need:
+                raise RuntimeError(f"диаграмме нужно {need / 12700:.0f} pt высоты, в образце {have / 12700:.0f} pt: образец не подходит")
         if pair:
             # two charts side by side in the sample's data area, each under its own title, the slide's lines as a
             # composed pair sets them — the conclusion stays the strip under the content (`clone_notes`)
@@ -6239,6 +6313,29 @@ def _logo_mark(ctx: _SlideCtx, el: etree._Element) -> bool:
     return False
 
 
+def _subject_drawing(ctx: _SlideCtx) -> Optional[str]:
+    """A drawing the sample makes of its own subject — a group of many outlines over a tenth of the slide and more,
+    without text (a map of states, a drawn scene) — or None. A 3D render, a ring, a few shapes of decor are no such
+    drawing: they carry no subject of their own."""
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    for el in tree:
+        if etree.QName(el).localname != "grpSp":
+            continue
+        sid = ctx.id_of(el) or ""
+        if sid in ctx.pattern.chrome_shape_ids:
+            continue
+        b = element_bbox(el)
+        if not b or b[2] * b[3] < 0.1 * ctx.W * ctx.H:
+            continue
+        parts = [x for x in el.iter(q("p:sp"))]
+        if len(parts) < 20 or any((shape_text(x) or "").strip() for x in parts):
+            continue
+        outlines = sum(1 for x in parts if x.find(".//" + q("a:custGeom")) is not None)
+        if outlines >= 0.6 * len(parts):
+            return f"рисунок из {len(parts)} контуров"
+    return None
+
+
 def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, keep_photos: bool = True) -> tuple[Slide, list[str]]:
     """`keep_photos`: a cover's, divider's or closing slide's photo beside its title stays (`_bookend_photo`); the
     renderer sets the cover again without it when the kept photo leaves the title no room.
@@ -6263,8 +6360,15 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         o_notes = oslide.model_copy(update={"takeaway": None}) if pattern.note_slot and (oslide.takeaway or "").strip() else oslide
         ctx.tail_room, ctx.notes_floor = notes_need(builder, slide, o_notes, outline, manifest, pattern)
     c = oslide.content
+    if not _is_bookend(oslide) and not c.image_hint and any(s.data is not None for s in outline.slides):
+        # a data deck never lays its slide beside a sample's drawing of its own subject (Marketing Report's map of the
+        # USA next to «Что дальше» of a VK Cloud sales deck — live QA, B4): another sample, or the slide is composed
+        fig = _subject_drawing(ctx)
+        if fig is not None:
+            raise RuntimeError(f"рисунок образца ({fig}) — о своём, не о данных колоды: образец не подходит")
     ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
     ctx.oslide_content = c
+    ctx.data_slide = oslide.data is not None
     ctx.verbatim = bool(oslide.verbatim)
     if not _is_bookend(oslide):
         # the sample's own largest empty stretch, before anything is taken off: the gate compares the slide with it;

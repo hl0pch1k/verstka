@@ -1634,6 +1634,11 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         _heading_on_slide(title_ph, (sx, sy, sw, sh), W, H, warnings)
     if title_ph is not None and art is None and ground is None:
         _reclaim_left(slide, title_ph, (sx, sy, sw, sh), manifest, W, H, warnings)
+    # a data deck keeps its headings and its content off the objects a picture ground draws on its sheet (Blueprint's
+    # pencil and eraser — live QA, L1); other decks are laid out as they were
+    data_deck = any(s.data is not None for s in outline.slides)
+    if data_deck and oslide.kind not in (PatternKind.title, PatternKind.section, PatternKind.thanks):
+        slide.__dict__["_verstka_cutouts"] = True  # read by the heading's width (`_place_plain_heading`)
     saved_title = copy.deepcopy(title_ph._element) if title_ph is not None else None
     n_warn = len(warnings)
     heading_bottom, content_left, lede_used = _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outline, pal, (sx, sy, sw, sh), h1, title_color, title_bold, title_font, scale, warnings, ds)
@@ -1700,6 +1705,8 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         full = area
         area = _clear_of_art(slide, area, title_ph, W, H, warnings, data=oslide.data is not None and (oslide.content.chart is not None or oslide.content.table is not None))
         foot_room = _foot_room(slide, full, area, title_ph, W, H)
+    if data_deck:
+        area = _clear_of_cutouts(slide, area, title_ph, W, H, warnings)
     area = _clear_of_rules(slide, area, W, H, warnings)
     _true_ground(slide, area, pal, manifest)
     proto = _card_proto(builder, manifest, family, pal.bg)
@@ -2069,6 +2076,38 @@ def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: 
         return area
     warnings.append(f"content kept clear of the template's art ({share:.0%} of the area)")
     return free
+
+
+def _cutouts_near(slide, box: Bbox, title_ph) -> list[Bbox]:
+    """The objects a picture ground draws on its sheet (`cutouts.cutout_boxes`) touching `box` — not the one the
+    heading is designed to stand on (an object under the heading's centre is its backing)."""
+    from verstka.rendering.cutouts import cutout_boxes
+
+    try:
+        cuts = cutout_boxes(slide, box)
+    except Exception:  # noqa: BLE001 - no cut-outs read: the box as it is
+        log.debug("cut-outs not read", exc_info=True)
+        return []
+    centre = None
+    if title_ph is not None and title_ph.left is not None and title_ph.width is not None and title_ph.top is not None and title_ph.height is not None:
+        centre = (int(title_ph.left) + int(title_ph.width) // 2, int(title_ph.top) + int(title_ph.height) // 2)
+    return [c for c in cuts if c.intersection(box) > 0 and not (centre and c.x <= centre[0] <= c.x2 and c.y <= centre[1] <= c.y2)]
+
+
+def _clear_of_cutouts(slide, area: Bbox, title_ph, W: int, H: int, warnings: list[str]) -> Bbox:
+    """The content area off the objects the ground draws on its sheet: the largest free rectangle inside it, when that
+    keeps most of the area."""
+    from verstka.rendering.layers import largest_free
+
+    hits = _cutouts_near(slide, area, title_ph)
+    if not hits:
+        return area
+    free = largest_free(area, hits)
+    if free.w >= 0.5 * area.w and free.h >= 0.5 * area.h:
+        warnings.append("содержимое отодвинуто от рисунка шаблона")
+        return free
+    warnings.append("рисунок шаблона заходит на содержимое: свободного места мало")
+    return area
 
 
 def _clear_of_rules(slide: Slide, area: Bbox, W: int, H: int, warnings: list[str]) -> Bbox:
@@ -2560,6 +2599,21 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
             continue
         if b.y < box.y2 and b.y2 > box.y and b.x >= box.x + int(0.3 * W):
             w_free = min(w_free, b.x - int(0.015 * W) - box.x)
+    # a data deck's heading stops before the objects its picture ground draws in the band (Blueprint's pencil)
+    cuts = _cutouts_near(slide, Bbox(x=safe_x, y=box.y, w=max(int(safe.x2 * W) - safe_x, box.w), h=box.h), title_ph) if slide.__dict__.get("_verstka_cutouts") else []
+    cut_r = min((c.x for c in cuts if c.x >= box.x + int(0.3 * W)), default=None)
+    cut_l = max((c.x2 for c in cuts if c.x2 <= box.x + int(0.3 * W)), default=None)
+    if cut_r is not None:
+        w_free = min(w_free, cut_r - box.x)
+        warnings.append("заголовок отодвинут от рисунка шаблона")
+    if slide.__dict__.get("_verstka_cutouts"):
+        from verstka.rendering.cutouts import sheet_box
+
+        # (and its first line stays on the sheet the ground lays under the content, a margin under its top edge)
+        sheet = sheet_box(slide, Bbox(x=safe_x, y=box.y, w=max(int(safe.x2 * W) - safe_x, box.w), h=max(box.h, int(0.3 * H))))
+        top = sheet.y + int(0.025 * H) if sheet is not None else None
+        if top is not None and box.y < top < box.y2 - int(0.08 * H):
+            box = Bbox(x=box.x, y=top, w=box.w, h=box.y2 - top)
     w_full = min(w_free, int(0.86 * W))
     content_left: Optional[int] = None
     if centred:
@@ -2568,12 +2622,14 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
         cx = box.x + box.w // 2
         lim_r = box.x + _free_width(slide, box, W, H, int(safe.x2 * W), skip=(title_ph._element,))
         lim_l = _free_left(slide, box, W, H, safe_x, skip=(title_ph._element,))
+        lim_r = min(lim_r, cut_r) if cut_r is not None else lim_r
+        lim_l = max(lim_l, cut_l) if cut_l is not None else lim_l
         half = min(cx - lim_l, lim_r - cx, int(0.43 * W))
         if 2 * half > box.w:
             box = Bbox(x=cx - half, y=box.y, w=2 * half, h=box.h)
         w_full = box.w
-    elif w_full != box.w and w_full > 0.3 * W:
-        box = Bbox(x=box.x, y=box.y, w=w_full, h=box.h)
+    elif w_full != box.w and (w_full > 0.3 * W or cut_r is not None):
+        box = Bbox(x=box.x, y=box.y, w=max(w_full, int(0.3 * W)), h=box.h)
     # one heading size for the whole deck (never autofitted per slide unless the headline cannot fit at all)
     h1 = ds.head_size if ds is not None else max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
     from verstka.ru import no_orphan

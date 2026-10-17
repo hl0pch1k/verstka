@@ -41,6 +41,39 @@ class RenderResult:
         return [f"slide {s.index} ({s.outline_id}): {w}" for s in self.slides for w in s.warnings]
 
 
+_PROMPT_KEEP = {"dt", "ftr", "sldNum"}
+
+
+def _quiet_layout_prompts(builder: DeckBuilder) -> int:
+    """The prompt texts of the layouts' placeholders («Альтернативные решения», «Примеры уже имеющихся способов…»)
+    emptied in the finished deck: LibreOffice draws a layout's placeholder its slide does not hold, and a sample of three
+    cards set again as two showed fragments of them between the cards (live QA, L5). The runs and their formatting stay;
+    the date, footer and slide number keep their fields. Returns the number of texts emptied."""
+    n = 0
+    seen: set = set()
+    try:
+        slides = list(builder.prs.slides)
+    except Exception:  # noqa: BLE001
+        return 0
+    for slide in slides:
+        try:
+            layout = slide.slide_layout
+        except Exception:  # noqa: BLE001
+            continue
+        if id(layout.part) in seen:
+            continue
+        seen.add(id(layout.part))
+        for ph in layout.placeholders:
+            el = ph._element.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}ph")
+            if el is not None and (el.get("type") or "body") in _PROMPT_KEEP:
+                continue
+            for t in ph._element.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t"):
+                if t.text:
+                    t.text = ""
+                    n += 1
+    return n
+
+
 def _mark_notes(builder: DeckBuilder, oslide) -> None:
     """Write speaker notes plus a machine marker so the audit can map slides back to the outline."""
     try:
@@ -457,6 +490,7 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
             progress(f"rendered slide {i}/{n}", i / max(n, 1))
     builder.delete_original_slides()
     _give_geometry(builder)
+    _quiet_layout_prompts(builder)
     builder.save(out_pptx)
     result.seconds = round(time.time() - t0, 2)
     log.info("rendered %d slides to %s in %.1fs", len(result.slides), out_pptx, result.seconds)
