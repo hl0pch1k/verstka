@@ -218,6 +218,20 @@ def test_model_goal_wins_over_a_tail_that_asks_nothing(skills):
     assert [(u.source, u.metric) for u in r.understood] == [("model", "Срок рассмотрения")]
 
 
+def test_a_rules_note_the_model_did_not_cover_stays(skills):
+    """Модель ответила о первом предложении и промолчала о втором; правила видят, что на второе данные не отвечают, —
+    эта пометка не теряется («Почему так»)."""
+    t = _t("Госуслуги регионы.csv", REGIONS)
+    brief = "Где дольше всего ждут решения? Покажите, как менялся срок рассмотрения по месяцам."
+    ans = _reading([{"span": "Где дольше всего ждут решения?", "dataset": "d1", "task": "comparison",
+                     "metric": "Срок рассмотрения", "ask": "max"}])
+    r = read_goals(brief, [t], skills=skills, providers=_mock(ans))
+    kept = [n for n in r.notes if n.source == "rules"]
+    assert kept and "срок рассмотрения по месяцам" in kept[0].quote and kept[0].reason == "в данных нет оси времени"
+    p = plan_datasets([t], brief, goals=r.goals)[0]
+    assert any("в данных нет оси времени" in x for x in p.task.reasons), p.task.reasons
+
+
 # ── when the model fails, says nothing that holds, or is not needed ─────────────────────────────────────────────────
 def test_an_empty_object_is_asked_once_more(skills):
     t = _t("Госуслуги регионы.csv", REGIONS)

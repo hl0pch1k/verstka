@@ -1,5 +1,6 @@
 {
-"about": "Ответы Qwen3.8-27B (VK inference, qwen38-27b-fp8, мышление выключено) навыку goal_reader 1.0.0 — живой прогон 2026-10-17, по одному вызову на бриф: tests/fixtures/intent/labels.json (168) и holdout.json (30). tables_sha — таблицы, над которыми модель отвечала; c4-20…24 и h-13, h-14 перезаписаны 2026-10-17 после раунда 10 (таблицы читаются иначе).",
+"about": "Ответы Qwen3.8-27B (VK inference, qwen38-27b-fp8, мышление выключено) навыку goal_reader 1.0.0 — живой прогон 2026-10-17, по одному вызову на бриф: tests/fixtures/intent/labels.json (168) и holdout.json (30). tables_sha — таблицы, над которыми модель отвечала; c4-20…24 и h-13, h-14 перезаписаны 2026-10-17 после раунда 10 (таблицы читаются иначе); skill_sha256 — хеш навыка goal_reader (skill.yaml и подсказки), с которым ответы записаны.",
+"skill_sha256": "ffac96ce9f718c5e48a93dcfdb26435ad56c7c926897ee89c5c1a591e34f5a9a",
 "answers": {
 "c4-01A": {
 "reading": {

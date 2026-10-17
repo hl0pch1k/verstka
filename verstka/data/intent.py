@@ -928,6 +928,9 @@ def _span_of(g: Goal, brief: str) -> tuple[int, int]:
     return a, a + len(g.phrase)
 
 
+_NOT_UNDERSTOOD = "вопрос не распознан как задача"
+
+
 def _rules_understood(brief: str, regex: Sequence[Goal], ctx: _Ctx) -> tuple[list[UnderstoodGoal], list[IntentNote]]:
     """The rules' goals as the plan will use them: the dataset `assign_goals` gives each, the column the plan shows for
     it, what is asked; goals that cannot be done and questions not understood — notes."""
@@ -944,7 +947,7 @@ def _rules_understood(brief: str, regex: Sequence[Goal], ctx: _Ctx) -> tuple[lis
             a, _b = _span_of(g, brief)
             quote = _quote(brief, *_span_of(g, brief)) or g.phrase
             if g.unmet or g.free:
-                why = g.unmet or "вопрос не распознан как задача"
+                why = g.unmet or _NOT_UNDERSTOOD
                 if quote not in seen_notes:
                     seen_notes.add(quote)
                     notes.append(IntentNote(quote=quote, reason=why, at=a, dataset=ctx.ids[k],
@@ -1027,7 +1030,8 @@ def _merge(brief: str, goals: list[UnderstoodGoal], notes: list[IntentNote], ctx
     """The model's goals with the rules' cross-check: a goal of the rules where the model said nothing stays; where both
     speak of the same words and disagree — the model's goal when its quotes cover the rules' one (all of it but a
     decision or a purpose that asks nothing: «…, чтобы разобрать на планёрке», «и стоит ли его менять»), otherwise the
-    rules' goal."""
+    rules' goal. A note of the rules (a goal the data cannot answer, with its reason) stays where no goal or note of the
+    model speaks of the same words; «вопрос не распознан» of the rules is no reason and does not."""
     kept_goals = list(goals)
     kept_notes = list(notes)
     log_: list[dict] = []
@@ -1053,7 +1057,16 @@ def _merge(brief: str, goals: list[UnderstoodGoal], notes: list[IntentNote], ctx
             log_.append({"quote": u.quote, "why": f"расходится с целью правил «{r.quote}», а её цитата длиннее"})
         kept_goals.append(r)
         spans[id(r)] = rs
+    for n in rule_notes:
+        ns = (n.at, n.at + len(n.quote))
+        if n.reason == _NOT_UNDERSTOOD or any(_overlap(spans[id(u)], ns) for u in kept_goals) \
+                or any(_overlap(s, ns) for s in nspans):
+            continue
+        kept_notes.append(n)
+        nspans.append(ns)
+        log_.append({"quote": n.quote, "why": "пометка правил, модель о ней промолчала — сохранена"})
     kept_goals.sort(key=lambda u: u.at)
+    kept_notes.sort(key=lambda n: n.at)
     return kept_goals, kept_notes, log_
 
 

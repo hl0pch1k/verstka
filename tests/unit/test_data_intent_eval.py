@@ -166,9 +166,17 @@ def test_rules_accuracy_is_measured(cases):
 
 
 def _model_rows(cases) -> tuple[list, list]:
-    from verstka.data.intent import _table_sha
+    """Записанные ответы — для этих подсказок навыка и этих таблиц: подсказки изменились или больше пятой части таблиц
+    читается иначе — тест падает и просит перезаписать ответы (живой прогон, `scratchpad/intent/eval.py live`)."""
+    from verstka.data.intent import SKILL, _table_sha
+    from verstka.skills_registry import SkillsRegistry
 
-    answers = json.loads(ANSWERS.read_text(encoding="utf-8"))["answers"]
+    rec = json.loads(ANSWERS.read_text(encoding="utf-8"))
+    sha = SkillsRegistry.load().get(SKILL).sha256
+    if rec.get("skill_sha256") != sha:
+        pytest.fail(f"подсказки навыка {SKILL} изменились после записи ответов ({str(rec.get('skill_sha256'))[:8]} → "
+                    f"{sha[:8]}): перезапишите tests/fixtures/intent/answers.json живым прогоном")
+    answers = rec["answers"]
     rows, stale = [], []
     for lab, tables in cases:
         a = answers.get(lab["id"])
@@ -182,7 +190,8 @@ def _model_rows(cases) -> tuple[list, list]:
             res = read_goals(lab["brief"], tables, reading=GoalReading.model_validate(a["reading"]))
         rows.append(score(lab, res))
     if len(stale) > len(cases) // 5:
-        pytest.skip(f"таблицы читаются иначе, чем при записи ответов ({len(stale)}): перезапишите answers.json")
+        pytest.fail(f"таблицы читаются иначе, чем при записи ответов ({len(stale)} из {len(cases)}: {', '.join(stale[:12])}"
+                    f"): перезапишите эти ответы в tests/fixtures/intent/answers.json живым прогоном")
     return rows, stale
 
 
