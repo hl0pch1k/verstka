@@ -600,3 +600,21 @@ def test_a_data_decks_summary_is_checked_against_its_story():
     r = redesign_slide(o, 3, parse_brief_text(BRIEF), None, request="сделай крупными цифрами", skills=SkillsRegistry.load(), providers=_designer(answer))
     s = r.outline.slides[2]
     assert [n.value for n in s.content.numbers] == ["41%", "+38%"], s.content
+
+
+def test_a_request_set_as_a_line_becomes_the_callout():
+    # qa3 N-L8 (o01 slide 11): «Просим утвердить…» as the third line under the columns, an 8 pt footnote on the slide
+    s = OutlineSlide(id="x", kind=K.comparison, headline="Срывы дедлайнов снизились с 31% до 12%", takeaway="Окупаемость за квартал за счёт роста конверсии в «Про»",
+                     content=SlideContent(columns=[SlideItem(title="Было", text="31%"), SlideItem(title="Стало", text="12%")],
+                                          bullets=["Окупаемость разработки за один квартал", "Просим утвердить запуск и бюджет на продвижение"]))
+    assert A.keep_ask(s, "Просим утвердить запуск и бюджет на продвижение.")
+    assert s.takeaway == "Просим утвердить запуск и бюджет на продвижение"
+    assert "Просим утвердить запуск и бюджет на продвижение" not in s.content.bullets
+
+
+def test_a_paraphrased_request_line_becomes_the_callout_in_the_briefs_words():
+    s = OutlineSlide(id="x", kind=K.comparison, headline="Срывы дедлайнов снизились с 31% до 12%", takeaway="Окупаемость за квартал за счёт тарифа «Про»",
+                     content=SlideContent(columns=[SlideItem(title="Было", text="31%"), SlideItem(title="Стало", text="12%")],
+                                          bullets=["Окупаемость разработки за один квартал", "Рост конверсии в тариф «Про»", "Запрос: утвердить запуск и бюджет"]))
+    A.keep_ask(s, "Просим утвердить запуск и бюджет на продвижение.")
+    assert s.takeaway == "Просим утвердить запуск и бюджет на продвижение" and len(s.content.bullets) == 2

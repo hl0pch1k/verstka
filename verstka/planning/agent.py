@@ -3143,7 +3143,9 @@ def _ask_parts(sentence: str) -> list[str]:
     if _ASK_SENTENCE_RE.match(sentence):
         return [sentence]
     parts = _enum_parts(sentence)
-    if len(parts) >= 2 and not any(m.group(0).lower() not in _NOT_VERBS for m in _VERB_RE.finditer(parts[0])):
+    # a list of three or more short things; «X даёт платформу, наставников и стажировки» splits into two halves of
+    # one clause, never a list
+    if len(parts) >= 3 and all(len(p.split()) <= 9 for p in parts) and not any(m.group(0).lower() not in _NOT_VERBS for m in _VERB_RE.finditer(parts[0])):
         return parts
     return [sentence]
 
@@ -3152,7 +3154,11 @@ def ask_shown(sentence: str, text: str) -> bool:
     """The deck (or a slide: `text`, what it shows) says the ask: its parts, most of them."""
     shown = _Shown(text)
     parts = _ask_parts(sentence)
-    return sum(1 for p in parts if shown.line(p)) * 2 > len(parts) if len(parts) > 1 else shown.line(sentence)
+    if len(parts) > 1:
+        return sum(1 for p in parts if shown.line(p)) * 2 > len(parts)
+    # one sentence: most of its words on the slide (a figure of it left out does not make the ask missing)
+    stems = shown.stems_of(sentence)
+    return bool(stems) and sum(1 for w in stems if shown.stems.has(w)) * 10 >= len(stems) * 4
 
 
 def keep_ask(s: OutlineSlide, source: str, asks: Optional[list[tuple[str, str]]] = None) -> list[str]:
@@ -3168,9 +3174,21 @@ def keep_ask(s: OutlineSlide, source: str, asks: Optional[list[tuple[str, str]]]
         asks = [("", H.strip_end(sn.strip())) for sn in (H.split_sentences(source or "") or []) if _ASK_SENTENCE_RE.match(sn.strip())]
     said: list[str] = []
     for heading, ask in asks:
+        c = s.content
+        request = bool(_ASK_SENTENCE_RE.match(ask)) and len(ask.split()) <= 14
+        if request and not ask_shown(ask, f"{s.headline}\n{s.takeaway or ''}"):
+            # a request the designer set as one of the slide's lines: the slide's callout instead (qa3 N-L8: an 8 pt line)
+            line = next((b for b in c.bullets if same_text(b, ask) or said_in(b, ask, 0.8) or ask_shown(ask, b)), None)
+            if line is not None:
+                old_tk = s.takeaway
+                c.bullets = [b for b in c.bullets if b is not line]
+                s.takeaway = H.strip_end(ask)  # the brief's own words («…и бюджет на продвижение»), not a paraphrase
+                if old_tk and not adds_nothing(old_tk, s.headline) and not _Shown("\n".join(c.bullets)).line(old_tk):
+                    c.bullets.append(old_tk)
+                said.append(f"the brief's request «{ask[:60]}» was a line: the slide's takeaway now")
+                continue
         if len(ask.split()) > 24 or ask_shown(ask, _visible_text(s)):
             continue
-        c = s.content
         room = {"comparison": 2, "two_column": 2}.get(s.kind.value, _LINE_ROOM.get(s.kind.value, 0)) - len(c.bullets)
         if c.chart is not None:
             room = min(room, 1)
@@ -3184,7 +3202,9 @@ def keep_ask(s: OutlineSlide, source: str, asks: Optional[list[tuple[str, str]]]
             continue
         shown = _Shown(_visible_text(s))
         missing = [p for p in parts if not shown.line(p)]
-        if len(missing) > 1 and room >= len(missing):
+        if len(missing) > 1 and (room >= len(missing) or len(c.bullets) + len(missing) <= 6):
+            # short parts as lines of their own, even past the form's usual room: one long joined line is what the
+            # autofix then cuts («…, аудитории для практикумов» lost its third part)
             c.bullets.extend(H.cap_first(H.strip_end(p)) for p in missing)
         elif room >= 1:
             line = f"{heading}: {', '.join(_low_first(p) for p in parts)}" if heading and len(parts) > 1 else H.cap_first(ask)
@@ -3255,6 +3275,9 @@ def plain_labels(s: OutlineSlide, source: str) -> list[str]:
             said.append(f"the label «{lab}» of {n.value} says nothing of what it counts → «{new}»")
             n.label = new
     return said
+
+
+_ATTRIBUTION_RE = re.compile(r"^(?:по\s+(?:оценке|оценкам|данным|мнению|прогнозу|словам)|согласно)(?![\wё])", re.I)
 
 
 def lone_line_repeat(s: OutlineSlide, title: str) -> Optional[str]:
@@ -3813,6 +3836,12 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
     said = lone_line_repeat(s, d.unit.title)
     if said:
         d.changes.append(f"slide {d.unit.key}: {said}")
+    # «По оценке отрасли» as a line of its own: where the figures come from, the slide's footnote — not a bullet
+    attrib = [b for b in c.bullets if _ATTRIBUTION_RE.match(b.strip()) and len(b.split()) <= 6 and not figures(b)]
+    if attrib and not s.footnote:
+        s.footnote = H.cap_first(H.strip_end(attrib[0]))
+        c.bullets = [b for b in c.bullets if b not in attrib]
+        d.changes.append(f"slide {d.unit.key}: the line «{attrib[0][:40]}» says where the figures come from: the footnote now")
     d.changes.extend(f"slide {d.unit.key}: {x}" for x in plain_labels(s, d.unit.text or ""))
     s.takeaway = plain_change(s.takeaway)
     c.bullets = [plain_change(b) or b for b in c.bullets]
