@@ -2497,6 +2497,9 @@ def _keep_pictures(o: DeckOutline, pictured: dict[str, "_Unit"], warns: list[str
 def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warns: list[str]) -> None:
     """The brief's «оставь место под фото» holds on the final slide of its spec whatever the later passes did with the
     slide (reshaped, merged, compiled): the first content slide of the spec keeps the place free."""
+    from verstka.planning.pictures import strip_picture_notes
+
+    strip_picture_notes(o, warns)  # a picture's note copied into the slide's text leaves it
     photos = {sp.number: sp.photo for sp in (structure.specs if structure else []) if sp.photo}
     owns = {sp.number: sp.photo_own for sp in (structure.specs if structure else []) if sp.photo}
     if not photos:

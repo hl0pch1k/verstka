@@ -8,7 +8,11 @@ max_per_generation: 8    # different pictures per generation; the variants share
 concurrency: 3           # pictures asked side by side
 timeout_s: 90            # one picture; the generation's 5 minutes bound it too
 wait_s: 75               # how long the export waits for the pictures still being made (the places stay free past it)
-max_side_px: 1600        # the picture in the deck, its longer side (cropped to the place's exact proportions first)
+max_side_px: 1600        # the picture in the deck, its longer side (cropped to its frame's exact proportions first, around what it shows)
+# the picture's form on the slide (rendering/picture_layouts.py): a place in a side column runs out to the slide's edge
+# (half of the slide is the picture), a deck of circles or rounded cards gets a round or rounded picture, a place over
+# most of the slide is its background with an underlay under the text; off — the picture fills its place as drawn
+layouts: true
 jpeg_quality: 88
 
 palette:
@@ -32,15 +36,22 @@ prompt:
   # Z-Image draws text well — and draws every quoted title, value or colour code it is given: the prompt carries no
   # headline, no deck title and no HEX codes, only words for what to draw (the live run of 2026-10-06 put the slide's
   # headline and «#00D3E6» into the pictures)
-  template: "{subject}. {context}. {style}. Colour palette: {colors}. {rules}."
+  template: "{subject}. {context}. {style}. {frame}. Colour palette: {colors}. {rules}."
   max_chars: 1000          # Polza's limit on a picture's prompt: the context goes first, then the end of the subject
   context: "An image for a business presentation slide"
   rules: "The picture contains no text of any kind: no words, no letters, no numbers, no labels, no captions, no logos, no watermarks, no colour codes"
   styles:
     photo: "Professional editorial photograph, natural soft light, clean uncluttered composition, realistic detail"
-    illustration: "Clean modern flat vector illustration, simple geometric shapes, soft gradients, generous negative space"
+    illustration: "Clean modern digital illustration, simple smooth forms, soft gradients and soft light, generous negative space"
     # a screen invites pseudo-text and digits: pictograms and progress bars stand for every value, a chart is one curve
     screen: "Clean modern flat vector illustration of a software interface on a laptop screen: pictograms and progress bars instead of any text, every chart is a single smooth curve without axes, ticks, numbers or gridlines; minimalist, soft shadows, generous negative space"
+  # the composition of the picture's frame on the slide (images/fill.py: the frame is read before the picture is asked)
+  frames:
+    tall: "Vertical portrait composition made for a tall frame: one clear main subject seen whole, filling the height, calm background, no borders or frames"
+    wide: "Wide landscape composition: one clear main subject, calm background, no borders or frames"
+    square: "Balanced square composition: one clear main subject in the middle, calm background, no borders or frames"
+    circle: "Centred composition for a circular crop: one clear main subject in the very middle with even space around it, plain soft background"
+    background: "Calm wide background scene with large even areas of soft low-contrast tone and the main subject small and off to one side, no borders or frames"
   # the person's wish on «Заменить изображение»: without a text model it leads the subject
   wish: "{wish}. Subject: {subject}"
   # the next attempt after the vision model saw writing in a picture (text_check): the wordless lead and stricter

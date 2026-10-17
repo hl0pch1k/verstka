@@ -43,6 +43,8 @@ class ImageAsk:
     label: str = ""
     wish: Optional[str] = None
     subject_en: Optional[str] = None  # the model's English subject, when it wrote one
+    frame: str = ""  # the composition of its frame on the slide: tall | wide | square | circle | background
+    template_style: str = ""  # the style the template's own pictures are in (photo | illustration), when they say
 
     @property
     def what(self) -> str:
@@ -78,15 +80,31 @@ def load_config(path: Optional[Path | str] = None) -> dict:
     return _CFG[key]
 
 
-def style_of(text: str, cfg: dict) -> str:
-    """The picture's style by the author's words: the first rule of configs/images.yaml `styles` that matches."""
+def style_of(text: str, cfg: dict, template_style: str = "") -> str:
+    """The picture's style by the author's words: the first rule of configs/images.yaml `styles` that matches; else
+    the style of the template's own pictures (its photos or its illustrations), else the default."""
     for rule in cfg.get("styles") or []:
         try:
             if re.search(str(rule.get("match", "")), text or "", re.I):
                 return str(rule.get("style") or cfg.get("default_style") or "photo")
         except re.error:
             continue
+    if template_style and template_style in ((cfg.get("prompt") or {}).get("styles") or {}):
+        return template_style
     return str(cfg.get("default_style") or "photo")
+
+
+def template_style(manifest) -> str:
+    """The style the template's own pictures are in: «illustration» when its large pictures are mostly illustrations
+    (drawn, 3D, cut out), «photo» when photos hold their own among them, "" when it has no large pictures."""
+    kinds = [str(getattr(a, "kind", "") or "") for a in (getattr(manifest, "assets", None) or [])
+             if (getattr(a, "width", 0) or 0) * (getattr(a, "height", 0) or 0) >= 300 * 300]
+    photos, drawn = kinds.count("photo"), kinds.count("illustration")
+    if photos + drawn < 2:
+        return ""
+    if drawn >= 6 and drawn >= 4 * photos:
+        return "illustration"
+    return "photo" if photos >= 2 else ""
 
 
 def _clean(text: str, limit: int = 300) -> str:
@@ -101,7 +119,7 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     a screen shown as shapes only; 2 — and the subject as a flat illustration, never a screen, a page or a sign."""
     cfg = cfg if cfg is not None else load_config()
     pcfg = cfg.get("prompt") or {}
-    style = style_of(" ".join([ask.hint or "", ask.label or "", ask.wish or ""]), cfg)
+    style = style_of(" ".join([ask.hint or "", ask.label or "", ask.wish or ""]), cfg, ask.template_style)
     scfg = pcfg.get("strict") or {}
     if strict >= 2:
         style = "illustration"
@@ -113,14 +131,18 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     if strict >= 1 and (scfg.get("styles") or {}).get(style):
         style_line = str(scfg["styles"][style])
     colors = palette_words(pal) if pal is not None else ""
+    # the frame's composition (a bleed half of the slide is a tall picture, a circle keeps its subject in the middle)
+    frame_line = str((pcfg.get("frames") or {}).get(ask.frame or "", "")) if ask.frame else ""
     template = str(pcfg.get("template", "{subject}. {context}. {style}. Colour palette: {colors}. {rules}."))
+    if frame_line and "{frame}" not in template:
+        template = template.replace("{style}.", "{style}. {frame}.", 1)
     rules = str(pcfg.get("rules", "No text"))
     if strict >= 1:
         template = str(scfg.get("lead", "Wordless picture.")) + " " + template
         rules = str(scfg.get("rules", rules))
 
     def compose(subj: str, ctx: str) -> str:
-        text = template.format(subject=subj, context=ctx, style=style_line, colors=colors or "neutral", rules=rules)
+        text = template.format(subject=subj, context=ctx, style=style_line, colors=colors or "neutral", rules=rules, frame=frame_line)
         return re.sub(r"\.\s*\.", ".", re.sub(r"\s+", " ", text)).strip()
 
     text = compose(subject, context)

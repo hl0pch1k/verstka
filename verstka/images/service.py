@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from verstka.images import palette as P
-from verstka.images.prompt import ImageAsk, build_prompt, english_subjects, load_config
+from verstka.images.prompt import ImageAsk, build_prompt, english_subjects, load_config, template_style
 from verstka.images.providers import ImageError
 from verstka.images.text_check import PictureHasText, check_text
 
@@ -55,6 +55,7 @@ class ImageMaker:
         self.provider = provider
         self.cfg = cfg if cfg is not None else load_config()
         self.palette = P.palette_of(manifest)
+        self.template_style = template_style(manifest)  # a picture the author's words leave open: in the template's style
         self.folder = Path(folder)
         self.skills = skills
         self.providers = providers
@@ -109,7 +110,7 @@ class ImageMaker:
             raise ImageError("no time left in the generation for a picture")
         subject = self._subject(ask)
         # one deck title for every variant's picture (the key leaves it out: the variants share the picture)
-        ask2 = ImageAsk(**{**asdict(ask), "subject_en": subject, "deck": self.deck_title or ask.deck})
+        ask2 = ImageAsk(**{**asdict(ask), "subject_en": subject, "deck": self.deck_title or ask.deck, "template_style": ask.template_style or self.template_style})
         seed = seed if seed is not None else seed_of(ask.key(), aspect)
         tc = self.cfg.get("text_check") or {}
         attempts = max(1, int(tc.get("attempts", 3))) if tc.get("enabled", True) else 1

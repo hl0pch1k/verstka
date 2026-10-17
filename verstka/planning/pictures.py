@@ -116,3 +116,50 @@ def place_pictures_by_text(outline: Any, text: str, notes: list[tuple[int, str, 
         c.photo_slot = "Изображение"
         c.photo_hint = hint
         c.photo_own = _own(words, _slide_text(host))
+
+
+# a slide with a picture gives it about half of its width: the text beside it stays short (VK's experts: a picture
+# that fits helps, one squeezed beside a full slide harms — the owner's run of 17.10 had a picture beside a lead, four
+# figures and two bullets)
+PICTURE_MAX_POINTS = 4
+PICTURE_MAX_NUMBERS = 3
+PICTURE_MAX_CHARS = 420
+
+
+def room_for_picture(lead: str = "", points: list[str] | None = None, numbers: list[str] | None = None, *, other: bool = False) -> bool:
+    """A slide of the writer keeps its picture: no timeline, steps, table, chart or formula beside it (`other`), at most
+    4 points or 3 figures, and the slide's words short enough for half of it."""
+    points = [p for p in (points or []) if (p or "").strip()]
+    numbers = [n for n in (numbers or []) if (n or "").strip()]
+    if other or len(points) > PICTURE_MAX_POINTS or len(numbers) > PICTURE_MAX_NUMBERS or (points and len(numbers) > 2):
+        return False
+    return len(" ".join([lead or "", *points, *numbers])) <= PICTURE_MAX_CHARS
+
+
+_NOTE_LINE_RE = re.compile(r"^\s*\[(?P<body>[^\[\]]{3,})\]\s*[.;]?\s*$")
+
+
+def is_picture_note(line: str) -> bool:
+    """A line that is the author's bracketed note about a picture («[Место под изображение: фасад офиса]»)."""
+    from verstka.planning.faithful import _note_part
+
+    m = _NOTE_LINE_RE.match(line or "")
+    return bool(m) and _note_part(m.group("body")).kind == "image"
+
+
+def strip_picture_notes(outline: Any, warnings: list[str]) -> None:
+    """A picture's note never stands on a slide as its text: the designer copied it into the bullets of the live run
+    of 18.10 («[Место под изображение: стеклянный фасад …]» as the slide's second point) — the place keeps it."""
+    for s in getattr(outline, "slides", None) or []:
+        c = s.content
+        lines = [*c.bullets, *c.paragraphs, *(it.title for it in c.items), s.takeaway or "", s.subtitle or ""]
+        if not any(is_picture_note(x) for x in lines):
+            continue
+        c.bullets = [x for x in c.bullets if not is_picture_note(x)]
+        c.paragraphs = [x for x in c.paragraphs if not is_picture_note(x)]
+        c.items = [it for it in c.items if not is_picture_note(it.title)]
+        if is_picture_note(s.takeaway or ""):
+            s.takeaway = None
+        if is_picture_note(s.subtitle or ""):
+            s.subtitle = None
+        warnings.append(f"slide {s.id}: the picture's note left the slide's text")

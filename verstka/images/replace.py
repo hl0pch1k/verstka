@@ -20,6 +20,7 @@ from verstka.images.fill import (
     WHY_REMOVED,
     descr_of,
     fitted,
+    frames_for,
     made_fields,
     public_records,
     read_records,
@@ -147,6 +148,8 @@ def change_picture(
                        "status": "free", "why": None, "wish": None}
         rec = dict(rec)
         before = rec.get("status")
+        # a free place's picture stands in its frame (a bleed to the edge, a circle…); a picture swapped keeps its own
+        frame = frames_for(prs, [place], cfg).get((n, place.shape_id)) if place is not None else None
 
         if action == "remove":
             if before != "generated":
@@ -160,10 +163,11 @@ def change_picture(
         else:
             if provider is None or getattr(provider, "off", False):
                 raise ValueError("модель изображений не подключена")
+            comp = frame.composition if frame is not None else str(rec.get("composition") or "")
             ask = ImageAsk(hint=str(rec.get("hint") or ""), headline=str(rec.get("headline") or (oslide.headline if oslide else "")), deck=outline.title or "",
-                           label=str(rec.get("label") or ""), wish=wish)
-            box = rec.get("box") or (list(place.box) if place is not None else None)
-            aspect = str(rec.get("aspect") or (nearest_aspect(box[2], box[3]) if box else "4:3"))
+                           label=str(rec.get("label") or ""), wish=wish, frame=comp)
+            box = list(frame.box) if frame is not None else rec.get("box") or (list(place.box) if place is not None else None)
+            aspect = nearest_aspect(box[2], box[3]) if frame is not None else str(rec.get("aspect") or (nearest_aspect(box[2], box[3]) if box else "4:3"))
             deadline = time.monotonic() + float(cfg.get("timeout_s", 90)) * 2 + 15
             maker = ImageMaker(provider, manifest, vdir.parent / "images", cfg=cfg, skills=skills, providers=providers, deadline=deadline, deck_title=outline.title or "")
             _say(progress, "Рисую изображение", 0.1)
@@ -181,13 +185,15 @@ def change_picture(
                 if not swap_picture(slide, str(rec.get("shape_id")), data, descr=descr_of(rec)):
                     raise ValueError("изображение на слайде не найдено")
             else:
-                data = fitted(made.path, place.box, cfg)
+                data = fitted(made.path, frame.box if frame is not None else place.box, cfg)
                 rec.update(made_fields(made))
                 rec["wish"] = wish
-                kept = put_picture(slide, place, data, descr=descr_of(rec))
+                kept = put_picture(slide, place, data, descr=descr_of(rec), frame=frame)
                 if kept is None:
                     raise ValueError("место под изображение не найдено")
-                rec.update({"kept": kept, "shape_id": place.shape_id, "box": list(place.box)})
+                rec.update({"kept": kept, "shape_id": place.shape_id, "box": list(frame.box if frame is not None else place.box)})
+                if frame is not None:
+                    rec.update({"place_box": list(place.box), "frame": frame.public(), "composition": frame.composition, "aspect": aspect})
             rec.update({"status": "generated", "why": None, "error": None, "at": time.time()})
             reply = f"Слайд {n}: новое изображение" + (f" — «{wish}»" if wish else "") + f". Нарисовала модель {made.model_label}."
         prs.save(str(work))

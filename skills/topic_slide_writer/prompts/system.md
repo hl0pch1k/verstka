@@ -24,6 +24,8 @@ Fill the slide's form; leave the other fields empty:
 - "steps" (form "steps"): 3–6 steps of a method or a process, each one sentence starting with a verb (a step with a formula belongs to the form "formulas").
 - "chart" (form "chart"): {"type": "column" | "line" | "pie", "caption": what is measured, "unit": the unit, "rows": [{"label": "...", "value": number}]} — only well-known figures of one measure; if you are not sure of them, use "numbers" instead.
 - "takeaway": one sentence — a conclusion that goes beyond the lead; leave it empty when it would only restate the slide.
-- "picture": only when the plan asks for one — a calm illustration of the slide's subject in a few words (a scene, an object, a place), with no writing, maps, documents, flags, symbols, graphs, diagrams, formulas or real people's faces in it, and without square brackets.
+- "picture": only when the plan asks for one — the concrete thing the slide is about, seen as one subject, in a few words (a scene, an object, a place: «стеклянный фасад головного офиса банка на фоне неба», never a symbol like a trophy, a handshake, a rocket or coins), with no writing, logos, maps, documents, flags, symbols, graphs, diagrams, formulas or real people's faces in it, and without square brackets.
+
+A slide with a picture gives it half of its width: a short lead and at most 3 short points or 3 figures (with more, the picture is dropped).
 
 Return JSON only: {"title": "...", "lead": "...", "points": [], "timeline": [], "numbers": [], "formula": "", "formula_note": "", "formulas": [{"name": "...", "latex": "...", "note": "..."}], "table": null, "steps": [], "chart": null, "takeaway": "", "picture": ""}

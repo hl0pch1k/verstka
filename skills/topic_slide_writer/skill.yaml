@@ -1,5 +1,5 @@
 name: topic_slide_writer
-version: 1.2.2
+version: 1.3.0
 role: llm
 description: >
   Writer mode, step 2 (verstka/planning/topic_writer.py): writes one content slide of a deck planned by
@@ -19,3 +19,4 @@ changelog:
   - "1.2.0: a slide written from the fragments of the person's knowledge base only (`source: kb`) (2026-10-17)"
   - "1.2.1: knowledge base mode — every figure on one slide, tables as tables or charts, the closing conclusion and request, no pictures unless asked, timelines only with own dates (qa5, 2026-10-17)"
   - "1.2.2: a change names both of its periods; every point is a whole sentence (qa6) (2026-10-17)"
+  - "1.3.0: the picture is the slide's concrete subject, never a symbol; a slide with a picture is short (the owner, 18.10)"

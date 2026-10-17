@@ -5,7 +5,8 @@
   shadows, its accent for the mid-tones, its lightest colour for the lights — blended in at `strength`, so the picture
   keeps its subject and reads in the deck's colours whatever the model made of the prompt;
 * `palette_match` — the share of the picture's pixels near the palette or its tints (ΔE76 < 25), kept with the picture;
-* `fit_to` — the picture cropped to the place's exact proportions (centred, never stretched) and scaled down."""
+* `fit_to` — the picture cropped to its frame's exact proportions around what it shows (`focus_crop`: where its detail
+  and its colour stand out — the subject —, the middle when nothing does), never stretched, and scaled down."""
 
 from __future__ import annotations
 
@@ -148,19 +149,73 @@ def palette_match(img: Image.Image, pal: Palette, delta: float = 25.0) -> float:
     return round(float((d < delta).mean()), 3)
 
 
-def fit_to(img: Image.Image, w: float, h: float, max_side: int = 1600) -> Image.Image:
-    """The picture cropped to w:h around its centre (never stretched), then scaled down to at most `max_side` px."""
+def saliency(img: Image.Image, side: int = 96) -> np.ndarray:
+    """Where the picture shows something (rows × columns of a small copy, summing to 1): its edges (detail) and the
+    pixels far in colour from the picture's own mean (a subject on a calm ground), a little weight on the middle."""
+    small = img.convert("RGB")
+    k = side / max(small.size)
+    small = small.resize((max(8, int(small.width * k)), max(8, int(small.height * k))), Image.BILINEAR)
+    a = np.asarray(small, dtype=np.float32) / 255.0
+    lab = _lab(a.reshape(-1, 3) * 255.0).reshape(a.shape)
+    y = lab[..., 0]
+    gx = np.abs(np.diff(y, axis=1, prepend=y[:, :1]))
+    gy = np.abs(np.diff(y, axis=0, prepend=y[:1, :]))
+    edges = gx + gy
+    far = np.sqrt(((lab - lab.reshape(-1, 3).mean(0)) ** 2).sum(-1))
+    m = edges / (edges.mean() + 1e-6) + far / (far.mean() + 1e-6)
+    h, w = m.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    prior = np.exp(-(((xx - (w - 1) / 2) / (0.45 * w)) ** 2 + ((yy - (h - 1) / 2) / (0.45 * h)) ** 2))
+    m = m * (0.55 + 0.45 * prior)
+    return m / (m.sum() + 1e-9)
+
+
+def _window(profile: np.ndarray, keep: float) -> float:
+    """The start (a share of the length) of the window of `keep` of a 1-D profile that holds most of it; ties keep
+    the middle."""
+    n = len(profile)
+    if keep >= 1.0 or n < 2:
+        return 0.0
+    win = max(1, int(round(keep * n)))
+    c = np.concatenate([[0.0], np.cumsum(profile)])
+    sums = c[win:] - c[:-win]
+    mid = (n - win) / 2
+    best = max(range(len(sums)), key=lambda i: (round(float(sums[i]), 4), -abs(i - mid)))
+    return best / n
+
+
+def focus_crop(img: Image.Image, target: float) -> tuple[int, int, int, int]:
+    """The crop box (left, top, right, bottom) of proportions `target` (w/h) that keeps what the picture shows."""
+    iw, ih = img.size
+    m = saliency(img)
+    if iw / ih > target:
+        cw = max(1, int(round(ih * target)))
+        x0 = int(round(_window(m.sum(0), cw / iw) * iw))
+        x0 = min(max(0, x0), iw - cw)
+        return x0, 0, x0 + cw, ih
+    ch = max(1, int(round(iw / target)))
+    y0 = int(round(_window(m.sum(1), ch / ih) * ih))
+    y0 = min(max(0, y0), ih - ch)
+    return 0, y0, iw, y0 + ch
+
+
+def fit_to(img: Image.Image, w: float, h: float, max_side: int = 1600, *, focus: bool = True) -> Image.Image:
+    """The picture cropped to w:h (never stretched) — around what it shows (`focus_crop`), or around its centre —,
+    then scaled down to at most `max_side` px."""
     img = img.convert("RGB")
     iw, ih = img.size
     target = w / h if h > 0 else 1.0
-    if iw / ih > target:
-        cw = max(1, int(round(ih * target)))
-        x0 = (iw - cw) // 2
-        img = img.crop((x0, 0, x0 + cw, ih))
-    else:
-        ch = max(1, int(round(iw / target)))
-        y0 = (ih - ch) // 2
-        img = img.crop((0, y0, iw, y0 + ch))
+    if abs(iw / ih - target) > 0.005:
+        if focus:
+            img = img.crop(focus_crop(img, target))
+        elif iw / ih > target:
+            cw = max(1, int(round(ih * target)))
+            x0 = (iw - cw) // 2
+            img = img.crop((x0, 0, x0 + cw, ih))
+        else:
+            ch = max(1, int(round(iw / target)))
+            y0 = (ih - ch) // 2
+            img = img.crop((0, y0, iw, y0 + ch))
     iw, ih = img.size
     k = min(1.0, max_side / max(iw, ih))
     if k < 1.0:

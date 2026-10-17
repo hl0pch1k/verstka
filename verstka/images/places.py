@@ -137,33 +137,48 @@ def _picture_xml(slide, data: bytes, box: tuple[int, int, int, int]):
     return el
 
 
-def put_picture(slide, place: Place, data: bytes, *, descr: str) -> Optional[dict]:
-    """The picture `data` (already cropped to the place's proportions) in the place: its z-position, box and geometry;
-    the caption goes. Returns what puts the place back (the place's and the captions' XML), None when the place is gone."""
+def put_picture(slide, place: Place, data: bytes, *, descr: str, frame=None) -> Optional[dict]:
+    """The picture `data` (already cropped to its frame's proportions) in the place: its z-position, box and geometry —
+    or the frame `frame` (rendering/picture_layouts.py: a bleed to the slide's edge, a circle, a background with an
+    underlay) —; the caption goes. Returns what puts the place back (the place's and the captions' XML, the shapes
+    added with the picture), None when the place is gone."""
+    from verstka.rendering import picture_layouts as PL
+
     tree = slide._element.cSld.find(q("p:spTree"))
     el = _by_id(tree, place.shape_id)
     if el is None or _name(el) != PHOTO_PLACE_NAME:
         return None
-    at = list(tree).index(el)
-    pic = _picture_xml(slide, data, place.box)
+    pic = _picture_xml(slide, data, frame.box if frame is not None else place.box)
     nv = pic.find(".//" + q("p:cNvPr"))
     nv.set("id", place.shape_id)
     nv.set("name", f"{PICTURE_PREFIX}: {(place.hint or place.label or place.headline)[:80]}".rstrip(": "))
     nv.set("descr", descr[:900])
-    geom = el.find(q("p:spPr") + "/" + q("a:prstGeom"))
     sppr = pic.find(q("p:spPr"))
-    if geom is not None and sppr is not None:
+    geom = el.find(q("p:spPr") + "/" + q("a:prstGeom"))
+    if frame is not None and frame.geom:
+        PL.set_geometry(pic, frame)
+    elif geom is not None and sppr is not None:
         old = sppr.find(q("a:prstGeom"))
         if old is not None:
             sppr.replace(old, copy.deepcopy(geom))
-    kept = {"place_xml": etree.tostring(el, encoding="unicode"), "caption_xml": []}
-    tree.remove(el)
-    tree.insert(at, pic)
+    kept = {"place_xml": etree.tostring(el, encoding="unicode"), "caption_xml": [], "extra_ids": []}
+    caps = []
     for cid in place.caption_ids:
         cel = _by_id(tree, cid)
         if cel is not None:
-            kept["caption_xml"].append(etree.tostring(cel, encoding="unicode"))
-            tree.remove(cel)
+            caps.append(cel)
+    mark = etree.Element(q("p:sp"))
+    el.addprevious(mark)
+    tree.remove(el)
+    for cel in caps:
+        kept["caption_xml"].append(etree.tostring(cel, encoding="unicode"))
+        tree.remove(cel)
+    at = list(tree).index(mark)
+    tree.remove(mark)
+    if frame is not None:
+        kept["extra_ids"] = PL.stand(slide, pic, frame, at)
+    else:
+        tree.insert(at, pic)
     return kept
 
 
@@ -209,6 +224,11 @@ def take_picture_out(slide, shape_id: str, kept: dict) -> bool:
     rid_attr = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
     blip = el.find(".//" + q("a:blip"))
     tree.remove(el)
+    for xid in kept.get("extra_ids") or []:  # the underlay under the text over the picture
+        xel = _by_id(tree, str(xid))
+        if xel is not None:
+            tree.remove(xel)
+    at = min(at, len(tree))
     tree.insert(at, place)
     for i, cx in enumerate(kept.get("caption_xml") or []):
         tree.insert(at + 1 + i, etree.fromstring(cx))

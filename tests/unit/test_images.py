@@ -496,9 +496,12 @@ def test_the_described_place_gets_a_picture_and_the_own_photo_place_stays_free(t
     names = [el.find(".//" + q("p:cNvPr")).get("name") for el in tree1 if el.find(".//" + q("p:cNvPr")) is not None]
     pics = [el for el in tree1 if etree.QName(el).localname == "pic"]
     assert len(pics) == 1 and not any(n.startswith(CAPTION_PREFIX) for n in names) and PHOTO_PLACE_NAME not in names
-    # the picture keeps the place's position under what was drawn over it, and the frame's geometry
+    # the picture keeps the place's position under what was drawn over it; the place in the right column runs out
+    # to the slide's right edge and bottom (rendering/picture_layouts.py: a bleed is square-cornered)
     assert names.index("Over") > [n for n in names].index(pics[0].find(".//" + q("p:cNvPr")).get("name"))
-    assert pics[0].find(".//" + q("a:prstGeom")).get("prst") == "roundRect"
+    assert pics[0].find(".//" + q("a:prstGeom")).get("prst") == "rect"
+    off, ext = pics[0].find(".//" + q("a:off")), pics[0].find(".//" + q("a:ext"))
+    assert int(off.get("x")) + int(ext.get("cx")) == prs.slide_width and int(off.get("y")) + int(ext.get("cy")) == prs.slide_height
     assert "сгенерировано" in pics[0].find(".//" + q("p:cNvPr")).get("descr")
     tree2 = prs.slides[1]._element.cSld.find(q("p:spTree"))
     assert not [el for el in tree2 if etree.QName(el).localname == "pic"]

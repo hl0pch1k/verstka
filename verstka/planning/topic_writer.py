@@ -693,6 +693,14 @@ def check_formulas(slides: list[TopicSlide]) -> list[dict]:
     return dropped
 
 
+def picture_fits(s: TopicSlide) -> bool:
+    """The written slide leaves half of itself for its picture (planning/pictures.py `room_for_picture`)."""
+    from verstka.planning.pictures import room_for_picture
+
+    other = bool(s.timeline or s.steps or (s.table and s.table.rows) or s.chart or s.formula or s.formulas)
+    return room_for_picture(s.lead, s.points, [f"{n.value} {n.label}" for n in s.numbers], other=other)
+
+
 def render_slide(n: int, s: TopicSlide, title: str) -> list[str]:
     out = ["", f"Слайд {n}. {H.strip_end(s.title or title)}"]
     if s.lead:
@@ -740,7 +748,10 @@ def render_slide(n: int, s: TopicSlide, title: str) -> list[str]:
     if s.picture:
         # a bracket inside the note («на отрезке [a; b]») would end it early: the note would read as the author's photo
         pic = H.strip_end(s.picture).replace("[", "(").replace("]", ")")
-        out.append(f"[Место под изображение: {pic}]")
+        # a block of its own (a blank line before it): glued to the list above, the note was read as the list's line —
+        # the slide kept a place «Фото» without the description, and the picture was drawn from the headline alone
+        # (the owner's run of 17.10: a glass trophy for «Бренд и клиентская база»)
+        out += ["", f"[Место под изображение: {pic}]"]
     return out
 
 
@@ -1284,7 +1295,7 @@ def write_topic_deck(
                 s: TopicSlide = r.parsed
                 if s.lead or s.points or s.timeline or s.numbers or s.formula or s.formulas or s.table or s.steps:
                     s.title = s.title or ps.title
-                    if not ps.picture:
+                    if not ps.picture or not picture_fits(s):
                         s.picture = ""
                     return s
             except Exception as e:  # noqa: BLE001 - asked once more, then the plan's facts stand for the slide
