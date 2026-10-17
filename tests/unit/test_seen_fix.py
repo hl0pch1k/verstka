@@ -140,7 +140,8 @@ def test_text_that_reads_everywhere_is_left_alone(simple_deck, manifest, tmp_pat
     deck, _ = _deck_with_text(simple_deck, tmp_path / "d.pptx")
     before = deck.read_bytes()
     res = SF.fix_seen(deck, 2, ["low_contrast"], manifest, _picture(deck, tmp_path / "p.png", 2))
-    assert res.cured == {"low_contrast"} and res.records == [] and deck.read_bytes() == before
+    # nothing changed is nothing cured: the slide is laid out again for the remark (never «остался прежним»)
+    assert res.cured == set() and res.untouched == {"low_contrast"} and res.records == [] and deck.read_bytes() == before
 
 
 def test_text_running_under_a_picture_is_cut_short(simple_deck, manifest, tmp_path):
@@ -199,8 +200,8 @@ def test_what_cannot_be_fixed_in_place_says_why(simple_deck, manifest, tmp_path)
     res = SF.fix_seen(deck, 2, ["unbalanced", "low_contrast"], manifest, None)
     assert not res.cured and set(res.left) == {"unbalanced", "low_contrast"}
     assert "пустоты" in res.left["unbalanced"] and "картинку" in res.left["low_contrast"]
-    why = res.why_for(True, "обложку")
-    assert why[0].isupper() and "обложку агент заново не собирает" in why and "другой вариант" in why
+    why = res.why_for(True, "обложки")
+    assert why[0].isupper() and "другие образцы шаблона для обложки выходят хуже" in why and "другой вариант" in why
 
 
 # ---------------------------------------------------------------------------- «Исправить слайд» end to end (offline)
@@ -301,11 +302,88 @@ def test_a_remark_the_model_still_sees_stays_and_says_so(built, monkeypatch, tmp
 
 
 def test_a_remark_that_cannot_be_fixed_on_a_cover_says_why(built, monkeypatch):
+    import verstka.audit.eyes as E
     from verstka.pipeline import revise as R
+
+    monkeypatch.setattr(E, "relayout", lambda *a, **kw: "skip")  # no other sample for this cover
 
     c, mod, tid, gid, vdir = built
     remark = _remark("unbalanced", 1, where="весь слайд")
     _with_remark(vdir, remark)
     res = R.fix_slide(vdir, "structured", 1, manifest=mod.store.manifest(tid), ws=mod.store.workspace(tid), remarks=[remark], use_models=False, exports=[])
     assert not res.applied
-    assert res.why.startswith("Пустоты и перекос на месте не исправить") and "обложку агент заново не собирает" in res.why
+    assert res.why.startswith("Пустоты и перекос на месте не исправить") and "другие образцы шаблона для обложки выходят хуже" in res.why
+
+
+def test_letters_below_a_code_box_widen_it_to_its_panel(simple_deck, manifest, tmp_path):
+    """The owner's code slide: the renderer wraps a code font wider than measured and the last line falls out under
+    the black panel — the picture shows it, the box takes the whole panel."""
+    prs = Presentation(str(simple_deck))
+    s = prs.slides[1]
+    W, H = prs.slide_width, prs.slide_height
+    for sh in list(s.shapes):  # the slide holds the panel and its code only
+        sh._element.getparent().remove(sh._element)
+    panel = s.shapes.add_shape(1, Emu(int(W * 0.45)), Emu(int(H * 0.2)), Emu(int(W * 0.5)), Emu(int(H * 0.5)))
+    panel.fill.solid()
+    panel.fill.fore_color.rgb = RGBColor(0, 0, 0)
+    box = s.shapes.add_textbox(Emu(int(W * 0.47)), Emu(int(H * 0.22)), Emu(int(W * 0.3)), Emu(int(H * 0.46)))
+    box.text_frame.word_wrap = True
+    box.text_frame.text = "\n".join(f"line {k}" for k in range(8))
+    deck = tmp_path / "code.pptx"
+    prs.save(str(deck))
+    sid = str(box.shape_id)
+    im = Image.new("RGB", (400, int(400 * H / W)), (250, 250, 250))
+    d = ImageDraw.Draw(im)
+    k = 400 / W
+    d.rectangle([int(panel.left * k), int(panel.top * k), int((panel.left + panel.width) * k), int((panel.top + panel.height) * k)], fill=(0, 0, 0))
+    y = int((box.top + box.height) * k) + 18  # a line of letters under the panel
+    d.rectangle([int(box.left * k) + 10, y, int(box.left * k) + 90, y + 4], fill=(120, 120, 120))
+    pic = tmp_path / "shot.png"
+    im.save(pic)
+    from verstka.audit.ir import build_deck_ir
+
+    ir = build_deck_ir(deck, with_images=False)
+    e = next(x for x in ir.slides[1].elements if str(x.id) == sid)
+    assert SF.ink_below(Image.open(pic), e, ir.slides[1], ir.slide_w, ir.slide_h) > 0.02
+    recs, touched, still = SF.fix_spill(deck, 2, manifest, pic)
+    assert touched == {sid} and "растянут на всю карточку" in recs[0]["result"]
+    sh = _shape(deck, 2, sid)
+    assert sh.left + sh.width > box.left + box.width and sh.left + sh.width <= panel.left + panel.width
+
+
+def test_a_remark_with_nothing_to_fix_in_place_lays_the_slide_out_again(built, monkeypatch):
+    """«Исправить слайд» never answers «остался прежним» while a remark is on the slide: the rules found nothing to
+    change and there is no model for the designer: the slide is laid out on another sample of the template (or
+    composed), only that slide changes, and the reply says what was done."""
+    from verstka.pipeline import revise as R
+
+    c, mod, tid, gid, vdir = built
+    remark = _remark("unbalanced", 3, where="весь слайд")
+    _with_remark(vdir, remark)
+    before = R.slide_fingerprints(vdir / "deck.pptx")
+    res = R.fix_slide(vdir, "structured", 3, manifest=mod.store.manifest(tid), ws=mod.store.workspace(tid), remarks=[remark], use_models=False, exports=[])
+    assert res.applied and res.how == "relayout" and res.fixed == [remark.id], res.reply
+    assert "собран" in res.reply
+    after = R.slide_fingerprints(vdir / "deck.pptx")
+    assert after[2] != before[2] and R.changed_slides(before, after, skip={3}) == []
+
+
+def test_nothing_left_to_change_says_the_remarks_are_gone(built, monkeypatch):
+    """The slide cannot be changed (no other layout) and the model, looking again, sees nothing: the remark goes and
+    the reply says «замечаний больше нет» — not «остался прежним, добавьте пожелание»."""
+    import verstka.audit.eyes as E
+    from verstka.pipeline import revise as R
+
+    c, mod, tid, gid, vdir = built
+    remark = _remark("unbalanced", 1, where="весь слайд")
+    _with_remark(vdir, remark)
+    before = (vdir / "deck.pptx").read_bytes()
+    monkeypatch.setattr(E, "relayout", lambda *a, **kw: "skip")
+    monkeypatch.setattr(SF, "slide_picture", lambda deck, n, out_dir, timeout_s=120.0: _picture(Path(deck), Path(out_dir).parent / f"shot-{time.time_ns()}.png", n))
+    monkeypatch.setattr(SF, "relook", lambda *a, **kw: [])
+    res = R.fix_slide(vdir, "structured", 1, manifest=mod.store.manifest(tid), ws=mod.store.workspace(tid), remarks=[remark], use_models=True, exports=[])
+    assert not res.applied and res.why.startswith("Замечаний больше нет") and res.fixed == [remark.id]
+    assert res.reply.startswith("Слайд 1: замечаний больше нет")
+    assert (vdir / "deck.pptx").read_bytes() == before
+    audit = json.loads((vdir / "audit_report.json").read_text(encoding="utf-8"))
+    assert not any(i["id"] == remark.id for i in audit["issues"])

@@ -721,6 +721,9 @@ class SlideFix:
     score_before: Optional[float] = None
     score_after: Optional[float] = None
     n_slides: int = 0
+    # nothing to change after all: the slide is the same, the model sees none of the asked problems, the remarks are gone
+    # from the report (the reply says «замечаний больше нет»)
+    cleared: bool = False
 
 
 _EVENT_PREFIX = re.compile(r"^(?:Аналитик|Архитектор|Дизайнер|Критик|Правка|Сборка|Вёрстка|Проверка)\s*:\s*")
@@ -886,6 +889,32 @@ def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int) ->
         return None
 
 
+_WORD_RE = re.compile(r"[\w\d][\w\d\-]{2,}", re.U)
+
+
+def slide_words(pptx: Path, n: int) -> set[str]:
+    """The words slide `n` of `pptx` shows (its shapes' text, groups and tables included; lower case, 3+ letters)."""
+    from pptx import Presentation
+
+    try:
+        s = Presentation(str(pptx)).slides[n - 1]
+    except (IndexError, OSError, ValueError):
+        return set()
+    text = " ".join(t.text or "" for t in s._element.cSld.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t"))
+    return {w.lower() for w in _WORD_RE.findall(text)}
+
+
+def lost_words_share(before: set[str], after: set[str]) -> float:
+    """The share of the slide's words a new layout of it no longer shows (a cover sample without a subtitle place)."""
+    return len(before - after) / float(len(before)) if before else 0.0
+
+
+def remaining_asked(fixed: list[str], remarks: list) -> bool:
+    """Whether a remark the person asked to fix is not among the fixed ones."""
+    done = set(fixed)
+    return any(r.id not in done for r in remarks)
+
+
 def fix_label(n: int, wishes: Optional[str]) -> str:
     """The history line of a fix («Ваши правки»)."""
     wishes = (wishes or "").strip()
@@ -972,8 +1001,9 @@ def fix_slide(
 
     def _fix_seen(deck: Path, k: int, codes: set, mf, where: Path, shown: Optional[list] = None) -> SF.SeenFix:
         """The in-place fixes of the review's `codes` on slide k of `deck`; their records join the history."""
-        pic = SF.slide_picture(deck, k, where) if "low_contrast" in codes else None
-        got = SF.fix_seen(deck, k, codes, mf, pic, shown or ())
+        pic = SF.slide_picture(deck, k, where) if codes & {"low_contrast", "text_cut"} else None
+        again = iter(range(1, 10))
+        got = SF.fix_seen(deck, k, codes, mf, pic, shown or (), render=lambda d: SF.slide_picture(d, k, where / f"r{next(again)}"))
         recs = [{"iteration": 0, "action": "xml", **r} for r in got.records]
         records.extend(recs)
         kept.extend(recs)
@@ -1056,7 +1086,9 @@ def fix_slide(
         left += [r for r in remarks if r.kind == "model" and not (seen is not None and SF.code_of(r) in seen.cured)]
 
         # B. the designer, when content is at stake
-        need_designer = not frame and bool(wishes or any(i.check_id in RM.CONTENT_CHECKS for i in left))
+        # (a remark the rules have no fix for — a figure hardly larger than its label — goes to the designer too: the
+        # button never leaves the slide as it was while a remark is on it)
+        need_designer = not frame and bool(wishes or any(i.check_id in RM.CONTENT_CHECKS or i.autofix is None or i.autofix.action == "none" for i in left))
         if need_designer and use_models:
             voice.plain(f"Дизайнер переделывает слайд {n}", 0.1)
             left_ids = {id(i) for i in left}
@@ -1091,9 +1123,13 @@ def fix_slide(
                 return (r, o, pl, rp), None
 
             got, reason = design(outline0, RM.remarks_note(note_items, titles, wishes), start)
+            if got is None and reason and "не изменился" in reason:
+                # the model gave the slide back as it was: once more, told so (a remark never leaves the slide as it was)
+                got, reason = design(outline0, RM.remarks_note(note_items, titles, wishes) + "\n" + RM.UNCHANGED_LINE, "пробую ещё раз — прежний ответ слайд не менял")
             if got is not None:
                 r, o, pl, rp = got
-                still = [i for i in rp.issues if i.slide == n and RM.is_stage(i) and i.check_id in RM.CONTENT_CHECKS and i.check_id in asked_checks]
+                # (any asked remark of the rules the new version still has: a figure still hardly larger than its label)
+                still = [i for i in rp.issues if i.slide == n and RM.is_stage(i) and i.kind != "model" and i.check_id in asked_checks]
                 if still and r.how == "model":
                     # one more try: the form the designer kept cannot show the slide's content
                     first_deck, m = scratch / "design_first.pptx", mark()
@@ -1153,6 +1189,64 @@ def fix_slide(
                 # composed — a rung that made the slide worse rolled back, the next one tried (two rungs stopped at the
                 # second sample, and a slide whose texts no sample holds was never composed)
                 rep, outline, plan = loop(rep, outline, plan, ids, 3)
+        # C'. a remark of the review the rules found nothing to change for (or could not fix in place) and the designer
+        # did not cure — a cover, a divider, no model, the designer's slide the same: the slide on another sample of the
+        # template (the eyes' ladder: the next sample, then the composer). A remark never leaves the slide as it was
+        relaid = laddered = False
+        pending = [r for r in remarks if r.kind == "model" and not (seen is not None and SF.code_of(r) in seen.cured)]
+        asked_rules = Counter(r.check_id for r in remarks if r.kind != "model")
+
+        def asked_open(rp: AuditReport) -> int:
+            """The asked remarks of the rules still on the slide in report `rp` (by check, at most as many as asked)."""
+            have = Counter(i.check_id for i in rp.issues if i.slide == n and RM.is_stage(i) and i.kind != "model")
+            return sum(min(k, have[c]) for c, k in asked_rules.items())
+
+        if (pending or asked_open(rep)) and not wishes:
+            fp_now = slide_fingerprints(work)
+            same = len(fp_now) < n or fp_now[n - 1] == slide_fingerprints(deck0)[n - 1]
+            # (the designer's version that kept an asked remark of the rules goes up the ladder too)
+            if not redesigned or same or asked_open(rep) >= asked_open(report):
+                from verstka.audit.eyes import relayout
+
+                voice.plain(f"Собираю слайд {n} на другом образце шаблона", 0.5)
+                errors_now, warns_now = slide_score(rep)
+                trial = scratch / "relayout.pptx"
+                pl_try = plan.model_copy(deep=True)
+                for _ in range(3):
+                    laddered = True
+                    o_try = outline.model_copy(deep=True)
+                    step = relayout(pl_try, o_try, oid, manifest, set())
+                    log.info("slide fix: slide %d — next layout: %s", n, step)
+                    if step == "skip":
+                        break
+                    try:
+                        render_deck(o_try, pl_try, manifest, ws, trial)
+                        rp = run_audit(trial, manifest, o_try, ws, **audit_kw)
+                    except Exception:  # noqa: BLE001 - the next rung
+                        log.warning("slide fix: slide %d on another sample failed", n, exc_info=True)
+                        pl_try = pl_try.model_copy(deep=True)
+                        continue
+                    fp_try = slide_fingerprints(trial)
+                    e_try, w_try = slide_score(rp)
+                    log.info("slide fix: slide %d on it — errors %d, warnings %d (were %d, %d), asked open %d (was %d)", n, e_try, w_try, errors_now, warns_now, asked_open(rp), asked_open(rep))
+                    # a layout that brings a remark of its own (a line gone to the notes, text on the template's art) is
+                    # no fix: the next rung (pl_try keeps what was tried)
+                    if e_try > errors_now or w_try > warns_now or len(fp_try) < n or fp_try[n - 1] == slide_fingerprints(deck0)[n - 1]:
+                        continue
+                    lost = lost_words_share(slide_words(deck0, n), slide_words(trial, n))
+                    if lost > 0.05:
+                        log.info("slide fix: slide %d on it loses %.0f%% of its words — the next rung", n, lost * 100)
+                        continue  # a layout that drops the slide's text (a subtitle with no place) is no fix
+                    if not pending and asked_open(rp) >= asked_open(rep):
+                        continue  # the asked remark of the rules is still there: the next rung
+                    shutil.copy2(trial, work)
+                    outline, plan, rep = o_try, pl_try, rp
+                    relaid = rerendered = True
+                    how = "relayout"
+                    what = "слайд собран на другом образце шаблона" if step.startswith("rematch") and "synth" not in step else "слайд собран заново по его содержанию"
+                    log.info("slide fix: slide %d laid out again for the review's remarks (%s)", n, step)
+                    voice.agent("designer", f"Дизайнер: слайд {n} собран заново — {what[:1].lower() + what[1:]}.", 0.55)
+                    break
         if seen is not None and seen.cured and (redesigned or rerendered):
             # the slide laid out again (the designer, another sample) came without the in-place fixes: made again where
             # they are still due (each fix measures first)
@@ -1189,17 +1283,24 @@ def fix_slide(
         # the model's remarks cannot be checked again without a model: the other slides keep theirs, and this slide
         # keeps its own unless the designer redesigned it
         cured_ids = {r.id for r in remarks if r.kind == "model" and seen is not None and SF.code_of(r) in seen.cured}
-        report.issues.extend(i.model_copy(deep=True) for i in report0.issues if i.kind == "model" and (i.slide != n or not (redesigned or i.id in cured_ids)))
+        report.issues.extend(i.model_copy(deep=True) for i in report0.issues if i.kind == "model" and (i.slide != n or not (redesigned or relaid or i.id in cured_ids)))
+        fp0, fp1 = slide_fingerprints(deck0), slide_fingerprints(final)
+        slide_changed = len(fp1) >= n and fp0[n - 1] != fp1[n - 1]
         # the model looks again at the slide as it is now: a remark it still sees stays (never called fixed on the
         # rules' word alone); without a vision model the rules' measure stands
         still_seen: set[str] = set()
         asked_seen = [r for r in remarks if r.kind == "model"]
-        if use_models and asked_seen and (redesigned or cured_ids):
+        looked = False
+        if use_models and asked_seen:
             voice.plain(f"Дизайнер смотрит на слайд {n} ещё раз", 0.7)
             pic = SF.slide_picture(final, n, scratch / "relook")
             got = SF.relook(pic, n, providers=providers, skills=skills, headline=final_outline.slides[n - 1].headline or "") if pic else None
             log.info("slide fix: slide %d looked at again — the model sees %s", n, got if got is not None else "nothing (no answer)")
             if got is not None:
+                looked = True
+                # the asked remarks are judged by this look alone: kept ones go, the ones it still sees come back
+                asked_ids = {r.id for r in asked_seen}
+                report.issues = [i for i in report.issues if i.id not in asked_ids]
                 # by count: a problem the model still sees is first the remark of its kind the slide kept (one not
                 # asked, one not fixed), then an asked one — the heading moved off the circle is fixed while the card
                 # under the circle is still seen
@@ -1221,9 +1322,7 @@ def fix_slide(
         report.applied_fixes = list(report0.applied_fixes) + [{"action": "slide_fix", "slide": n, "outline_id": oid, "result": how}] + records
         report.iterations = report0.iterations
         report.recompute()
-        fp0, fp1 = slide_fingerprints(deck0), slide_fingerprints(final)
         other = changed_slides(fp0, fp1, skip={n})
-        slide_changed = len(fp1) >= n and fp0[n - 1] != fp1[n - 1]
         after_stage = RM.stage_remarks(report.issues, n)
         known = {i.id for i in before_stage}
         fixed, remaining = RM.match_fixed(remarks, after_stage, before=before_stage + [r for r in remarks if r.id not in known])
@@ -1239,7 +1338,12 @@ def fix_slide(
         if lost_words:
             applied = False
         why = None
-        if not applied:
+        # nothing to change after all: the slide is the same, the model looked again and sees none of the asked problems,
+        # and no asked remark of the rules is left — the remarks go, and the reply says so (not «остался прежним»)
+        clear = not slide_changed and not worse and looked and not still_seen and not wishes and not remaining_asked(fixed, remarks)
+        if clear:
+            why = "Замечаний больше нет — дизайнер посмотрел на слайд ещё раз и проблем не видит"
+        elif not applied:
             if lost_words:
                 why = "Сделать крупнее, не потеряв выводы слайда, не получилось — оставил как было"
             elif worse:
@@ -1249,9 +1353,12 @@ def fix_slide(
                 why = "Пожелание не удалось выполнить — слайд оставлен как был"
             elif still_seen:
                 said = ", ".join(SF.seen_words(c) for c in sorted(still_seen))
-                why = f"Дизайнер всё ещё видит: {said} — попробуйте другой вариант презентации или пожелание"
+                tried = "; на других образцах шаблона слайд выходит хуже" if laddered and not relaid else ""
+                why = f"Дизайнер всё ещё видит: {said}{tried} — попробуйте другой вариант презентации или пожелание"
             elif seen is not None and seen.left:
-                why = seen.why_for(frame, _frame_name(osl0.kind.value)[0] if frame else None)
+                why = seen.why_for(frame, {"section": "разделителя", "thanks": "финального слайда"}.get(osl0.kind.value, "обложки") if frame else None)
+            elif laddered and not relaid:
+                why = "Замечания остались: ни правки на месте, ни другие образцы шаблона их не убрали — попробуйте пожелание или другой вариант презентации"
             else:
                 why = "Замечания остались — попробуйте добавить пожелание"
         voice.agent("check", RM.check_line(fixed, remarks, remaining, applied, worse, titles, other=other), 0.8)
@@ -1265,6 +1372,19 @@ def fix_slide(
             n_slides=len(final_outline.slides),
         )
         result.reply = RM.fix_reply(n, result.fixed, remarks, result.remaining, score_before, result.score_after, notes, applied, why, result.other, what, titles)
+        if clear:
+            # the report without the remarks the model no longer sees (the deck and its previews stay as they are)
+            report.deck, report.slide_images = report0.deck, dict(report0.slide_images)
+            (vdir / "audit_report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+            result.report, result.fixed, result.remaining, result.cleared = report, fixed, remaining, True
+            result.score_after = report.summary.score
+            result.reply = f"Слайд {n}: замечаний больше нет — дизайнер посмотрел на него ещё раз и проблем не видит."
+            log_edit(vdir, {
+                "at": time.time(), "version": None, "undo_of": None, "kind": "fix", "slides": [n], "request": fix_label(n, wishes),
+                "reply": result.reply, "score_before": score_before, "score_after": result.score_after, "issue_ids": [r.id for r in remarks],
+                "fixed": fixed, "wishes": wishes, "how": "look", "other_slides": [],
+            })
+            return result
         if not applied:
             return result
 

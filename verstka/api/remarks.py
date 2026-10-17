@@ -73,6 +73,7 @@ FIX_HINT: dict[str, str] = {
     "figure_is_time": "не делай крупным числом время суток или номер проекта, модели: возьми настоящую величину из текста или покажи строку без крупного числа",
     "chart_mixed_units": "на одной диаграмме — одна величина в одних единицах: покажи разные числа карточками или раздели на две диаграммы",
     "duplicate_heading": "дай слайду свой заголовок — о главном именно на этом слайде",
+    "figure_label_ratio": "крупно в карточке — только число с единицей («1213»), а слова («боевых кораблей») — в подпись под ним; или строка без числа в начале, если число не главное",
     "orphan_opener": "начни строку с того, о ком или о чём она: замени «Также», «Этот», «она», «они» на имя или название из текста",
 }
 
@@ -83,6 +84,11 @@ _NOTE_LEAD = (
 _WISH_LINE = (
     "- The person also asks: «{wishes}». Do exactly what they ask; their request overrides the form the brief asked for "
     "this slide. Every figure still comes from the source text or the data list."
+)
+# the designer's second try when its first answer gave the slide back unchanged
+UNCHANGED_LINE = (
+    "- Your previous answer returned this slide exactly as it was, so the problems above stayed. Change the slide now: "
+    "rewrite the lines or choose another form so that every problem above is gone; keep the facts of the slide."
 )
 _MAX_MISSING = 12  # the missing texts a content_missing line names
 

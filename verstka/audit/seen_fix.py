@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from lxml import etree
 
@@ -64,6 +64,9 @@ class SeenFix:
     records: list[dict] = field(default_factory=list)  # {"slide", "kind", "element_id", "result"} like autofix._xml_fixes
     cured: set[str] = field(default_factory=set)  # codes measured as fixed (or with nothing left to fix)
     left: dict[str, str] = field(default_factory=dict)  # code → why it stays
+    # codes the rules found nothing to change for (the measure reads the slide as fine, the model did not): the slide
+    # is laid out again for them — a remark never leaves the slide as it was
+    untouched: set[str] = field(default_factory=set)
 
     @property
     def titled(self) -> bool:
@@ -78,8 +81,8 @@ class SeenFix:
         said = self.why() or "замечание на месте не исправить"
         said = said[:1].upper() + said[1:]
         if frame:
-            return f"{said}; {name or 'этот слайд'} агент заново не собирает — выберите другой вариант презентации или напишите помощнику, что поменять"
-        return f"{said} — напишите пожелание к слайду или выберите другой вариант"
+            return f"{said}, а другие образцы шаблона для {name or 'этого слайда'} выходят хуже — выберите другой вариант презентации или напишите помощнику, что поменять"
+        return f"{said}, а другие образцы шаблона выходят хуже — напишите пожелание к слайду или выберите другой вариант"
 
 
 def seen_words(code: str) -> str:
@@ -296,13 +299,132 @@ def free_box(e: Any, slide_ir: Any, slide_w: int, slide_h: int) -> Any:
     return Bbox(x=b.x, y=b.y, w=max(1, x2 - b.x), h=max(1, y2 - b.y))
 
 
+def ink_below(image: Any, e: Any, slide_ir: Any, slide_w: int, slide_h: int) -> float:
+    """How far (share of the box's height) the letters of text `e` run below its box on the slide's picture: the rows
+    under the box, across its width, down to the next block below it, that carry ink unlike their own ground — a gap
+    of two lines ends them. 0 when nothing runs out (the measure of the fonts may be wrong; the picture is not)."""
+    W, H = image.size
+    b = e.bbox
+    l, r = max(0, int(b.x / slide_w * W)), min(W, int(b.x2 / slide_w * W))
+    top, bottom = int(b.y / slide_h * H), int(b.y2 / slide_h * H)
+    if r - l < 4 or bottom - top < 2 or bottom >= H - 1:
+        return 0.0
+    limit = H
+    for o in slide_ir.elements:
+        if o is e or o.bbox.y < b.y2 or o.bbox.x2 <= b.x or o.bbox.x >= b.x2:
+            continue
+        limit = min(limit, int(o.bbox.y / slide_h * H))
+    line_px = max(2, int((e.dominant_size or 12.0) * 1.2 * 12700 / slide_h * H))
+    gray = image.convert("L")
+    last, gap = bottom, 0
+    for y in range(bottom + 1, min(H, limit)):
+        row = gray.crop((l, y, r, y + 1)).tobytes()
+        ground = max(set(row), key=row.count)
+        inked = sum(1 for v in row if abs(v - ground) > 60) >= max(2, 0.004 * len(row))
+        if inked:
+            last, gap = y, 0
+        else:
+            gap += 1
+            if gap > 2 * line_px:
+                break
+    return (last - bottom) / float(max(1, bottom - top))
+
+
 # ---------------------------------------------------------------------------- the fix
 
 
-def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Optional[Path] = None, shown: Iterable[Path] = ()) -> SeenFix:
+def _holder(e: Any, slide_ir: Any, slide_area: Optional[float] = None) -> Any:
+    """The filled card or panel text `e` stands on (holding most of its box; of several stacked — a plate on a panel —
+    the largest that is not a ground of the slide), or None."""
+    best = None
+    big = 0.5 * slide_area if slide_area else None
+    for o in slide_ir.elements:
+        if o is e or o.type not in ("shape", "text") or not o.fill_hex:
+            continue
+        ob, b = o.bbox, e.bbox
+        ix = min(b.x2, ob.x2) - max(b.x, ob.x)
+        iy = min(b.y2, ob.y2) - max(b.y, ob.y)
+        if ix > 0 and iy > 0 and ix * iy >= 0.8 * b.area and ob.area > b.area and (big is None or ob.area < big) and (best is None or ob.area > best.bbox.area):
+            best = o
+    return best
+
+
+def fix_spill(pptx: Path, n: int, manifest: Any, image: Optional[Path], render: Optional[Callable[[Path], Optional[Path]]] = None,
+              rounds: int = 3) -> tuple[list[dict], set[str], bool]:
+    """Text whose letters run below its box on the slide's picture (the fonts' measure says it fits — a code font the
+    renderer sets wider, wrapping every long line): first the box takes the whole card it stands on (inside the card's
+    own padding), then the text is set smaller by what still runs out, on the template's scale, never under its least
+    size. With `render` the slide is rendered again after each round and measured again. Returns (records, the
+    elements changed, whether some text still runs out)."""
+    from PIL import Image
+    from pptx import Presentation
+
+    from verstka.audit.autofix import _text_floors
+    from verstka.audit.ir import build_deck_ir
+    from verstka.rendering.deck import set_element_pos, slide_shape_elements
+
+    _, least = _text_floors(manifest)
+    typo = manifest.tokens.typography
+    scale = sorted({float(x) for x in (typo.sizes_used or [st.size_pt for st in typo.scale])})
+    records: list[dict] = []
+    touched: set[str] = set()
+    widened: set[str] = set()
+    still = False
+    for k in range(rounds):
+        if image is None or not Path(image).exists():
+            break
+        with Image.open(image) as im:
+            shot = im.convert("RGB")
+        ir = build_deck_ir(pptx, with_images=False)
+        sl = ir.slides[n - 1]
+        prs = Presentation(str(pptx))
+        by_id = slide_shape_elements(prs.slides[n - 1])
+        changed, still = False, False
+        for e in sl.elements:
+            if e.type != "text" or not e.has_text or e.nested or e.ph_type in _CHROME_PH or str(e.id) not in by_id:
+                continue
+            out_by = ink_below(shot, e, sl, ir.slide_w, ir.slide_h)
+            if out_by < 0.02:
+                continue
+            el = by_id[str(e.id)]
+            card = _holder(e, sl, float(ir.slide_w) * ir.slide_h)
+            if card is not None and str(e.id) not in widened:
+                pad = max(0, min(e.bbox.x - card.bbox.x, e.bbox.y - card.bbox.y))
+                w = card.bbox.x2 - pad - e.bbox.x
+                h = card.bbox.y2 - pad - e.bbox.y
+                widened.add(str(e.id))
+                if w > e.bbox.w * 1.03 or h > e.bbox.h * 1.03:
+                    set_element_pos(el, w=max(w, e.bbox.w), h=max(h, e.bbox.h))
+                    records.append({"slide": n, "kind": "fit_text", "element_id": str(e.id), "result": "Блок текста растянут на всю карточку: текст выходил за блок", "role": "text"})
+                    touched.add(str(e.id))
+                    changed = True
+                    continue
+            size = e.dominant_size or 12.0
+            want = size / (1.0 + out_by) * 0.97
+            got = [x for x in scale if least - 0.01 <= x <= want + 0.01]
+            new = got[-1] if got else max(least, round(want * 2) / 2)
+            if new >= size - 0.01:
+                still = True
+                continue
+            set_sizes(el, new / size, size)
+            records.append({"slide": n, "kind": "fit_text", "element_id": str(e.id), "result": f"Шрифт уменьшен до {new:g} пт: текст выходил за блок", "role": "text"})
+            touched.add(str(e.id))
+            changed = True
+        if not changed:
+            break
+        prs.save(str(pptx))
+        image = render(pptx) if render is not None else None
+        if image is None:
+            break
+    return records, touched, still
+
+
+def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Optional[Path] = None, shown: Iterable[Path] = (),
+             render: Optional[Callable[[Path], Optional[Path]]] = None) -> SeenFix:
     """Fix in place, on slide `n` of `pptx` (saved over), what the review's `codes` name. `image` — the slide's picture
     rendered now, `shown` — the pictures of it the person and the model saw (the variant's preview): `low_contrast`
-    reads the ground on them. Codes this module cannot fix in place come back in `left` with the reason."""
+    reads the ground on them, `text_cut` the letters below a box. `render(pptx)` — the slide's picture again after a
+    change (the spill is measured again). Codes this module cannot fix in place come back in `left` with the reason."""
     from PIL import Image
     from pptx import Presentation
 
@@ -319,6 +441,13 @@ def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Opt
     todo = codes & INPLACE_CODES
     if not todo:
         return out
+    n_spill, spilled, spill_left = 0, set(), False
+    if "text_cut" in todo:
+        recs, spilled, spill_left = fix_spill(pptx, n, manifest, image, render)
+        out.records.extend(recs)
+        n_spill = len(recs)
+        if recs and render is not None and "low_contrast" in todo:
+            image = render(pptx)  # the ground is read on the slide as it is now
     ir = build_deck_ir(pptx, with_images=False)
     if not 1 <= n <= len(ir.slides):
         return out
@@ -349,7 +478,10 @@ def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Opt
         from verstka.rendering.deck import set_element_pos
 
         stuck = moved = False
+        n0 = len(out.records) - n_spill
         for e in texts:
+            if str(e.id) in spilled:
+                continue
             box = free_box(e, ir.slides[n - 1], ir.slide_w, ir.slide_h) if "overlap" in geo or "word_broken" in geo or "text_cut" in geo else e.bbox
             narrowed = box != e.bbox
             e2 = e.model_copy(update={"bbox": box}) if narrowed else e
@@ -388,20 +520,28 @@ def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Opt
                 said.append(f"шрифт уменьшен до {size * f:.0f} пт")
             done("fit_text", e, ("; ".join(said) or "текст уложен в блок").capitalize())
             changed = True
+        acted = len(out.records) > n0
+        if spill_left:
+            stuck = True
         for c in ("word_broken", "text_cut"):
             if c in geo:
                 if stuck:
                     out.left[c] = "текст не встаёт в блок даже мельче — сократите его или выберите другой вариант"
-                else:
+                elif acted:
                     out.cured.add(c)
+                else:
+                    out.untouched.add(c)
         if "overlap" in geo:
             if moved and not stuck:
                 out.cured.add("overlap")
+            elif not acted:
+                out.untouched.add("overlap")
             else:
                 out.left["overlap"] = NOT_INPLACE["overlap"]
 
     if "too_small" in todo:
         stuck = False
+        n0 = len(out.records)
         for e in texts:
             size = e.dominant_size or 14.0
             target = max(least, body)
@@ -424,8 +564,10 @@ def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Opt
                 stuck = True
         if stuck:
             out.left["too_small"] = "крупнее текст в блок не встанет — сократите текст или выберите другой вариант"
-        else:
+        elif len(out.records) > n0:
             out.cured.add("too_small")
+        else:
+            out.untouched.add("too_small")
 
     if "low_contrast" in todo:
         pics = []
@@ -438,6 +580,7 @@ def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Opt
         else:
             palette = manifest.tokens.palette()
             stuck = False
+            n0 = len(out.records)
             for e in texts:
                 el = by_id[str(e.id)]
                 box = (e.bbox.x, e.bbox.y, e.bbox.w, e.bbox.h)
@@ -485,8 +628,10 @@ def fix_seen(pptx: Path, n: int, codes: Iterable[str], manifest: Any, image: Opt
                     stuck = True
             if stuck:
                 out.left["low_contrast"] = "цвет текста, который читается на этом фоне, подобрать не удалось"
-            else:
+            elif len(out.records) > n0:
                 out.cured.add("low_contrast")
+            else:
+                out.untouched.add("low_contrast")
 
     if changed:
         prs.save(str(pptx))

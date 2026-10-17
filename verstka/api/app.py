@@ -2857,7 +2857,7 @@ def _slide_fix_job(gid: str, strategy: str, n: int, requested: list, wishes: Opt
             providers=providers() if use_models else None, exports=list(meta.get("exports") or []), progress=job_progress(job),
         )
         s = res.report.summary
-        if res.applied:
+        if res.applied or res.cleared:
             store.merge_variant_summary(gid, strategy, {"n_slides": res.n_slides, "score": s.score, "errors": s.errors, "warnings": s.warnings})
         return {
             "reply": res.reply, "changed": res.applied, "applied": res.applied, "kind": "fix", "strategy": strategy, "slide": n,
@@ -2865,6 +2865,8 @@ def _slide_fix_job(gid: str, strategy: str, n: int, requested: list, wishes: Opt
             "score_before": res.score_before, "new_score": res.score_after, "errors": s.errors, "warnings": s.warnings,
             "changed_other_slides": bool(res.other), "other_slides": res.other,
             "how": res.how, "notes": res.notes, "why": res.why, "version": res.version, "at": res.at,
+            # the remarks are gone with the slide as it was (the model sees none of them now): the stage rereads them
+            "cleared": res.cleared,
         }
 
     return run
