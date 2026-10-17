@@ -213,6 +213,52 @@ def _snap_size(size_pt: float, factor: float, scale: list[float]) -> float:
     return size_pt
 
 
+def _shrink_factor(ratio: float) -> float:
+    return max(0.6, min(0.95, 1 / ratio))
+
+
+def _text_floors(manifest: TemplateManifest) -> tuple[float, float]:
+    """(the template's body size, the least size of small print) — the sizes a shrink never goes under."""
+    from verstka.rendering.clone_check import body_floor, small_floor
+
+    return body_floor(manifest), max(MIN_FONT_PT, small_floor(manifest))
+
+
+def _run_floor(cur: float, body: float, least: float, running: bool, small: bool) -> Optional[float]:
+    """The least size a shrink may give one run: small print by design down to the least size; text at the body size
+    or above never under the body size; running text already under it (the composer's dense pass, flagged by the
+    audit as «body_below_template») is never set smaller still — None: leave it alone."""
+    if small:
+        return least
+    if cur >= body - 0.25:
+        return body
+    return None if running else least
+
+
+def shrink_blocked(e: Any, ratio: float, body: float) -> bool:
+    """Whether the shrink a check asks for (the text `ratio` times too tall) would push the element's normal text
+    under the template's body size: the text then gets another layout (another sample, the composer, a condensed
+    text), not a smaller type. `e`: the audit's element (paragraphs of runs)."""
+    from verstka.audit.checks.template import is_running_text, is_small_print
+
+    factor = _shrink_factor(ratio)
+    for p in getattr(e, "paragraphs", None) or []:
+        txt = (p.text or "").strip()
+        if not txt or is_small_print(getattr(e, "name", "") or "", txt):
+            continue
+        sizes = [r.size_pt or getattr(e, "dominant_size", None) for r in p.runs if (r.text or "").strip()]
+        sizes = [z for z in sizes if z]
+        if not sizes:
+            continue
+        z = max(sizes)
+        if z >= body - 0.25:
+            if z * factor < body - 0.25:
+                return True
+        elif is_running_text(txt):
+            return True
+    return False
+
+
 def _force_run_color(rPr: etree._Element, hex_: str) -> int:
     """Give a run an explicit solid colour when its colour is inherited or a scheme colour. Returns 1 if changed."""
     fill = rPr.find(q("a:solidFill"))
@@ -406,6 +452,7 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
     text_primary = manifest.tokens.color_for("text.primary")
     typo = manifest.tokens.typography
     scale = sorted({float(s) for s in (typo.sizes_used or [st.size_pt for st in typo.scale])})
+    body, least = _text_floors(manifest)
     safe = manifest.tokens.spacing.safe_area.to_emu(slide_w, slide_h)
     for slide_index, act in actions:
         if not (1 <= slide_index <= len(prs.slides)):
@@ -453,20 +500,36 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
                     what = "Элемент" if len(plan) == 1 else f"Блок из {len(plan)} элементов"
                     done(slide_index, "move_inside", eid, f"{what} возвращён {where}{' и уменьшен по размеру' if resized else ''}")
             elif act.action == "shrink_text":
-                ratio = float(act.params.get("ratio", 1.2))
-                factor = max(0.6, min(0.95, 1 / ratio))
+                # by the template's scale, never under its body size on normal text (`_run_floor`): a text that does not
+                # fit at the body size is laid out again by the loop (`shrink_blocked`), only what is left comes here
+                from verstka.audit.checks.template import is_running_text, is_small_print
+
+                factor = _shrink_factor(float(act.params.get("ratio", 1.2)))
+                cnv = next(el.iter(q("p:cNvPr")), None)
+                name = cnv.get("name", "") if cnv is not None else ""
                 sizes: list[float] = []
-                for rPr in el.iter(q("a:rPr")):
-                    sz = rPr.get("sz")
-                    if not sz:
-                        continue
-                    cur = int(sz) / 100.0
-                    new = _snap_size(cur, factor, scale)
-                    if new < cur:
-                        rPr.set("sz", str(int(round(new * 100))))
-                        sizes.append(new)
+                held = False
+                for para in el.iter(q("a:p")):
+                    txt = "".join(t.text or "" for t in para.iter(q("a:t"))).strip()
+                    running, small = is_running_text(txt), is_small_print(name, txt)
+                    for rPr in para.iter(q("a:rPr")):
+                        sz = rPr.get("sz")
+                        if not sz:
+                            continue
+                        cur = int(sz) / 100.0
+                        lo = _run_floor(cur, body, least, running, small)
+                        if lo is None:
+                            held = True
+                            continue
+                        new = _snap_size(cur, factor, scale)
+                        if new < lo - 0.01:
+                            new, held = lo, True
+                        if new < cur - 0.01:
+                            rPr.set("sz", str(int(round(new * 100))))
+                            sizes.append(new)
                 if sizes:
-                    done(slide_index, "shrink_text", eid, f"Шрифт уменьшен до {', '.join(f'{s:g}' for s in sorted(set(sizes), reverse=True))} пт, чтобы текст поместился")
+                    done(slide_index, "shrink_text", eid, f"Шрифт уменьшен до {', '.join(f'{s:g}' for s in sorted(set(sizes), reverse=True))} пт, чтобы текст поместился"
+                         + (f" (не мельче основного кегля шаблона {body:g} пт)" if held else ""))
     if applied:
         prs.save(str(pptx))
     return applied
@@ -557,10 +620,32 @@ def autofix_loop(
             ir_slides = _ir_slides(current, outline)
             slide_index_of = {s.outline_id: s.index for s in ir_slides}
             texts = {(s.outline_id, e.id): e.text for s in ir_slides for e in getattr(s, "elements", None) or [] if getattr(e, "text", None)}
+            elems = {(s.outline_id, str(e.id)): e for s in ir_slides for e in getattr(s, "elements", None) or []}
+            body, _least = _text_floors(manifest)
             taken: set = set()
             moved: dict[str, str] = {}  # outline id → what its structural fix did («rematch → p7», «synth → cards»)
+            relaid: set[str] = set()  # slides a blocked shrink laid out again (or condensed): one re-layout per slide
             for oid, actions in fixes.items():
                 for act in actions:
+                    eid = str(act.params.get("element_id") or "")
+                    if act.action == "shrink_text" and (oid in relaid or (eid and (oid, eid) in elems and shrink_blocked(elems[(oid, eid)], float(act.params.get("ratio", 1.2)), body))):
+                        # the text does not fit at the template's body size: another layout, not a smaller type — the
+                        # slide's next sample or the composer; a composed slide (or one with nothing left) condensed
+                        if oid in relaid:
+                            continue
+                        why = f"текст не помещается при основном кегле шаблона {body:g} пт — другая раскладка вместо мелкого шрифта"
+                        res = _rematch(plan, outline, oid, manifest, taken, others=others)
+                        how = "rematch"
+                        if res == "skip":
+                            res, how = _condense(outline, oid, skills if use_models else None, providers if use_models else None, target=texts.get((oid, act.params.get("element_id")))), "condense_text"
+                        if res != "skip":
+                            relaid.add(oid)
+                            need_render = True
+                            if how == "rematch":
+                                moved[oid] = res
+                            applied.append({"iteration": it, "outline_id": oid, "action": how, "result": res, "why": why})
+                            continue
+                        # nothing to lay out again: the shrink below keeps to the body size (`_run_floor`)
                     if act.action in STRUCTURAL_ACTIONS:
                         res = _rematch(plan, outline, oid, manifest, taken, others=others)
                         applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
@@ -568,10 +653,14 @@ def autofix_loop(
                         if res != "skip":
                             moved[oid] = res
                     elif act.action == "condense_text":
+                        if oid in relaid:
+                            continue  # the slide is laid out again this pass already
                         target = texts.get((oid, act.params.get("element_id"))) if act.params.get("element_id") else None
                         res = _condense(outline, oid, skills if use_models else None, providers if use_models else None, target=target)
                         applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
                         need_render = need_render or res != "skip"
+                        if res != "skip":
+                            relaid.add(oid)
                     else:
                         idx = slide_index_of.get(oid)
                         if idx:

@@ -705,12 +705,24 @@ def headline_in_chip(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+_SMALL_NAME_RE = re.compile(r"^(?:Footnote|Source|Caption|Chart note|Chart title|Legend|Unit|Axis)")
+
+
+def is_small_print(name: str, text: str) -> bool:
+    """A box or a line that is small print by design (by the box's name or the line's opening): a source or a note
+    line, a caption, a chart's note, legend or axis — set under the body size on purpose. Autofix shares it."""
+    return bool(_SMALL_NAME_RE.match(name or "") or _FOOTNOTE_RE.match(text or ""))
+
+
+def is_running_text(text: str) -> bool:
+    """A line of running text (a bullet, a card's text, a step, a figure's label): 25 characters and four words."""
+    t = (text or "").strip()
+    return len(t) >= 25 and len(t.split()) >= 4
+
+
 def _small_print(e, p, o) -> bool:
     """A paragraph that is small print by design: a source or a note line, the slide's footnote, a caption."""
-    name = (e.name or "")
-    if re.match(r"^(?:Footnote|Source|Caption|Chart note|Chart title|Legend|Unit|Axis)", name):
-        return True
-    if _FOOTNOTE_RE.match(p.text or ""):
+    if is_small_print(e.name or "", p.text or ""):
         return True
     if o is not None and (o.footnote or "").strip() and (p.text or "").strip()[:30] == (o.footnote or "").strip()[:30]:
         return True
@@ -732,7 +744,7 @@ def body_below_template(ctx: AuditContext) -> list[Issue]:
 
             for p in e.paragraphs:
                 txt = (p.text or "").strip()
-                if len(txt) < 25 or len(txt.split()) < 4 or _small_print(e, p, o):
+                if not is_running_text(txt) or _small_print(e, p, o):
                     continue
                 if any(r.font and MONO_RE.search(r.font) for r in p.runs):
                     continue

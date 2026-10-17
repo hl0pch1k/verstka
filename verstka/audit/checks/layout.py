@@ -269,7 +269,7 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
                         element_ids=[e.id],
                         severity=severity,
                         details={"ratio": round(ratio, 2), "lines": lines, "autofit": e.autofit},
-                        autofix=None if shrinks else fix("rematch" if rematch else "shrink_text", "перевыбрать макет" if rematch else "уменьшить шрифт по шкале шаблона", outline_id=s.outline_id, element_id=e.id, ratio=round(ratio, 2)),
+                        autofix=None if shrinks else fix("rematch" if rematch else "shrink_text", "перевыбрать макет" if rematch else "уменьшить шрифт по шкале шаблона — не мельче основного кегля, иначе другая раскладка", outline_id=s.outline_id, element_id=e.id, ratio=round(ratio, 2)),
                     )
                 )
     return out
@@ -421,7 +421,7 @@ def word_break(ctx: AuditContext) -> list[Issue]:
                         bboxes=[e.bbox_frac],
                         element_ids=[e.id],
                         details={"word": word.strip(), "word_pt": round(w_pt, 1), "line_pt": round(line, 1)},
-                        autofix=fix("shrink_text", "уменьшить шрифт по шкале шаблона, чтобы слово встало в строку", outline_id=s.outline_id, element_id=e.id, ratio=round(w_pt / (line * WORD_ROOM), 2)),
+                        autofix=fix("shrink_text", "уменьшить шрифт по шкале шаблона, чтобы слово встало в строку, — не мельче основного кегля, иначе другая раскладка", outline_id=s.outline_id, element_id=e.id, ratio=round(w_pt / (line * WORD_ROOM), 2)),
                     )
                 )
     return out

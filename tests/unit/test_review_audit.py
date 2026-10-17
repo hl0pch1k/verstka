@@ -267,7 +267,75 @@ def test_shrink_text_snaps_to_template_scale(tmp_path):
     assert af._snap_size(20.0, 0.6, [18.0, 24.0]) == 18.0  # nothing ≤ 12 in scale: smallest step below 20
     af._xml_fixes(tmp_path / "d.pptx", [(1, FixAction(action="shrink_text", params={"element_id": sid, "ratio": 6.5}))], manifest, W, H)
     prs = Presentation(str(tmp_path / "d.pptx"))
-    assert prs.slides[0].shapes[0].text_frame.paragraphs[0].runs[0].font.size.pt == 12.0  # 18 → smallest step, never 6 pt
+    assert prs.slides[0].shapes[0].text_frame.paragraphs[0].runs[0].font.size.pt == 14.0  # 18 → the template's body size, never under it
+
+
+def _text_deck(path: Path, paras: list[tuple[str, float]], name: str | None = None) -> str:
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    tb = s.shapes.add_textbox(Emu(int(W * 0.1)), Emu(int(H * 0.1)), Emu(int(W * 0.5)), Emu(int(H * 0.2)))
+    if name:
+        tb.name = name
+    tf = tb.text_frame
+    for k, (txt, size) in enumerate(paras):
+        p = tf.paragraphs[0] if k == 0 else tf.add_paragraph()
+        r = p.add_run()
+        r.text = txt
+        r.font.size = Pt(size)
+    prs.save(str(path))
+    return str(tb.shape_id)
+
+
+def _sizes(path: Path) -> list[float]:
+    prs = Presentation(str(path))
+    return [p.runs[0].font.size.pt for p in prs.slides[0].shapes[0].text_frame.paragraphs]
+
+
+def test_shrink_text_never_sets_running_text_under_the_body_size(tmp_path):
+    """Residual: autofix set a card's text at 13 pt on a 14 pt template (ЛЦТ). Normal text keeps the body size;
+    running text the composer's dense pass already set under it is never set smaller still; small print by design
+    (a source line) may shrink, down to the least size of small print."""
+    manifest = _manifest()  # body 14 (no body role: 14 pt on a 7.5″ slide)
+    card = "Автоматически эскалирует задачи, которые застряли больше двух дней"
+    sid = _text_deck(tmp_path / "d.pptx", [("Автоматическая эскалация", 18.0), (card, 14.0)])
+    af._xml_fixes(tmp_path / "d.pptx", [(1, FixAction(action="shrink_text", params={"element_id": sid, "ratio": 1.3}))], manifest, W, H)
+    assert _sizes(tmp_path / "d.pptx") == [14.0, 14.0]  # the heading steps down to the body size; the text stays
+    sid = _text_deck(tmp_path / "e.pptx", [(card, 12.0)])
+    af._xml_fixes(tmp_path / "e.pptx", [(1, FixAction(action="shrink_text", params={"element_id": sid, "ratio": 1.3}))], manifest, W, H)
+    assert _sizes(tmp_path / "e.pptx") == [12.0]  # dense-pass running text: never smaller still
+    sid = _text_deck(tmp_path / "f.pptx", [("Источник: опрос 120 команд, март 2026 года", 12.0)], name="Source")
+    lines = af._xml_fixes(tmp_path / "f.pptx", [(1, FixAction(action="shrink_text", params={"element_id": sid, "ratio": 1.1}))], manifest, W, H)
+    assert _sizes(tmp_path / "f.pptx")[0] < 12.0 and lines
+
+
+def test_shrink_blocked_by_the_body_size():
+    card = "Автоматически эскалирует задачи, которые застряли больше двух дней"
+    el = _el("7", f"Автоматическая эскалация\n{card}", 0.1, 0.1, 0.4, 0.2, size=14.0)
+    assert af.shrink_blocked(el, 1.1, 14.0)  # 14 pt text cannot get smaller
+    big = _el("8", "Заголовок слайда в три строки", 0.1, 0.1, 0.4, 0.2, size=28.0)
+    assert not af.shrink_blocked(big, 1.3, 14.0)  # 28 → 21.5 stays above the body size
+    src = _el("9", "Источник: опрос 120 команд, март 2026 года", 0.1, 0.9, 0.4, 0.05, size=12.0)
+    assert not af.shrink_blocked(src, 1.2, 14.0)  # small print by design
+
+
+def test_blocked_shrink_lays_the_slide_out_again(tmp_path, monkeypatch):
+    """A shrink that would set the text under the body size becomes another layout: the slide's next sample."""
+    pptx, outline, plan, _ = _rematch_setup(tmp_path)
+    card = "Автоматически эскалирует задачи, которые застряли больше двух дней"
+    shrink = FixAction(action="shrink_text", params={"outline_id": "s1", "element_id": "7", "ratio": 1.1})
+    report0 = _report(pptx, [_issue("text_overflow-1-1", 1, "text_overflow", "warn", "s1", shrink, ratio=1.1)])
+    el = _el("7", card, 0.1, 0.1, 0.4, 0.2, size=14.0)
+    monkeypatch.setattr(af, "_ir_slides", lambda report, outline=None: [SimpleNamespace(outline_id="s1", index=1, elements=[el]), SimpleNamespace(outline_id="s2", index=2, elements=[])])
+    monkeypatch.setattr(af, "render_deck", lambda outline, plan, manifest, ws, out, **kw: (Path(out).write_bytes(b"NEW"), RenderResult(pptx_path=Path(out)))[1])
+    monkeypatch.setattr(af, "run_audit", lambda path, manifest, outline=None, ws=None, **kw: _report(path, []))
+    xml_calls: list = []
+    monkeypatch.setattr(af, "_xml_fixes", lambda p, actions, manifest, w, h: xml_calls.append(list(actions)) or [])
+    final, plan2, _, _ = af.autofix_loop(pptx, report0, outline, plan, _manifest(), None, max_iterations=1)
+    assert plan2.for_outline("s1").pattern_id == "p2", "the slide moved to its next sample"
+    assert not xml_calls, "no shrink under the body size"
+    done = [f for f in final.applied_fixes if f.get("action") == "rematch"]
+    assert done and "основном кегле" in done[0]["why"]
 
 
 # ---------------------------------------------------------------- F4: XML fixes after a re-render, move_inside
