@@ -1401,8 +1401,8 @@ class Composer:
     # a block that still takes less than BALANCE_LOW of its area after every growth stands at the area's optical middle:
     # BALANCE_TOP of the air over it, the rest under it — not in the top third over an empty foot (owner, 17.10:
     # «низ пустой»; the audit's bottom_empty)
-    BALANCE_LOW = 0.6
-    BALANCE_TOP = 0.4
+    BALANCE_LOW = 0.85  # (qa6 №1: blocks at 60–85 % of their area still read as a strip under the heading)
+    BALANCE_TOP = 0.45
     _NO_BALANCE = ("chart", "chart_text", "chart_pair", "code", "formula")
 
     def _balance(self, comp: str, n0: int, area: Bbox) -> None:
@@ -1424,7 +1424,9 @@ class Composer:
             # the conclusion keeps its reserved place at the foot: the block stands in the middle of what is over it
             floor = min(floor, notes[1]["y_max"] - int(k.vgap * 1.2))
         room = floor - area.y
-        if room <= int(0.15 * k.H) or bottom - area.y >= self.BALANCE_LOW * room or top > area.y + int(0.02 * k.H):
+        # (a big number keeps the earlier bound: set over a photo it stood on its plate, moved it ran off it — Lights)
+        low = 0.6 if comp == "big_number" else self.BALANCE_LOW
+        if room <= int(0.15 * k.H) or bottom - area.y >= low * room or top > area.y + int(0.02 * k.H):
             return
         dy = int((floor - bottom) * self.BALANCE_TOP)
         if dy <= int(0.02 * k.H):
@@ -6103,6 +6105,14 @@ class Composer:
             size = next((s_ for s_ in k.figure_sizes(k.display, k.h3) if text_width_pt(text, k.font, s_, k.figure_bold) <= _pt(box.w) * 0.88 and s_ * 1.3 <= _pt(box.h) * 0.45), k.h3)
         while size > k.small and text_width_pt(text, k.font, size, k.figure_bold) > _pt(box.w) * 0.95:
             size = k.snap(size * 0.9, k.small, size - 0.5)
+        if text_width_pt(text, k.font, size, k.figure_bold) > _pt(box.w) * 0.95 or size * 1.3 > _pt(box.h):
+            # a hole too small for the whole on one line (qa6: «1 240 клиенто / в» broken in a 70 px ring): the figure
+            # alone, else nothing — the whole is a figure of the deck's text, never a broken word in the chart
+            bare = typeset(_amount_text(total, ""))
+            if text_width_pt(bare, k.font, size, k.figure_bold) > _pt(box.w) * 0.95 or size * 1.3 > _pt(box.h):
+                self.warnings.append("the whole left out of the doughnut's hole: no room for it on one line")
+                return
+            text = bare
         hh = _emu(size * 1.3)
         color = k.colors.figure if getattr(self, "_hole_large", False) else k.colors.heading
         self.cv.text(Bbox(x=box.x, y=box.y + (box.h - hh) // 2, w=box.w, h=hh), [self.P(text, size, color, bold=k.figure_bold, align="c")], name="Total", anchor="ctr")

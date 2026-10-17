@@ -311,3 +311,20 @@ def test_a_pie_legend_of_amounts_is_headed_by_its_unit_not_a_service_line(env):
     assert "сумма ·" not in text and "общей суммы" not in text
     head = _named(slide, "Legend title")
     assert head and "₽ и % от итога" in head[0].text_frame.text.replace("\u00a0", " ")
+
+
+def test_a_conclusion_strip_never_lies_across_a_row_of_cards(tmp_path):
+    """qa6 (VK + база знаний, сл. 6): the free stretch between two rows of white cards took the conclusion strip
+    across the second row — a card drawn by its shadow alone is content all the same."""
+    from verstka.rendering.clone_notes import _lies_on_content
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    W, H = prs.slide_width, prs.slide_height
+    card = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Emu(int(0.05 * W)), Emu(int(0.56 * H)), Emu(int(0.4 * W)), Emu(int(0.3 * H)))
+    card.fill.background()
+    card.line.fill.background()
+    across = Bbox(x=int(0.05 * W), y=int(0.53 * H), w=int(0.9 * W), h=int(0.1 * H))
+    under = Bbox(x=int(0.05 * W), y=int(0.88 * H), w=int(0.9 * W), h=int(0.08 * H))
+    assert _lies_on_content(slide, across, W, H)
+    assert not _lies_on_content(slide, under, W, H)

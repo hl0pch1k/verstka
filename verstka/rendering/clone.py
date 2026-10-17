@@ -2142,7 +2142,10 @@ def _text_cap(ctx: _SlideCtx, wide: bool = True) -> float:
     head = float(ctx.slide.__dict__.get("_verstka_head_size") or 0.0)
     if wide and h1 < body * 1.25 and head > h1:
         h1 = head
-    return max(body, min(max(body * 1.4, 16.0), h1 * 0.8))
+    # (16 pt on a slide 540 pt high — 3 % of it: a slide larger than that reads its text in proportion — VK Tech's
+    # 810 pt slide set card texts at 11 pt in cards a third of the slide wide, qa6)
+    comfort = 16.0 * max(1.0, (getattr(ctx, "H", 0) or 0) / EMU_PER_PT / 540.0)
+    return max(body, min(max(body * 1.4, comfort), h1 * 0.8))
 
 
 _SYSTEM_FACES = frozenset({"arial", "calibri", "times new roman", "helvetica", "verdana", "tahoma", "segoe ui"})

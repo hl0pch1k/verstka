@@ -284,6 +284,26 @@ def _chart_down_to(slide, content_bottom: int, to_y: int, left: int, right: int,
         set_element_pos(el, h=min(to_y - b[1], int(b[3] * 1.5)))
 
 
+def _lies_on_content(slide, box: Bbox, W: int, H: int) -> bool:
+    """The strip would lie on the slide's content: a text, or a card or a row's panel (a painted shape under a third of
+    the slide) — qa6: a free stretch found in the gap between two rows of cards put the conclusion across them."""
+    tree = slide._element.cSld.find(q("p:spTree"))
+    for el in tree:
+        if etree.QName(el).localname not in _DRAWN:
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] * b[3] >= 0.3 * W * H:
+            continue
+        nv = el.find(".//" + q("p:cNvPr"))
+        if nv is not None and (nv.get("name") or "").startswith(("Conclusion", "Footnote", "Decor cover")):
+            continue
+        # (any shape of the sample's: a white card on a white ground draws by its shadow alone — `_paints` misses it)
+        hit = Bbox(x=b[0], y=b[1], w=b[2], h=b[3]).intersection(box)
+        if hit > 0.02 * box.area:
+            return True
+    return False
+
+
 def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, manifest: TemplateManifest, pattern: Pattern) -> Optional[str]:
     """Set the slide's conclusion and footnote under its content. Returns why they did not fit, or None."""
     from verstka.rendering.synth import _content_bottom_limit
@@ -364,7 +384,7 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
                     fx -= inset  # (the strip's own edge on the column: the inset below is taken back)
                     fw += inset
                 p = comp._takeaway_plan(take, fw - 2 * inset, figure=False, sizes=(deck_size,))
-                if p["h"] <= fh - inset and p.get("lines", 1) <= 3:
+                if p["h"] <= fh - inset and p.get("lines", 1) <= 3 and not _lies_on_content(slide, Bbox(x=fx + inset, y=fy + fh - p["h"], w=fw - 2 * inset, h=p["h"]), W, H):
                     plan, aside = p, (fx + inset, fy + fh - p["h"], fw - 2 * inset)
         if plan is None:
             if _conclusion_under_heading(builder, slide, oslide, outline, manifest, pattern, take, deck_size):
