@@ -195,6 +195,22 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
     from_data = {s.id for s in data_slides}
     # the facts the analysis counted from those files: the summary of a data deck («Выручка выросла на 23%») says them
     data_facts = [float(f.value) for s in data_slides for f in s.data.headline_facts]
+    # …and every value the data layer put on those slides (their charts, tables, cards, captions and the numbers in
+    # their names — the bins «больше 120» of a histogram): a data deck's summary and next steps carry the data story's
+    # figures, re-set by «Исправить слайд» («20% — больше 120 мин · 3 — больше 10 часов»), never the one-line brief's
+    if data_slides:
+        from verstka.data.headline import numbers_in
+        from verstka.data.story import data_slide_labels, slide_values
+
+        for s0 in data_slides:
+            try:
+                data_facts += slide_values(s0)
+                data_facts += [v for lab in data_slide_labels(s0) for v in numbers_in(str(lab))]
+                prep = s0.data.prepared
+                if prep is not None:
+                    data_facts += [v for c in list(prep.categories) + list(prep.columns) for v in numbers_in(str(c))]
+            except Exception:  # noqa: BLE001 - a slide the data layer cannot read: its headline facts only
+                continue
     # …and the data slides' conclusions repeated whole (a summary card: «Прямые продажи приносят почти половину выручки»)
     data_heads = {_plain(s.headline) for s in data_slides}
     for s in ctx.ir.slides:
@@ -219,7 +235,10 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                     except Exception:  # noqa: BLE001 - the plain verdict then
                         pass
             for t in _texts(e):
-                if data_heads and _plain(t) in data_heads:
+                pt = _plain(t)
+                if data_heads and (pt in data_heads or (len(pt) >= 20 and any(pt in h for h in data_heads))):
+                    # a data slide's conclusion said again, whole or without its figure (the summary redone with
+                    # «цифры крупнее»: «46%» over «Прямые продажи приносят почти половину выручки» — qa4 live checks)
                     continue
                 for f in figures(t):
                     if cover and (f.date is not None or (f.plain and 1900 <= f.value <= 2100)):

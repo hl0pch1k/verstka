@@ -694,6 +694,50 @@ def _hairlines(source: str, W: int, H: int) -> dict[int, list[Bbox]]:
     return out
 
 
+def _deck(ctx: AuditContext):
+    """The audited deck as python-pptx reads it (once per audit), or None."""
+    if "_deck" not in ctx.__dict__:
+        try:
+            from pptx import Presentation
+
+            ctx.__dict__["_deck"] = Presentation(str(ctx.ir.source))
+        except Exception:  # noqa: BLE001 - an IR built in memory: no file to read
+            ctx.__dict__["_deck"] = None
+    return ctx.__dict__["_deck"]
+
+
+def _picture_lines(ctx: AuditContext) -> dict[int, list]:
+    """By slide number, the lines the pictures under each whole slide draw (`rendering.picture_lines`: a panel's edges,
+    VK Tech's divider down the middle of «3_Содержание»), less the lines the template's own samples on that layout
+    write over (its designed ground). {} without a deck file."""
+    if "_picture_lines" in ctx.__dict__:
+        return ctx.__dict__["_picture_lines"]
+    out: dict[int, list] = {}
+    prs = _deck(ctx)
+    if prs is not None:
+        from verstka.rendering.picture_lines import designed_lines, ground_lines
+
+        W, H = int(prs.slide_width), int(prs.slide_height)
+        for i, (slide, s) in enumerate(zip(prs.slides, ctx.ir.slides), 1):
+            try:
+                lines = ground_lines(slide)
+            except Exception:  # noqa: BLE001
+                continue
+            lines = [ln for ln in lines if ln.strength >= 6.0 and (ln.end - ln.start) >= 0.3 * (H if ln.vertical else W)]
+            if lines:
+                out[i] = designed_lines(lines, ctx.manifest, s.layout_part, W, H)
+    ctx.__dict__["_picture_lines"] = out
+    return out
+
+
+def _line_cuts_row(ln, row: Bbox) -> bool:
+    """A ground line through a line of text: a vertical one through its letters (not at their ends) along its whole
+    height, a horizontal one through its middle band over half its width."""
+    if ln.vertical:
+        return row.x + 0.04 * row.w < ln.pos < row.x2 - 0.04 * row.w and ln.start <= row.y + 0.2 * row.h and ln.end >= row.y2 - 0.2 * row.h
+    return row.y + 0.25 * row.h < ln.pos < row.y2 - 0.25 * row.h and min(ln.end, row.x2) - max(ln.start, row.x) >= 0.5 * row.w
+
+
 @check(CONTENT_OVER_ART)
 def content_over_art(ctx: AuditContext) -> list[Issue]:
     from verstka.audit.checks.density import _bleeds, _ink
@@ -702,7 +746,11 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
     W, H = ctx.ir.slide_w, ctx.ir.slide_h
     cache: dict = {}
     hairlines = _hairlines(ctx.ir.source, W, H)
+    plines = _picture_lines(ctx)
     for s in ctx.ir.slides:
+        if plines.get(s.index):
+            # qa4 NEW-L1: a line drawn inside the picture under the slide runs through a text or under a card
+            out += _picture_line_issues(ctx, s, plines[s.index], W, H)
         tpl = list(getattr(s, "template_elements", []) or [])
         if not tpl and not hairlines.get(s.index) and not any(o.type == "picture" and o.cells is not None for o in s.elements):
             continue
@@ -796,6 +844,220 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
             if got is not None:
                 share, o = got
                 out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"строка текста «{what}» заходит на пёструю часть фотографии шаблона ({int(round(share * 100))}% строки)", bboxes=[e.bbox_frac, o.bbox_frac], element_ids=[e.id], details={"share": round(share, 2), "art": o.id, "photo": True}, autofix=fix("rematch", "перевыбрать макет, где текст стоит на спокойной части фотографии", outline_id=s.outline_id)))
+    return out
+
+
+def _picture_line_issues(ctx: AuditContext, s, lines: list, W: int, H: int) -> list[Issue]:
+    """The texts a ground picture's line runs through (where no plate of the slide hides it) and the cards it runs
+    under (a card across a panel's divider or edge reads as laid over the frame, not in it): one issue a slide."""
+    from verstka.audit.checks.common import line_boxes
+
+    plates = [o for o in s.elements if o.type in ("shape", "text") and o.fill_hex and fill_alpha(o) >= 0.9 and o.bbox.area > 0]
+    for e in s.elements:
+        if e.type != "text" or not e.has_text or is_chrome_like(e, ctx.ir, ctx.manifest):
+            continue
+        try:
+            rows = [b for b, _ in line_boxes(e)]
+        except Exception:  # noqa: BLE001
+            rows = []
+        for row in rows:
+            for ln in lines:
+                if not _line_cuts_row(ln, row):
+                    continue
+                y = row.y + row.h // 2 if ln.vertical else ln.pos
+                x = ln.pos if ln.vertical else row.x + row.w // 2
+                if any(pl is not e and pl.bbox.x <= x <= pl.bbox.x2 and pl.bbox.y <= y <= pl.bbox.y2 for pl in plates):
+                    continue  # a card of the slide stands over the line there: the text is on the card
+                return [ctx.new_issue(CONTENT_OVER_ART, s.index, f"линия рисунка шаблона проходит через текст «{e.text.strip()[:40]}»", bboxes=[e.bbox_frac, ln.box(int(0.002 * W)).to_frac(W, H)], element_ids=[e.id], details={"picture_line": True}, autofix=fix("rematch", "перевыбрать макет, где линии подложки не пересекают контент", outline_id=s.outline_id))]
+    for e in plates:
+        if e.type != "shape" or e.bbox_frac.area < 0.01 or is_chrome_like(e, ctx.ir, ctx.manifest):
+            continue
+        hit = next((ln for ln in lines if ln.crosses(e.bbox, inset=0.12, span=0.3)), None)
+        if hit is not None:
+            return [ctx.new_issue(CONTENT_OVER_ART, s.index, "карточка лежит поперёк линии рисунка шаблона (край или разделитель его панели)", bboxes=[e.bbox_frac, hit.box(int(0.002 * W)).to_frac(W, H)], element_ids=[e.id], details={"picture_line": True}, autofix=fix("rematch", "перевыбрать макет, где линии подложки не пересекают контент", outline_id=s.outline_id))]
+    return []
+
+
+TEXT_OVER_DECOR = CheckSpec(
+    id="text_over_decor",
+    title="Текст лежит на рисунке подложки (знак, крупная цифра)",
+    severity="warn",
+    category="layout",
+    description="Строка текста слайда лежит на знаке, который рисует картинка под всем слайдом (бледные «01–04» в "
+                "карточках VK Tech, значок): под строкой на спокойном листе подложки есть пятно другого цвета. Текст на "
+                "фотографии проверяет «Контент лежит на рисунке шаблона».",
+)
+
+
+@check(TEXT_OVER_DECOR)
+def text_over_decor(ctx: AuditContext) -> list[Issue]:
+    from verstka.audit.checks.common import line_boxes
+    from verstka.rendering.picture_lines import _grounds, cell_marks
+
+    out: list[Issue] = []
+    prs = _deck(ctx)
+    if prs is None:
+        return out
+    W, H = ctx.ir.slide_w, ctx.ir.slide_h
+    n = len(ctx.ir.slides)
+    kinds = {o.id: (o.kind.value if hasattr(o.kind, "value") else str(o.kind)) for o in (ctx.outline.slides if ctx.outline is not None else [])}
+    for slide, s in zip(prs.slides, ctx.ir.slides):
+        if kinds.get(s.outline_id or "") in ("title", "section", "thanks") or (not s.outline_id and s.index in (1, n)):
+            continue
+        try:
+            if not _grounds(slide):
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        plates = [o.bbox for o in s.elements if o.type in ("shape", "text", "picture") and (o.fill_hex or o.type == "picture") and fill_alpha(o) >= 0.9 and o.bbox.area > 0]
+        # (a mark the template's own sample sets its words over is still a mark: VK Tech's «01»…«04» under its card
+        # texts read as noise behind them — qa4 NEW-L3)
+        display = 2.0 * ctx.manifest.tokens.typography.size_for("body", 14.0)
+        hit = None
+        for e in s.elements:
+            if e.type != "text" or not e.has_text or is_chrome_like(e, ctx.ir, ctx.manifest):
+                continue
+            if (e.dominant_size or 0) >= display:
+                continue  # a display figure or a heading stands over the ground's art as a large shape of its own
+            try:
+                rows = [b for b, _ in line_boxes(e)]
+            except Exception:  # noqa: BLE001
+                continue
+            boxes, own = [], []
+            for r in rows:
+                if r.w <= 0 or r.h <= 0 or any(p.x <= r.x and p.x2 >= r.x2 and p.y <= r.y and p.y2 >= r.y2 for p in plates if p != e.bbox):
+                    continue
+                pad = int(0.35 * r.h)
+                boxes.append(Bbox(x=r.x - pad, y=r.y - pad, w=r.w + 2 * pad, h=r.h + 2 * pad))
+                own.append(r)
+            if not boxes:
+                continue
+            try:
+                marks = cell_marks(slide, boxes, sheet_share=0.55)
+            except Exception:  # noqa: BLE001
+                continue
+            for r0, r, m in zip(own, boxes, marks):
+                # (the mark under the letters themselves, not beside them: a sheet's edge next to a short figure is none)
+                if m is not None and m.w < 0.9 * r.w and m.intersection(r0) >= 0.15 * min(m.area, r0.area):
+                    hit = (e, m)
+                    break
+            if hit:
+                break
+        if hit:
+            e, m = hit
+            out.append(ctx.new_issue(TEXT_OVER_DECOR, s.index, f"текст «{e.text.strip()[:40]}» лежит на знаке, который рисует подложка шаблона", bboxes=[e.bbox_frac, m.to_frac(W, H)], element_ids=[e.id], autofix=fix("rematch", "перевыбрать образец без знаков под текстом", outline_id=s.outline_id)))
+    return out
+
+
+LEGEND_OVER_AXIS_TITLE = CheckSpec(
+    id="legend_over_axis_title",
+    title="Легенда диаграммы наезжает на подпись оси",
+    severity="warn",
+    category="layout",
+    description="Легенда внизу диаграммы не помещается в одну строку ширины диаграммы (значки и названия рядов по "
+                "метрикам шрифта) и переносится на вторую, которую под неё не оставили: она ложится на подпись оси X, "
+                "поставленную вручную над ней. Считается по разметке самой диаграммы (c:legend, c:title оси, c:manualLayout).",
+)
+
+
+def _chart_legend_overlap(gf_el, part, W: int) -> Optional[str]:
+    """Why the bottom legend of a chart frame lies over its X axis's title (its rows by the fonts' metrics against the
+    room under the title's manual place), or None."""
+    from lxml import etree
+
+    from verstka.rendering.deck import element_bbox
+
+    C = "{http://schemas.openxmlformats.org/drawingml/2006/chart}"
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    ref = next(iter(gf_el.iter(C + "chart")), None)
+    rid = ref.get(R + "id") if ref is not None else None
+    if not rid:
+        return None
+    try:
+        cs = etree.fromstring(part.related_part(rid).blob)
+    except Exception:  # noqa: BLE001
+        return None
+    leg = cs.find(f".//{C}legend")
+    if leg is None:
+        return None
+    pos = leg.find(C + "legendPos")
+    if (pos.get("val") if pos is not None else "r") != "b":
+        return None
+    b = element_bbox(gf_el)
+    if not b or b[2] <= 0 or b[3] <= 0:
+        return None
+    fw, fh = b[2] / EMU_PER_PT, b[3] / EMU_PER_PT
+    # the X axis's title (a scatter's X is a value axis at the bottom): its manual place
+    title = None
+    for ax in list(cs.iter(C + "catAx")) + list(cs.iter(C + "dateAx")) + list(cs.iter(C + "valAx")):
+        axpos = ax.find(C + "axPos")
+        if axpos is None or axpos.get("val") != "b":
+            continue
+        t = ax.find(C + "title")
+        if t is not None:
+            title = t
+            break
+    if title is None:
+        return None
+    ml = title.find(f"{C}layout/{C}manualLayout")
+    ty = ml.find(C + "y") if ml is not None else None
+    if ty is None:
+        return None
+    t_size = 10.0
+    rp = next(iter(title.iter(A + "rPr")), None)
+    if rp is not None and (rp.get("sz") or "").isdigit():
+        t_size = int(rp.get("sz")) / 100
+    title_bottom = float(ty.get("val")) * fh + t_size * 1.0  # (its letters: the line's leading under them is no ink)
+    # the legend's entries: the series that keep their entry, a marker and a gap with each name
+    deleted = {e.find(C + "idx").get("val") for e in leg.findall(C + "legendEntry") if e.find(C + "delete") is not None and e.find(C + "delete").get("val") == "1" and e.find(C + "idx") is not None}
+    names = []
+    for ser in cs.iter(C + "ser"):
+        idx = ser.find(C + "idx")
+        if idx is not None and idx.get("val") in deleted:
+            continue
+        v = next(iter(ser.iter(C + "v")), None)
+        if v is not None and (v.text or "").strip():
+            names.append(v.text.strip())
+    if not names:
+        return None
+    l_size = 10.0
+    drp = next(iter(leg.iter(A + "defRPr")), None)
+    if drp is not None and (drp.get("sz") or "").isdigit():
+        l_size = int(drp.get("sz")) / 100
+    lat = next(iter(leg.iter(A + "latin")), None)
+    fam = lat.get("typeface") if lat is not None else None
+    lml = leg.find(f"{C}layout/{C}manualLayout")
+    # the renderer lays a bottom legend out in columns as wide as its widest entry (its marker, the gap, the name),
+    # as many as 80 % of the frame's width holds (qa4 NEW-H2: three entries of a scatter in a 476 pt frame took two
+    # rows, «Гуманитарный» on the second, over «Подготовка, ч/нед.»)
+    avail = (float(lml.find(C + "w").get("val")) * fw if lml is not None and lml.find(C + "w") is not None else fw * 0.8)
+    col = max(text_width_pt(nm, fam, l_size) for nm in names) + l_size * 1.6
+    per_row = max(1, int(avail // max(col, 1.0)))
+    rows = -(-len(names) // per_row)
+    leg_h = rows * l_size * 1.25 + l_size * 0.3
+    leg_top = (float(lml.find(C + "y").get("val")) * fh) if lml is not None and lml.find(C + "y") is not None else fh - leg_h
+    if leg_top < title_bottom - 1.0:
+        return f"легенда в {rows} {'строку' if rows == 1 else ('строки' if rows < 5 else 'строк')} ({leg_h:.0f} пт) ложится на подпись оси X"
+    return None
+
+
+@check(LEGEND_OVER_AXIS_TITLE)
+def legend_over_axis_title(ctx: AuditContext) -> list[Issue]:
+    out: list[Issue] = []
+    prs = _deck(ctx)
+    if prs is None:
+        return out
+    for slide, s in zip(prs.slides, ctx.ir.slides):
+        for el in slide._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}graphicFrame"):
+            try:
+                why = _chart_legend_overlap(el, slide.part, int(prs.slide_width))
+            except Exception:  # noqa: BLE001
+                why = None
+            if why:
+                e = next((x for x in s.elements if x.type == "chart"), None)
+                out.append(ctx.new_issue(LEGEND_OVER_AXIS_TITLE, s.index, why, bboxes=[e.bbox_frac] if e is not None else [], element_ids=[e.id] if e is not None else [], suggestion="Легенде — своя строка под подписью оси или место справа от диаграммы."))
+                break
     return out
 
 

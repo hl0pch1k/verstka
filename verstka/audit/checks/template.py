@@ -541,3 +541,287 @@ def brand_logo_place(ctx: AuditContext) -> list[Issue]:
                 out.append(ctx.new_issue(BRAND_LOGO_PLACE, i, f"Логотип бренда {c}, а на других слайдах — {main}",
                                          suggestion="Один угол логотипа на всю колоду."))
     return out
+
+
+# ── qa4: the typographic floor of every slide, chips, logos (a score of 100 means what it says) ─────────────────────
+FIGURE_LABEL_RATIO = CheckSpec(
+    id="figure_label_ratio",
+    title="Ключевая цифра почти не крупнее своей подписи",
+    severity="warn",
+    category="template",
+    description="Ключевая цифра слайда (число плана с подписью, цифра карточки, цифра, с которой начинается строка "
+                "под короткой меткой «Было / Стало») набрана меньше чем в 1,6 раза крупнее своей подписи: цифра и подпись "
+                "читаются одним кеглем. Цифра и подпись ищутся по тексту плана, пара — ближайшие абзацы.",
+)
+HEADLINE_IN_CHIP = CheckSpec(
+    id="headline_in_chip",
+    title="Заголовок слайда стоит на плашке-метке",
+    severity="error",
+    category="template",
+    description="Заголовок слайда с содержимым набран на плашке-метке (невысокая цветная плашка не шире половины слайда "
+                "под началом текста) вместо метки раздела: заголовка под ней нет, метка «съела» вывод.",
+)
+BODY_BELOW_TEMPLATE = CheckSpec(
+    id="body_below_template",
+    title="Основной текст мельче основного кегля шаблона",
+    severity="warn",
+    category="template",
+    description="Строка основного текста (от 25 знаков и четырёх слов: пункт, текст карточки, шаг, подпись цифры) "
+                "набрана мельче основного кегля шаблона (больше чем на полпункта). Сноски, источники, подписи "
+                "диаграмм и таблиц — мелкий текст по замыслу, их проверяет «Текст мельче читаемого».",
+)
+TEXT_TOO_SMALL = CheckSpec(
+    id="text_too_small",
+    title="Текст мельче читаемого",
+    severity="error",
+    category="template",
+    description="Текст слайда с содержимым (и мелкий: сноска, источник, ячейка таблицы) набран мельче 1,7% высоты "
+                "слайда (самый мелкий кегль плотной вёрстки) — 9,2 пт на слайде 7,5″, 7 пт на слайде 5,6″: такой текст с "
+                "экрана не читается. Служебные "
+                "элементы шаблона (номер слайда, колонтитулы) не проверяются.",
+)
+LOGO_OFF_SLIDE = CheckSpec(
+    id="logo_off_slide",
+    title="Логотип выходит за край слайда",
+    severity="error",
+    category="template",
+    description="Видимая часть логотипа бренда (его непрозрачные пиксели, с учётом группы, в которой он стоит) выходит "
+                "за край слайда: логотип обрезан («VK Clouc»).",
+)
+
+_FOOTNOTE_RE = re.compile(r"^\s*(?:источник|источники|данные|по данным|примечание|\*|source)\b", re.I)
+_CONTENT_SKIP_KINDS = ("title", "section", "thanks")
+
+
+def _content_slides(ctx: AuditContext):
+    """(IR slide, outline slide or None) of the content slides: covers, dividers and closing slides set display type."""
+    by_id = {o.id: o for o in (ctx.outline.slides if ctx.outline is not None else [])}
+    n = len(ctx.ir.slides)
+    for s in ctx.ir.slides:
+        o = by_id.get(s.outline_id or "")
+        kind = (o.kind.value if hasattr(o.kind, "value") else str(o.kind)) if o is not None else None
+        if kind in _CONTENT_SKIP_KINDS or (o is None and s.index in (1, n)):
+            continue
+        yield s, o
+
+
+def _records_of(s) -> list[tuple]:
+    """The slide's paragraphs as `clone_check.match_figures` records (text, digits' size, largest size, x, y, element,
+    paragraph, box)."""
+    out = []
+    for e in text_elements(s):
+        b = e.bbox
+        paras = [p for p in e.paragraphs]
+        for j, p in enumerate(paras):
+            sizes = [(r.text, r.size_pt) for r in p.runs if r.size_pt and r.text.strip()]
+            if not sizes or not p.text.strip():
+                continue
+            dig = [z for t, z in sizes if any(ch.isdigit() for ch in t)]
+            out.append((p.text, max(dig) if dig else 0.0, max(z for _, z in sizes), b.x + b.w / 2, b.y + (j + 0.5) * b.h / max(len(paras), 1), e, p, (b.x, b.y, b.w, b.h)))
+    return out
+
+
+@check(FIGURE_LABEL_RATIO)
+def figure_label_ratio(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.clone_check import FIG_RATIO, _sq, box_gap, figure_pairs, match_figures
+
+    out: list[Issue] = []
+    W, H = ctx.ir.slide_w, ctx.ir.slide_h
+    for s, o in _content_slides(ctx):
+        if o is None:
+            continue
+        pairs = figure_pairs(o)
+        if not pairs:
+            continue
+        recs = _records_of(s)
+        found = match_figures(pairs, recs)
+        for fig, lab, fs, ls, fr, lr in found:
+            if fs < FIG_RATIO * ls - 0.3:
+                out.append(ctx.new_issue(FIGURE_LABEL_RATIO, s.index, f"цифра «{fig.strip()[:16]}» {fs:g} пт почти не крупнее подписи «{lab.strip()[:24]}» {ls:g} пт (нужно от {FIG_RATIO:g}×)",
+                                         element_ids=[fr[5].id, lr[5].id], bboxes=[fr[5].bbox_frac, lr[5].bbox_frac], details={"figure_pt": fs, "label_pt": ls},
+                                         suggestion="Цифра крупнее, подпись — основным кеглем шаблона; иначе другой образец или композиция."))
+                break
+            gx, gy = box_gap(fr[7], lr[7])
+            if gx > 0.1 * W or gy > 0.12 * H:
+                # qa4 NEW-L3: «до 5 часов» alone at the slide's top-right edge, its words in a list at the left
+                out.append(ctx.new_issue(FIGURE_LABEL_RATIO, s.index, f"цифра «{fig.strip()[:16]}» стоит отдельно от своей подписи «{lab.strip()[:24]}»",
+                                         element_ids=[fr[5].id, lr[5].id], bboxes=[fr[5].bbox_frac, lr[5].bbox_frac], details={"apart": True},
+                                         suggestion="Цифра и её подпись — в одном блоке."))
+                break
+        else:
+            kind = o.kind.value if hasattr(o.kind, "value") else str(o.kind)
+            if kind in ("stat_row", "big_number"):
+                shown = {_sq(f[0]) for f in found}
+                lone = next((fig for fig, _, lead in pairs if not lead and _sq(fig) not in shown and any(r[1] and _sq(r[0]) == _sq(fig) for r in recs)), None)
+                if lone:
+                    out.append(ctx.new_issue(FIGURE_LABEL_RATIO, s.index, f"у цифры «{lone.strip()[:16]}» нет подписи рядом", details={"unlabelled": True},
+                                             suggestion="У каждой ключевой цифры — подпись рядом, что она считает."))
+    return out
+
+
+def _plate_under(s, e, W: int, H: int):
+    """A filled plate (the slide's own shape, or the template's) under the start of a text's first line: (element, box)."""
+    from verstka.audit.checks.common import line_boxes
+
+    try:
+        rows = line_boxes(e)
+    except Exception:  # noqa: BLE001
+        rows = []
+    first = rows[0][0] if rows else e.bbox
+    px, py = first.x + min(first.w, int(0.02 * W)) // 2, first.y + first.h // 2
+    best = None
+    for o in list(s.elements) + list(getattr(s, "template_elements", []) or []):
+        if o is e or o.type not in ("shape", "text") or not o.fill_hex or fill_alpha(o) < 0.6 or (o.type == "text" and o.has_text and o is not e):
+            continue
+        b = o.bbox
+        if b.x <= px <= b.x2 and b.y <= py <= b.y2 and b.area < 0.25 * W * H and (best is None or b.area < best[1].area):
+            best = (o, b)
+    if e.fill_hex and fill_alpha(e) >= 0.6 and best is None:
+        best = (e, e.bbox)
+    return best
+
+
+@check(HEADLINE_IN_CHIP)
+def headline_in_chip(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.clone_check import _sq
+
+    out: list[Issue] = []
+    W, H = ctx.ir.slide_w, ctx.ir.slide_h
+    for s, o in _content_slides(ctx):
+        head = _sq((o.headline if o is not None else "") or "")
+        if len(head) < 6:
+            continue
+        for e in text_elements(s):
+            if e.bbox_frac.y > 0.35:
+                continue
+            t = _sq(e.text)
+            if not t or not (t == head or (len(t) >= 12 and head.startswith(t))):
+                continue
+            plate = _plate_under(s, e, W, H)
+            if plate is not None and plate[1].h < 0.1 * H and plate[1].w <= 0.5 * W:
+                out.append(ctx.new_issue(HEADLINE_IN_CHIP, s.index, f"заголовок «{e.text.strip()[:40]}» стоит на плашке-метке вместо названия раздела",
+                                         element_ids=[e.id], bboxes=[e.bbox_frac], suggestion="Плашка называет раздел или вид слайда, заголовок — под ней."))
+                break
+    return out
+
+
+def _small_print(e, p, o) -> bool:
+    """A paragraph that is small print by design: a source or a note line, the slide's footnote, a caption."""
+    name = (e.name or "")
+    if re.match(r"^(?:Footnote|Source|Caption|Chart note|Legend)", name):
+        return True
+    if _FOOTNOTE_RE.match(p.text or ""):
+        return True
+    if o is not None and (o.footnote or "").strip() and (p.text or "").strip()[:30] == (o.footnote or "").strip()[:30]:
+        return True
+    return False
+
+
+@check(BODY_BELOW_TEMPLATE)
+def body_below_template(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.clone_check import body_floor
+
+    out: list[Issue] = []
+    floor = body_floor(ctx.manifest)
+    for s, o in _content_slides(ctx):
+        worst = None
+        for e in text_elements(s):
+            if is_chrome_like(e, ctx.ir, ctx.manifest):
+                continue
+            from verstka.rendering.compose import MONO_RE
+
+            for p in e.paragraphs:
+                txt = (p.text or "").strip()
+                if len(txt) < 25 or len(txt.split()) < 4 or _small_print(e, p, o):
+                    continue
+                if any(r.font and MONO_RE.search(r.font) for r in p.runs):
+                    continue
+                sizes = [r.size_pt for r in p.runs if r.size_pt and r.text.strip()]
+                if not sizes:
+                    continue
+                z = max(sizes)
+                if z < floor - 0.5 and (worst is None or z < worst[0]):
+                    worst = (z, e, txt)
+        if worst is not None:
+            z, e, txt = worst
+            out.append(ctx.new_issue(BODY_BELOW_TEMPLATE, s.index, f"текст «{txt[:40]}» набран {z:g} пт — мельче основного кегля шаблона {floor:g} пт",
+                                     element_ids=[e.id], bboxes=[e.bbox_frac], details={"size": z, "floor": floor},
+                                     suggestion="Основной текст — не мельче основного кегля шаблона: меньше текста на слайде или другая раскладка."))
+    return out
+
+
+@check(TEXT_TOO_SMALL)
+def text_too_small(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.clone_check import small_floor
+
+    out: list[Issue] = []
+    floor = small_floor(ctx.manifest)
+    for s, o in _content_slides(ctx):
+        worst = None
+        for e in s.elements:
+            if e.type == "table" and e.table is not None:
+                for row, cells in zip(e.table.rows, e.table.cells):
+                    for txt, c in zip(row, cells):
+                        if txt.strip() and c.size_pt and c.size_pt < floor - 0.3 and (worst is None or c.size_pt < worst[0]):
+                            worst = (c.size_pt, e, txt.strip())
+                continue
+            if e.type != "text" or not e.has_text or is_template_chrome(e, ctx.manifest):
+                continue
+            if is_chrome_like(e, ctx.ir, ctx.manifest) and not e.text.strip()[:1].isalpha():
+                continue  # a page number, a mark in the corner
+            for p in e.paragraphs:
+                for r in p.runs:
+                    if r.size_pt and r.text.strip() and r.size_pt < floor - 0.3 and (worst is None or r.size_pt < worst[0]):
+                        worst = (r.size_pt, e, p.text.strip())
+        if worst is not None:
+            z, e, txt = worst
+            out.append(ctx.new_issue(TEXT_TOO_SMALL, s.index, f"текст «{txt[:40]}» набран {z:g} пт — мельче читаемого ({floor:.1f} пт на этом слайде)",
+                                     element_ids=[e.id], bboxes=[e.bbox_frac], details={"size": z, "floor": round(floor, 1)},
+                                     suggestion="Меньше текста или строк таблицы, крупнее кегль; лишнее — в заметки."))
+    return out
+
+
+@check(LOGO_OFF_SLIDE)
+def logo_off_slide(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.brand_logo import is_brand_logo_any as is_brand_logo
+    from verstka.rendering.deck import abs_bbox
+    from verstka.rendering.layers import opaque_box
+
+    try:
+        from pptx import Presentation
+
+        prs = Presentation(str(ctx.ir.source))
+    except Exception:  # noqa: BLE001 - no file to read: nothing to say
+        return []
+    W, H = int(prs.slide_width), int(prs.slide_height)
+    tol = int(0.002 * W)
+    out: list[Issue] = []
+    for k, (slide, s) in enumerate(zip(prs.slides, ctx.ir.slides), 1):
+        holders = [(slide.part, slide._element)]
+        try:
+            holders.append((slide.slide_layout.part, slide.slide_layout._element))
+        except Exception:  # noqa: BLE001
+            pass
+        for part, root in holders:
+            for el in root.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}pic"):
+                if not is_brand_logo(el):
+                    continue
+                b = abs_bbox(el)
+                if not b or b[2] <= 0 or b[3] <= 0:
+                    continue
+                try:
+                    vis = opaque_box(part, el, Bbox(x=int(b[0]), y=int(b[1]), w=int(b[2]), h=int(b[3])))
+                except Exception:  # noqa: BLE001
+                    vis = Bbox(x=int(b[0]), y=int(b[1]), w=int(b[2]), h=int(b[3]))
+                if vis.w <= 0 or vis.h <= 0:
+                    continue
+                if vis.x < -tol or vis.y < -tol or vis.x2 > W + tol or vis.y2 > H + tol:
+                    cut = max(-vis.x, -vis.y, vis.x2 - W, vis.y2 - H) / max(vis.w if (vis.x < 0 or vis.x2 > W) else vis.h, 1)
+                    out.append(ctx.new_issue(LOGO_OFF_SLIDE, s.index, f"логотип выходит за край слайда на {cut:.0%} своей ширины",
+                                             details={"box": [vis.x / W, vis.y / H, vis.w / W, vis.h / H]},
+                                             suggestion="Логотип целиком на слайде, с полем от края, как в брендбуке."))
+                    break
+            else:
+                continue
+            break
+    return out
