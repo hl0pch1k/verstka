@@ -43,7 +43,15 @@ class SampleRefused(RuntimeError):
     the renderer takes the next sample or composes the slide. A reason the plan gives, never a failure — «failed»
     stays for a renderer that broke (nothing could be composed, a native object could not be drawn)."""
 
-TEXT_ROLES = {SlotRole.title, SlotRole.subtitle, SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption}
+
+def is_label_chip(box: Bbox, W: int, H: int) -> bool:
+    """A plate under the start of a heading that is a label's chip (ЛЦТ's pink pill: a few words of a section), not a
+    band the template sets its headings in: low (under a tenth of the slide's height) and at most half its width. A
+    heading never goes into a chip — the chip names the section, the heading stands under it (qa4 NEW-L4)."""
+    return box.h < 0.1 * H and box.w <= 0.5 * W
+
+
+TEXT_ROLES ={SlotRole.title, SlotRole.subtitle, SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption}
 CELL_TEXT_ROLES = {SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.bullet_list, SlotRole.body}
 _BODY_ROLES = (SlotRole.card_body, SlotRole.bullet_list, SlotRole.body)
 # the audit's tolerance around the template's sizes (`audit/checks/template.py`, size_not_in_scale): a size within
@@ -294,7 +302,16 @@ class _SlideCtx:
                 if slot is not None and slot.role == SlotRole.number and len(paragraphs) == 1 and not is_nested(el):
                     # a single figure never wraps well: widen the box instead of clipping
                     need_w = int(text_width_pt(paragraphs[0].text, family, target_size, True) * EMU_PER_PT * 1.15) + insets[0] + insets[2]
-                    if need_w > box[2] and box[0] + need_w <= self.W * 0.97:
+                    # (never into the next text of its row: two widened figures of a pair ran into each other — «+34%»
+                    # over «2,1 часа» at 96 pt, qa4 re-render of o01 slide 6)
+                    right = self.W * 0.97
+                    for other in self.els.values():
+                        if other is el or is_nested(other) or other.getparent() is None or etree.QName(other).localname != "sp" or not shape_text(other).strip():
+                            continue
+                        ob = element_bbox(other)
+                        if ob and ob[0] > box[0] + int(0.02 * self.W) and ob[1] < box[1] + box[3] and ob[1] + ob[3] > box[1]:
+                            right = min(right, ob[0] - int(0.02 * self.W))
+                    if need_w > box[2] and box[0] + need_w <= right:
                         set_element_pos(el, w=need_w)
                         self.warnings.append(f"widened number slot {slot.id}")
                     elif need_w > box[2]:
@@ -772,10 +789,11 @@ class _SlideCtx:
             return box
         back_el, ob = backing
         head = " ".join(" ".join(texts).split())
-        if getattr(self, "_title_call", False) and getattr(self, "kind", None) is not None and len(head) > 32 and ob.h < 0.1 * self.H and self.kind not in _BOOKENDS:
-            # a heading of a sentence is never set into a label's chip at the chip's size (ЛЦТ: «Полный запуск умных
-            # напоминаний через 3 недели» in the pink pill — qa3 L4): another sample, or the slide is composed
-            raise SampleRefused(f"заголовок в {len(head)} знаков не для плашки-метки образца")
+        if getattr(self, "_title_call", False) and getattr(self, "kind", None) is not None and head and is_label_chip(ob, self.W, self.H) and self.kind not in _BOOKENDS:
+            # a heading is never set into a label's chip, whatever its length (ЛЦТ: «Полный запуск умных напоминаний
+            # через 3 недели» in the pink pill — qa3 L4; «Четыре главных вывода» in it with no heading — qa4 NEW-L4): the
+            # chip names the section, the heading is set under it — another sample, or the slide is composed
+            raise SampleRefused(f"заголовок «{head[:32]}» не для плашки-метки образца")
         pad_r = max(ob.x2 - (bx.x + need_w), 0) if bx.x + need_w <= ob.x2 else int(0.012 * self.W)
         inner = ob.x2 - bx.x - int(0.008 * self.W)  # the label's own width is the text's to use
         width = min(max(bx.w, min(need_w, inner)), max(inner, int(0.05 * self.W)))
@@ -965,11 +983,13 @@ def _body_insets(el: etree._Element) -> tuple[int, int, int, int]:
 
 
 def _items_for(oslide: OutlineSlide) -> list[SlideItem]:
+    from verstka.rendering.compose import unrepeat_item
+
     c = oslide.content
     if c.items:
-        return list(c.items)
+        return [unrepeat_item(x) for x in c.items]
     if c.columns:
-        return list(c.columns)
+        return [unrepeat_item(x) for x in c.columns]
     if c.numbers:
         return [SlideItem(title=n.value, text=n.label, number=n.value) for n in c.numbers]
     if oslide.kind in _ITEM_KINDS and c.bullets:
@@ -3066,6 +3086,12 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
             have = int(box.h * (0.92 if by_chart else 1.0))
             if need and have < need:
                 raise SampleRefused(f"диаграмме нужно {need / 12700:.0f} pt высоты, в образце {have / 12700:.0f} pt: образец не подходит")
+            # and the width its plot needs (`charts.min_frame_width`: a scatter's near-square plot, a category per slot;
+            # beside the slide's lines the chart keeps about two thirds of the box)
+            need_w = comp.chart_need_w(c.chart)
+            have_w = int(box.w * (0.62 if by_chart else 1.0))
+            if need_w and have_w < need_w:
+                raise SampleRefused(f"диаграмме нужно {need_w / 12700:.0f} pt ширины, в образце {have_w / 12700:.0f} pt: образец не подходит")
         if pair:
             # two charts side by side in the sample's data area, each under its own title, the slide's lines as a
             # composed pair sets them — the conclusion stays the strip under the content (`clone_notes`)
@@ -3613,6 +3639,71 @@ def _remove_orphan_holders(ctx: _SlideCtx) -> None:
             continue
         for o in [el] + occupants:
             ctx.remove_el(o)
+
+
+def _para_runs_sz(p: etree._Element, digits: Optional[bool], factor: Optional[float] = None, size: Optional[float] = None) -> None:
+    """Set the runs of a paragraph: every run at `size`, or each run's own size times `factor` (`digits`: only the runs
+    that hold digits — None: all)."""
+    for r in p.iter(q("a:r")):
+        rp = r.find(q("a:rPr"))
+        t = "".join(x.text or "" for x in r.iter(q("a:t")))
+        if rp is None or not (rp.get("sz") or "").isdigit() or not t.strip():
+            continue
+        if digits is not None and any(ch.isdigit() for ch in t) != digits:
+            continue
+        old = int(rp.get("sz")) / 100
+        new = size if size is not None else old * (factor or 1.0)
+        rp.set("sz", str(int(round(new * 2)) * 50))
+
+
+def _figure_floor(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
+    """Every key figure of the slide at least 1.6 times its label (qa4 L3 / NEW-L2: Marketing's 43 pt over 30.5 pt, the
+    «Было» label large over a small «31%»), within the sample's frames: the label steps down — never under the
+    template's body size — and the figure grows as far as its own box holds it on one line. What still falls short
+    is the gate's (`clone_check.figure_trouble`): another sample, or the slide is composed."""
+    from verstka.rendering.clone_check import FIG_RATIO, body_floor, figure_pairs, match_figures, slide_records
+
+    pairs = figure_pairs(oslide)
+    if not pairs:
+        return
+    floor = body_floor(ctx.manifest)
+    fam0 = ctx.typo.primary_family
+    for fig, lab, fs, ls, fr, lr in match_figures(pairs, slide_records(ctx.slide, set(ctx.pattern.chrome_shape_ids))):
+        if fs >= FIG_RATIO * ls - 0.3:
+            continue
+        l_sp, l_p, f_sp, f_p = lr[5], lr[6], fr[5], fr[6]
+        new_ls = max(floor, math.floor(min(ls, fs / FIG_RATIO) * 2) / 2)
+        if new_ls < ls - 0.05:
+            _para_runs_sz(l_p, None, size=new_ls)
+            ls = new_ls
+        if fs >= FIG_RATIO * ls - 0.3:
+            ctx.warnings.append(f"подпись «{lab.strip()[:16]}» уменьшена до {ls:g} pt: цифра крупнее подписи")
+            continue
+        want = math.ceil(FIG_RATIO * ls * 2) / 2
+        b = abs_bbox(f_sp) if is_nested(f_sp) else element_bbox(f_sp)
+        if not b:
+            continue
+        ins = _body_insets(f_sp)
+        usable_w = (b[2] - ins[0] - ins[2]) / EMU_PER_PT
+        usable_h = (b[3] - ins[1] - ins[3]) / EMU_PER_PT
+        rp = next((r.find(q("a:rPr")) for r in f_p.iter(q("a:r")) if r.find(q("a:rPr")) is not None), None)
+        lat = rp.find(q("a:latin")) if rp is not None else None
+        fam = lat.get("typeface") if lat is not None and lat.get("typeface") else fam0
+        bold = bool(rp is not None and rp.get("b") == "1")
+        k = want / max(fs, 0.1)
+        runs = [("".join(x.text or "" for x in r.iter(q("a:t"))), r.find(q("a:rPr"))) for r in f_p.iter(q("a:r"))]
+        width = sum(text_width_pt(t, fam, (int(r.get("sz")) / 100 if r is not None and (r.get("sz") or "").isdigit() else fs) * (k if any(ch.isdigit() for ch in t) else 1.0), bold) for t, r in runs)
+        others = 0.0
+        for p2 in f_sp.iter(q("a:p")):
+            if p2 is f_p:
+                continue
+            szs = [int(r.get("sz")) / 100 for r in p2.iter(q("a:rPr")) if (r.get("sz") or "").isdigit()]
+            t2 = "".join(x.text or "" for x in p2.iter(q("a:t")))
+            if t2.strip() and szs:
+                others += max(len(wrap_lines(t2, fam, max(szs), False, max(usable_w, 1.0))), 1) * max(szs) * 1.2
+        if width <= usable_w * 0.97 and want * 1.15 + others <= usable_h + 0.5:
+            _para_runs_sz(f_p, True, factor=k)
+            ctx.warnings.append(f"цифра «{fig.strip()[:14]}» поднята до {want:g} pt: в 1,6 раза крупнее подписи")
 
 
 def _remove_placeholder_boxes(ctx: _SlideCtx) -> None:
@@ -4521,18 +4612,23 @@ def _inherits_caps(ctx: _SlideCtx, el: etree._Element) -> bool:
 
 
 def _caps_convention(ctx: _SlideCtx, el: etree._Element, slot: Slot) -> bool:
-    """Whether the template sets this heading in capitals: its layout prompt or sample text is written so."""
+    """Whether the template sets this heading in capitals: its real headings are typed so — the sample's own heading,
+    else the headings of the template's other covers, dividers and closing slides. A layout's prompt is no heading
+    (ЛЦТ's «НАЗВАНИЕ КОМАНДЫ» set the branded cover in capitals while the template's covers carry no such heading —
+    qa4 NEW-B4), nor is a label on its chip."""
     if (_eff_rpr(ctx, el, "cap") or "") == "all":
         return False  # already set in capitals by the template: nothing to add
-    texts = [slot.sample_text or ""]
-    lay = _layout_placeholder(ctx, el)
-    if lay is not None:
-        texts.append(shape_text(lay))
-    for t in texts:
-        letters = [c for c in t if c.isalpha()]
-        if len(letters) >= 4 and all(c.isupper() for c in letters):
-            return True
-    return False
+
+    def letters(t: str) -> list[str]:
+        return [c for c in (t or "") if c.isalpha()]
+
+    texts = [slot.sample_text or ""] if len(letters(slot.sample_text or "")) >= 4 else []
+    if not texts:
+        for p in ctx.manifest.patterns:
+            if p.reference or p.kind not in _BOOKENDS or p.id == ctx.pattern.id:
+                continue
+            texts += [s.sample_text or "" for s in p.slots if s.role == SlotRole.title and len(letters(s.sample_text or "")) >= 4]
+    return bool(texts) and all(all(c.isupper() for c in letters(t)) for t in texts)
 
 
 def _new_text(ctx: _SlideCtx, src: etree._Element, name: str, family: Optional[str], color: Optional[str]) -> etree._Element:
@@ -5875,6 +5971,24 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             w_used = w_sample
         else:
             w_used = max(w_used, w_max)
+    if _snap_down(size, snap_sizes) < 0.8 * size - 0.05:
+        # a heading fitted between two far steps of the scale (Классика: 36 pt or 32 pt between its 24 and 40 — a size
+        # the template never sets, `size_not_in_scale`) takes the scale's own size: the next one up when the heading
+        # takes it in the room the sample's lines give (a line more), else the next one down
+        up = sorted(x for x in snap_sizes if size + 0.05 < x <= target + 0.05)
+        got = None
+        if up:
+            cand = up[0]
+            for ww in dict.fromkeys((w_used, w_max)):
+                n_c = len(display_lines(measured, family, cand, bold, inner(ww), spc_pt=t_spc))
+                whole = not any(text_width_pt(x, family, cand, bold, spc_pt=t_spc) > inner(ww) * word_room for x in re.split(r"[\s\u00a0]+", measured) if x)
+                if whole and n_c <= max_lines + 1 and n_c * cand <= 0.9 * max_lines * target:
+                    got = (cand, n_c, ww)
+                    break
+        if got is not None:
+            size, lines, w_used = got
+        else:
+            size = _snap_down(size, snap_sizes)
     size = _snap_display(size, snap_sizes)
     if kind != PatternKind.title and st.cover_size:
         size = min(size, st.cover_size)
@@ -5986,11 +6100,14 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             # the template has no size close under the heading's (Классика: nothing between 24 and 40): the subtitle
             # gives way first, one step of the scale, never under half the heading — the heading keeps its own size
             # rather than an even size the template never sets (36 pt)
-            lower = [s for s in ctx.grow_scale if 0.5 * size - 0.05 <= s < sub_size - 0.05]
+            lower = [s for s in ctx.grow_scale if 0.4 * size - 0.05 <= s < sub_size - 0.05]
             if lower and legible(max(lower), sub_color) < sub_size - 0.05:
                 sub_cap = max(lower)
                 continue
-        size = max(smaller) if smaller else _snap_display(size * 0.92, snap_sizes)
+        # (a step down is the scale's next size, however far: an even size between two far steps — 36 pt between
+        # Классика's 24 and 40 — is no size of the template, `size_not_in_scale`)
+        steps_below = [s for s in snap_sizes if 0.5 * size0 - 0.05 <= s < size - 0.05]
+        size = max(smaller) if smaller else (max(steps_below) if steps_below else _snap_display(size * 0.92, snap_sizes))
     if kind == PatternKind.title:
         st.cover_size, st.cover_bold = size, bold
     if sub_text and not st.sub_size:
@@ -6811,6 +6928,10 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
                 _drop_icon(ctx, el)
     _remove_qr_codes(ctx)
     try:
+        _figure_floor(ctx, oslide)
+    except Exception:  # noqa: BLE001 - the gate judges the slide as it stands
+        log.debug("figure floor failed", exc_info=True)
+    try:
         # for the conclusion (clone_notes) and the gate (clone_check): text must stand clear of the template's art —
         # the slide's own, and the art its layout draws (WorkSpace's 3D spiral down the left of its content layout)
         arts = ctx.art_boxes()
@@ -6824,6 +6945,22 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         slide.__dict__["_verstka_designed"] = {s.shape_id: s.bbox.to_emu(ctx.W, ctx.H) for s in pattern.slots if s.role in TEXT_ROLES}
     except Exception:  # noqa: BLE001
         pass
+    try:
+        # the marks the picture under the slide draws in the sample's cells (VK Tech's «01»…«04» watermarks, its
+        # numerals 1–5 over the cards): the gate keeps text off them and the numbering single (qa4 NEW-L3)
+        from verstka.rendering.picture_lines import cell_marks
+
+        marked = []
+        for g in pattern.repeat_groups:
+            cells = [c.to_emu(ctx.W, ctx.H) for c in (g.cell_boxes or [])]
+            if len(cells) >= 2:
+                got = cell_marks(slide, cells)
+                if sum(1 for m in got if m is not None) >= max(2, (2 * len(cells) + 2) // 3):
+                    marked += [(c, m) for c, m in zip(cells, got) if m is not None]
+        if marked:
+            slide.__dict__["_verstka_cell_marks"] = marked
+    except Exception:  # noqa: BLE001 - marks unread: the gate's other rules stand
+        log.debug("cell marks not read", exc_info=True)
     if oslide.notes:
         try:
             slide.notes_slide.notes_text_frame.text = oslide.notes

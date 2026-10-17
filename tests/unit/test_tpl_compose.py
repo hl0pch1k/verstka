@@ -675,11 +675,12 @@ def test_a_conclusion_the_block_leaves_no_room_for_stays_on_the_slide(sparse_env
     tol = int(0.01 * LO_H)
     top = min(bb[1] for bb in concl)
     assert top >= max(bb[1] + bb[3] for bb in others) - tol  # under the content, never over it
-    if foot_room:
-        assert any("free room" in w for w in comp.warnings)
+    # (qa4 L3: the usual settings keep the lists at the template's body size; two lists too long for the area at it are
+    # set by the dense pass — the conclusion then stands under them in the area, or in the free room by the art)
+    if foot_room and any("free room" in w for w in comp.warnings):
         assert all(bb[0] + bb[2] <= room.x2 + tol and bb[1] + bb[3] <= room.y2 + tol for bb in concl)
     else:
-        assert any("the block set" in w or "a size smaller" in w for w in comp.warnings), comp.warnings
+        assert any(x in w for w in comp.warnings for x in ("the block set", "a size smaller", "dense content set smaller")), comp.warnings
         assert all(bb[1] + bb[3] <= area.y2 + tol for bb in concl + others)
 
 
@@ -1209,8 +1210,14 @@ def test_five_theses_keep_their_numerals_where_the_room_allows(sparse_env):
     n0 = len(comp.cv.tree)
     comp.cards(area, _theses())
     idx = _drawn(comp, n0, "Index")
-    assert [etree.tostring(el, method="text", encoding="unicode").strip() for el, _ in idx] == ["01", "02", "03", "04", "05"]
     texts = _drawn(comp, n0, "Card text")
+    if not idx:
+        # qa4 L3: the words never go under the template's body size to keep the numerals — the theses then go without
+        # them (cards, or a list when no grid of cards holds them at that size), their words at the body size or larger
+        sizes = [int(r.get("sz")) / 100 for el in list(comp.cv.tree)[n0:] for r in el.iter(q("a:rPr")) if r.get("sz")]
+        assert sizes and min(sizes) >= comp.kit.text_floor - 0.05, sizes
+        return
+    assert [etree.tostring(el, method="text", encoding="unicode").strip() for el, _ in idx] == ["01", "02", "03", "04", "05"]
     for (iel, ib), (tel, tb) in zip(idx, texts):
         # a numeral never stands on its words: over them, or beside their first line
         assert ib[1] + ib[3] <= tb[1] + int(0.003 * LO_H) or ib[0] + ib[2] <= tb[0] + int(0.003 * LO_W)

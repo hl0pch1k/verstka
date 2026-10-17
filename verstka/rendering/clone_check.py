@@ -66,15 +66,202 @@ def _is_code_para(p) -> bool:
     return bool(faces) and all(MONO_RE.search(f) for f in faces)
 
 
+# ---- the typographic floor of every slide (qa4 L3 / NEW-L2): one rule for the composer, the clone gate and the audit
+
+FIG_RATIO = 1.6  # a key figure stands at least this much larger than its label
+SMALL_SHARE = 0.017  # small print (a source line, a caption) never under this share of the slide's height (the composer's dense floor)
+
+
+def body_floor(manifest: TemplateManifest) -> float:
+    """The template's body size: running text (a card's text, a step, a bullet, a figure's label) is never set
+    smaller. A template whose scale names no body size (a derived ladder) takes 14 pt, at most 3.1 % of the slide's
+    height (the composer's body there)."""
+    typo = manifest.tokens.typography
+    got = typo.size_for("body", 0.0)
+    if got > 0:
+        return float(got)
+    hpt = manifest.slide_size.h / EMU_PER_PT
+    return min(14.0, round(0.031 * hpt * 2) / 2)
+
+
+def small_floor(manifest: TemplateManifest) -> float:
+    """The least size of any text of a content slide — small print included: 1.7 % of the slide's height (9.2 pt on a
+    7.5″ slide, 7 pt on VK Tech's 5.6″), the composer's own dense floor: text under it reads as specks (qa4: 6–8 pt)."""
+    return SMALL_SHARE * manifest.slide_size.h / EMU_PER_PT
+
+
+def _sq(text: str) -> str:
+    """A text for comparing: no spaces of any kind, no word joiners, lower case."""
+    return re.sub(r"[\s   ⁠​]+", "", text or "").lower()
+
+
+_LEAD_FIG_RE = re.compile(r"^\s*([+\-−–~≈]?\d[\d\s  ]*(?:[.,]\d+)?\s?(?:%|‰|×|₽|\$|€|раз[а]?\b|тыс\.?|млн|млрд)?)")
+_YEAR_RE = re.compile(r"^(?:19|20)\d\d$")
+
+
+def is_index_number(num: str, i: int) -> bool:
+    """An item's number that only counts the items (its place «1», «02», a step's «III») or names a year: never a key
+    figure set larger than its words."""
+    t = _sq(num).strip(".)")
+    return t in (str(i + 1), f"{i + 1:02d}") or bool(re.fullmatch(r"[ivxlc]+", t)) or bool(_YEAR_RE.match(t)) or (t.isdigit() and len(t) <= 2 and int(t) <= 12)
+
+
+def figure_pairs(oslide: OutlineSlide, headline: Optional[str] = None) -> list[tuple[str, list[str], bool]]:
+    """The slide's key figures with their labels: (figure, the label's possible texts, lead) — `lead`: the figure starts
+    its own sentence under a short label («Было» over «31% срывов дедлайнов»), where the figure must lead, not the label.
+    The labels a composer may show for a figure (`distinct_label`) are among the texts."""
+    from verstka.rendering.compose import distinct_label
+
+    c = oslide.content
+    head = headline if headline is not None else (oslide.headline or "")
+    out: list[tuple[str, list[str], bool]] = []
+    for n in c.numbers:
+        if (n.value or "").strip() and (n.label or "").strip():
+            out.append((n.value, list(dict.fromkeys([n.label, distinct_label(n.value, n.label, head)])), False))
+    for i, it in enumerate(list(c.items) + list(c.columns)):
+        num = (it.number or "").strip()
+        title = (it.title or "").strip()
+        if num and any(ch.isdigit() for ch in num) and not is_index_number(num, i):
+            lab = title if title and _sq(title) != _sq(num) else (it.text or "").strip()
+            if lab:
+                out.append((num, [lab], False))
+        elif not num and title and (it.text or "").strip() and len(title.split()) <= 3 and not any(ch.isdigit() for ch in title):
+            m = _LEAD_FIG_RE.match(it.text or "")
+            if m and any(ch.isdigit() for ch in m.group(1)):
+                out.append((m.group(1).strip(), [title], True))
+    return out
+
+
+def match_figures(pairs: list[tuple[str, list[str], bool]], records: list[tuple]) -> list[tuple]:
+    """(figure, label, figure size, label size, figure record, label record) of the pairs found on a slide. `records`:
+    one per paragraph — (text, size of its runs that hold digits, its largest size, x, y, …); a figure and its label
+    are the nearest matching paragraphs of two different texts or of one text's two paragraphs."""
+    out = []
+    for fig, labels, lead in pairs:
+        f = _sq(fig)
+        if not f:
+            continue
+        figs = [r for r in records if r[1] and ((not lead and _sq(r[0]) == f) or (lead and _sq(r[0]).startswith(f) and len(_sq(r[0])) > len(f)))]
+        if not figs:
+            continue
+        labs_sq = [_sq(x) for x in labels if _sq(x)]
+        labs = [r for r in records if r[2] and any(_sq(r[0]) == x or (len(x) >= 12 and _sq(r[0])[:12] == x[:12]) for x in labs_sq)]
+        best = None
+        for fr in figs:
+            for lr in labs:
+                if lr is fr:
+                    continue
+                d = abs(fr[3] - lr[3]) + abs(fr[4] - lr[4])
+                if best is None or d < best[0]:
+                    best = (d, fr, lr)
+        if best is not None:
+            _, fr, lr = best
+            out.append((fr[0], lr[0], fr[1], lr[2], fr, lr))
+    return out
+
+
+def slide_records(slide, skip: Optional[set] = None) -> list[tuple]:
+    """The paragraphs of a slide's text boxes as `match_figures` records (the slide's own shapes, groups included)."""
+    from verstka.rendering.deck import abs_bbox
+
+    out = []
+    tree = slide._element.cSld.find(q("p:spTree"))
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        if skip and nv is not None and nv.get("id") in skip:
+            continue
+        b = abs_bbox(sp)
+        if not b:
+            continue
+        paras = list(sp.iter(q("a:p")))
+        for j, p in enumerate(paras):
+            runs = [(("".join(t.text or "" for t in r.iter(q("a:t")))), r.find(q("a:rPr"))) for r in p.iter(q("a:r"))]
+            text = "".join(t for t, _ in runs)
+            if not text.strip():
+                continue
+            sizes = [(t, int(rp.get("sz")) / 100) for t, rp in runs if rp is not None and (rp.get("sz") or "").isdigit() and t.strip()]
+            if not sizes:
+                continue
+            dig = [s for t, s in sizes if any(ch.isdigit() for ch in t)]
+            out.append((text, max(dig) if dig else 0.0, max(s for _, s in sizes), b[0] + b[2] / 2, b[1] + (j + 0.5) * b[3] / max(len(paras), 1), sp, p, b))
+    return out
+
+
+def box_gap(a: tuple, b: tuple) -> tuple[float, float]:
+    """(horizontal, vertical) gap between two (x, y, w, h) boxes, 0 where they overlap along that axis."""
+    gx = max(0.0, max(a[0], b[0]) - min(a[0] + a[2], b[0] + b[2]))
+    gy = max(0.0, max(a[1], b[1]) - min(a[1] + a[3], b[1] + b[3]))
+    return gx, gy
+
+
+def figure_trouble(slide, oslide: OutlineSlide, skip: Optional[set] = None) -> Optional[str]:
+    """A key figure of the slide set hardly larger than its label (qa4 L3 / NEW-L2: Marketing 43 over 30.5 pt,
+    Forestbird 16 over 14 pt; «Было» large over a small «31%»), or apart from it (qa4 NEW-L3: «до 5 часов» alone at the
+    slide's top-right edge, its words in a list at the left; a ring's «18%» with its words elsewhere): why, or None."""
+    W = slide.part.package.presentation_part.presentation.slide_width
+    H = slide.part.package.presentation_part.presentation.slide_height
+    pairs = figure_pairs(oslide)
+    recs = slide_records(slide, skip)
+    found = match_figures(pairs, recs)
+    for fig, lab, fs, ls, fr, lr in found:
+        if fs < FIG_RATIO * ls - 0.3:
+            return f"цифра «{fig.strip()[:14]}» в {fs:g} pt почти не крупнее подписи «{lab.strip()[:18]}» в {ls:g} pt"
+        gx, gy = box_gap(fr[7], lr[7])
+        if gx > 0.1 * W or gy > 0.12 * H:
+            return f"цифра «{fig.strip()[:14]}» стоит отдельно от своей подписи «{lab.strip()[:18]}»"
+    if oslide.kind in (PatternKind.stat_row, PatternKind.big_number):
+        shown = {_sq(f[0]) for f in found}
+        for fig, labels, lead in pairs:
+            if lead or _sq(fig) in shown:
+                continue
+            if any(r[1] and _sq(r[0]) == _sq(fig) for r in recs):
+                return f"у цифры «{fig.strip()[:14]}» нет подписи рядом"
+    return None
+
+
+def _marks_trouble(slide, oslide: OutlineSlide, marks: list, chrome: set, manifest: TemplateManifest) -> Optional[str]:
+    """The marks the ground picture draws in the sample's cells (`clone._render_clone`: (cell, mark) boxes) — VK Tech's
+    «01»…«04» watermarks, its numerals over the cards (qa4 NEW-L3): no text of the slide over a mark, no cell with a
+    mark left empty (the picture would show a numbered card with nothing in it), and no numbers of the slide's own
+    beside the picture's (the numbering doubled: «1» over «01»). Why, or None."""
+    fam = manifest.tokens.typography.primary_family
+    tree = slide._element.cSld.find(q("p:spTree"))
+    texts = []
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") in chrome:
+            continue
+        t = _shape_text(sp).strip()
+        if not t:
+            continue
+        lines = ink_lines(sp, fam)
+        if lines:
+            texts.append((t, lines, sp))
+    for t, lines, _ in texts:
+        for _, m in marks:
+            for ln in lines:
+                if ln.area > 0 and ln.intersection(m) > 0.12 * min(ln.area, m.area):
+                    return f"текст «{t[:24]}» лёг на рисунок в карточке шаблона"
+    for cell, _ in marks:
+        if not any(any(cell.intersection(ln) > 0.5 * ln.area for ln in lines) for _, lines, _ in texts):
+            return "карточка рисунка шаблона осталась пустой"
+    items = list(oslide.content.items) + list(oslide.content.columns)
+    if any(is_index_number(it.number or "", i) and not _YEAR_RE.match(_sq(it.number or "")) for i, it in enumerate(items) if it.number):
+        idx = {_sq(it.number) for it in items if it.number} | {str(i + 1) for i in range(len(items))} | {f"{i + 1:02d}" for i in range(len(items))}
+        for t, _, sp in texts:
+            for p in sp.iter(q("a:p")):
+                if _sq("".join(x.text or "" for x in p.iter(q("a:t")))).strip(".)") in idx:
+                    return "образец сам нумерует карточки рисунком: номера удвоились бы"
+    return None
+
+
 def readable_floor(manifest: TemplateManifest) -> float:
     """The least size of running text on a slide set on a template sample: the template's body size (a step under
     it at most), never under 2.4 % of the slide height — VK Tech's 9 pt card text on a 5.6-inch slide does not read
     from the back of the room, and a deck of composed slides at 11 pt shows it beside them."""
-    hpt = manifest.slide_size.h / EMU_PER_PT
-    body = manifest.tokens.typography.size_for("body", 14.0)
-    # (never above the template's own body size: Education sets its running text at 12 pt on a 540 pt slide — a floor
-    # of 2.4 % of the height, 13 pt, turned down every one of its text samples)
-    return max(body * 0.85, min(0.024 * hpt, body))
+    # (qa4 L3: the template's body size itself — a step under it set the cards of VK Tech at 7 pt and ЛЦТ's at 12 pt
+    # beside 14 pt composed slides; the floor is the same for the composer and the audit, `body_floor`)
+    return body_floor(manifest)
 
 
 def para_indent(p, body=None) -> int:
@@ -453,7 +640,7 @@ def _layout_plates_left_empty(slide, manifest: TemplateManifest) -> int:
     return len(empty) if len(empty) >= 2 else 0
 
 
-def closing_trouble(slide, body: float) -> Optional[str]:
+def closing_trouble(slide, body: float, headline: Optional[str] = None) -> Optional[str]:
     """A data deck's closing slides (the clone marks their items, `_verstka_closing`) are the slide's whole content and
     read as a deliberate end, not as a footnote: their text at the template's body size or larger (ЛЦТ p4: the summary
     at 13 pt under its 14 pt body, squeezed further by its box), and the summary's cards led by their figures — a
@@ -471,9 +658,22 @@ def closing_trouble(slide, body: float) -> Optional[str]:
     words = [norm(x) for _, a, b in marks for x in (a, b) if len(norm(x)) >= 4]
     figs: list[float] = []
     texts: list[float] = []
+    # the cards are compared with the cards only: the slide's heading — an answer-first summary's headline made of its
+    # two strongest conclusions starts with a card's words (story 9057be0) — is no card text
+    head = norm(headline or "")
+    titles = set()
+    for sp in slide._element.iter(q("p:sp")):
+        ph = sp.find(".//" + q("p:ph"))
+        if ph is not None and (ph.get("type") or "") in ("title", "ctrTitle"):
+            titles.add(sp)
     for para in slide._element.iter(q("a:p")):
         t = norm("".join(x.text or "" for x in para.iter(q("a:t"))))
         if not t:
+            continue
+        owner = para.getparent()
+        while owner is not None and etree.QName(owner).localname != "sp":
+            owner = owner.getparent()
+        if owner in titles or (head and (t == head or (len(t) >= 16 and head.startswith(t)) or (len(head) >= 16 and t.startswith(head)))):
             continue
         sizes = [int(rp.get("sz")) / 100 for rp in (r.find(q("a:rPr")) for r in para.iter(q("a:r"))) if rp is not None and (rp.get("sz") or "").isdigit()]
         if not sizes:
@@ -484,7 +684,7 @@ def closing_trouble(slide, body: float) -> Optional[str]:
             texts.append(min(sizes))
     if texts and body and min(texts) < body - 0.5:
         return f"текст итоговых карточек мельче основного текста шаблона: {min(texts):g} pt при {body:g} pt"
-    if figs and texts and min(figs) < 1.5 * max(texts) - 0.5:
+    if figs and texts and min(figs) < FIG_RATIO * max(texts) - 0.5:
         return f"цифры карточек не ведут их: {min(figs):g} pt над текстом в {max(texts):g} pt"
     return None
 
@@ -515,7 +715,8 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
     body = typo.size_for("body", 14.0)
     small = typo.size_for("small", body * 0.8)
     run_floor = readable_floor(manifest)
-    label_floor = max(small * 0.9, 0.016 * hpt)
+    # (a short label — a card's title, a figure's unit — may be small print, never under the floor of small print)
+    label_floor = max(small_floor(manifest), min(small * 0.9, run_floor))
     samples = {_norm(s.sample_text) for s in pattern.slots if s.sample_text and len(_norm(s.sample_text)) >= 3}
     ours = _content_strings(oslide)
     tree = slide._element.cSld.find(q("p:spTree"))
@@ -588,9 +789,19 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         sizes = [int(r.get("sz")) / 100 for r in el.iter(q("a:rPr")) if r.get("sz")] if el is not None else []
         if ref and sizes and min(sizes) < 0.75 * ref - 0.05:
             return f"the heading had to shrink to {min(sizes):g} pt (the deck sets {ref:g} pt)"
-    closing = closing_trouble(slide, body)
+    closing = closing_trouble(slide, body, oslide.headline)
     if closing:
         return closing
+    marks = slide.__dict__.get("_verstka_cell_marks") or []
+    if marks:
+        why = _marks_trouble(slide, oslide, marks, chrome, manifest)
+        if why:
+            return why
+    # a key figure leads its label (qa4 L3 / NEW-L2: 1.6 times its size at the least) — the clone has set the pair
+    # as large as the sample's frames allow (`clone._figure_floor`): a sample that cannot is no place for the figures
+    fig_trouble = figure_trouble(slide, oslide, skip=chrome)
+    if fig_trouble:
+        return fig_trouble
     # figures squeezed far below the sample's own (VK Tech p42: two display figures, three of ours set at a label's
     # size in narrowed cells): the sample's point — the big number — is lost
     nums = {s.shape_id: (s.style.size_pt or 0.0) for s in pattern.slots if s.role == SlotRole.number and (s.style.size_pt or 0.0) >= 20}
