@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutlineSlide, SlideFixResult } from "../../types";
-import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, panelSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
+import { asSlideFixResult, clock, fixRereads, fixUnchangedText, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, panelSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
 import { slideRemarks } from "./marks";
 import { CONTRAST, DENSE, MODEL, edit, ev, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -141,4 +141,22 @@ test("одно место строки панели: строка «Вернут
   // повторный возврат идёт: ни прежней строки возврата, ни прежней строки работы — без мигания
   assert.equal(panelSlot({ error: "Возвращать нечего", busy: true }, { tone: "info", text: "Переставил абзац." }), null);
   assert.equal(panelSlot({ error: null, busy: true }, { tone: "info", text: "x" }), null);
+});
+
+test("«Исправить слайд»: слайд прежний, а замечания сняты (cleared) — вариант перечитывается, строка — ответ сервера", () => {
+  const base = { reply: "", slide: 3, strategy: "visual", requested: ["a", "b"], remaining: [] };
+  const cleared = asSlideFixResult({ ...base, reply: "Замечаний больше нет: проверка их не находит.", applied: false, changed: false, fixed: ["a", "b"], cleared: true })!;
+  assert.equal(cleared.cleared, true);
+  assert.equal(fixRereads(cleared), true);
+  assert.equal(fixUnchangedText(cleared), "Замечаний больше нет: проверка их не находит.");
+  // cleared без снятых замечаний — перечитывать нечего
+  assert.equal(fixRereads(asSlideFixResult({ ...base, applied: false, fixed: [], cleared: true })!), false);
+  // исправлено — перечитывается, как раньше; старый сервер без поля — cleared нет
+  assert.equal(fixRereads(asSlideFixResult({ ...base, applied: true, changed: true, fixed: ["a"] })!), true);
+  const old = asSlideFixResult({ ...base, applied: false, fixed: [], why: "Правила не нашли правки." })!;
+  assert.equal(old.cleared, false);
+  assert.equal(fixRereads(old), false);
+  // ответа нет — запасной текст «Слайд остался прежним: …»
+  assert.equal(fixUnchangedText(old), "Слайд остался прежним: правила не нашли правки");
+  assert.equal(fixUnchangedText({ ...old, why: null }), "Слайд остался прежним: замечания остались");
 });

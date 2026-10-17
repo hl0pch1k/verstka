@@ -629,6 +629,8 @@ export interface SlideFixResult {
   score_before: number | null; new_score: number | null; errors?: number; warnings?: number;
   changed_other_slides: boolean; other_slides: number[];
   how: "model" | "rules" | "autofix"; notes: string[]; why: string | null; version: number | null; at: number | null;
+  /** Слайд не менялся, но замечания `fixed` сняты (проверка их больше не находит): вариант надо перечитать. */
+  cleared?: boolean;
 }
 /** «Пересобрать слайд так»: POST /api/generations/{gid}/{strategy}/slides/{n}/rebuild — `option` с 0, номер в
  *  `OutlineSlide.data.options`. Неподходящий вариант — 422 с причиной анализа, файла с данными нет — 409. */

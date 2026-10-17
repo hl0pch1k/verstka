@@ -25,7 +25,7 @@ import type { AgentEvent, Job, PictureChangeRequest, PictureChangeResult, SlideF
 import { useStale, type Refresh } from "../shell/StaleLine";
 import { asEditResult } from "../helper/chat";
 import { undoRefusal } from "../details/variantWork";
-import { asSlideFixResult } from "./fix";
+import { asSlideFixResult, fixRereads } from "./fix";
 import type { Remark } from "./marks";
 import {
   adoptPlan, awayFailText, JOB0, jobWhat, liveWork, runOf, slideBusy, slideJobNext, undoOffOf, variantLiveJob, type SlideJobAction, type SlideJobKind, type SlideJobState, type SlideRun,
@@ -166,7 +166,7 @@ export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): S
         if (kind === "fix") {
           const res = asSlideFixResult(job.result);
           if (!res) return void send({ type: "settled", seq: s, at: Date.now(), error: "Сервер не смог исправить слайд. Попробуйте ещё раз." });
-          const stale = res.applied ? await reread() : false;
+          const stale = fixRereads(res) ? await reread() : false;
           send({ type: "settled", seq: s, at: Date.now(), fix: res, stale });
         } else {
           const res = asPictureResult(job.result);
@@ -274,7 +274,7 @@ export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): S
     if (p.source === "slide_fix") {
       const res = asSlideFixResult(job.result);
       if (!res) return void send({ type: "settled", seq, at, error: "Сервер не смог исправить слайд. Попробуйте ещё раз." });
-      return void send({ type: "settled", seq, at, fix: res, stale: res.applied && stale });
+      return void send({ type: "settled", seq, at, fix: res, stale: fixRereads(res) && stale });
     }
     if (p.source === "picture") {
       const res = asPictureResult(job.result);

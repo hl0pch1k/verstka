@@ -84,7 +84,21 @@ export function asSlideFixResult(value: unknown): SlideFixResult | null {
     why: typeof r.why === "string" && r.why ? r.why : null,
     version: numOrNull(r.version),
     at: numOrNull(r.at),
+    cleared: !!r.cleared,
   };
+}
+
+/** Итог исправления меняет вариант на сервере — его надо перечитать: слайд исправлен (`applied`) или слайд прежний,
+ *  а замечания сняты (`cleared` и `fixed` не пуст) — без перечитывания они остались бы на экране. */
+export const fixRereads = (r: SlideFixResult): boolean => r.applied || (!!r.cleared && r.fixed.length > 0);
+
+/** Строка у панели, когда слайд не изменился: ответ сервера (`reply`) — он знает, что сделано («Замечаний больше
+ *  нет…»); ответа нет — запасной текст «Слайд остался прежним: <почему>». */
+export function fixUnchangedText(r: SlideFixResult): string {
+  const said = r.reply.trim();
+  if (said) return said;
+  const why = (r.why ?? "замечания остались").replace(/\.\s*$/, "");
+  return `Слайд остался прежним: ${why.charAt(0).toLowerCase()}${why.slice(1)}`;
 }
 
 /** Ряды «Исправлено» (V2 `rmItems` после исправления): замечания, которые просили исправить, в их порядке —

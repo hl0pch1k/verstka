@@ -9,7 +9,7 @@ import type { Variant } from "../../types";
 import { usePresence } from "../kit/usePresence";
 import type { FilmMarks } from "./Film";
 import { useFixStage, type FxPhase } from "./FixSketch";
-import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch, undoneIn } from "./fix";
+import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, fixUnchangedText, lastEditIs, slideSketch, undoneIn } from "./fix";
 import { firstRemarkSlide, slideBadges, slideRemarks, stageMarks, type Frame, type OkPin, type Pin } from "./marks";
 import type { PanelLine, PanelRow, PanelView, RemarksPanelProps } from "./RemarksPanel";
 import { busyWhy, staleOf } from "./slideJob";
@@ -33,7 +33,6 @@ export interface RemarksMode {
   panel: Omit<RemarksPanelProps, "helper"> | null;
 }
 
-const lower = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 
 export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   v: Variant;
@@ -111,7 +110,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
     ? stale === "change" && job.refresh ? { tone: "error", text: job.refresh.text, refresh: job.refresh }
       : fixRun.error ? { tone: "error", text: fixRun.error }
       : fixRun.note ? { tone: "info", text: fixRun.note }
-      : fixRun.fix && !fixRun.fix.applied ? { tone: "info", text: `Слайд остался прежним: ${lower((fixRun.fix.why ?? "замечания остались").replace(/\.\s*$/, ""))}` } : null
+      : fixRun.fix && !fixRun.fix.applied ? { tone: "info", text: fixUnchangedText(fixRun.fix) } : null
     : null;
   const steps = fixRun ? fixSteps(job.live.events, fixRun.phase === "done") : null;
   const summary = fixDone ? fixSummary(fixRun!.fix!) : null;
