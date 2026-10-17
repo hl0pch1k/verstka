@@ -766,6 +766,7 @@ def _fonted_template_id(template_id: str, req: GenerateRequest, data: Generation
     from verstka.brand.fontpick import fonted_template, fonts_info
 
     tf = time.monotonic()
+    spent = False  # the fonts step counts in the run's timings only when it did something (a pick, a copy)
     try:
         info = fonts_info(template_id, store.root)
         if info and info.get("base_template_id") and store.manifest(str(info["base_template_id"])) is not None:
@@ -775,12 +776,14 @@ def _fonted_template_id(template_id: str, req: GenerateRequest, data: Generation
         brand_fonts = bool(data.brand is not None and data.brand.fonts)  # a brandbook with fonts is stronger than the pick
         tid, choice = fonted_template(template_id, enabled=req.pick_fonts, brand_fonts=brand_fonts, workspace_root=store.root,
                                       progress=lambda stage, frac: progress(f"Шрифты: {stage}", 0.02 + 0.03 * float(frac or 0.0)))
+        spent = req.pick_fonts
         return tid, choice
     except Exception:  # noqa: BLE001 - the deck is built on the template as it is
         log.warning("fonts not picked for %s", template_id, exc_info=True)
         return template_id, None
     finally:
-        steps["fonts"] = time.monotonic() - tf
+        if spent:
+            steps["fonts"] = time.monotonic() - tf
 
 
 def _fonts_meta(choice: Any, pick: bool) -> Optional[dict]:

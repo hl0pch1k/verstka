@@ -89,7 +89,14 @@ def _slide_of(outline: dict, file: str) -> int:
 def test_datasets_become_a_story_deck(api, deck):
     c, store, root, tid = api
     gid, gen, ids = deck
-    assert gen["status"] == "done" and gen["template_id"] == tid
+    assert gen["status"] == "done"
+    # the unseen template is set in standard fonts: the deck is laid out on its copy with a picked pair (pick_fonts is
+    # on by default, verstka/brand/fontpick.py) — the request's template stays the deck's base
+    from verstka.brand.fontpick import fonts_info
+
+    info = fonts_info(gen["template_id"], root)
+    assert gen["template_id"] != tid and info is not None and info["base_template_id"] == tid
+    assert gen["base_template_id"] == tid and gen["fonts"]["applied"] and gen["pick_fonts"] is True
     assert [d["id"] for d in gen["datasets"]] == ids
     assert gen["data_story"]["datasets"] == 7 and gen["data_story"]["planned_by"] == "rules"
     gdir = store.generation_dir(gid)
