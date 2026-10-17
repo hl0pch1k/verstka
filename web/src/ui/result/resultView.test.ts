@@ -368,6 +368,10 @@ test("раскладка рабочей области: уведомления �
   assert.ok(note);
   assert.equal(workGeo(null, null), "top");
   assert.equal(workGeo(note, null), "note");
+  // таблетка в шапке рабочей области (компьютер) — ряда нет, рабочая область с самого верха; строке неудачи ряд нужен
+  assert.equal(workGeo(note, null, true), "top");
+  assert.equal(workGeo(note, "Не удалось открыть презентацию", true), "note");
+  assert.equal(note.short, "Проверьте факты");
   // строка «Не удалось открыть презентацию» или отказ «Собрать ещё раз» — тоже уведомление: ряд остаётся её местом
   assert.equal(workGeo(null, "Не удалось открыть презентацию"), "note");
   assert.deepEqual(WORK_GEO.top, { height: 612, marginTop: 0 });

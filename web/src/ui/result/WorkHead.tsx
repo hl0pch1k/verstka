@@ -3,13 +3,14 @@
 // замечания варианта: янтарный, а в режиме «Замечания» при ошибке — красный (R-remarks); не осталось ни одного — числа
 // нет (переключатель остаётся, пока режим включён). Пока агент исправляет слайд, переключатель не нажимается.
 // Просмотр на весь экран — задача 10: обработчик приходит сверху.
+import type { ReactNode } from "react";
 import { plural } from "../../lib/utils";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Switch } from "../kit/Switch";
 import { remarksSwitch } from "./marks";
 
-export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksOff = null, onPrev, onNext, onToggleRemarks, onOpenLightbox }: {
+export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksOff = null, note, onPrev, onNext, onToggleRemarks, onOpenLightbox }: {
   n: number;
   total: number;
   title: string;
@@ -18,6 +19,9 @@ export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksO
   remarksOn?: boolean;
   /** Почему переключатель сейчас не нажимается (агент исправляет слайд); null — нажимается. */
   remarksOff?: string | null;
+  /** Таблетка уведомления («Текст написал агент — проверьте факты») — первой в ряду, слева от «Слайд N из M»
+   *  (замечание владельца 18.10, скрин 13: ряд над рабочей областью отнимал у неё 64 px). */
+  note?: ReactNode;
   onPrev(): void;
   onNext(): void;
   onToggleRemarks(): void;
@@ -28,9 +32,10 @@ export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksO
   const where = total > 0 ? `Слайд ${n} из ${total}` : "Слайдов нет";
   return (
     <div className="p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 40, animationDelay: "200ms" }}>
+      {note}
       {/* в тесной колоде (помощник при 1280) заголовок слайда сжимается многоточием — целиком он в подсказке */}
       <p title={title ? `${where} · ${title}` : where}
-        style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        style={{ flex: note ? 1 : undefined, minWidth: 0, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {where}{" "}
         {title && <span style={{ fontWeight: 500, color: "#5A6272" }}>· {title}</span>}
       </p>

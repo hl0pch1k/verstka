@@ -295,7 +295,10 @@ export const WORK_GEO: Record<WorkGeo, { height: number; marginTop: number }> = 
   note: { height: 548, marginTop: 16 },
   top: { height: 612, marginTop: 0 },
 };
-export const workGeo = (note: NoteView | null, line: unknown): WorkGeo => (note || line ? "note" : "top");
+/** `inHead` — таблетка стоит в шапке рабочей области («Слайд N из M», замечание владельца 18.10, скрин 13): ряда под
+ *  неё не нужно, рабочая область встаёт с самого верха; ряд остаётся только строке неудачи. На телефоне таблетка — в
+ *  колонке над названием (`inHead` нет). */
+export const workGeo = (note: NoteView | null, line: unknown, inHead = false): WorkGeo => ((note && !inHead) || line ? "note" : "top");
 
 /** Таблетка уведомления над рабочей областью (R-aside `ra-note`): заголовок, строка-основание (одна строка; целиком —
  *  в подсказке `full`) и действия. Текст и наличие — `deckNotice`. Когда текст написал агент, таблетка предлагает
@@ -303,6 +306,9 @@ export const workGeo = (note: NoteView | null, line: unknown): WorkGeo => (note 
  *  `label` — о чём уведомление (имя области для чтения с экрана). */
 export interface NoteView {
   title: string;
+  /** Короткий заголовок таблетки на телефоне (в одну строку): текст написал агент — «Проверьте факты», остальное —
+   *  `title`. Целиком заголовок — в подсказке таблетки. */
+  short: string;
   body: string;
   full: string;
   label: string;
@@ -328,8 +334,10 @@ export function noteView(g: Generation, v: Variant, total: number, live: LiveMod
   const label = written ? "Уведомление о тексте, который написал агент"
     : modelFailed(g) ? "Уведомление о сборке без модели"
       : v.outline?.planned_by === "skeleton" ? "Уведомление о каркасе презентации" : "Уведомление о числе слайдов";
+  const title = plainNotice(n.title, labels).replace(/\.\s*$/, "");
   return {
-    title: plainNotice(n.title, labels).replace(/\.\s*$/, ""),
+    title,
+    short: written ? "Проверьте факты" : title,
     body: help || basis,
     full: [basis, help, n.owner ?? ""].filter(Boolean).join(" "),
     label,

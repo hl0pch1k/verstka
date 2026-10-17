@@ -35,20 +35,30 @@ export function NoteRow({ children }: { children?: ReactNode }) {
   );
 }
 
-export function NotePill({ note, open, actions, line }: {
+export function NotePill({ note, open, actions, line, head, short }: {
   note: NoteView;
   open: boolean;
   actions: NoteActions;
   /** Строка неудачи результата (не открылась презентация, не началась повторная сборка) — справа в том же ряду. */
   line?: ReactNode;
+  /** Таблетка в шапке рабочей области («Слайд N из M», компьютер): высота 40, заголовок в одну строку (многоточие),
+   *  текст и действия раскрываются плитой под ней, поверх сцены (`ra-note-h`, result.css). */
+  head?: boolean;
+  /** Короткий заголовок (`note.short`, телефон) — целиком в подсказке. */
+  short?: boolean;
 }) {
   const off = actions.rebuildOff;
   const busy = !!actions.rebuildBusy;
+  const title = short ? note.short : note.title;
   return (
-    <div className={cls("ra-note p2-in", open && "ra-note-on")} role="note" aria-label={note.label} style={{ animationDelay: "160ms" }}>
-      <button type="button" className="ra-ntg" onClick={actions.onToggle} aria-expanded={open} aria-controls="ra-nd" title={open ? "Свернуть" : "Показать действия"}>
+    <div className={cls("ra-note p2-in", head && "ra-note-h", open && "ra-note-on")} role="note" aria-label={note.label} style={{ animationDelay: "160ms" }}>
+      <button type="button" className="ra-ntg" onClick={actions.onToggle} aria-expanded={open} aria-controls="ra-nd"
+        title={open ? "Свернуть" : `${note.title} — показать действия`}>
         <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="info" size={20} /></span>
-        <span>{note.title}</span>
+        {/* в шапке: тесно (container query, result.css) — короткий заголовок вместо полного */}
+        {head && note.short !== note.title
+          ? <span className="ra-ntt"><span className="ra-ntl">{title}</span><span className="ra-nts">{note.short}</span></span>
+          : <span className="ra-ntt">{title}</span>}
         <span className="ra-chev" aria-hidden="true"><Icon name="chevron-right" size={18} /></span>
       </button>
       <div id="ra-nd" className="ra-nd">

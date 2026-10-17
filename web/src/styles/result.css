@@ -283,6 +283,40 @@ a.p2-ob:hover{color:#0B1220}
 .rt-st{min-width:0}
 .rt-st > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rt-hd .p2-ttl{font-size:32px;line-height:40px}
+/* уведомление в шапке рабочей области (замечание владельца 18.10, скрин 13): таблетка 40 первой в ряду «Слайд N из
+   M», заголовок в одну строку (многоточие, целиком — в подсказке); раскрытая — текст и действия плитой под ней поверх
+   сцены, фон раскрывается тем же clip-path слева, действия — лесенкой. Сразу после сборки обводка дважды расходится от
+   таблетки (только transform и opacity), чтобы её заметили */
+.ra-ntt{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ra-whx:has(.ra-note-h){position:relative;z-index:5;container-type:inline-size}
+.ra-nts{display:none}
+.ra-note-h + p{min-width:7.5em}
+/* тесная шапка (окно около 1100, колонка слайда уже 760): короткий заголовок таблетки, подпись «Замечания» уходит
+   (как в тесной колоде с помощником), «Слайд N из M» остаётся */
+@container (width < 760px){
+  .ra-note-h .ra-ntl{display:none}
+  .ra-note-h .ra-nts{display:inline}
+  .ra-note-h ~ .ra-whr .ra-swl{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .ra-note-h ~ .ra-whr{gap:12px !important}
+}
+.ra-note-h{z-index:4;flex:0 1 auto;min-width:0;max-width:62%;height:40px}
+.ra-note-h .ra-ntg{flex:0 1 auto;min-width:0;max-width:100%;height:40px;min-height:0;gap:8px;padding:0 12px;font-size:14px;line-height:20px;white-space:nowrap;text-align:left}
+.ra-note-h .ra-ntg::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px #2563EB;opacity:0;pointer-events:none;animation:ra-ping 1200ms var(--ease) 700ms 2 both}
+@keyframes ra-ping{0%{opacity:.6;transform:scale(1)}100%{opacity:0;transform:scale(1.06,1.4)}}
+.ra-note-h .ra-chev{width:18px;transform:rotate(90deg)}
+.ra-note-h .ra-ntg:hover .ra-chev{transform:rotate(90deg) translateX(2px)}
+.ra-note-h.ra-note-on .ra-chev{transform:rotate(-90deg)}
+.ra-note-h.ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(-90deg) translateX(2px)}
+.ra-note-h .ra-nd{position:absolute;left:0;top:48px;z-index:4;flex-direction:column;align-items:stretch;gap:4px;width:400px;max-width:calc(100vw - 32px);height:auto;margin-left:0;padding:12px}
+.ra-note-h .ra-nbg{border-radius:24px;clip-path:inset(0 100% 0 0 round 24px);box-shadow:0 16px 48px 0 rgba(11,18,32,.12)}
+.ra-note-h.ra-note-on .ra-nbg{clip-path:inset(0 0 0 0 round 24px)}
+.ra-note-h:not(.ra-note-on) .ra-nd{pointer-events:none}
+.ra-note-h .ra-nsp{display:none}
+.ra-note-h .ra-ni{width:100%}
+.ra-note-h .ra-ni1{padding:4px 48px 8px 8px}
+.ra-note-h .ra-src{white-space:normal}
+.ra-note-h .ra-ni .ra-nb{width:100%;justify-content:flex-start}
+.ra-note-h .ra-ni5{position:absolute;top:8px;right:8px;width:auto}
 @media (width >= 1280px) and (height >= 675px){
   /* сайт: «Скопировано» (и неудача копирования) в узкой раскладке — под кнопками, в зазоре 24 над текстом: в ряду шапки
      места нет (V2 строки не знает) */
@@ -375,6 +409,9 @@ a.p2-ob:hover{color:#0B1220}
   .mr-stage:active{transform:none}
   .mr-chip{position:absolute;top:12px;left:12px;z-index:3;display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#0B1220;color:#FFFFFF;font-size:12px;font-weight:700;line-height:16px;pointer-events:none}
   .mr-col .ra-note{z-index:5}
+  /* телефон: таблетка — короткий заголовок в одну строку («Проверьте факты»), высота 44 */
+  .mr-col .ra-ntg{min-height:44px;height:44px;white-space:nowrap}
+  .mr-col .ra-note{height:44px}
   .mr-col .p2-film{margin:0 -16px !important;padding:8px 16px}
   .mr-col .p2-th{width:80px;height:45px}
   .mr-col .p2-th img{width:80px !important;height:45px !important}

@@ -388,9 +388,12 @@ function ResultBody({ g }: { g: Generation }) {
   // Уведомление появилось или ушло на той же презентации — рабочая область вместе с рядом гаснет, раскладка подменяется
   // невидимой и проявляется (useSwap на обёртке `.ra-work`), без хода высоты и ширины; уходящий ряд гаснет со своим
   // содержимым (`useHeld`)
-  const geo = useSwap(workGeo(note, lineKey || null), ui.screen === "result");
+  // компьютер: таблетка — в шапке рабочей области («Слайд N из M»), ряд над ней остаётся только строке неудачи (замечание
+  // владельца 18.10); телефон: таблетка над названием, заголовок короткий, в одну строку
+  const geo = useSwap(workGeo(note, lineKey || null, !phone), ui.screen === "result");
   const g2 = WORK_GEO[geo.shown];
-  const noteRow = note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} /> : line ? <NoteRow>{line}</NoteRow> : null;
+  const headNote = note && !phone ? <NotePill note={note} open={ui.note} actions={noteActions} head /> : null;
+  const noteRow = phone && note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} short /> : line ? <NoteRow>{line}</NoteRow> : null;
   const heldRow = useHeld(noteRow);
 
   // телефон (доска M-result): колонка плиты 04 — те же данные, сцена с разметкой, панель замечаний и карточка
@@ -434,7 +437,7 @@ function ResultBody({ g }: { g: Generation }) {
           style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: g2.height, marginTop: g2.marginTop }}>
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
             <div className={cls("ra-whx", head.cls)} data-fit={head.shown}>
-              <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
+              <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off} note={headNote}
                 onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
             </div>
             <Stage src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect}>
