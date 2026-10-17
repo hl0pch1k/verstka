@@ -1586,14 +1586,20 @@ def upload_document(file: UploadFile = File(...)) -> dict:
     except Exception:  # noqa: BLE001 - a reader's slip on a broken file: said in words
         log.warning("document not read: %s", name, exc_info=True)
         raise HTTPException(400, f"Не удалось прочитать «{name}» — проверьте, что файл не повреждён")
-    text = doc.markdown(data_tables=False)
+    # a document that is mostly its tables of figures: its text is the brief, its tables — data files (data_first); a
+    # document with text of its own goes into the field whole, its tables inline (the deck lays the whole document out)
+    data_first = doc.data_first
+    text = doc.markdown(data_tables=not data_first)
     full = doc.markdown()
     cut = False
     if len(text) > _MAX_DOC_MARKDOWN:
         text = text[:_MAX_DOC_MARKDOWN].rsplit("\n\n", 1)[0].rstrip() + "\n"
         cut = True
     warnings = list(doc.warnings) + (["документ длинный — в поле встало его начало"] if cut else [])
-    return {**doc.summary(), "markdown": text, "full_markdown": full[:_MAX_DOC_MARKDOWN * 2], "warnings": warnings}
+    summary = doc.summary()
+    # «data_tables»: the tables the person's data panel takes from this document (none when they stay in the text)
+    return {**summary, "data_tables": summary["data_tables"] if data_first else 0, "tables_in_text": 0 if data_first else summary["tables"],
+            "markdown": text, "full_markdown": full[:_MAX_DOC_MARKDOWN * 2], "warnings": warnings}
 
 
 _DOC_TEXT_EXTS = (".docx", ".docm", ".dotx", ".pdf", ".doc", ".rtf", ".odt", ".md", ".markdown", ".txt")

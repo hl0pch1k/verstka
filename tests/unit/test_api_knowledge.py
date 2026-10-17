@@ -32,14 +32,28 @@ def test_a_document_becomes_the_text_of_the_field_and_its_figure_tables_become_d
     r = c.post("/api/documents", files={"file": (name, (FIX / name).read_bytes())})
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["title"] == "Итоги третьего квартала 2026" and d["tables"] == 2 and d["data_tables"] == 1
-    assert d["markdown"].startswith("# Итоги третьего квартала 2026") and "| Q3 2026 |" not in d["markdown"]
-    assert "| Q3 2026 | 412 | 1 240 |" in d["full_markdown"]
+    # a report of its own text: it goes into the field whole, its tables inline (the deck lays the whole report out)
+    assert d["title"] == "Итоги третьего квартала 2026" and d["tables"] == 2 and d["data_tables"] == 0 and d["tables_in_text"] == 2
+    assert d["markdown"].startswith("# Итоги третьего квартала 2026") and "| Q3 2026 | 412 | 1 240 |" in d["markdown"]
+    # the same file sent as data: its table of figures is a data file of the second stage
     r = c.post("/api/datasets", files=[("files", (name, (FIX / name).read_bytes()))])
     assert r.status_code == 200, r.text
     cards = r.json()
     assert len(cards) == 1 and cards[0]["file"] == name
     assert cards[0]["rows"] == 3
+
+
+def test_a_document_that_is_mostly_its_table_gives_a_brief_and_data(api):
+    import sys
+
+    sys.path.insert(0, str(FIX))
+    from make_docs import docx_bytes, p, table
+
+    body = [p("Продажи по месяцам", "1"), p("Выручка по месяцам, млн ₽:"),
+            table([["Месяц", "Выручка"], ["Январь", "10"], ["Февраль", "12"], ["Март", "15"], ["Апрель", "14"]])]
+    c, _ = api
+    d = c.post("/api/documents", files={"file": ("продажи.docx", docx_bytes(body))}).json()
+    assert d["data_first"] and d["data_tables"] == 1 and "| Январь |" not in d["markdown"] and d["markdown"].startswith("# Продажи по месяцам")
 
 
 def test_a_document_without_figures_or_text_is_refused_in_words(api):

@@ -39,6 +39,15 @@ export interface WhyView {
   reasons: Reason[];
   alts: WhyAlt[];
   check: { text: string; tone: QTone | null } | null;
+  /** Колода по базе знаний: откуда факты слайда — документы и места (««Отчёт Q3», раздел «Выручка», стр. 2»). */
+  kb: string[];
+}
+
+/** Источники слайда в базе знаний — строка «Источник(и): A; B и ещё 2.» его заметок, по пунктам. */
+export function kbSources(notes: string | null | undefined): string[] {
+  const m = /(?:^|\n)\s*Источники?: ([^\n]+)/.exec(notes ?? "");
+  if (!m) return [];
+  return m[1].replace(/\.\s*$/, "").split(/;\s+/).map((x) => x.trim()).filter(Boolean);
 }
 
 /** Запись раскладки слайда `n` (по id плана, иначе по месту). */
@@ -155,7 +164,7 @@ export function whyView(g: Generation, v: Variant, n: number, manifest: Template
     frame: sample ? null : composed ? "Готового образца не нашлось" : noSample ? noSample.frame : "Образца нет",
     sampleCap: sample ? sample.caption : composed ? "Собран заново по сетке, шрифтам и цветам шаблона" : entry ? "Образец шаблона" : "Образец шаблона не найден",
     own: { src: slideSrc(v, n), alt: headline ? `Ваш слайд ${n}: ${headline}` : `Ваш слайд ${n}` },
-    sim, reasons, alts: altList, check,
+    sim, reasons, alts: altList, check, kb: kbSources(o?.notes),
   };
 }
 

@@ -170,6 +170,14 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
               : ex.error ? <ErrorLine text={ex.error} style={{ marginTop: 16 }} />
                 : <Tx tx="w-why" style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Дизайнер не оставил объяснения для этого слайда.</Tx>}
           {w.dl.length > 0 && <WhyTerms dl={w.dl} />}
+          {w.kb.length > 0 && (
+            <>
+              <h4 className="dw-sub" style={{ marginTop: 24 }}>Факты — из базы знаний</h4>
+              <ul className="dw-kb">
+                {w.kb.map((x, i) => <li key={i}><Icon name="book" size={16} /><span>{x}</span></li>)}
+              </ul>
+            </>
+          )}
           {w.forms.length > 0 && (
             <>
               <h4 className="dw-sub" style={{ marginTop: 24 }}>Другие формы</h4>

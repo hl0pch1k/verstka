@@ -34,6 +34,7 @@ function writerSum(g: Generation): string | null {
   const w = g.writer;
   if (!w || w.status !== "written") return null;
   const n = w.slides ? ` на ${plural(w.slides, "слайд", "слайда", "слайдов")}` : "";
+  if (w.basis === "kb") return `Текст${n} по базе знаний «${w.kb?.name ?? "База знаний"}»`;
   const src = w.source ? ` по статье «${w.source.title}»${/wikipedia\.org/i.test(w.source.url) ? " в Википедии" : ""}` : " по теме";
   return `Текст${n}${src}`;
 }

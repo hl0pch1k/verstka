@@ -41,7 +41,11 @@ export const TEXT_EXTS = [".txt", ".md", ".markdown"];
 /** Готовая презентация — «Улучшить готовую» (сервер переводит в .pptx сам: verstka/ingest/convert.py). Шаблоны
  *  оформления (.potx, .thmx …) — дело шага 01. */
 export const DECK_EXTS = [".pptx", ".pptm", ".ppsx", ".ppsm", ".ppt", ".pps", ".odp"];
-export const TEXT_ACCEPT = [...TEXT_EXTS, "text/plain", "text/markdown"].join(",");
+/** Документ — сервер читает его заголовки, абзацы и таблицы (POST /api/documents): текст встаёт в поле, таблицы с
+ *  цифрами — в «Данные». */
+export const DOC_EXTS = [".docx", ".pdf", ".doc", ".rtf", ".odt"];
+export const TEXT_ACCEPT = [...TEXT_EXTS, ...DOC_EXTS, "text/plain", "text/markdown", "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].join(",");
 export const DECK_ACCEPT = [
   ...DECK_EXTS,
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -51,10 +55,20 @@ export const DECK_ACCEPT = [
 /** Больше текст из файла не берём (как прежде, 2 МБ). */
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 
-export type FileKind = "text" | "deck" | "other";
+export type FileKind = "text" | "doc" | "deck" | "other";
 export function fileKind(name: string): FileKind {
   const e = ext(name);
-  return TEXT_EXTS.includes(e) ? "text" : DECK_EXTS.includes(e) ? "deck" : "other";
+  return TEXT_EXTS.includes(e) ? "text" : DOC_EXTS.includes(e) ? "doc" : DECK_EXTS.includes(e) ? "deck" : "other";
+}
+
+/** Строка после чтения документа: «Документ прочитан: 7 заголовков · 1 таблица с цифрами — в «Данные»» (таблицы слов —
+ *  в тексте поля, их не считаем). */
+export function docReadLine(d: { headings: number; data_tables: number; tables: number; tables_in_text?: number; warnings?: string[] }): string {
+  const head = d.headings ? `Документ прочитан: ${plural(d.headings, "заголовок", "заголовка", "заголовков")}` : "Документ прочитан";
+  const inText = d.tables_in_text ? ` · ${plural(d.tables_in_text, "таблица", "таблицы", "таблиц")} в тексте` : "";
+  const data = d.data_tables ? ` · ${plural(d.data_tables, "таблица с цифрами", "таблицы с цифрами", "таблиц с цифрами")} — в «Данные»` : inText;
+  const warn = d.warnings?.length ? ` · ${d.warnings[0]}` : "";
+  return head + data + warn;
 }
 
 /** Что поле скажет о тексте (или о выбранном файле) — null, если сказать нечего.
@@ -170,7 +184,8 @@ export function clipLine(s: string, n: number): string {
   if (space > n / 2) cut = cut.slice(0, space);
   return `${cut.trimEnd()}…`;
 }
-const firstLine = (text: string) => briefBody(text).trim().split("\n")[0].trim();
+// первая строка — без разметки заголовка Markdown («# Итоги квартала» документа DOCX / PDF → «Итоги квартала»)
+const firstLine = (text: string) => briefBody(text).trim().split("\n")[0].trim().replace(/^#{1,6}\s+/, "");
 
 /** Свёрнутый шаг: «Интеграл» в кавычках или «Тема ещё не задана» (V2 `preview`). */
 export function textPreview(text: string): { text: string; empty: boolean } {

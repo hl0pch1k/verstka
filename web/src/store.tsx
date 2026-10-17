@@ -18,6 +18,7 @@ import { askFor, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, req
 import { openStrategy } from "./ui/result/resultView";
 import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
 import { hasDraftData, useDataState, type DataPreset, type DataState } from "./ui/create/dataState";
+import { useKbState, type KbState } from "./ui/create/kbState";
 import { slideFailAfter, type SlideFail } from "./ui/result/slideJob";
 import { busyKeys } from "./ui/details/variantWork";
 import type {
@@ -215,6 +216,8 @@ export interface AppState {
   /** Вторая ступень: файлы с данными (панель «Данные»), брендбук и что важнее при расхождении — для запроса сборки
    *  (`data.request`) и «Создать» (ui/create/dataState). */
   data: DataState;
+  /** База знаний: документы и ссылки, по которым агент пишет текст (ui/create/kbState); `kb.request` — в запрос сборки. */
+  kb: KbState;
 }
 
 const feedRefreshWithout = (cur: Record<string, string>, gid: string): Record<string, string> => {
@@ -449,6 +452,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fail: (t) => setTextIssue({ kind: "file", text: t }),
   });
   dataRef.current = data;
+  const kb = useKbState();
   // файлы приложены: плита 01 сворачивается в полосу, плита 02 встаёт под неё (ui/deck/geometry `fold1`)
   const dataOn = data.cards.length > 0;
   useEffect(() => dispatch({ type: "set", patch: { data: dataOn } }), [dataOn]);
@@ -1073,13 +1077,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, feedRefresh, noteFeedRefresh, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
-    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource, data,
+    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource, data, kb,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, feedRefresh, noteFeedRefresh, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
-    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource, data,
+    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource, data, kb,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

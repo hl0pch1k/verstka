@@ -179,6 +179,8 @@ export interface RequestInput {
   improve: ImproveSource | null;
   /** Вторая ступень: наборы данных, брендбук и что важнее (dataRules `dataRequest`; пусто — полей нет). */
   data?: DataRequest;
+  /** База знаний (kbRules `kbRequest`): с документами — её id. */
+  knowledge?: { knowledge_id?: string };
 }
 
 /** Запрос сборки (POST /api/generations):
@@ -209,6 +211,7 @@ export function buildRequest(i: RequestInput): GenerateRequest {
     exports: ["pdf", "html"],
     improved_from: src ? { name: src.name, slides: src.slides, template_id: src.template_id, audit: src.audit ?? null } : undefined,
     ...i.data,
+    ...i.knowledge,
   };
 }
 

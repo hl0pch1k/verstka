@@ -123,3 +123,12 @@ test("объяснение сервера: спрошенное раньше б�
   assert.equal(explainPlan(true, false, true), "gone");
   assert.equal(explainPlan(true, false, false), "ask");
 });
+
+test("источники слайда в базе знаний — из его заметок, по пунктам", async () => {
+  const { kbSources } = await import("./why");
+  assert.deepEqual(kbSources("Текст слайда.\n\nИсточники: «Отчёт Q3», раздел «Выручка», таблица; «Клиенты», раздел «Отток», абз. 5 и ещё 2."),
+    ["«Отчёт Q3», раздел «Выручка», таблица", "«Клиенты», раздел «Отток», абз. 5 и ещё 2"]);
+  assert.deepEqual(kbSources("Источник: «Команда и найм», абз. 1."), ["«Команда и найм», абз. 1"]);
+  assert.deepEqual(kbSources("Обычные заметки"), []);
+  assert.deepEqual(kbSources(undefined), []);
+});

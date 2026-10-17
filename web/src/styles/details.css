@@ -866,3 +866,8 @@
   .dpl-it,.dpl-ix{font-size:16px;line-height:24px}
   .dd-sheet section.p2-pop > p{font-size:16px !important;line-height:24px !important}
 }
+/* «Почему так» колоды по базе знаний: документ и место каждого источника слайда */
+.dw-kb{display:flex;flex-direction:column;gap:8px;margin:8px 0 0;padding:0;list-style:none}
+.dw-kb>li{display:flex;align-items:flex-start;gap:8px;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dw-kb svg{flex:none;margin-top:2px;color:#2563EB}
+@media (width < 768px){.dw-kb>li{font-size:16px;line-height:24px}}

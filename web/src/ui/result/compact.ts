@@ -23,6 +23,10 @@ const pages = (g: Generation) => {
  *  результата — его заголовок, иначе свой текст. */
 export function sourceText(g: Generation, note: { title: string } | null): string {
   if (g.writer?.status === "written" && g.writer.text) {
+    if (g.writer.basis === "kb" && g.writer.kb) {
+      const n = g.writer.kb.docs.length;
+      return `Текст написал агент — по базе знаний «${g.writer.kb.name}»: ${n} ${n % 10 === 1 && n % 100 !== 11 ? "документ" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "документа" : "документов"}, источники — в заметках`;
+    }
     const p = pages(g);
     if (!p.length) return "Текст написал агент по своим знаниям — проверьте даты и цифры";
     const names = p.map((x, i) => `${i === 0 ? "" : i === p.length - 1 ? " и " : ", "}«${x.title}»`).join("");

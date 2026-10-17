@@ -107,3 +107,15 @@ test("полоса «04 Результат» над слоем: вариант �
   assert.equal(textStripMeta("Визуальный", null, 1, 12), "Визуальный · слайд 1 из 12");
   assert.equal(textStripMeta("Компактный", 88.6, 2, 0), "Компактный · 89 из 100");
 });
+
+test("текст по базе знаний: подпись и строка источника — документ и место, без Википедии", () => {
+  const w = { mode: "topic", status: "written", basis: "kb", kb: { id: "k", name: "Квартал", docs: [{ id: "a", title: "Отчёт Q3" }] },
+    pages: [{ title: "Отчёт Q3", url: "" }, { title: "Клиенты", url: "" }] } as unknown as Parameters<typeof writerByline>[0];
+  assert.deepEqual(writerByline(w).lead, "Написал агент по базе знаний «Квартал»:");
+  const src = { text: "NPS вырос до 44", page: "Клиенты", url: "", sentence: "раздел «Удовлетворённость», абз. 3: Индекс NPS вырос с 31 до 44." };
+  const line = sourceLine(w, [src], 0);
+  assert.equal(line.href, null);
+  assert.ok(line.quote.startsWith("«раздел «Удовлетворённость»"));
+  assert.equal(line.title, "Документ «Клиенты» базы знаний");
+  assert.ok(!sourceLine(w, [], null).quote.includes("Википеди"));
+});

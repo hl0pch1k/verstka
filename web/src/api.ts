@@ -1,7 +1,7 @@
 // Thin typed client over the Verstka HTTP API. All URLs are relative (/api/...) so the same build
 // works behind the Vite dev proxy and when FastAPI serves web/dist directly.
 import type {
-  BrandConflict, BrandSpec, ChatResponse, CheckSpec, DatasetSummary, DiffResponse, ExplainResponse, FixRequest, GenerateRequest, GenerateResponse,
+  BrandConflict, BrandSpec, ChatResponse, CheckSpec, DatasetSummary, DiffResponse, DocumentRead, ExplainResponse, KbAdded, KbSummary, FixRequest, GenerateRequest, GenerateResponse,
   Generation, GenerationMeta, Health, Job, ModelsStatus, PictureChangeRequest, RebuildRequest, SkillsResponse, SlideFixRequest, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
 } from "./types";
 import { parseManifest, type ExampleManifest } from "./ui/create/dataRules";
@@ -177,6 +177,24 @@ export const api = {
     ]);
     return { manifest, files, brandbook };
   },
+
+  // ── «Из файла»: документ DOCX / PDF → текст поля; база знаний (документы, архив, папка, ссылки)
+  readDocument: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    return request<DocumentRead>("/api/documents", { method: "POST", body: fd });
+  },
+  createKb: (name = "") => request<KbSummary>("/api/knowledge", json({ name })),
+  kb: (id: string) => request<KbSummary>(`/api/knowledge/${encodeURIComponent(id)}`),
+  /** Документы в базу; у файла папки — его путь (сервер берёт имя). */
+  addKbFiles: (id: string, files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f, f.name);
+    return request<KbAdded>(`/api/knowledge/${encodeURIComponent(id)}/documents`, { method: "POST", body: fd });
+  },
+  addKbLink: (id: string, url: string) => request<KbAdded>(`/api/knowledge/${encodeURIComponent(id)}/links`, json({ url })),
+  removeKbDoc: (id: string, doc: string) =>
+    request<{ deleted: boolean; base: KbSummary }>(`/api/knowledge/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc)}`, { method: "DELETE" }),
 
   chat: (body: { session_id: string; message: string; template_id?: string | null; generation_id?: string | null; strategy?: string | null; slide?: number | null }) =>
     request<ChatResponse>("/api/chat", json(body)),

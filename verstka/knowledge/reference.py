@@ -21,7 +21,8 @@ from verstka.knowledge.store import KnowledgeBase
 from verstka.knowledge.text import figures, tokens
 
 MIN_SHARED = 2  # content words a statement shares with its source fragment (or one figure and one word)
-SMALL_INT = 10  # «три филиала» in a document is «3 филиала» on a slide: integers up to this are not checked
+SMALL_INT = 10
+DERIVED_FRAGMENTS = 1  # the statement's top fragments whose figures may give its share, change or ratio  # «три филиала» in a document is «3 филиала» on a slide: integers up to this are not checked
 
 
 @dataclass
@@ -150,8 +151,34 @@ class KbReference:
             self._figs = figs
         return self._figs
 
+    def _derived(self, statement: str) -> set[str]:
+        """What the figures of the fragments the statement is about give by plain arithmetic, rounded as a slide writes
+        it: a share (a / b · 100 — «610 из 1 240 — 49,2 %»), a change (a / b − 1 — «с 301 до 412 — +37 %»), a ratio
+        («в 1,4 раза»). Only the statement's own top fragments are paired — a figure is never «derivable» from the
+        whole base."""
+        vals: set[float] = set()
+        for f, _ in self.search.top(statement, DERIVED_FRAGMENTS):
+            for n in figures(f.text):
+                try:
+                    v = float(n)
+                except ValueError:
+                    continue
+                if v > 0 and not (1900 <= v <= 2100 and v == int(v)):
+                    vals.add(v)
+        out: set[str] = set()
+        xs = sorted(vals)
+        for a in xs:
+            for b in xs:
+                if a == b:
+                    continue
+                for x in (a / b * 100, (a - b) / b * 100, a / b):
+                    out.add(str(round(abs(x))))
+                    out.add(f"{round(abs(x), 1):g}")
+        return out
+
     def unsupported(self, statement: str, given: str = "") -> set[str]:
-        """The figures of `statement` that no document of the base states (nor the person's own request `given`)."""
+        """The figures of `statement` that no document of the base states (nor the person's own request `given`), nor
+        the arithmetic of its own fragments gives (a share, a change, a ratio)."""
         known = self.all_figures() | figures(given)
         out = set()
         for n in figures(statement):
@@ -160,6 +187,8 @@ class KbReference:
             if re.fullmatch(r"\d+", n) and int(n) <= SMALL_INT:
                 continue
             out.add(n)
+        if out and re.search(r"%|процент|раз(?:а)?(?![а-яё])", statement):
+            out -= self._derived(statement)
         return out
 
     def source_of(self, statement: str) -> Optional[KbSource]:

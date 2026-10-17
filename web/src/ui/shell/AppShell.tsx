@@ -35,6 +35,7 @@ import { TextLayer } from "../layers/TextLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { BrandLayer } from "../layers/BrandLayer";
+import { KbLayer } from "../layers/KbLayer";
 import { brandStrip, briefShort, dataFilesLabel, datasetIds } from "../create/dataRules";
 import { ResultPlate } from "../result/ResultPlate";
 import { buildRunning } from "../create/params";
@@ -167,6 +168,7 @@ export function AppShell() {
       <TplDeleteDialog />
       {/* слой «Брендбук» (z 8): палитра, шрифты, логотипы, расхождения с шаблоном */}
       <BrandLayer />
+      <KbLayer />
     </>
   );
   return (

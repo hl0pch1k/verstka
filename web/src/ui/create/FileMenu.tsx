@@ -16,7 +16,7 @@ export type FilePick = "text" | "deck" | "sample";
 const sampleKb = Math.max(1, Math.round(new TextEncoder().encode(SAMPLE_BRIEF).length / 1024));
 
 const ITEMS: { key: FilePick; icon: IconName; name: string; meta: string }[] = [
-  { key: "text", icon: "file-text", name: "Текст из файла", meta: ".txt или .md" },
+  { key: "text", icon: "file-text", name: "Текст из файла", meta: ".txt, .md, .docx или .pdf" },
   { key: "deck", icon: "presentation", name: "Улучшить готовую", meta: "Презентация .pptx — новая вёрстка" },
   { key: "sample", icon: "file-text", name: "Пример: Умные сводки.md", meta: `Текст Markdown · ${sampleKb} КБ` },
 ];
@@ -25,7 +25,7 @@ const ITEMS: { key: FilePick; icon: IconName; name: string; meta: string }[] = [
 const MENU_W = 608;
 const MENU_MIN = 440;
 
-export function FileMenu({ open, off: deckOff, onPick, onClose, onData, onExample, exampleBusy }: {
+export function FileMenu({ open, off: deckOff, onPick, onClose, onData, onExample, exampleBusy, onKb, kbMeta }: {
   open: boolean;
   /** «Улучшить готовую» не выбирается (презентация уже читается, разбирается свой шаблон): почему; null — выбирается. */
   off: string | null;
@@ -38,6 +38,10 @@ export function FileMenu({ open, off: deckOff, onPick, onClose, onData, onExampl
   onExample(): void;
   /** Пример скачивается. */
   exampleBusy: boolean;
+  /** «База знаний» — слой с документами и ссылками, по которым агент пишет текст. */
+  onKb(): void;
+  /** Вторая строка пункта «База знаний»: что в ней есть. */
+  kbMeta: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
@@ -86,7 +90,7 @@ export function FileMenu({ open, off: deckOff, onPick, onClose, onData, onExampl
         })}
       </div>
       <div className="tx-mcol" role="group" aria-labelledby="tx-mc2">
-        <p id="tx-mc2" className="tx-mcap">Данные для графиков</p>
+        <p id="tx-mc2" className="tx-mcap">Данные и база знаний</p>
         <button type="button" role="menuitem" className="tx-mi" tabIndex={open ? 0 : -1} onClick={onData}>
           <span className="tx-mic" aria-hidden="true"><DsIcon name="tbl" size={16} /></span>
           <span className="tx-mt"><span className="tx-mn">Файлы с данными</span><span className="tx-mm">CSV, XLSX, JSON, таблица в тексте</span></span>
@@ -95,6 +99,10 @@ export function FileMenu({ open, off: deckOff, onPick, onClose, onData, onExampl
           title={exampleBusy ? "Пример загружается" : undefined}>
           <span className="tx-mic" aria-hidden="true">{exampleBusy ? <DsSpin /> : <DsIcon name="chart" size={16} />}</span>
           <span className="tx-mt"><span className="tx-mn">Пример: данные продаж</span><span className="tx-mm">7 файлов, бриф, брендбук</span></span>
+        </button>
+        <button type="button" role="menuitem" className="tx-mi" tabIndex={open ? 0 : -1} onClick={onKb}>
+          <span className="tx-mic" aria-hidden="true"><DsIcon name="book" size={16} /></span>
+          <span className="tx-mt"><span className="tx-mn">База знаний</span><span className="tx-mm">{kbMeta}</span></span>
         </button>
         <p className="tx-mdrop">
           <span className="tx-mic" aria-hidden="true"><DsIcon name="upload" size={16} /></span>

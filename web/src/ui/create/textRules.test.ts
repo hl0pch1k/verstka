@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, SAMPLE_BRIEF } from "../../lib/createForm";
+import { docReadLine } from "./textRules";
 import { charsLabel, clipLine, hintText, READY_HINT, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, writerOn, type Tw } from "./textRules";
 
 /** Сервер пишет текст по теме (`health.writer`) — и без него. */
@@ -14,11 +15,15 @@ test("пустое поле и одни пробелы — empty", () => {
   assert.equal(textError("", null, W)?.text, "Напишите, о чём презентация");
   assert.equal(textError("", null, NO_W)?.text, "Напишите, о чём презентация");
 });
-test(".pdf — type: «Файл «X.pdf» не подойдёт»", () => {
-  const e = textError("", { name: "X.pdf" }, W);
+test(".key — type: «Файл «X.key» не подойдёт»; .pdf и .docx — документ (его текст встанет в поле)", () => {
+  const e = textError("", { name: "X.key" }, W);
   assert.equal(e?.kind, "type");
-  assert.equal(e?.text, "Файл «X.pdf» не подойдёт");
-  assert.equal(textError("интегралы", { name: "Итоги квартала.pdf" }, W)?.text, "Файл «Итоги квартала.pdf» не подойдёт");
+  assert.equal(e?.text, "Файл «X.key» не подойдёт");
+  assert.equal(textError("интегралы", { name: "Итоги квартала.png" }, W)?.text, "Файл «Итоги квартала.png» не подойдёт");
+  assert.equal(textError("", { name: "Итоги квартала.pdf" }, W), null);
+  assert.equal(textError("", { name: "Отчёт.DOCX" }, NO_W), null);
+  assert.equal(fileKind("a.pdf"), "doc");
+  assert.equal(fileKind("a.rtf"), "doc");
 });
 test("текст короче BRIEF_MIN_TOPIC — short", () => {
   const short = "и".repeat(BRIEF_MIN_TOPIC - 1);
@@ -43,7 +48,7 @@ test("сервер не пишет текст по теме (`health.writer` в�
 });
 test("файл проверяется только по типу — пишет ли сервер текст, неважно", () => {
   assert.equal(textError("", { name: "Умные сводки.md" }, NO_W), null);
-  assert.equal(textError("", { name: "X.pdf" }, NO_W)?.kind, "type");
+  assert.equal(textError("", { name: "X.png" }, NO_W)?.kind, "type");
 });
 test("файлы, которые поле берёт: .txt и .md — текст, .pptx — «Улучшить готовую»", () => {
   assert.equal(textError("", { name: "Умные сводки.md" }, W), null);
@@ -56,7 +61,7 @@ test("файлы, которые поле берёт: .txt и .md — текст
   assert.equal(fileKind("a.odp"), "deck");
   // шаблон оформления — шаг 01, не текст
   assert.equal(fileKind("a.potx"), "other");
-  assert.equal(fileKind("a.docx"), "other");
+  assert.equal(fileKind("a.docx"), "doc");
   assert.equal(fileKind("без расширения"), "other");
 });
 test("настройки в начале текста («---» … «---») — не текст: поле пустое", () => {
@@ -326,4 +331,15 @@ test("полоса 02 с файлами данных: первая фраза б
   assert.deepEqual(textStrip(brief, { line: { kind: "topic" }, data: 7 }), { title: "Итоги продаж VK Cloud за 9 месяцев 2026 года…", meta: "7 файлов данных" });
   assert.equal(textStrip(brief, { line: { kind: "topic" }, improve: { name: "Итоги.pptx", slides: 3 }, data: 7 }).meta, "текст из презентации · 3 слайда");
   assert.equal(textStrip(brief, { line: { kind: "topic" }, data: 0 }).meta, "тема · текст пишет агент");
+});
+
+test("строка после чтения документа: заголовки, таблицы слов, таблицы с цифрами — в «Данные»", () => {
+  assert.equal(docReadLine({ headings: 7, tables: 2, data_tables: 1 }), "Документ прочитан: 7 заголовков · 1 таблица с цифрами — в «Данные»");
+  assert.equal(docReadLine({ headings: 0, tables: 0, data_tables: 0 }), "Документ прочитан");
+  assert.equal(docReadLine({ headings: 7, tables: 2, data_tables: 0, tables_in_text: 2 }), "Документ прочитан: 7 заголовков · 2 таблицы в тексте");
+  assert.equal(docReadLine({ headings: 1, tables: 0, data_tables: 0, warnings: ["документ длинный — в поле встало его начало"] }), "Документ прочитан: 1 заголовок · документ длинный — в поле встало его начало");
+});
+
+test("полоса и свёрнутый шаг: заголовок Markdown документа — без «#»", () => {
+  assert.equal(textPreview("# Итоги квартала\n\nТекст").text, "«Итоги квартала»");
 });

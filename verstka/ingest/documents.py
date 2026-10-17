@@ -39,6 +39,7 @@ ALL_EXTS = DOC_EXTS + LEGACY_DOC_EXTS + TEXT_EXTS + HTML_EXTS
 MAX_XML_BYTES = 60 * 1024 * 1024  # word/document.xml unpacked: more is a zip bomb, not a document
 MAX_PDF_PAGES = 400
 MAX_TABLE_ROWS = 400
+DATA_FIRST_PROSE = 600  # characters of text around the tables below which a document is its tables (data_first)
 
 BlockKind = Literal["heading", "para", "item", "table"]
 
@@ -154,11 +155,26 @@ class DocumentText:
         text = "\n".join(out)
         return re.sub(r"\n{3,}", "\n\n", text).strip() + "\n"
 
+    @property
+    def prose_chars(self) -> int:
+        """Characters of the text around the tables (headings, paragraphs, list items)."""
+        return sum(len(b.text) for b in self.blocks if b.kind != "table")
+
+    @property
+    def data_first(self) -> bool:
+        """The document is mostly its tables of figures (a short note around them): its tables go to the data panel as
+        data files and its text is the brief. A document with text of its own keeps its tables inline: the deck is the
+        whole document laid out, its tables shown as charts and tables where they stand."""
+        if not self.data_tables:
+            return False
+        return self.prose_chars < DATA_FIRST_PROSE // 2 or (self.prose_chars < DATA_FIRST_PROSE and self.headings <= 2)
+
     def summary(self) -> dict:
         return {
             "name": self.name, "kind": self.kind, "title": self.title, "pages": self.pages, "headings": self.headings,
             "paragraphs": sum(1 for b in self.blocks if b.kind in ("para", "item")), "tables": len(self.tables),
-            "data_tables": len(self.data_tables), "chars": sum(len(b.text) for b in self.blocks), "warnings": list(self.warnings),
+            "data_tables": len(self.data_tables), "chars": sum(len(b.text) for b in self.blocks), "prose_chars": self.prose_chars,
+            "data_first": self.data_first, "warnings": list(self.warnings),
         }
 
 
@@ -1050,7 +1066,8 @@ def read_html(name: str, html: str) -> DocumentText:
             if len(t) >= 2:
                 doc.blocks.append(Block("para", t))
     h1 = next((b.text for b in doc.blocks if b.kind == "heading" and b.level == 1), "")
-    doc.title = h1 or page_title or name
+    # «Облачные вычисления — Википедия», «Отчёт | Компания»: the page's own name without the site's
+    doc.title = h1 or re.sub(r"\s+[—|–-]\s+[^—|–-]{2,40}$", "", page_title) or page_title or name
     if not doc.blocks:
         raise DocumentError("На странице нет текста — возможно, она собирается скриптом или закрыта входом")
     return doc

@@ -435,6 +435,7 @@ export interface GenerationMeta {
   dataset_ids?: string[];
   brandbook_id?: string | null;
   brand_priority?: BrandPriority;
+  knowledge_id?: string | null;
   /** Брендбук приложен: `template_id` — брендированная копия шаблона (на ней свёрстана колода), исходный — здесь. */
   base_template_id?: string | null;
   /** Имена файлов с данными и брендбука для людей (generation.json `datasets`, `brandbook`). */
@@ -480,6 +481,10 @@ export interface WriterInfo {
   seconds?: number;
   /** Content slides fewer than asked after the checks and the refill (0: as asked). */
   short_by?: number;
+  /** Where the facts come from: Wikipedia or the person's knowledge base (newer servers). */
+  basis?: "wikipedia" | "kb";
+  /** The knowledge base the text was written from. */
+  kb?: { id: string; name: string; docs: { id: string; title: string; url?: string | null }[] } | null;
 }
 export interface VariantEdit {
   at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null;
@@ -581,8 +586,27 @@ export interface GenerateRequest {
   dataset_ids?: string[];
   brandbook_id?: string | null;
   brand_priority?: BrandPriority;
+  /** База знаний (POST /api/knowledge): агент пишет текст по её документам, у каждого факта — источник. */
+  knowledge_id?: string | null;
 }
 export interface GenerateResponse { job_id: string; generation_id: string }
+
+// ── «Из файла» — документ, и база знаний
+/** Документ DOCX / PDF, прочитанный сервером (POST /api/documents): текст Markdown для поля (без таблиц с цифрами —
+ *  они уходят в «Данные»), сколько в нём заголовков и таблиц. */
+export interface DocumentRead {
+  name: string; kind: string; title: string; pages: number; headings: number; paragraphs: number; tables: number;
+  data_tables: number; chars: number; markdown: string; warnings: string[];
+  /** Таблицы, оставшиеся в тексте поля (документ со своим текстом: колода раскладывает его целиком). */
+  tables_in_text?: number;
+}
+/** Документ базы знаний. */
+export interface KbDoc {
+  id: string; name: string; title: string; kind: string; url?: string | null; source: "file" | "link"; pages?: number;
+  chars: number; fragments: number; tables?: number; warnings?: string[];
+}
+export interface KbSummary { id: string; name: string; docs: KbDoc[]; fragments: number; chars: number }
+export interface KbAdded { added: KbDoc[]; skipped: { name: string; reason: string }[]; base: KbSummary }
 export interface FixRequest { issue_ids?: string[]; all_deterministic?: boolean }
 export interface FixResult { score: number; errors: number; warnings: number; applied: Record<string, unknown>[] }
 /** «Исправить слайд»: POST /api/generations/{gid}/{strategy}/slides/{n}/fix — the remarks of one slide, the person's

@@ -288,7 +288,9 @@ def _document_brief(path: Path):
         doc = read_document(path.name, path.read_bytes())
     except DocumentError as e:
         raise typer.BadParameter(f"--brief: {e}")
-    return parse_brief_text(doc.markdown(data_tables=False)), len(doc.data_tables)
+    if doc.data_first:  # mostly tables of figures: the text is the brief, the tables — data files
+        return parse_brief_text(doc.markdown(data_tables=False)), len(doc.data_tables)
+    return parse_brief_text(doc.markdown()), 0  # a document of its own text: laid out whole, its tables inline
 
 
 def _knowledge_base(items: list[str], workspace: Optional[Path]) -> Optional[str]:

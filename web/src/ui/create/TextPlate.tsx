@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
 import { useApp } from "../../store";
 import { SAMPLE_BRIEF } from "../../lib/createForm";
+import { api } from "../../api";
 import { humanError } from "../../lib/errors";
 import { templateStem } from "../../lib/templateFiles";
 import type { ImproveSource } from "../../types";
@@ -24,13 +25,18 @@ import { useNarrow } from "./useNarrow";
 import { DATA_ACCEPT, dataPanel, dropKind, hasTable } from "./dataRules";
 import { DataPanel, DataZone, useFilesDrop, usePanelMotion } from "./DataPanel";
 import { GoalsBox } from "./GoalsBox";
+import { DsIcon } from "./dsKit";
+import { kbHead } from "./kbRules";
+import { plural } from "../../lib/utils";
 import {
-  charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
+  charsLabel, DECK_ACCEPT, deckError, docReadLine, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
   textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
 import { usePhone } from "../shell/tier";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
+/** Строка хода чтения: документ («doc:Отчёт.docx») или презентация «Улучшить готовую». */
+const busyLine = (reading: string) => (reading.startsWith("doc:") ? `Читаю документ «${reading.slice(4)}»…` : `Читаю презентацию «${templateStem(reading)}»…`);
 
 const HINT_TOPIC = "Это тема — агент напишет полный текст";
 const HINT_TOPIC_TAIL = ": ключевые факты, даты, формулы с пояснениями";
@@ -39,10 +45,13 @@ const HINT_BRIEF = "Это бриф — агент напишет текст п�
 const HINT_BRIEF_N = "Бриф — текст по данным";
 /** Пример «данные продаж» (GET /api/examples/data-sales-2026): бриф, 7 файлов и брендбук VK Cloud. */
 export const DATA_EXAMPLE = "data-sales-2026";
+/** С базой знаний: тема — агент напишет текст по фактам из документов базы, с источниками. */
+const HINT_KB = "Это тема — агент напишет текст по базе знаний, у каждого факта — источник";
+const HINT_KB_N = "Тема — текст по базе знаний";
 /** Пустое поле, а текст агент не пишет (модель не подключена или не пишет тексты): нужен готовый текст. */
 const HINT_READY = "Вставьте готовый текст — агент разложит его по слайдам";
 const NO_FACTS = "Цифр и таблиц в тексте нет — слайды будут из формулировок";
-const FIX = "Вставьте готовый текст или загрузите .txt и .md";
+const FIX = "Вставьте готовый текст или загрузите .txt, .md, .docx, .pdf";
 
 /** Кто пишет текст: `writer` — агент распишет тему (`writerOn`: сервер в режиме writer, модель подключена и пишет
  *  тексты — строка «Это тема — агент напишет…», «Взять пример» даёт тему, тема проходит проверку перед сборкой);
@@ -195,12 +204,42 @@ export function useTextPlate(): TextPlate {
     });
   }, [uploadTemplate, setTextIssue, clearNotice]);
 
+  // документ DOCX / PDF: сервер читает его заголовки, списки и таблицы — текст встаёт в поле Markdown, таблицы с цифрами
+  // уходят в «Данные» (тот же файл — в POST /api/datasets); строка под полем говорит, что прочитано
+  const [docName, setDocName] = useState<string | null>(null);
+  const [docInfo, setDocInfo] = useState<string | null>(null);
+  const docSeq = useRef(0);
+  const addDataNow = useRef(data.addFiles);
+  addDataNow.current = data.addFiles;
+  const readDoc = useCallback(async (f: File) => {
+    const n = ++docSeq.current;
+    setDocName(f.name);
+    setDocInfo(null);
+    setTextIssue(null);
+    try {
+      const d = await api.readDocument(f);
+      if (docSeq.current !== n) return;
+      if (!d.markdown.trim() && !d.data_tables) return setTextIssue({ kind: "file", text: `В «${f.name}» нет текста` });
+      if (d.markdown.trim()) replace(d.markdown.trim());
+      if (d.data_tables) {
+        if (improveNow.current) dispatch({ type: "set", patch: { improve: false } });
+        addDataNow.current([f]);
+      }
+      setDocInfo(docReadLine(d));
+    } catch (e) {
+      if (docSeq.current === n) setTextIssue({ kind: "file", text: humanError(e instanceof Error ? e.message : "", `Не удалось прочитать «${f.name}»`) });
+    } finally {
+      if (docSeq.current === n) setDocName(null);
+    }
+  }, [replace, setTextIssue, dispatch]);
+
   const onFile = useCallback(async (f: File) => {
     setMenu(false);
     // у файла проверяется только тип: его текст ещё встанет в поле
     const bad = textError("", f, { writer });
     if (bad) return setTextIssue(bad);
     if (fileKind(f.name) === "deck") return readDeck(f);
+    if (fileKind(f.name) === "doc") return void readDoc(f);
     if (f.size > MAX_TEXT_BYTES) return setTextIssue({ kind: "file", text: `Файл «${f.name}» больше 2 МБ` });
     try {
       const raw = await f.text();
@@ -211,7 +250,7 @@ export function useTextPlate(): TextPlate {
     } catch (e) {
       setTextIssue({ kind: "file", text: humanError(e instanceof Error ? e.message : "", `Не удалось прочитать «${f.name}»`) });
     }
-  }, [readDeck, replace, setTextIssue, writer]);
+  }, [readDeck, readDoc, replace, setTextIssue, writer]);
 
   const pick = useCallback((k: FilePick) => {
     setMenu(false);
@@ -228,6 +267,7 @@ export function useTextPlate(): TextPlate {
     setBrief(v);
     setMenu(false);
     setRefused(null);
+    setDocInfo(null);
   }, [setBrief]);
 
   const take = useCallback(() => {
@@ -241,7 +281,7 @@ export function useTextPlate(): TextPlate {
   }, [textIssue]);
 
   const notice = notices.text?.kind === "error" ? notices.text.text : null;
-  const info = refused ?? (notices.text?.kind === "info" ? notices.text.text : null);
+  const info = refused ?? docInfo ?? (notices.text?.kind === "info" ? notices.text.text : null);
   const issue: TextIssue | null = textIssue ?? (notice ? { kind: "file", text: deckError(notice, lastDeck.current) } : null);
   const seq = useRef({ key: null as string | null, n: 0 });
   const key = issue ? `${issue.kind}:${issue.text}` : null;
@@ -255,9 +295,11 @@ export function useTextPlate(): TextPlate {
     const tables: File[] = [];
     const texts: File[] = [];
     const decks: File[] = [];
+    const docs: File[] = [];
     for (const f of list) {
       const k = dropKind(f.name);
-      if (k === "deck") decks.push(f);
+      if (fileKind(f.name) === "doc") docs.push(f);
+      else if (k === "deck") decks.push(f);
       else if (k === "text") {
         let raw = "";
         try {
@@ -272,7 +314,8 @@ export function useTextPlate(): TextPlate {
       if (improveNow.current) dispatch({ type: "set", patch: { improve: false } });
       addData(tables);
     }
-    if (texts.length) void onFile(texts[0]);
+    if (docs.length) void onFile(docs[0]);
+    else if (texts.length) void onFile(texts[0]);
     else if (decks.length && !tables.length) void onFile(decks[0]);
   }, [addData, onFile, dispatch]);
   const pickData = useCallback(() => {
@@ -288,7 +331,7 @@ export function useTextPlate(): TextPlate {
 
   const deckOff = reading ? "Презентация уже читается" : tplBusy ? TEMPLATE_BUSY : null;
   return {
-    menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take,
+    menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading: reading ?? (docName ? `doc:${docName}` : null), deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take,
     pickData, dataRef, onFiles, example,
   };
 }
@@ -325,7 +368,12 @@ function TypingHint({ live, tw, writer }: { live: boolean; tw: MutableRefObject<
 
 /** Заголовок плиты 02 справа (слот `h2`). */
 export function TextHead({ tp }: { tp: TextPlate }) {
-  const { ui, dispatch, brief, data } = useApp();
+  const { ui, dispatch, brief, data, kb } = useApp();
+  const kbDocs = kb.kb?.docs.length ?? 0;
+  const openKb = () => {
+    tp.setMenu(false);
+    dispatch({ type: "set", patch: { kbLayer: true } });
+  };
   const writes = tp.writes;
   const impOn = useImproveOn();
   const create = ui.screen === "create";
@@ -349,8 +397,8 @@ export function TextHead({ tp }: { tp: TextPlate }) {
       <div className={cls("p2-in tx-fg", show(txOpen))} style={{ display: "flex", alignItems: "center", gap: 12, animationDelay: "40ms" }}>
         {phone ? (
           // телефон (доска M-create): круглая кнопка со скрепкой справа от «Текст»
-          <button ref={tp.btnRef} type="button" className="mp-rw" onClick={() => tp.setMenu(!tp.menu)} title="Текст .txt или .md, данные"
-            aria-label="Из файла: текст .txt или .md, данные" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu">
+          <button ref={tp.btnRef} type="button" className="mp-rw" onClick={() => tp.setMenu(!tp.menu)} title="Текст .txt, .md, документ .docx, .pdf, данные"
+            aria-label="Из файла: текст .txt, .md, документ .docx, .pdf, данные, база знаний" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu">
             <Icon name="attach" size={20} />
           </button>
         ) : (
@@ -364,11 +412,20 @@ export function TextHead({ tp }: { tp: TextPlate }) {
         {!phone && (
           <span className="hp-wo tx-fmtw">
             <span id="ct-fmt" className={cls("p2-hide-s", show(txOpen && !tp.issue))} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
-              .txt или .md
+              .txt, .md, .docx, .pdf
             </span>
           </span>
         )}
+        {/* база знаний с документами — карточка: сколько документов, нажатие открывает слой */}
+        {kbDocs > 0 && (
+          <button type="button" className="kb-chip p2-in" onClick={openKb} aria-haspopup="dialog" aria-controls="kb-lay" aria-label={`База знаний: ${plural(kbDocs, "документ", "документа", "документов")}`}
+            title={`База знаний: ${kbHead(kb.kb)} — агент берёт факты из этих документов`}>
+            <span className="dt-ic" aria-hidden="true"><DsIcon name="book" size={16} /></span>
+            <span className="kb-cc">База знаний · {plural(kbDocs, "документ", "документа", "документов")}</span>
+          </button>
+        )}
         <FileMenu open={tp.menu} off={tp.deckOff} onPick={tp.pick} onData={tp.pickData} onExample={tp.example} exampleBusy={data.exampleBusy}
+          onKb={openKb} kbMeta={kbDocs ? kbHead(kb.kb) : "Документы и ссылки на страницы"}
           onClose={(back) => {
             tp.setMenu(false);
             if (back) tp.btnRef.current?.focus({ preventScroll: true });
@@ -585,7 +642,8 @@ const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px
 
 /** Тело шага 02 (слот `p2`, `#p2-b2`). */
 export function TextBody({ tp }: { tp: TextPlate }) {
-  const { ui, brief, data } = useApp();
+  const { ui, brief, data, kb } = useApp();
+  const kbOn = (kb.kb?.docs.length ?? 0) > 0;
   const { writer } = useWriting();
   const on = ui.screen === "create" && ui.open === "text" && !ui.more;
   const impOn = useImproveOn();
@@ -656,10 +714,12 @@ export function TextBody({ tp }: { tp: TextPlate }) {
             </label>
             <div className="p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 20, marginTop: 16 }}>
               <div className="tx-sw">
-                <p className={show(hintOn)} style={LINE} title={dataOn ? HINT_BRIEF : HINT_TOPIC + HINT_TOPIC_TAIL}>
+                <p className={show(hintOn)} style={LINE} title={dataOn ? HINT_BRIEF : kbOn ? HINT_KB : HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
                   {dataOn ? (
                     <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_BRIEF}</span><span className="hp-no">{HINT_BRIEF_N}</span></span>
+                  ) : kbOn ? (
+                    <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_KB}</span><span className="hp-no">{HINT_KB_N}</span></span>
                   ) : (
                     <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span><span className="hp-no">{HINT_TOPIC}</span></span>
                   )}
@@ -682,11 +742,11 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                 </div>
                 <p className={show(busyOn)} role="status" style={{ ...LINE, whiteSpace: "nowrap" }}>
                   <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Spinner size={16} /></span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{deck ? `Читаю презентацию «${templateStem(deck)}»…` : ""}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{deck ? busyLine(deck) : ""}</span>
                 </p>
                 <p className={show(infoOn)} role="status" title={infoOn && note ? note : undefined} style={{ ...LINE, whiteSpace: "nowrap" }}>
                   <span style={{ display: "flex", flex: "none", color: infoBusy ? "#2563EB" : undefined }}>{infoBusy ? <Spinner size={16} /> : <Icon name="info" size={16} />}</span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{infoBusy && deck ? `Читаю презентацию «${templateStem(deck)}»… ${note ?? ""}` : note}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{infoBusy && deck ? `${busyLine(deck)} ${note ?? ""}` : note}</span>
                 </p>
               </div>
               {/* у ошибки файла правая часть (счётчик, подсказка) гаснет, но держит своё место: ничего не выскакивает, а ширина

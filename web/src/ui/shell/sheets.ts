@@ -5,7 +5,7 @@ import type { UiAction, UiState } from "../deck/geometry";
 
 /** Что открыто поверх колоды, сверху вниз: «Удалить шаблон?» (своё затемнение), «Слайды шаблона», «Брендбук», «Слайд N
  *  шаблона» над листом, весь экран, лист «Подробнее», «Текст презентации», раздел, помощник. */
-export type Sheet = "tplDelete" | "tplPreview" | "brand" | "pattern" | "lightbox" | "sheet" | "text" | "sect" | "helper";
+export type Sheet = "tplDelete" | "tplPreview" | "brand" | "kb" | "pattern" | "lightbox" | "sheet" | "text" | "sect" | "helper";
 
 /** Открытые плиты поверх колоды, сверху вниз. */
 export function openSheets(ui: UiState): Sheet[] {
@@ -13,6 +13,7 @@ export function openSheets(ui: UiState): Sheet[] {
   if (ui.tplDelete) out.push("tplDelete");
   if (ui.tplPreview) out.push("tplPreview");
   if (ui.brandLayer) out.push("brand");
+  if (ui.kbLayer) out.push("kb");
   if (ui.sheet && ui.pattern !== null) out.push("pattern");
   if (ui.lightbox) out.push("lightbox");
   if (ui.sheet) out.push("sheet");
@@ -31,6 +32,7 @@ export function closeSheet(s: Sheet): UiAction {
     case "tplDelete": return { type: "set", patch: { tplDelete: null } };
     case "tplPreview": return { type: "set", patch: { tplPreview: null } };
     case "brand": return { type: "set", patch: { brandLayer: false } };
+    case "kb": return { type: "set", patch: { kbLayer: false } };
     case "pattern": return { type: "pattern", n: null };
     case "lightbox": return { type: "set", patch: { lightbox: false } };
     case "sheet": return { type: "sheet", tab: null };

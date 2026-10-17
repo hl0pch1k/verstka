@@ -145,7 +145,7 @@ function Byline({ w }: { w: WriterInfo }) {
       {by.pages.map((p, i) => (
         <Fragment key={`${p.url}-${i}`}>
           {i > 0 && (i === by.pages.length - 1 ? " и " : ", ")}
-          <a className="rt-a" href={p.url} target="_blank" rel="noopener noreferrer">«{p.title}»</a>
+          {p.url ? <a className="rt-a" href={p.url} target="_blank" rel="noopener noreferrer">«{p.title}»</a> : <span>«{p.title}»</span>}
         </Fragment>
       ))}
       {by.tail && ` ${by.tail}`}

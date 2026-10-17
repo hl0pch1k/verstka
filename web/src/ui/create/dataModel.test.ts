@@ -19,7 +19,7 @@ const key = () => `k${++n}`;
 
 test("новые карточки: годные — в очередь, без формата, пустые и больше предела — сразу с причиной (запроса нет)", () => {
   n = 0;
-  const cs = newCards([{ name: "a.csv", size: 10 }, { name: "b.pdf", size: 10 }, { name: "c.csv", size: 0 }, { name: "d.json", size: 26 * 1024 * 1024 }], key);
+  const cs = newCards([{ name: "a.csv", size: 10 }, { name: "b.png", size: 10 }, { name: "c.csv", size: 0 }, { name: "d.json", size: 26 * 1024 * 1024 }], key);
   assert.deepEqual(cs.map((c) => [c.key, c.status, c.error]), [
     ["k1", "wait", null],
     ["k2", "fail", "Такой файл не прочитать — нужен CSV, XLSX, JSON или текст с таблицей"],
@@ -104,4 +104,10 @@ test("фокус после «убрать»: ✕ следующей карто�
   assert.equal(focusAfter(["a", "b", "c"], "c", ["c"]), "b");
   assert.equal(focusAfter(["a"], "a", ["a"]), null);
   assert.equal(focusAfter(["a"], "x", []), null);
+});
+
+test("документ DOCX / PDF в «Данных»: отправляется (его таблицы с цифрами — наборы), а не отклоняется", () => {
+  let k = 0;
+  const cs = newCards([{ name: "Отчёт.docx", size: 100 }, { name: "Отчёт.pdf", size: 100 }, { name: "x.png", size: 10 }], () => `k${k++}`);
+  assert.deepEqual(cs.map((c) => [c.status, c.kind]), [["wait", "text"], ["wait", "text"], ["fail", null]]);
 });

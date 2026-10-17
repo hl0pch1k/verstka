@@ -71,7 +71,7 @@ export interface ParamsPlate {
 export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
-    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded, goBuild, data,
+    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded, goBuild, data, kb,
   } = useApp();
   const rise = useRise();
   const modelOn = useModelOn();
@@ -140,7 +140,7 @@ export function useParamsPlate(): ParamsPlate {
     setDataWait(wait);
     if (wait) return;
     setAttempt(Date.now());
-    void startGeneration(buildRequest({ templateId, brief, params, strategies, modelOn, images, improve, data: data.request }), slides.count);
+    void startGeneration(buildRequest({ templateId, brief, params, strategies, modelOn, images, improve, data: data.request, knowledge: kb.request }), slides.count);
   };
 
   // сборка кончилась, пока человек был в другом месте: «Открыть» — её презентация (как из «Мои презентации»: открытая

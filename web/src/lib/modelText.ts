@@ -184,7 +184,8 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
   // writer mode: the text was a topic and the agent wrote the deck's text — a calm note, the text one click away
   if (w?.status === "written" && w.text) {
     const src = w.source?.title;
-    const basis = src ? `По статье Википедии «${src}».` : "Агент писал по своим знаниям — даты и цифры могут быть неточны.";
+    const basis = w.basis === "kb" ? `По документам базы знаний «${w.kb?.name ?? "База знаний"}» — источник каждого факта в заметках слайда.`
+      : src ? `По статье Википедии «${src}».` : "Агент писал по своим знаниям — даты и цифры могут быть неточны.";
     const want = w.asked ?? asked;
     // the asked slide count is a promise in writer mode: any shortfall is said (not only 3 or more)
     const fewer = !!want && want > total ? ` Вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${want}.` : "";

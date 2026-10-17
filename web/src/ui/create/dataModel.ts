@@ -1,6 +1,7 @@
 // Модель состояния второй ступени без React (dataState.ts — её хук): карточки файлов и их очередь, разбор ответа сервера
 // (книга XLSX — по карточке на лист), брендбук и его черновик, «использованные» наборы, свежесть расхождений. Чистые
 // функции — тесты в dataModel.test.ts.
+import { isDocFile } from "./kbRules";
 import type { BrandConflict, BrandPriority, BrandSpec, DatasetSummary } from "../../types";
 import { BRAND_RUN0, BRAND_STEPS, cardName, dataKind, sizeProblem, type BrandRun, type BrandSource, type DataCard } from "./dataRules";
 
@@ -57,7 +58,7 @@ export function toSummary(raw: DatasetSummary, id?: string): DatasetSummary {
 
 /** Причина, по которой файл не отправляется вовсе (тип, пустой, размер); null — отправляется. */
 export function fileProblem(f: { name: string; size: number }): string | null {
-  if (!dataKind(f.name)) return "Такой файл не прочитать — нужен CSV, XLSX, JSON или текст с таблицей";
+  if (!dataKind(f.name) && !isDocFile(f.name)) return "Такой файл не прочитать — нужен CSV, XLSX, JSON или текст с таблицей";
   if (f.size === 0) return "Файл пустой";
   return sizeProblem(f.name, f.size);
 }
@@ -66,7 +67,8 @@ export function fileProblem(f: { name: string; size: number }): string | null {
 export const newCards = (files: { name: string; size: number }[], keyOf: () => string): DataCard[] =>
   files.map((f) => {
     const problem = fileProblem(f);
-    return { key: keyOf(), file: f.name, kind: dataKind(f.name), status: problem ? "fail" : "wait", summary: null, error: problem };
+    // документ DOCX / PDF: его таблицы с цифрами — данные (сервер: verstka/ingest/documents.py `document_tables`)
+    return { key: keyOf(), file: f.name, kind: dataKind(f.name) ?? (isDocFile(f.name) ? "text" : null), status: problem ? "fail" : "wait", summary: null, error: problem };
   });
 
 /** Следующая в очереди. */

@@ -84,6 +84,7 @@ const titles = (pages: Page[]) =>
 /** Подпись под заголовком слоя: «Написал агент по статье «Интеграл» из Википедии» (названия статей — ссылки). */
 export function writerByline(w: WriterInfo): { lead: string; pages: Page[]; tail: string } {
   const pages = pagesOf(w);
+  if (w.basis === "kb") return { lead: `Написал агент по базе знаний «${w.kb?.name ?? "База знаний"}»:`, pages, tail: "" };
   if (!pages.length) return { lead: "Написал агент по своим знаниям", pages: [], tail: "" };
   return { lead: `Написал агент по ${pages.length > 1 ? "статьям" : "статье"}`, pages, tail: "из Википедии" };
 }
@@ -101,6 +102,11 @@ export function sourceLine(w: WriterInfo, sources: WriterSource[], sel: number |
   const pages = pagesOf(w);
   const article = pages[0]?.url || null;
   const src = sel !== null ? sources[sel] : undefined;
+  if (w.basis === "kb") {
+    // база знаний: фрагмент документа и его место («раздел «Выручка», стр. 2: …»); ссылка — только у страницы
+    if (src) return { quote: `«${src.sentence.trim()}»`, href: src.url || null, label: src.url ? "Страница" : "", title: `Документ «${src.page}» базы знаний` };
+    return { quote: `документы базы знаний «${w.kb?.name ?? "База знаний"}»: ${titles(pages)}`, href: null, label: "", title: "" };
+  }
   if (src) {
     const page = src.page || pages[0]?.title || "";
     return { quote: `«${src.sentence.trim()}»`, href: sentenceLink(src, article), label: "Википедия", title: page ? `Статья «${page}» в Википедии` : "Википедия" };

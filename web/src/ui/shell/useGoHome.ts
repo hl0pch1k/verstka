@@ -8,7 +8,7 @@ import type { UiState } from "../deck/geometry";
 
 /** Всё, что логотип закрывает на «Создать»: разделы шапки, лист «Подробнее», слои и окна поверх колоды. */
 export const LAYERS_CLOSED: Partial<UiState> = {
-  sect: null, sheet: null, pattern: null, textLayer: false, lightbox: false, tplPreview: null, tplDelete: null, brandLayer: false,
+  sect: null, sheet: null, pattern: null, textLayer: false, lightbox: false, tplPreview: null, tplDelete: null, brandLayer: false, kbLayer: false,
 };
 
 export function useGoHome(): () => void {

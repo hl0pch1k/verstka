@@ -249,3 +249,9 @@ test("телефон: подпись строки «Параметры» — к�
   assert.equal(paramsBrief(true, true), "тексты пишет модель · с изображениями");
   assert.equal(paramsBrief(false, false), "ваш текст дословно · без изображений");
 });
+
+test("база знаний с документами — её id в запросе; пустой базы в запросе нет", () => {
+  assert.equal(req({ knowledge: { knowledge_id: "kb1" } }).knowledge_id, "kb1");
+  assert.equal("knowledge_id" in req({ knowledge: {} }), false);
+  assert.equal("knowledge_id" in req({}), false);
+});

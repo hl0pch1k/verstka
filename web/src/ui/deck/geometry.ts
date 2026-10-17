@@ -27,6 +27,8 @@ export interface UiState {
   tplPreview: string | null; tplDelete: string | null;
   /** Слой «Брендбук» (палитра, шрифты, логотипы, расхождения с шаблоном) открыт. */
   brandLayer: boolean;
+  /** Слой «База знаний» (документы и ссылки, по которым агент пишет текст) открыт. */
+  kbLayer: boolean;
   /** результат открыт из «Создать»: плита 04 поднимается снизу одним движением с плитами 02/03 */
   rise: boolean;
   /** возврат на «Создать» с результата: плита 04 уходит вниз непрозрачной со своим содержимым */
@@ -37,7 +39,7 @@ export const UI0: UiState = {
   screen: "create", open: "text", more: false, improve: false, data: false,
   sect: null, sheet: null, sheetLast: "quality", pattern: null,
   textLayer: false, lightbox: false, helper: false, note: false, remarks: false,
-  tplPreview: null, tplDelete: null, brandLayer: false, rise: false, down: false,
+  tplPreview: null, tplDelete: null, brandLayer: false, kbLayer: false, rise: false, down: false,
 };
 
 /** Высота колоды на компьютере (холст V2), px. */
@@ -82,7 +84,7 @@ export function uiReducer(s: UiState, a: UiAction): UiState {
       return {
         ...s, screen: a.screen, open: a.screen === "create" ? "text" : s.open,
         sheet: null, sect: null, pattern: null, textLayer: false, lightbox: false, remarks: false, more: false,
-        tplPreview: null, tplDelete: null, brandLayer: false, rise: false, down: a.screen === "create" && (s.screen === "result" || s.down),
+        tplPreview: null, tplDelete: null, brandLayer: false, kbLayer: false, rise: false, down: a.screen === "create" && (s.screen === "result" || s.down),
       };
     case "open":
       // шапка шага или полоса свёрнутой плиты: шаг раскрывается, «Все параметры» сворачиваются; шаг «Шаблон»

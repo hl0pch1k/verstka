@@ -87,7 +87,12 @@ def test_the_writer_reads_the_base_and_every_figure_is_checked_against_it(kb):
     assert "[«Клиенты и отзывы», раздел «Удовлетворённость», абз. 3]" in ref.relevant("NPS удовлетворённость", 2000)
     assert ref.unsupported("Выручка за квартал выросла до 412 млн ₽, на 18%.") == set()
     assert ref.unsupported("Выручка выросла до 500 млн ₽.") == {"500"}
-    assert ref.unsupported("Наняли 3 инженера.") == set()  # small integers: a document writes «три»
+    assert ref.unsupported("Наняли 3 инженера.") == set()
+    # a share and a change the documents' figures give: 610 of 1 240 — 49,2 %; 301 → 412 — +37 %
+    assert ref.unsupported("Малый бизнес — 49,2 % корпоративных клиентов.") == set()
+    assert ref.unsupported("Выручка по кварталам выросла на 37% — с 301 до 412 млн ₽.") == set()
+    assert ref.unsupported("Отток клиентов за квартал составил 7,5%.") == {"7.5"}
+    assert ref.unsupported("Выручка выросла на 73%.") == {"73"}  # small integers: a document writes «три»
     assert ref.unsupported("Наняли 27 инженеров.", given="план: 27 инженеров") == set()  # the person's own figure
     src = ref.source_of("Индекс NPS вырос до 44 в третьем квартале.")
     assert src is not None and src.title == "Клиенты и отзывы" and src.place == "раздел «Удовлетворённость», абз. 3"
