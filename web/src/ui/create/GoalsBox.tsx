@@ -21,6 +21,7 @@ import { isStack, useTier } from "../shell/tier";
 import { datasetIds, goalChips, goalNoteLine, goalsLabel, goalsLayout, goalsOf, stillInText, type GoalChip } from "./dataRules";
 import { DsIcon } from "./dsKit";
 import { useServerGoals } from "./useGoals";
+import { layoutWidth } from "../shell/stage";
 
 export function GoalsBox({ text }: { text: string }) {
   const { data, params } = useApp();
@@ -69,10 +70,10 @@ export function GoalsBox({ text }: { text: string }) {
         const q = c.querySelector<HTMLElement>(".dt-gq");
         const g = gt ? Math.ceil(gt.scrollWidth) : 0;
         gt?.style.setProperty("--gtw", `${g}px`);
-        return { q: q ? q.getBoundingClientRect().width : 0, gt: g };
+        return { q: q ? layoutWidth(q) : 0, gt: g };
       });
       setW((cur) => (cur.length === next.length && cur.every((x, i) => Math.abs(x.q - next[i].q) < 0.5 && x.gt === next[i].gt) ? cur : next));
-      const [l, m] = Array.from(meter.current?.children ?? []).map((c) => Math.ceil(c.getBoundingClientRect().width));
+      const [l, m] = Array.from(meter.current?.children ?? []).map((c) => Math.ceil(layoutWidth(c)));
       if (l) setLab((cur) => (cur.l === l + 36 && cur.more === m + 8 ? cur : { l: l + 36, more: m + 8 }));
     };
     measure();

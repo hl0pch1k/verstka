@@ -35,6 +35,7 @@ import { busyText, REFUSED_SAME, rowAct, STALE_TEXT, takeFocus, UNDO_TEXT, type 
 import type { Rebuild } from "../useRebuild";
 import { MORPH_MOVE, useMorph, type Morph } from "../useMorph";
 import { CheckRow } from "./CheckRow";
+import { layoutRect } from "../../shell/stage";
 
 /** Эскиз варианта (V2 `dx-mini`): рамка, слои по порядку; `label` — что он рисует, с числами (для экранного диктора). */
 export function Mini({ m, c, label }: { m: MiniLayers; c: MiniColors; label: string }) {
@@ -176,8 +177,8 @@ function Var({ m, x, c, act, slide, refresh, onBuild, onUndo }: {
 function reveal(el: HTMLElement): void {
   const box = el.closest<HTMLElement>(".dd-scroll");
   if (!box || !el.isConnected || document.activeElement !== el) return;
-  const a = el.getBoundingClientRect();
-  const b = box.getBoundingClientRect();
+  const a = layoutRect(el);
+  const b = layoutRect(box);
   const pad = 24;
   const dy = a.bottom > b.bottom - pad ? a.bottom - (b.bottom - pad) : a.top < b.top + pad ? a.top - (b.top + pad) : 0;
   if (Math.abs(dy) >= 1) box.scrollBy({ top: dy, behavior: smoothScroll() });

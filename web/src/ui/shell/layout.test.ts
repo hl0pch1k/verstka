@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { TIER_LG, TIER_MD, TIER_XL } from "./tier";
+import { TIER_LG, TIER_MD, TIER_XL, TIER_XL_H } from "./tier";
 
 const WEB = process.cwd();
 const STYLES = join(WEB, "src/styles");
@@ -70,7 +70,9 @@ test("stack.css не задевает компьютер: вне запросо�
       assert.ok(m && m[1].split(",").every((s) => hidden.has(s)), `правило вне запроса стопки: ${rule}`);
       continue;
     }
-    const stackOnly = /width\s*<\s*(1280|1024|768)px/.test(b.media) || /^\(\s*prefers-reduced-motion/.test(b.media);
+    // окно ниже TIER_XL_H — стопка при любой ширине (и всё, что ещё ниже, — тоже)
+    const low = [...b.media.matchAll(/height\s*<\s*(\d+)px/g)].some((h) => Number(h[1]) <= TIER_XL_H);
+    const stackOnly = /width\s*<\s*(1280|1024|768)px/.test(b.media) || low || /^\(\s*prefers-reduced-motion/.test(b.media);
     assert.ok(stackOnly, `stack.css: запрос не только для стопки: ${b.media}`);
   }
 });
@@ -85,6 +87,40 @@ test("правила раскладки телефона (доски M-*) — т
         // и без движения (prefers-reduced-motion) — только снимает переходы
         const ok = b.media !== null && (/width\s*<\s*768px/.test(b.media) || /prefers-reduced-motion/.test(b.media));
         assert.ok(ok, `${f}: «${sel.trim()}» вне запроса телефона`);
+      }
+    }
+  }
+});
+
+test("компьютер — и по высоте: запросы от 1280 требуют окна не ниже TIER_XL_H, запросы стопки срабатывают и в низком окне", () => {
+  const xl = `(width >= ${TIER_XL}px)`;
+  const low = `(height < ${TIER_XL_H}px)`;
+  let n = 0;
+  for (const f of ALL) {
+    for (const m of css(f).matchAll(/@media([^{]+)\{/g)) {
+      const parts = m[1].split(",").map((p) => p.trim());
+      for (const p of parts) {
+        // компьютер: только вместе с высотой
+        if (p.includes(xl)) {
+          n++;
+          assert.ok(p.includes(`(height >= ${TIER_XL_H}px)`) || p.includes(low), `${f}: «${p}» без высоты — низкое широкое окно получит холст 900 px`);
+        }
+        // стопка по ширине (< 1280, без верхней границы ниже) — с тем же запросом для низкого окна рядом
+        if (/^\(width < 1280px\)/.test(p) || /^\(1024px <= width < 1280px\)/.test(p)) {
+          const rest = p.replace(/^\((1024px <= )?width < 1280px\)/, "");
+          assert.ok(parts.some((q) => q.includes(low) && q.endsWith(rest)), `${f}: «${m[1].trim()}» не срабатывает в низком окне`);
+        }
+      }
+    }
+  }
+  assert.ok(n > 0, "нет ни одного запроса компьютера");
+});
+
+test("граница высоты в CSS — ровно TIER_XL_H (и 500 — телефон лёжа)", () => {
+  for (const f of ALL) {
+    for (const m of css(f).matchAll(/@media([^{]+)\{/g)) {
+      for (const h of m[1].matchAll(/height\s*[<>]=?\s*(\d+(?:\.\d+)?)px/g)) {
+        assert.ok([TIER_XL_H, 500].includes(Number(h[1])), `${f}: граница высоты ${h[1]} px`);
       }
     }
   }

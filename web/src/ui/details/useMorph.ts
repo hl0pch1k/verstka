@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
 import { decodeImage, prefersReducedMotion } from "../../lib/motion";
 import { diffSigs, morph0, morphCls, morphNext, relMove, sigsKey, type MorphAction, type MorphPhase, type MorphState, type Moved, type Sigs } from "./morph";
+import { layoutRect } from "../shell/stage";
 
 export const MORPH_OUT = 120;
 export const MORPH_MOVE = 240;
@@ -18,14 +19,14 @@ const IMG_WAIT = 1200;
 interface Snap { w: number; at: Map<Element, { x: number; y: number }>; surf: Map<Element, number> }
 
 function snap(root: HTMLElement): Snap {
-  const r = root.getBoundingClientRect();
+  const r = layoutRect(root);
   const at = new Map<Element, { x: number; y: number }>();
   root.querySelectorAll("[data-mv]").forEach((el) => {
-    const b = el.getBoundingClientRect();
+    const b = layoutRect(el);
     at.set(el, { x: b.left - r.left, y: b.top - r.top });
   });
   const surf = new Map<Element, number>();
-  root.querySelectorAll("[data-surf]").forEach((el) => surf.set(el, el.getBoundingClientRect().height));
+  root.querySelectorAll("[data-surf]").forEach((el) => surf.set(el, layoutRect(el).height));
   return { w: r.width, at, surf };
 }
 

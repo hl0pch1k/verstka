@@ -16,6 +16,7 @@ import { Tx } from "../../kit/Tx";
 import { Col, Empty, Shot } from "../parts";
 import { bandOf, copyHint, fontRows, layoutsOf, paletteOf, rulesOf } from "../templateTab";
 import type { DeckManifest } from "../useDeckManifest";
+import { rangeRect } from "../../shell/stage";
 
 export function TemplateTab({ deck }: { deck: DeckManifest }) {
   const m = deck.manifest;
@@ -55,7 +56,7 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
     const set = () => {
       const r = document.createRange();
       r.selectNodeContents(w);
-      box.style.setProperty("--ctw", `${Math.ceil(r.getBoundingClientRect().width)}px`);
+      box.style.setProperty("--ctw", `${Math.ceil(rangeRect(r).width)}px`);
     };
     set();
     void document.fonts?.ready.then(set);

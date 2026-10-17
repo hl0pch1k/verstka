@@ -4,20 +4,26 @@
 //   lg 1024–1279 — небольшой ноутбук, планшет лёжа: поля и колонка номера плотнее, номер рядом с названием;
 //   md 768–1023 — планшет: номер шага над названием, всё, что справа от названия, — строкой под ним;
 //   sm до 768 — телефон: одна колонка, разделы шапки — за кнопкой меню, касания не меньше 44 px, текст не мельче 16 px.
-// CSS повторяет те же границы в синтаксисе диапазонов: `(width < 1280px)` — стопка, `(width < 1024px)` — md и уже,
-// `(width < 768px)` — телефон, `(width >= 1280px)` — компьютер (без щели между границами при нецелой ширине окна).
+// Компьютеру нужна и высота: холст 900 px (шапка 64 + колода 812 + поле 24) в низком окне сцена уменьшается целиком
+// (ui/shell/stage.ts), но не мельче `STAGE_MIN`; окно ниже `TIER_XL_H` (= 900 × STAGE_MIN) — та же стопка, что lg, со
+// своей прокруткой страницы. CSS повторяет те же границы в синтаксисе диапазонов: `(width < 1280px), (height < 675px)` —
+// стопка, `(width < 1024px)` — md и уже, `(width < 768px)` — телефон, `(width >= 1280px) and (height >= 675px)` —
+// компьютер (без щели между границами при нецелой ширине окна).
 import { useSyncExternalStore } from "react";
 
 export type Tier = "xl" | "lg" | "md" | "sm";
 
 /** Нижние границы ступеней, px. */
 export const TIER_XL = 1280;
+/** Компьютер — и не ниже этого по высоте окна, px: холст 900 × наименьший масштаб сцены 0.75 (ui/shell/stage.ts). */
+export const TIER_XL_H = 675;
 export const TIER_LG = 1024;
 export const TIER_MD = 768;
 
-/** Ступень по ширине окна; ширина не известна (0, NaN) — компьютер, как до замера. */
-export function tierOf(width: number): Tier {
-  if (!(width > 0) || width >= TIER_XL) return "xl";
+/** Ступень по ширине и высоте окна; ширина не известна (0, NaN) — компьютер, как до замера; высота не известна —
+ *  только по ширине. Широкое, но низкое окно (ниже `TIER_XL_H`) — стопка lg. */
+export function tierOf(width: number, height = Infinity): Tier {
+  if (!(width > 0) || width >= TIER_XL) return height >= TIER_XL_H || !(height > 0) ? "xl" : "lg";
   if (width >= TIER_LG) return "lg";
   if (width >= TIER_MD) return "md";
   return "sm";
@@ -31,7 +37,7 @@ export const helperBeside = (t: Tier): boolean => t === "xl";
 
 /** Запросы ступеней — те же, что в CSS. */
 export const TIER_QUERY = {
-  xl: `(width >= ${TIER_XL}px)`,
+  xl: `(width >= ${TIER_XL}px) and (height >= ${TIER_XL_H}px)`,
   lg: `(width >= ${TIER_LG}px)`,
   md: `(width >= ${TIER_MD}px)`,
 } as const;
@@ -61,7 +67,7 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-/** Ступень раскладки; меняется только на границе ступеней (а не на каждом пикселе ширины окна). */
+/** Ступень раскладки; меняется только на границе ступеней (а не на каждом пикселе ширины и высоты окна). */
 export function useTier(): Tier {
   return useSyncExternalStore(subscribe, snapshot, () => "xl" as Tier);
 }

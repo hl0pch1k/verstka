@@ -283,7 +283,7 @@ a.p2-ob:hover{color:#0B1220}
 .rt-st{min-width:0}
 .rt-st > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rt-hd .p2-ttl{font-size:32px;line-height:40px}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   /* сайт: «Скопировано» (и неудача копирования) в узкой раскладке — под кнопками, в зазоре 24 над текстом: в ряду шапки
      места нет (V2 строки не знает) */
   .hp-nar .rt-acts > .rt-cl{position:absolute;right:56px;top:calc(100% + 2px);max-width:320px}
@@ -296,7 +296,7 @@ a.p2-ob:hover{color:#0B1220}
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): «Результат». Плита 04 — по высоте содержимого, прокручивается
    страница, а не колонка. lg — слайд слева, колонка справа (340); md и телефон — слайд во всю ширину, колонка под ним.
    Компактного вида нет: помощник стопкой не сужает колоду (он поверх неё), результат всегда полный ═══ */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   .p2-two.ra-two{grid-template-columns:minmax(0,1fr) 340px !important;column-gap:32px !important;row-gap:32px;height:auto !important}
   .ra-two > :first-child{height:auto}
   .ra-stage,.ra-top .ra-stage{max-width:100%}

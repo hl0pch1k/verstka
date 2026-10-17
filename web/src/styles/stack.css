@@ -9,7 +9,7 @@
  *   md 768–1023:  поля 32 / 24, номер над названием (48 px), всё, что справа от названия, — строкой под ним;
  *   sm до 768:    колода во весь экран под шапкой, плиты на местах досок M-*, поля 24 / 16, номер 48 px, разделы шапки —
  *                 за кнопкой меню, касания не меньше 44 px. */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   .p2-root{--pt:32px;--px:32px;--ps:48px;--num:64px;--numh:48px;--numw:112px;--hg:24px;--body:136px;--tpc:4;--gut:16px;--sheet-top:72px;padding:0 var(--gut) var(--gut) !important;min-height:0 !important}
   /* шапка: логотип и разделы — по полям колоды */
   .p2-hdr{position:relative;padding:0 var(--px) !important}
@@ -73,7 +73,7 @@
 
 /* ── слои колоды стопкой: плита поднимается снизу поверх колоды (translateY 520 мс), уходит вниз непрозрачной со своим
    содержимым; прокрутка — внутри плиты. Сверху остаётся полоса затемнённой страницы — она закрывает слой (StackScrim) */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   .p2-lay{position:fixed !important;left:var(--gut) !important;right:var(--gut) !important;top:var(--sheet-top) !important;bottom:0;height:auto !important;transform:translateY(0) !important}
   .p2-lay.p2-lay-off{transform:translateY(calc(100% + 48px)) !important}
   .p2-lay > .p2-plate,.p2-lay > .dd-sheet{border-radius:40px 40px 0 0 !important;box-shadow:0 -24px 48px -24px rgba(11,18,32,.4)}
@@ -101,7 +101,7 @@
 }
 /* затемнение под слоем или помощником (только opacity): 360 мс вход, 240 уход; щелчок закрывает верхний */
 .p2-dim{display:none}
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   /* страница под плитой сверху не прокручивается (ui/shell/modal.ts `useScrollLock`); полоса прокрутки окна держит место */
   html.p2-lock{overflow:hidden}
   html.p2-lock-bar{scrollbar-gutter:stable}
@@ -111,7 +111,7 @@
 
 /* ── помощник стопкой: плита снизу поверх колоды. lg и md — справа, во всю высоту окна, шириной 400; телефон — во всю
    ширину. Поднимается translateY 520 мс, уходит вниз 340 мс непрозрачной; каскад содержимого — как на компьютере */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   .hp-wrap,.hp-wrap.hp-nar{grid-template-columns:minmax(0,1fr) 0px !important;column-gap:0 !important;height:auto}
   /* клетка помощника рядом с колодой — без высоты: плита помощника стопкой fixed, а высота 812 клетки удлиняла бы
      страницу под короткой колодой */
@@ -168,7 +168,7 @@
 
 /* ── короткое окно (телефон лёжа, 200 % при 1280): слой и помощник — от верха окна, липкая навигация «Почему так» — в
    потоке, вкладки листа «Подробнее» — одной строкой (прокручиваются, если не помещаются) */
-@media (width < 1280px) and (height < 500px){
+@media (height < 500px){
   .p2-root{--sheet-top:16px}
   .dw-navw{position:static !important;top:auto !important;margin-top:0 !important;padding-top:0 !important}
   .dd-tabs{display:flex !important;flex-wrap:nowrap !important;overflow-x:auto;scrollbar-width:none;border-radius:999px !important}

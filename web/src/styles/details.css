@@ -281,7 +281,7 @@
    Многострочный текст — стопки из двух копий (kit/Tx; машинерия hp-tx — create.css), `--hpd` — ниже.
    Сайт: колода у́же полной (окно меньше 1440 — тесная колода, `.dd-tight` — sheetMorph.ts) V2 не помещается — свои
    дорожки ниже. */
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   .dd-tabs .p2-rseg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
   .hp-nar .dd-tabs .p2-rseg{padding:0 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
   .dd-g{transition:grid-template-columns 340ms var(--ease)}
@@ -402,7 +402,7 @@
    V2 — дорожки с тем же числом дорожек, только-широкое сжимается и гаснет, стопки; в покое при закрытом помощнике лист
    такой же, как при 1440. Числа ниже — при 1280 / 1217 (с полосой прокрутки): дорожки тесной колоды постоянны, при окне
    шире на столько же шире резиновые колонки (1fr). */
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   /* вкладки, меню варианта и ✕ — плотнее (ряд V2 761 px шире листа 720 / 705) */
   .dd-tight .dd-tabs{transition:gap 340ms var(--ease)}
   .hp-nar .dd-tight .dd-tabs{gap:2px;transition-duration:520ms}
@@ -584,7 +584,7 @@
 .dx-not{display:flex;align-items:flex-start;gap:8px;margin:16px 0 0;padding-top:16px;border-top:1px solid rgba(11,18,32,.08);font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
 .dx-not .dd-tag{flex:none;margin-top:-2px}
 .dx-not s{text-decoration-thickness:1.5px;text-decoration-color:rgba(90,98,114,.6)}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   /* узкая колода: подпись «лучший по данным — первым» сжимается и гаснет; стопки текста — на сколько у́же их клетка
      (левая колонка 526 → 416, правая — на 306; в тесной колоде 526 → 376 и на 266) */
   .dx-capw{display:block;max-width:240px;overflow:hidden;white-space:nowrap;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
@@ -619,7 +619,7 @@
    общую прокрутку вкладки. Текст переносится (многоточия и line-clamp сняты), таблицы — не шире листа (перенос или
    прокрутка внутри таблицы). Телефон: поля коробок 24 → 16, текст для чтения — 16 px, касания — не меньше 44 px.
    Классы-крючки (dd-sp, dd-varw, dq-sumt, dw-nt, da-top, df-ft, dpt-hd…) стилей на компьютере не имеют. */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   /* ── шапка листа: панели с высотой холста («План», «Шаблон», «Файлы» — 508) — от шапки до низа листа */
   .dd-top{min-width:0}
   .dd-sheet .dd-pw{height:auto !important}
@@ -721,7 +721,7 @@
   .dpt-vote{height:auto;min-height:24px}
   .dpt-pl1{height:auto;min-height:20px;flex-wrap:wrap;row-gap:2px}
 }
-@media (1024px <= width < 1280px){
+@media (1024px <= width < 1280px), (width >= 1280px) and (height < 675px){
   /* lg: заголовок колоды в «О плане» (300 px) — 24 px, как узкая копия тесной колоды */
   .dd-sheet [data-tx="p-ttl"] > .hp-txw{font-size:24px !important;line-height:32px !important}
 }

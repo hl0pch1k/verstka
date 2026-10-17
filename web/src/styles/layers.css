@@ -91,7 +91,7 @@
 .gh-moving .gh-grid > li:not(.gh-vis){content-visibility:auto}
 .gh-grid > li.gh-snap *{transition:none !important}
 .gh-body .p2-ttl{font-size:32px;line-height:40px}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   [data-tx="h-ttl"]{--hpd:104px}
   /* название карточки — ровно две строки: копии стопки обрезаются со своим полем 8 px (create.css), и верх третьей строки
      выглядывал над метой; по вертикали — точно по краю копии, по горизонтали поле остаётся */
@@ -121,13 +121,13 @@
    и на ходу — auto (бо́льшая из копий, как у V2), узкая копия — от нуля до своей высоты по ходу (--hn·p, без if(): в
    покое 0 и --hn — те же высоты) */
 @supports (height: if(style(--x: 0): 0px; else: 1px)){
-  @media (width >= 1280px){
+  @media (width >= 1280px) and (height >= 675px){
     .p2-lay .hp-txm{height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)))}
     .p2-lay .hp-txm > .hp-txn{height:if(style(--hpp: 0): 0px; style(--hpp: 1): auto; else: calc(var(--hn, 0px) * var(--hpp))) !important}
   }
 }
 @supports not (height: if(style(--x: 0): 0px; else: 1px)){
-  @media (width >= 1280px){
+  @media (width >= 1280px) and (height >= 675px){
     .p2-lay .hp-txm > .hp-txn{height:calc(var(--hn, 0px) * var(--hpp)) !important}
   }
 }
@@ -147,7 +147,7 @@
    колоды в покое и --lgone с задержкой 520 мс). Пока слой уходит, он перестраивается вместе с колодой, как открытый. */
 @property --lgone{syntax:'<number>';inherits:true;initial-value:0}
 @property --lcv{syntax:'<number>';inherits:true;initial-value:0}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   .hp-wrap .dd-pw.p2-off{--lgone:1;--lcv:1;width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 96px);transition:opacity 240ms var(--ease),visibility 0s linear 240ms,--lgone 0s linear 240ms,--lcv 0s linear 240ms,width 0s linear 240ms;transition-behavior:allow-discrete}
   .hp-wrap.hp-nar .dd-pw.p2-off{width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 512px)}
   /* сайт: невыбранная вкладка, когда догасла, ещё и не рисуется (content-visibility: hidden у её содержимого; с тех пор как
@@ -194,7 +194,7 @@
    значения короткие); расхождений нет — тихая строка */
 .bb-cfv>span:not(.bb-dot),.bb-win>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .bb-none{margin:16px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   /* узкая колода: слой «Брендбук» — правая колонка 416 → 376 той же кривой */
   .bb-g{transition:grid-template-columns 340ms var(--ease)}
   .hp-nar .bb-g{grid-template-columns:minmax(0,1fr) 376px;transition-duration:520ms}
@@ -208,7 +208,7 @@
    карточек — строками, а не многоточием; на телефоне текст для чтения — 16 px, касания — не меньше 44. Крючки классов —
    ly-hd/ly-hc/ly-ttl/ly-sub (шапки), gh-hd/gh-cnt/gh-err, pv-nmr/pv-edr/pv-mr/pv-acts, dl-hd/dl-nm/dl-acts, bb-mr,
    rt-body/rt-sp/rt-box/rt-src/rt-q, lb-hd/lb-t/lb-stage/lb-keys (в слоях; на компьютере у них правил нет). */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   /* шапки слоёв: высота по содержимому, заголовок и подпись переносятся словами, ✕ — справа сверху */
   .ly-hd{flex:none;height:auto !important;min-height:64px;align-items:flex-start !important;column-gap:16px !important}
   .ly-hc{flex:1 1 0%}
@@ -334,7 +334,7 @@
   .lb-arrow{position:relative !important;order:2;top:auto !important;left:auto !important;right:auto !important;margin-top:16px}
   .lb-stage > .lb-arrow:first-child{margin-right:auto}
 }
-@media (width < 1280px) and (hover: none) and (pointer: coarse){
+@media (width < 1280px) and (hover: none) and (pointer: coarse), (height < 675px) and (hover: none) and (pointer: coarse){
   /* «На весь экран» на сенсорном экране: подсказка клавиш не нужна — листают стрелки */
   .lb-keys{display:none !important}
 }

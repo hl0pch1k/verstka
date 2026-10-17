@@ -15,6 +15,7 @@
 // Для листа «Подробнее» и слоёв; «Создать» и «Сборка» держат свои стопки (create/, build/Roles).
 import { createContext, useContext, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { cls } from "./cls";
+import { layoutWidth } from "../shell/stage";
 
 /** Колода сужена помощником — активна узкая копия. Ставит тот, кто держит стопки (лист, слой): одно значение на всех. */
 export const TxNarrow = createContext(false);
@@ -90,7 +91,7 @@ function afterMove() {
     dirty.add(el);
   });
   pending.clear();
-  missed.forEach((el) => el.isConnected && checkCell(el, el.getBoundingClientRect().width));
+  missed.forEach((el) => el.isConnected && checkCell(el, layoutWidth(el)));
   missed.clear();
   if (dirty.size && !frame) frame = requestAnimationFrame(flush);
 }
@@ -117,10 +118,10 @@ function flush() {
     if (!w || !n) return null;
     const cs = getComputedStyle(w);
     const h = stackHeights(w.offsetHeight, n.offsetHeight, (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0));
-    const cell = el.getBoundingClientRect().width;
+    const cell = layoutWidth(el);
     const hpd = parseFloat(getComputedStyle(el).getPropertyValue("--hpd")) || 0;
     const cells = narrowNow ? { wide: cell + hpd, narrow: cell } : { wide: cell, narrow: cell - hpd };
-    return { ...h, tw: w.getBoundingClientRect().width, tn: n.getBoundingClientRect().width, cells };
+    return { ...h, tw: layoutWidth(w), tn: layoutWidth(n), cells };
   });
   // обратно — тоже без переходов (иначе узкая копия ехала бы к своей высоте 0 ↔ auto 340 мс): сначала только «без
   // переходов», стиль досчитан, потом и эта метка снята — значения уже прежние, ход не начинается

@@ -9,6 +9,7 @@ import { DsIcon, DsSpin } from "./dsKit";
 import { SAMPLE_BRIEF } from "../../lib/createForm";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
+import { layoutRect } from "../shell/stage";
 
 export type FilePick = "text" | "deck" | "sample";
 
@@ -50,7 +51,7 @@ export function FileMenu({ open, off: deckOff, onPick, onClose, onData, onExampl
     const el = ref.current;
     const deck = el?.closest(".p2-deck");
     if (!el || !deck) return;
-    const room = deck.getBoundingClientRect().right - 24 - el.getBoundingClientRect().left;
+    const room = layoutRect(deck).right - 24 - layoutRect(el).left;
     setWidth(room < MENU_W ? Math.max(MENU_MIN, Math.floor(room)) : null);
   }, [open]);
   const items = () => Array.from(ref.current?.querySelectorAll<HTMLButtonElement>(".tx-mi:not([aria-disabled=true])") ?? []);

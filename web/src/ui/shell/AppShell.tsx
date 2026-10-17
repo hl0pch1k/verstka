@@ -43,6 +43,7 @@ import { deckBrand, deckStrip, deckTemplate, docTitle, openDeck } from "../resul
 import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 import { StackDim } from "./StackDim";
+import { STAGE_ATTR, stageScale, stageStyles, useWindowHeight } from "./stage";
 import { helperBeside, useTier } from "./tier";
 
 const ROOT: CSSProperties = {
@@ -147,7 +148,12 @@ export function AppShell() {
     dispatch({ type: "open", step: "tpl" });
     upload.pick();
   };
-  const beside = helperBeside(useTier());
+  const tier = useTier();
+  const beside = helperBeside(tier);
+  // компьютер в окне ниже холста (900): сцена уменьшается целиком и видна вся, без прокрутки (ui/shell/stage.ts).
+  // Обёртка `p2-fit` есть всегда (без стилей, пока масштаб 1): смена масштаба не пересоздаёт страницу
+  const k = stageScale(useWindowHeight(), tier === "xl");
+  const st = stageStyles(k);
   const layers = (
     <>
       {/* колода стопкой (окно уже 1280): затемнение под слоем или помощником, щелчок закрывает верхнюю плиту */}
@@ -172,7 +178,8 @@ export function AppShell() {
     </>
   );
   return (
-    <div className="p2-root" style={ROOT}>
+    <div className="p2-fit" style={st.fit}>
+    <div className="p2-root" style={st.root ? { ...ROOT, ...st.root } : ROOT} {...(k < 1 && { [STAGE_ATTR]: String(k) })}>
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
         {/* колода и место помощника: закрыт — колонка 0; открыт — 400 px, зазор 16, колода сужается на всех экранах */}
@@ -186,6 +193,7 @@ export function AppShell() {
           <div className="hp-shade" aria-hidden="true" />
         </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";
 import { CLOSE_HOLD_MS, deckLayout, type DeckFit, type DeckLayout } from "./fit";
+import { layoutWidth } from "../shell/stage";
 
 export const DeckFitContext = createContext<DeckLayout>({ width: 0, fit: "wide" });
 
@@ -40,7 +41,7 @@ export function useWrapWidth(ref: RefObject<HTMLElement>): number | null {
       setWrap(0); // мерить нечего — содержимое встаёт как есть
       return;
     }
-    const measure = () => setWrap(Math.round(el.getBoundingClientRect().width));
+    const measure = () => setWrap(Math.round(layoutWidth(el)));
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);

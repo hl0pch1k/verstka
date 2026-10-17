@@ -217,7 +217,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-root .hp-sw > *{grid-area:1 / 1}
 /* сайт: стопки в потоке флекса — во всю свою клетку и при ≤ 900 px (там узкой копии нет, поле — одно) */
 .hp-txf{flex:1 1 0%;min-width:0}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   .p2-ttl-sz{transition:font-size 340ms var(--ease)}
   .p2-ttl-v{transition:transform 340ms var(--ease)}
   .hp-nar .p2-ttl-sz{font-size:24px;transition-duration:520ms}
@@ -377,7 +377,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 @property --hpp{syntax:'<number>';inherits:false;initial-value:0}
 /* ширина мягкого края растущей копии (ниже) — тоже не наследуется: иначе каждый кадр пересчитывался бы стиль всего её текста */
 @property --hpf{syntax:'<length>';inherits:false;initial-value:0px}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
   .hp-tx.hp-txf{flex:1 1 0%}
   span.hp-tx{display:grid}
@@ -559,7 +559,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-gm{position:absolute;top:0;left:0;visibility:hidden;pointer-events:none;font-size:13px;font-weight:600;line-height:20px;white-space:nowrap}
 .dt-gm>span{position:absolute;top:0;left:0}
 .dt-gn.dt-gn-off{opacity:0;visibility:hidden;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   /* узкая колода: панель «Данные» 400 → 320 (сайт: в тесной колоде — у́же, --dtn: dataRules `dataPanel`), поле — копии
      текста (c-tad); «→ тип графика» у целей сжимается и гаснет; в разборе брендбука вторая дорожка сжимается до нуля
      (как у разбора шаблона) */
@@ -600,7 +600,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-more-t{display:none}
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): шаги «Создать». Те же плиты, кнопки и ходы; меняется раскладка
    внутри плит — тела шагов под названием (lg) или во всю ширину (md, телефон), ряды переносятся, а не обрезаются ═══ */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   /* тела шагов 01 и 02 — от колонки номера (lg) или от края (md, телефон) */
   #p2-b1,#p2-b2{margin:24px 0 0 var(--body) !important}
   /* 01 · лента: дорожки по ширине; ряды по четыре — одной сеткой (ряды холста нужны только ходу помощника) */

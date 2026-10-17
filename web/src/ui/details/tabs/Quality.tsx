@@ -31,6 +31,7 @@ import { observeWidth } from "../../kit/widthGate";
 import { bindShort } from "../../../lib/typo";
 import { radioGroup } from "../../kit/radios";
 import { EyeBox } from "./QualityEye";
+import { layoutWidth } from "../../shell/stage";
 
 // Реестр проверок (GET /api/checks) один на страницу: его просят, когда лист открылся впервые; не ответил — раздел
 // говорит только число проверок, а следующий лист попросит снова.
@@ -59,7 +60,7 @@ function useWidth<T extends HTMLElement>(on: boolean): [RefObject<T>, number] {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!on || !el) return void setW(0);
-    const measure = () => setW(Math.round(el.getBoundingClientRect().width * 100) / 100);
+    const measure = () => setW(Math.round(layoutWidth(el) * 100) / 100);
     measure();
     const stop = observeWidth([el], measure);
     void document.fonts?.ready.then(measure);

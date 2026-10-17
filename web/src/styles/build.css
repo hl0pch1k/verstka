@@ -92,7 +92,7 @@
    остаются; сегменты плотнее), «Не получилось» — поля 48 → 24, «Как думает агент» 20 → 18 px, зазор 16 → 8. Мысли агента,
    подсказки очереди и причина ошибки — стопки из двух копий (hp-tx, create.css; сайт: ширины копий — постоянные, в px).
    Что зависит от ширины окна — columns.ts `buildMorph`, переменными на `.bd-two` (BuildPlate). */
-@media (width >= 1280px){
+@media (width >= 1280px) and (height >= 675px){
   .bd-two{grid-template-columns:minmax(0,1fr) 416px !important;column-gap:48px !important;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
   /* сайт: колонка агента в узкой раскладке — `--bd-an` (320; в тесной колоде — 288) */
   .hp-nar .bd-two{grid-template-columns:minmax(0,1fr) var(--bd-an,320px) !important;column-gap:24px !important;transition-duration:520ms}
@@ -158,7 +158,7 @@
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): «Сборка». Плита 03 — по высоте содержимого: фаза, часы и полоса,
    раскадровка целиком (без прокрутки внутри), «Как думает агент» — колонкой справа (lg) или под раскадровкой (md,
    телефон), тоже целиком. Фазы сменяют друг друга на месте (одна клетка сетки — по самой длинной, переносятся) ═══ */
-@media (width < 1280px){
+@media (width < 1280px), (height < 675px){
   .bd-two{grid-template-columns:minmax(0,1fr) 300px !important;grid-template-rows:auto 1fr !important;column-gap:32px !important;height:auto !important}
   /* lg: колонка агента выше левой — лишнее место берёт ряд тела (1fr), фаза над часами не раздвигается; тело — от верха */
   .bd-two > .bd-body{align-self:start}
