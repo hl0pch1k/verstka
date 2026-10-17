@@ -708,7 +708,7 @@ def headline_in_chip(ctx: AuditContext) -> list[Issue]:
 def _small_print(e, p, o) -> bool:
     """A paragraph that is small print by design: a source or a note line, the slide's footnote, a caption."""
     name = (e.name or "")
-    if re.match(r"^(?:Footnote|Source|Caption|Chart note|Legend)", name):
+    if re.match(r"^(?:Footnote|Source|Caption|Chart note|Chart title|Legend|Unit|Axis)", name):
         return True
     if _FOOTNOTE_RE.match(p.text or ""):
         return True
