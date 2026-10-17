@@ -58,7 +58,7 @@ function QualityCard({ q, variant, onOpen }: { q: QualityView; variant: string; 
         <span style={{ display: "flex", flexDirection: "column", justifyContent: "center", flex: 1, minWidth: 0 }}>
           <span className="p2-sr">Качество: </span>
           {(q.verdict || q.warnings) && (
-            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap" }}>
+            <span className="ra-qv" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap" }}>
               {q.verdict && <span style={q.errors ? { color: "#DC2626" } : undefined}>{q.verdict}</span>}
               {q.verdict && q.warnings && <span style={{ fontWeight: 500, color: "#5A6272" }} aria-hidden="true">·</span>}
               {q.warnings && (

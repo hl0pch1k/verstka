@@ -262,7 +262,7 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
                   </p>
                   <p className="df-fn" title={f.file} style={{ margin: 0, fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.file}</p>
                 </div>
-                <div style={{ display: "flex", gap: 8, flex: "none" }}>
+                <div className="df-acts" style={{ display: "flex", gap: 8, flex: "none" }}>
                   {f.pptx && <a className="p2-ob" href={f.pptx} download={`${f.base}.pptx`} aria-label={f.aPpt} style={{ height: 40, padding: "0 16px" }}>PowerPoint</a>}
                   {f.pdf && <a className="p2-ob" href={f.pdf} download={`${f.base}.pdf`} aria-label={f.aPdf} style={{ height: 40, padding: "0 16px" }}>PDF</a>}
                   {f.html && <a className="p2-ob" href={f.html} target="_blank" rel="noopener noreferrer" aria-label={f.aWeb} title="Откроется в новой вкладке" style={{ height: 40, padding: "0 16px" }}><span>Веб</span><Icon name="external" size={16} /></a>}

@@ -27,6 +27,7 @@ import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
 import type { SheetTab } from "../deck/geometry";
 import { LazyPanels, LazyPattern, loadSheet, preloadSheet, SheetBoundary } from "./lazySheet";
 import { useDeckManifest } from "./useDeckManifest";
+import { useStack } from "../shell/tier";
 import { scoreOf, docTitle } from "../result/resultView";
 
 /** Сброс слоя шаблона и меню — после того как лист уехал (V2: 560 мс). */
@@ -205,6 +206,24 @@ export function DetailsSheet() {
   const g = keep?.g;
   const v = keep?.v;
   const score = g && v ? scoreOf(g, v) : null;
+  // стопкой (окно уже 1280) шапка листа переносится (вариант и ✕, под ними вкладки — строкой или сеткой): вкладки стоят
+  // под её настоящей высотой (`--ddh`, stack.css), а не под числом на каждую ширину
+  const stack = useStack();
+  const topRef = useRef<HTMLDivElement>(null);
+  const shown = !!(g && v) && presence.mounted;
+  useLayoutEffect(() => {
+    const top = topRef.current;
+    const box = sheet.current;
+    if (!stack || !shown || !top || !box) return;
+    const put = () => box.style.setProperty("--ddh", `${top.offsetHeight}px`);
+    put();
+    const ro = new ResizeObserver(put);
+    ro.observe(top);
+    return () => {
+      ro.disconnect();
+      box.style.removeProperty("--ddh");
+    };
+  }, [stack, shown]);
   return (
     <Layer id="p2-lay-d" presence={presence} open={open} top={160} z={5} bare label="Подробнее" onClose={close}>
       {g && v && (
@@ -212,7 +231,7 @@ export function DetailsSheet() {
         <SheetCtx.Provider value={morph}>
         <section ref={sheet} className={cls("dd-sheet", morph.tight && "dd-tight", settled && "dd-settled")} style={{ outline: "none" }} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1}>
           <div className="dd-fx">
-          <div className="dd-top p2-ls" style={lsDelay(120)}>
+          <div ref={topRef} className="dd-top p2-ls" style={lsDelay(120)}>
             {/* aria-controls — когда панель есть (`dd-panel-*` у содержимого вкладки, а невыбранные монтируются позже) */}
             <div className="dd-tabs" role="tablist" aria-label="Разделы подробностей" onKeyDown={onTabKey}>
               {SHEET_TABS.map((t) => (

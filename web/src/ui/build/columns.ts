@@ -192,7 +192,8 @@ export function phaseFit(phase: BuildPhase, font: number, cell: number, data = f
   const room = two <= cell - 4 ? cell - 4 : cell;
   // scale — до тысячных вниз, когда две строки встают только мельче 18: после округления они всё равно в клетке
   const scale = two * floor <= room * floor + 1e-9 ? r3(floor) : Math.floor(((floor * room) / two) * 1000) / 1000;
-  return { scale, two: true, width: r3(room / scale), line: r3(line), top: r3((PHASE_ROW - 2 * line) / 2) };
+  // клетки нет (окно уже колоды холста): ширина копии — 0, а не деление на ноль
+  return { scale, two: true, width: scale > 0 ? r3(room / scale) : 0, line: r3(line), top: r3((PHASE_ROW - 2 * line) / 2) };
 }
 
 /** Ширина длинной строки фазы в две строки при 18 px (замер `PHW2`). */

@@ -7,6 +7,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cls } from "../kit/cls";
 import { useDeckWrap } from "../deck/useDeckFit";
+import { isStack, useTier } from "../shell/tier";
 import { goalsFit, goalsLabel, goalsOf } from "./dataRules";
 import { DsIcon } from "./dsKit";
 
@@ -40,7 +41,10 @@ export function GoalsBox({ text }: { text: string }) {
       alive = false;
     };
   }, [key]);
-  const fit = w.length === goals.length ? goalsFit(w, wrap) : null;
+  // подгонка под строку колоды холста — только на компьютере: стопкой (окно уже 1280) таблетки переносятся рядами
+  // (create.css) и видны все цели
+  const stack = isStack(useTier());
+  const fit = !stack && w.length === goals.length ? goalsFit(w, wrap) : null;
   const all = goals.map((g) => `«${g.q}» → ${g.to}`).join(" · ");
   return (
     <div className="dt-goal p2-in" style={{ animationDelay: "120ms" }} title={all || undefined}>

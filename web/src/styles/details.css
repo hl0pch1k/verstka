@@ -281,7 +281,7 @@
    Многострочный текст — стопки из двух копий (kit/Tx; машинерия hp-tx — create.css), `--hpd` — ниже.
    Сайт: колода у́же полной (окно меньше 1440 — тесная колода, `.dd-tight` — sheetMorph.ts) V2 не помещается — свои
    дорожки ниже. */
-@media (min-width: 1280px){
+@media (width >= 1280px){
   .dd-tabs .p2-rseg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
   .hp-nar .dd-tabs .p2-rseg{padding:0 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
   .dd-g{transition:grid-template-columns 340ms var(--ease)}
@@ -402,7 +402,7 @@
    V2 — дорожки с тем же числом дорожек, только-широкое сжимается и гаснет, стопки; в покое при закрытом помощнике лист
    такой же, как при 1440. Числа ниже — при 1280 / 1217 (с полосой прокрутки): дорожки тесной колоды постоянны, при окне
    шире на столько же шире резиновые колонки (1fr). */
-@media (min-width: 1280px){
+@media (width >= 1280px){
   /* вкладки, меню варианта и ✕ — плотнее (ряд V2 761 px шире листа 720 / 705) */
   .dd-tight .dd-tabs{transition:gap 340ms var(--ease)}
   .hp-nar .dd-tight .dd-tabs{gap:2px;transition-duration:520ms}
@@ -584,7 +584,7 @@
 .dx-not{display:flex;align-items:flex-start;gap:8px;margin:16px 0 0;padding-top:16px;border-top:1px solid rgba(11,18,32,.08);font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
 .dx-not .dd-tag{flex:none;margin-top:-2px}
 .dx-not s{text-decoration-thickness:1.5px;text-decoration-color:rgba(90,98,114,.6)}
-@media (min-width: 1280px){
+@media (width >= 1280px){
   /* узкая колода: подпись «лучший по данным — первым» сжимается и гаснет; стопки текста — на сколько у́же их клетка
      (левая колонка 526 → 416, правая — на 306; в тесной колоде 526 → 376 и на 266) */
   .dx-capw{display:block;max-width:240px;overflow:hidden;white-space:nowrap;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
@@ -614,12 +614,12 @@
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): лист «Подробнее» ═══════════════════════════════════════════════
    Компьютер (от 1280) этих правил не видит. Лист — плита во всю высоту окна, вкладка — от шапки до низа листа, прокрутка
    внутри неё (stack.css: `.dd-pw`, `.dd-scroll`). Шапка: lg — в строку, как на компьютере; md — «вариант + ✕» строкой,
-   под ней вкладки в строку; телефон — под ней вкладки сеткой 3 × 2 (`--ddh` — высота шапки). Колонки вкладок: lg — две,
+   под ней вкладки в строку; телефон — под ней вкладки сеткой 3 × 2 (`--ddh` — высота шапки, её меряет DetailsSheet). Колонки вкладок: lg — две,
    поуже (доли вместо 526 px); md и телефон — одна. Высоты холста (508, 484, 532, 388) растут до низа листа или уходят в
    общую прокрутку вкладки. Текст переносится (многоточия и line-clamp сняты), таблицы — не шире листа (перенос или
    прокрутка внутри таблицы). Телефон: поля коробок 24 → 16, текст для чтения — 16 px, касания — не меньше 44 px.
    Классы-крючки (dd-sp, dd-varw, dq-sumt, dw-nt, da-top, df-ft, dpt-hd…) стилей на компьютере не имеют. */
-@media (max-width: 1279.98px){
+@media (width < 1280px){
   /* ── шапка листа: панели с высотой холста («План», «Шаблон», «Файлы» — 508) — от шапки до низа листа */
   .dd-top{min-width:0}
   .dd-sheet .dd-pw{height:auto !important}
@@ -683,6 +683,8 @@
   #dd-panel-files{margin:0 calc(-1 * var(--px)) !important;padding:8px var(--px) 32px !important;border-radius:0 !important;scrollbar-width:none}
   .df-row{flex-wrap:wrap;row-gap:8px;height:auto !important;min-height:64px;padding:12px 12px 12px 16px !important}
   .df-ft{flex:1 1 200px}
+  /* кнопки ряда (PowerPoint, PDF, Веб) переносятся внутри ряда, а не уходят за край листа (320) */
+  .df-acts{flex:0 1 auto !important;flex-wrap:wrap;min-width:0}
   .df-fn{white-space:normal !important;overflow-wrap:anywhere}
   .df-st{grid-template-columns:minmax(0,1fr) minmax(64px,1fr) 48px !important;height:auto !important;min-height:24px}
   .df-st > span:first-child{white-space:normal !important}
@@ -719,13 +721,12 @@
   .dpt-vote{height:auto;min-height:24px}
   .dpt-pl1{height:auto;min-height:20px;flex-wrap:wrap;row-gap:2px}
 }
-@media (min-width: 1024px) and (max-width: 1279.98px){
+@media (1024px <= width < 1280px){
   /* lg: заголовок колоды в «О плане» (300 px) — 24 px, как узкая копия тесной колоды */
   .dd-sheet [data-tx="p-ttl"] > .hp-txw{font-size:24px !important;line-height:32px !important}
 }
-@media (max-width: 1023.98px){
+@media (width < 1024px){
   /* шапка листа: «вариант + ✕» строкой, под ней вкладки — в строку на всю ширину; меню варианта — от левого края кнопки */
-  .dd-sheet{--ddh:100px}
   .dd-top{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"v x" "t t";gap:12px 8px;height:auto}
   .dd-top > .dd-tabs{grid-area:t}
   .dd-top > .dd-sp{display:none}
@@ -755,9 +756,8 @@
   /* «Слайд N шаблона»: одна колонка */
   .dpt-g{grid-template-columns:minmax(0,1fr) !important}
 }
-@media (max-width: 767.98px){
+@media (width < 768px){
   /* шапка листа: под «вариант + ✕» вкладки сеткой 3 × 2 (касание 44) */
-  .dd-sheet{--ddh:156px}
   .dd-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));height:auto;border-radius:24px}
   .dd-tabs .p2-rseg{padding:0 8px}
   .dd-varw .df-mi{min-height:44px}
@@ -822,7 +822,10 @@
   .dtp-tile{height:auto;min-height:72px;padding:8px 12px}
   .dtp-name{font-size:24px;line-height:32px}
   .dtp-lays{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .dtp-sw{position:relative}
+  /* палитра: образцы — не уже 44 (касание), не помещаются в ряд — переносятся отдельными таблетками */
+  .dtp-rib{flex-wrap:wrap;gap:4px;height:auto}
+  .dtp-rib::after{display:none}
+  .dtp-sw{position:relative;flex:1 0 44px;border-radius:999px !important}
   .dtp-sw::before{content:"";position:absolute;left:0;right:0;top:-10px;bottom:-10px}
 
   /* «Файлы»: шапки карточек переносятся; автоисправление — слайд и проход строкой, текст под ними; «Для
