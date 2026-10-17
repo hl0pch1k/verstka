@@ -178,3 +178,74 @@ def test_tall_cards_two_thirds_empty_are_no_place_for_the_content():
         tb = next(sh for sh in slide.shapes if sh._element is c[0])
         tb.text_frame.text = "\n".join(["Каждый модуль заканчивается проектом на реальных данных"] * 7)
     _cards_not_empty(_fake_ctx(slide, W, H), cells)
+
+
+# ── qa3: the hero figure, the no-break spaces, the brand logo's one corner ───────────────────────────────────────
+def test_the_hero_figure_is_the_headings():
+    from verstka.rendering.compose import _aside_figure
+
+    take = "Медиана — 54 минуты. 3 обращения — больше 10 часов: на графике они в столбце «больше 180» (там всего 51)."
+    assert _aside_figure(take, "80% обращений получают ответ за 2 часа") is None  # never «180» or «51»
+    assert _aside_figure("Остальные 230 клиентов — 2 167 млн ₽, 62%", "Топ-10 клиентов дают 38% выручки") is None
+    assert _aside_figure("Сентябрь 2026 к сентябрю 2025: 423 млн ₽ против 344 млн ₽", "Выручка в сентябре 2026 достигла 423 млн ₽") == "423 млн ₽"
+    assert _aside_figure("Сентябрь 2026 к сентябрю 2025: 423 млн ₽ против 344 млн ₽") is not None  # the author's slides as before
+
+
+def test_collapsing_spaces_keeps_the_no_break_ones():
+    from verstka.rendering.compose import squash
+
+    assert squash("  Сравнение с III кв. 2025 \n и  дальше ") == "Сравнение с III кв. 2025 и дальше"
+
+
+def _logo_pic(slide, x: float, y: float, w: float, h: float, png: bytes):
+    from verstka.brand.package import BRAND_LOGO_MARK
+
+    pic = slide.shapes.add_picture(io.BytesIO(png), Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)))
+    pic._element.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr").set("title", BRAND_LOGO_MARK)
+    return pic
+
+
+def test_the_brand_logo_comes_back_in_the_decks_one_corner():
+    from verstka.rendering.brand_logo import held_logo_box, hold_brand_logos, put_back_brand_logos
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 20), (0, 119, 255)).save(buf, "PNG")
+    png = buf.getvalue()
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    W, H = 12192000, 6858000
+    for _ in range(3):  # the samples: the logo bottom right
+        _logo_pic(prs.slides.add_slide(prs.slide_layouts[6]), 0.88 * W, 0.9 * H, 0.08 * W, 0.04 * H, png)
+    odd = prs.slides.add_slide(prs.slide_layouts[6])
+    _logo_pic(odd, 0.03 * W, 0.9 * H, 0.08 * W, 0.04 * H, png)  # one sample had it bottom left
+    assert hold_brand_logos(odd) == 1
+    box = held_logo_box(odd)
+    assert box is not None and box[0] > 0.8 * W and box[1] > 0.85 * H  # the deck's corner, known while the slide is laid out
+    put_back_brand_logos(odd, [])
+    pic = next(sh for sh in odd.shapes if sh.shape_type == 13)
+    assert pic.left > 0.8 * W and pic.top > 0.85 * H
+
+
+def test_the_audit_sees_a_logo_missing_or_in_another_corner(tmp_path):
+    from verstka.audit.ir import build_deck_ir
+    from verstka.audit.registry import AuditContext, run_checks
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 20), (0, 119, 255)).save(buf, "PNG")
+    png = buf.getvalue()
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    W, H = 12192000, 6858000
+    for k in range(5):
+        sl = prs.slides.add_slide(prs.slide_layouts[6])
+        sl.shapes.add_textbox(Emu(600000), Emu(600000), Emu(6000000), Emu(800000)).text_frame.text = f"Слайд {k + 1}"
+        if k in (0, 1, 2):
+            _logo_pic(sl, 0.88 * W, 0.9 * H, 0.08 * W, 0.04 * H, png)
+        elif k == 3:
+            _logo_pic(sl, 0.03 * W, 0.9 * H, 0.08 * W, 0.04 * H, png)
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+    ir = build_deck_ir(path)
+    got, _ = run_checks(AuditContext(ir=ir, manifest=None, outline=None), only={"brand_logo_place"})
+    by = {i.slide: i.message for i in got}
+    assert set(by) == {4, 5} and "снизу слева" in by[4] and "нет логотипа" in by[5]

@@ -1003,7 +1003,7 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         # the picture where the structured one squeezed it under the heading and broke its words)
         outline = outline.model_copy(update={"strategy": style})
     if comp in _COVER_COMPS:
-        return put_back_brand_logos(*_render_cover(builder, plan_slide, oslide, manifest, ws, outline))
+        return put_back_brand_logos(*_render_cover(builder, plan_slide, oslide, manifest, ws, outline), corner=False)
     return put_back_brand_logos(*_render_content(builder, comp, oslide, manifest, ws, outline))
 
 
@@ -2181,6 +2181,12 @@ def _content_bottom_limit(slide: Slide, safe_bottom: int, W: int, H: int) -> int
     foot = _foot_top(slide, W, H)
     if foot is not None:
         bottom = min(bottom, foot - int(0.035 * H))  # the content keeps clear of the logos and the footer line
+    from verstka.rendering.brand_logo import held_logo_box
+
+    lb = held_logo_box(slide)
+    if lb is not None and lb[1] + lb[3] / 2 > H / 2:
+        # the brand logo comes back in the deck's corner at the foot (qa3 N-B1): the content stays above it
+        bottom = min(bottom, int(lb[1]) - int(0.025 * H))
     return bottom
 
 
@@ -2603,6 +2609,12 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     cuts = _cutouts_near(slide, Bbox(x=safe_x, y=box.y, w=max(int(safe.x2 * W) - safe_x, box.w), h=box.h), title_ph) if slide.__dict__.get("_verstka_cutouts") else []
     cut_r = min((c.x for c in cuts if c.x >= box.x + int(0.3 * W)), default=None)
     cut_l = max((c.x2 for c in cuts if c.x2 <= box.x + int(0.3 * W)), default=None)
+    from verstka.rendering.brand_logo import held_logo_box
+
+    lb = held_logo_box(slide)
+    if lb is not None and lb[1] < box.y2 and lb[1] + lb[3] > box.y and lb[0] >= box.x + int(0.3 * W):
+        # the brand logo in a top corner of the deck: the heading stops before it (qa3 N-B1)
+        cut_r = min(cut_r, int(lb[0]) - int(0.02 * W)) if cut_r is not None else int(lb[0]) - int(0.02 * W)
     if cut_r is not None:
         w_free = min(w_free, cut_r - box.x)
         warnings.append("заголовок отодвинут от рисунка шаблона")

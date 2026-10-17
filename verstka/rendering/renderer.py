@@ -491,6 +491,16 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
     builder.delete_original_slides()
     _give_geometry(builder)
     _quiet_layout_prompts(builder)
+    try:
+        from verstka.rendering.brand_logo import one_corner
+
+        kinds = {o.id: (o.kind.value if hasattr(o.kind, "value") else str(o.kind)) for o in outline.slides}
+        bookends = {i for i, rs in enumerate(result.slides) if kinds.get(rs.outline_id) in ("title", "section", "thanks")}
+        n_moved = one_corner(builder.prs, skip=bookends)
+        if n_moved:
+            log.info("brand logo moved to the deck's corner on %d layout(s)", n_moved)
+    except Exception:  # noqa: BLE001 - the logos stay where the branded copy put them
+        log.debug("brand logo corner pass failed", exc_info=True)
     builder.save(out_pptx)
     result.seconds = round(time.time() - t0, 2)
     log.info("rendered %d slides to %s in %.1fs", len(result.slides), out_pptx, result.seconds)

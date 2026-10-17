@@ -245,7 +245,11 @@ class _SlideCtx:
             box = self._clear_of_art(el, box)
         self.band_limited = False
         if box and box[2] > 0 and box[3] > 0 and slot is not None and (widen or slot.role in (SlotRole.title, SlotRole.subtitle)):
-            box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
+            self._title_call = slot.role == SlotRole.title
+            try:
+                box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
+            finally:
+                self._title_call = False
         if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role == SlotRole.title and self.pattern.kind not in (PatternKind.title, PatternKind.section, PatternKind.thanks):
             box = self._above_art(el, box)
         if self.band_limited:
@@ -720,7 +724,9 @@ class _SlideCtx:
             if under_start and (backing is None or ob.area < backing[1].area):
                 backing = (other, ob)
         limit = int(self.manifest.tokens.spacing.safe_area.x2 * self.W)
-        obstacles = [element_bbox(o) for o in self.els.values() if o is not el and (backing is None or o is not backing[0]) and not is_nested(o) and o.getparent() is not None]
+        # (the sample's own chart or picture that gives way to the slide's chart or table is no obstacle: WorkSpace p20's
+        # chart picture held a data slide's heading to 30 % of the width, three lines — qa3 L4)
+        obstacles = [element_bbox(o) for o in self.els.values() if o is not el and (backing is None or o is not backing[0]) and not is_nested(o) and o.getparent() is not None and not self.replaced(o)]
         obstacles += [(lambda b: (b.x, b.y, b.w, b.h))(c.bbox.to_emu(self.W, self.H)) for c in chrome_for(self.manifest, self.pattern.layout_part)]
         band = backing[1] if backing is not None else bx
         for b in obstacles:
@@ -759,6 +765,11 @@ class _SlideCtx:
                     return (bx.x, bx.y, free - bx.x, bx.h)
             return box
         back_el, ob = backing
+        head = " ".join(" ".join(texts).split())
+        if getattr(self, "_title_call", False) and getattr(self, "kind", None) is not None and len(head) > 32 and ob.h < 0.1 * self.H and self.kind not in _BOOKENDS:
+            # a heading of a sentence is never set into a label's chip at the chip's size (ЛЦТ: «Полный запуск умных
+            # напоминаний через 3 недели» in the pink pill — qa3 L4): another sample, or the slide is composed
+            raise RuntimeError(f"заголовок в {len(head)} знаков не для плашки-метки образца")
         pad_r = max(ob.x2 - (bx.x + need_w), 0) if bx.x + need_w <= ob.x2 else int(0.012 * self.W)
         inner = ob.x2 - bx.x - int(0.008 * self.W)  # the label's own width is the text's to use
         width = min(max(bx.w, min(need_w, inner)), max(inner, int(0.05 * self.W)))
@@ -1614,7 +1625,18 @@ def _kpi_room(ctx: _SlideCtx, group, items: list[SlideItem], numbers_in_cells: b
     is no place for them (RuntimeError: the renderer takes another sample or composes the figures large). The floor is
     three quarters of the template's slide-heading size."""
     c = getattr(ctx, "oslide_content", None)
-    if c is None or not c.numbers or not items or items[0].number != c.numbers[0].value or numbers_in_cells:
+    if c is None or not items:
+        return
+    kpis = bool(c.numbers) and items[0].number == c.numbers[0].value
+    # (cards led by key figures — a data deck's summary: «+23%», «41%» — need the figure's size too; a step's «1» does not)
+    figures = bool(c.items) and all(i.number for i in items) and any(re.search(r"[%₽+−,×]", i.number or "") for i in items)
+    if figures and any(i.text for i in items):
+        cell_roles = {ctx.role_of.get(sid) for sid in group.member_shape_ids[0]}
+        if not cell_roles & {SlotRole.card_title, SlotRole.card_body, SlotRole.body, SlotRole.bullet_list, SlotRole.number_label}:
+            # cards with a figure, a topic and a sentence in a row of figure-only cells (MyBrand p12): all of it would
+            # shrink into the figure's box (qa3: «+23%» at 11 pt over the conclusion)
+            raise RuntimeError("в ячейках образца место только для цифры, а у карточек есть текст")
+    if not (kpis or figures) or numbers_in_cells:
         return
     if any(s.group_id != group.id for s in ctx.slots(SlotRole.number)):
         return  # the sample's own figure slots take them (a big_number sample)
@@ -1632,12 +1654,19 @@ def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
     or composes the slide."""
     from verstka.rendering.clone_check import ink_box
 
-    if getattr(ctx, "kind", None) not in (PatternKind.cards, PatternKind.two_column, PatternKind.comparison, PatternKind.stat_row):
+    kinds = (PatternKind.cards, PatternKind.two_column, PatternKind.comparison, PatternKind.stat_row)
+    if getattr(ctx, "data_deck", False):
+        kinds += (PatternKind.process,)  # a data deck's «Что дальше»: three steps in tall cards are near empty (qa3 N-L3)
+    if getattr(ctx, "kind", None) not in kinds:
         return  # (an agenda's short lines in its tall cards are the template's agenda)
     # the plates the slide draws (a card is the cell's own filled shape or the panel laid under its text)
     panels = []
-    for e in ctx.els.values():
-        if e.getparent() is None or is_nested(e) or etree.QName(e).localname != "sp" or not _has_fill(e):
+    for sid, e in ctx.els.items():
+        if e.getparent() is None or is_nested(e):
+            continue
+        tag = etree.QName(e).localname
+        # (a filled shape, or a picture the analysis reads as a panel: VK Tech's white cards are pictures)
+        if not ((tag == "sp" and _has_fill(e)) or (tag == "pic" and getattr(ctx, "pic_kind", {}).get(getattr(ctx, "origin", {}).get(sid, sid)) == "panel")):
             continue
         b = element_bbox(e)
         if b and b[2] > 0 and b[3] > 0 and b[2] * b[3] < 0.6 * ctx.W * ctx.H:
@@ -2665,6 +2694,14 @@ def _free_height(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> Bbox:
         ib = ink_box(tel, ctx.typo.primary_family)
         if ib is not None and ib.y2 <= box.y + int(0.01 * ctx.H):
             up = max(up, ib.y2 + int(0.03 * ctx.H))
+        elif ib is not None:
+            # the heading beside the column: the chart never climbs over its band (qa3 N-L1: the Moscow bar 4 % from the
+            # slide's top, over the heading's first line) — its top a little above the heading's at most
+            up = box.y
+            top_cap = int(ib.y - 0.05 * ctx.H)
+            if box.y < top_cap and box.y2 - top_cap >= 0.3 * ctx.H:
+                box = Bbox(x=box.x, y=top_cap, w=box.w, h=box.y2 - top_cap)
+                up = box.y
     keeps_text = bool(oslide.content.paragraphs or oslide.content.bullets)
     tree = ctx.slide._element.cSld.find(q("p:spTree"))
     for el in tree:
@@ -2686,6 +2723,15 @@ def _free_height(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> Bbox:
             up = max(up, o.y2 + gap)
         elif o.y >= box.y2 - int(0.005 * ctx.H):
             down = min(down, o.y - gap)
+    from verstka.rendering.brand_logo import held_logo_box
+
+    lb = held_logo_box(ctx.slide)
+    if lb is not None and min(lb[0] + lb[2], box.x2) - max(lb[0], box.x) > 0:
+        # the brand logo's corner of the deck (qa3 N-B1): the chart grows up to it, never over it
+        if lb[1] >= box.y2 - int(0.005 * ctx.H):
+            down = min(down, int(lb[1]) - gap)
+        elif lb[1] + lb[3] <= box.y + int(0.005 * ctx.H):
+            up = max(up, int(lb[1] + lb[3]) + gap)
     y = min(box.y, up)
     y2 = max(box.y2, down)
     if (y, y2) == (box.y, box.y2):
@@ -6411,7 +6457,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     built — no layout decision sees it — and comes back in its place unless the slide's new content reaches it."""
     slide = builder.clone_slide(pattern.source_slide)
     hold_brand_logos(slide)
-    return put_back_brand_logos(*_render_clone(slide, builder, plan_slide, oslide, pattern, manifest, ws, outline, keep_photos))
+    return put_back_brand_logos(*_render_clone(slide, builder, plan_slide, oslide, pattern, manifest, ws, outline, keep_photos), corner=oslide.kind not in _BOOKENDS)
 
 
 def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, keep_photos: bool) -> tuple[Slide, list[str]]:
@@ -6427,6 +6473,13 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         o_notes = oslide.model_copy(update={"takeaway": None}) if pattern.note_slot and (oslide.takeaway or "").strip() else oslide
         ctx.tail_room, ctx.notes_floor = notes_need(builder, slide, o_notes, outline, manifest, pattern)
     c = oslide.content
+    if oslide.kind not in _BOOKENDS:
+        # a divider's design — its heading under the text (Классика p13: «ЧТО ДАЛЬШЕ» under the list, the list at 7 pt —
+        # qa3 N-L4) — is no place for a content slide: another sample, or the slide is composed
+        t = next((x for x in pattern.slots if x.role == SlotRole.title), None)
+        texts = [x for x in pattern.slots if x.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title)]
+        if t is not None and texts and t.bbox.y >= max(x.bbox.y for x in texts) + 0.1:
+            raise RuntimeError("заголовок образца стоит под текстом: это разделитель, не слайд с содержимым")
     if not _is_bookend(oslide) and not c.image_hint and any(s.data is not None for s in outline.slides):
         # a data deck never lays its slide beside a sample's drawing of its own subject (Marketing Report's map of the
         # USA next to «Что дальше» of a VK Cloud sales deck — live QA, B4): another sample, or the slide is composed
@@ -6437,6 +6490,7 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
     ctx.oslide_content = c
     ctx.data_slide = oslide.data is not None
     ctx.kind = oslide.kind
+    ctx.data_deck = any(x.data is not None for x in outline.slides)
     ctx.verbatim = bool(oslide.verbatim)
     if not _is_bookend(oslide):
         # the sample's own largest empty stretch, before anything is taken off: the gate compares the slide with it;

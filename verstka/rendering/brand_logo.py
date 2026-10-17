@@ -38,6 +38,18 @@ def is_brand_logo(el: etree._Element) -> bool:
     return nv is not None and nv.get("title") == BRAND_LOGO_MARK
 
 
+def is_brand_logo_any(el: etree._Element) -> bool:
+    """A brand logo the branded copy put or put in place of the template's own: marked (`is_brand_logo`) or named
+    «Логотип <бренд>» with the same description (`brand.logos._set_blip`)."""
+    if is_brand_logo(el):
+        return True
+    if etree.QName(el).localname != "pic":
+        return False
+    nv = el.find(f"{{{_P}}}nvPicPr/{{{_P}}}cNvPr")
+    name = (nv.get("name") or "") if nv is not None else ""
+    return name.startswith("Логотип ") and (nv.get("descr") or "") == name
+
+
 def _tree(slide) -> etree._Element:
     return slide._element.find(f"{{{_P}}}cSld/{{{_P}}}spTree")
 
@@ -55,12 +67,74 @@ def hold_brand_logos(slide) -> int:
     return len(held)
 
 
-def put_back_brand_logos(slide, warnings: list[str]):
-    """Вернуть отложенные логотипы поверх собранного слайда; тот, на чьё место (с охранным полем) зашло новое
-    содержимое, не возвращается. (slide, warnings) — как у отрисовщиков."""
+def deck_logo_box(slide) -> Optional[tuple[float, float, float, float]]:
+    """Место логотипа бренда в этой колоде — один угол на всю колоду (qa3 N-B2): угол, в котором брендированная копия
+    ставила логотип на большинстве образцов (там, где брендбук велит и угол свободен, — его угол), с медианными
+    размером и отступами от краёв. Считается один раз на пакет; None — у образцов нет логотипа бренда."""
+    pkg = slide.part.package
+    cache = pkg.__dict__.get("_verstka_logo_box", "unset")
+    if cache != "unset":
+        return cache
+    box = None
+    try:
+        prs = pkg.presentation_part.presentation
+        W, H = float(prs.slide_width), float(prs.slide_height)
+        by: dict = {}
+        for sl in prs.slides:
+            for el in sl._element.iter(f"{{{_P}}}pic"):
+                if not is_brand_logo(el):
+                    continue
+                b = _box(el)
+                if b is None or b[2] <= 0 or b[3] <= 0:
+                    continue
+                corner = ("l" if b[0] + b[2] / 2 < W / 2 else "r", "t" if b[1] + b[3] / 2 < H / 2 else "b")
+                by.setdefault(corner, []).append(b)
+        if by:
+            corner, boxes = max(by.items(), key=lambda kv: len(kv[1]))
+
+            def med(xs):
+                xs = sorted(xs)
+                return xs[len(xs) // 2]
+
+            w, h = med([b[2] for b in boxes]), med([b[3] for b in boxes])
+            dx = med([b[0] if corner[0] == "l" else W - (b[0] + b[2]) for b in boxes])
+            dy = med([b[1] if corner[1] == "t" else H - (b[1] + b[3]) for b in boxes])
+            x = dx if corner[0] == "l" else W - dx - w
+            y = dy if corner[1] == "t" else H - dy - h
+            box = (x, y, w, h)
+    except Exception as e:  # noqa: BLE001 - без общего угла: логотип остаётся на месте образца
+        log.debug("deck logo corner not read: %s", e)
+        box = None
+    pkg.__dict__["_verstka_logo_box"] = box
+    return box
+
+
+def held_logo_box(slide) -> Optional[tuple[float, float, float, float]]:
+    """Место, куда вернётся отложенный логотип бренда (угол колоды), — его не занимает раскладка (qa3 N-B1); None —
+    логотипа на слайде нет."""
+    if slide is None or not slide.__dict__.get(_KEY):
+        return None
+    return deck_logo_box(slide)
+
+
+def put_back_brand_logos(slide, warnings: list[str], corner: bool = True):
+    """Вернуть отложенные логотипы поверх собранного слайда — в угол колоды (`deck_logo_box`; `corner=False` — на место
+    образца: обложка, раздел, финал), один раз; тот, на чьё место (с охранным полем) зашло новое содержимое, не
+    возвращается. (slide, warnings) — как у отрисовщиков."""
     held = slide.__dict__.pop(_KEY, None) if slide is not None else None
     if not held:
         return slide, warnings
+    target = deck_logo_box(slide) if corner else None
+    if target is not None:
+        held = held[:1]  # one logo a slide, in the deck's corner
+        own = _box(held[0])
+        if own is not None and own[2] > 0 and own[3] > 0:
+            # its own proportions at the deck's height, against the corner's edge
+            W = float(slide.part.package.presentation_part.presentation.slide_width)
+            w = target[3] * own[2] / own[3]
+            x = target[0] if target[0] + target[2] / 2 < W / 2 else target[0] + target[2] - w
+            target = (x, target[1], w, target[3])
+        _place(held[0], target)
     tree = _tree(slide)
     ids = [int(e.get("id")) for e in slide._element.iter(f"{{{_P}}}cNvPr") if (e.get("id") or "").isdigit()]
     top = max(ids, default=1)
@@ -86,6 +160,18 @@ def put_back_brand_logos(slide, warnings: list[str]):
     if bad:
         warnings.append(DROPPED)
     return slide, warnings
+
+
+def _place(el: etree._Element, box: tuple[float, float, float, float]) -> None:
+    xfrm = el.find(f"{{{_P}}}spPr/{{{_A}}}xfrm")
+    off = xfrm.find(f"{{{_A}}}off") if xfrm is not None else None
+    ext = xfrm.find(f"{{{_A}}}ext") if xfrm is not None else None
+    if off is None or ext is None:
+        return
+    off.set("x", str(int(box[0])))
+    off.set("y", str(int(box[1])))
+    ext.set("cx", str(int(box[2])))
+    ext.set("cy", str(int(box[3])))
 
 
 def _remove(slide, el: etree._Element) -> None:
@@ -173,3 +259,73 @@ class _LivePackage(PptxPackage):
                 out[rid] = Rel(rid=rid, type=kind, target=str(rel.target_part.partname).lstrip("/"))
         self._rels_cache[part] = out
         return out
+
+
+def one_corner(prs, skip: frozenset | set = frozenset()) -> int:
+    """The finished deck's brand logos in ONE corner (qa3 N-B2): the corner most content slides show it in — the
+    slides' own logos and the ones their layouts draw — and every layout logo elsewhere moved there, at the deck's size,
+    when that place is clear on the layout and on every slide using it (else it stays where the copy put it). Covers
+    and dividers are not counted. Returns how many layout logos moved."""
+    from verstka.rendering.deck import element_bbox
+
+    W, H = float(prs.slide_width), float(prs.slide_height)
+
+    def corner_of(b) -> tuple[str, str]:
+        return ("l" if b[0] + b[2] / 2 < W / 2 else "r", "t" if b[1] + b[3] / 2 < H / 2 else "b")
+
+    def logos(holder) -> list:
+        # (top-level pictures only: a logo inside a group sits in the group's coordinates)
+        return [el for el in holder._element.iter(f"{{{_P}}}pic") if is_brand_logo_any(el) and etree.QName(el.getparent()).localname == "spTree"]
+
+    shown: dict = {}
+    layouts: dict = {}
+    for i, sl in enumerate(prs.slides):
+        if i in skip:
+            continue  # (a cover, a divider, the closing slide: their logo is their sample's)
+        lay = sl.slide_layout
+        own = logos(sl)
+        els = own or logos(lay)
+        for el in els[:1]:
+            b = _box(el)
+            if b is not None and b[2] > 0 and b[3] > 0:
+                shown.setdefault(corner_of(b), []).append(b)
+        if not own:
+            layouts.setdefault(id(lay.part), (lay, []))[1].append(sl)
+    if len(shown) < 2:
+        return 0
+    corner, boxes = max(shown.items(), key=lambda kv: len(kv[1]))
+    h = sorted(b[3] for b in boxes)[len(boxes) // 2]
+    dx = sorted((b[0] if corner[0] == "l" else W - (b[0] + b[2])) for b in boxes)[len(boxes) // 2]
+    dy = sorted((b[1] if corner[1] == "t" else H - (b[1] + b[3])) for b in boxes)[len(boxes) // 2]
+    moved = 0
+    targets: list = [(lay, slides) for lay, slides in layouts.values()]
+    for i, sl in enumerate(prs.slides):
+        if i not in skip and logos(sl):
+            targets.append((sl, []))  # the slide's own logo: checked against the slide itself
+    for lay, slides in targets:
+        for el in logos(lay):
+            b = _box(el)
+            if b is None or b[3] <= 0 or corner_of(b) == corner:
+                continue
+            w = h * b[2] / b[3]
+            x = dx if corner[0] == "l" else W - dx - w
+            y = dy if corner[1] == "t" else H - dy - h
+            pad = 0.01 * H
+            tgt = (x - pad, y - pad, w + 2 * pad, h + 2 * pad)
+
+            def hits(holder) -> bool:
+                for o in holder._element.iter(f"{{{_P}}}sp", f"{{{_P}}}pic", f"{{{_P}}}graphicFrame", f"{{{_P}}}grpSp"):
+                    if o is el or o.getparent() is None or etree.QName(o.getparent()).localname not in ("spTree",):
+                        continue
+                    ob = element_bbox(o)
+                    if not ob or ob[2] * ob[3] >= 0.85 * W * H:
+                        continue
+                    if min(ob[0] + ob[2], tgt[0] + tgt[2]) - max(ob[0], tgt[0]) > 0 and min(ob[1] + ob[3], tgt[1] + tgt[3]) - max(ob[1], tgt[1]) > 0:
+                        return True
+                return False
+
+            if hits(lay) or any(hits(sl) for sl in slides):
+                continue
+            _place(el, (x, y, w, h))
+            moved += 1
+    return moved

@@ -474,3 +474,62 @@ def table_contrast_low(ctx: AuditContext) -> list[Issue]:
             severity = "error" if cr < 2.5 else ("info" if brand else "warn")
             out.append(ctx.new_issue(TABLE_CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{text[:30]}» в таблице (#{color} на #{bg}, нужно {need:g}:1)", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg, "brand_pair": brand}))
     return out
+
+
+# ── qa3 (N-U1): the brand logo on every content slide, in one corner ──────────────────────────────────────────────
+BRAND_LOGO_PLACE = CheckSpec(
+    id="brand_logo_place",
+    title="Логотип бренда не на всех слайдах или в разных углах",
+    severity="warn",
+    category="template",
+    description="В колоде по брендбуку логотип бренда стоит на каждом слайде с содержимым и в одном и том же углу "
+                "(обложка, разделы и финальный слайд — по своим образцам).",
+)
+
+
+@check(BRAND_LOGO_PLACE)
+def brand_logo_place(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.brand_logo import is_brand_logo_any as is_brand_logo
+
+    try:
+        from pptx import Presentation
+
+        prs = Presentation(str(ctx.ir.source))
+    except Exception:  # noqa: BLE001 - no file to read: nothing to say
+        return []
+    W, H = float(prs.slide_width), float(prs.slide_height)
+    kinds = {o.id: (o.kind.value if hasattr(o.kind, "value") else str(o.kind)) for o in (ctx.outline.slides if ctx.outline is not None else [])}
+    corners: dict[int, Optional[str]] = {}
+    any_logo = False
+    for k, (slide, s) in enumerate(zip(prs.slides, ctx.ir.slides), 1):
+        if kinds.get(s.outline_id or "") in ("title", "section", "thanks") or (ctx.outline is None and k == 1):
+            continue
+        corner = None
+        own = [el for el in slide._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}pic") if is_brand_logo(el)]
+        # (the slide's own logo, else the one its layout draws)
+        drawn = own or [el for el in slide.slide_layout._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}pic") if is_brand_logo(el)]
+        for el in drawn:
+            off = el.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}off")
+            ext = el.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}ext")
+            if off is None or ext is None:
+                continue
+            cx, cy = float(off.get("x")) + float(ext.get("cx")) / 2, float(off.get("y")) + float(ext.get("cy")) / 2
+            corner = ("сверху" if cy < H / 2 else "снизу") + " " + ("слева" if cx < W / 3 else ("справа" if cx > 2 * W / 3 else "по центру"))
+            any_logo = True
+            break
+        corners[s.index] = corner
+    if not any_logo:
+        return []
+    out = []
+    missing = [i for i, c in corners.items() if c is None]
+    for i in missing:
+        out.append(ctx.new_issue(BRAND_LOGO_PLACE, i, "На слайде нет логотипа бренда, хотя на других слайдах колоды он есть",
+                                 suggestion="Оставьте под логотип угол колоды: содержимое его обходит."))
+    seen = [c for c in corners.values() if c]
+    if len(set(seen)) > 1:
+        main = max(set(seen), key=seen.count)
+        for i, c in corners.items():
+            if c and c != main:
+                out.append(ctx.new_issue(BRAND_LOGO_PLACE, i, f"Логотип бренда {c}, а на других слайдах — {main}",
+                                         suggestion="Один угол логотипа на всю колоду."))
+    return out

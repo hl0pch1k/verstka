@@ -675,6 +675,15 @@ def _xfrm_box(spPr: Optional[etree._Element]) -> Optional[Bbox]:
 _FIG_RE = re.compile(r"(?<![\w])([+\-−–]?\d[\d\s\u00a0\u202f]*(?:[.,]\d+)?\s?(?:%|₽|×|(?:млн|млрд|тыс)\.?(?![а-яё])|рубл(?:ь|я|ей)(?![а-яё])|руб\.?(?![а-яё])|час(?:а|ов)?(?![а-яё])|ч\.?(?![а-яё])|мин(?:ут[аы]?|\.)?(?![а-яё])|сек(?:унд[аы]?|\.)?(?![а-яё])|дн(?:ей|я|\.)?(?![а-яё])|мес(?:яц(?:а|ев)?|\.)?(?![а-яё])|раз[а]?(?![а-яё]))?(?:\s?₽)?)", re.I)  # a unit is a whole word: «рублей», never «руб|лей»
 
 
+_SPACES_RE = re.compile(r"[ \t\r\n\u2028\u2029]+")
+
+
+def squash(text: Optional[str]) -> str:
+    """A line's spaces collapsed — but never its no-break spaces (qa3 N-L9: `" ".join(x.split())` split on U+00A0
+    too, and «III кв. 2025» of the data layer broke as «III / кв. 2025»)."""
+    return _SPACES_RE.sub(" ", text or "").strip()
+
+
 def highlight_runs(text: str, size: float, color: str, accent: str, bold: bool = False, accent_bold: bool = True, font: Optional[str] = None) -> list[Run]:
     """Figures inside a statement («27 млн ₽», «4 GPU») set in the accent colour: the eye finds the ask. A year
     («сентябрь 2026 к сентябрю 2025», «III кв. 2026») dates the sentence — it is no figure and keeps the text colour."""
@@ -1219,7 +1228,7 @@ class Composer:
         # shrinks and the block keeps its readable steps above it — then the dense steps (never under 2 % of the
         # slide height, B3-5) above the conclusion's own room, then above the smaller one's
         k = self.kit
-        take = " ".join((self.o.takeaway or "").split())
+        take = squash(self.o.takeaway)
         bottom = plan["y_max"] + plan["h"]
         smaller = []
         for size in dict.fromkeys((k.body, k.small)):
@@ -1449,14 +1458,15 @@ class Composer:
         if intro and comp not in ("statement", "quote"):
             area = self._intro(intro, area, formula=intro == (c.formula or "").strip())
         if getattr(self, "_take_lead", False):
-            area = self._lead_line(area, " ".join((self.o.takeaway or "").split()))
+            area = self._lead_line(area, squash(self.o.takeaway))
         if comp == "code" and c.code is not None:
             self.code(area, c.code, list(c.paragraphs) + list(c.bullets))
         elif comp == "formula" and (c.formula or "").strip():
             self.formula(area, c.formula)
         elif comp == "chart_pair" and c.chart is not None and c.chart2 is not None:
             self.chart_pair(area)
-        elif comp in ("table",) and c.table is not None:
+        elif comp in ("table",) and c.table is not None or comp in ("chart_text", "chart") and c.chart is None and c.table is not None:
+            # (a data chart whose rows did not fit is the same data as a table, set again on every pass — `_chart_failed`)
             with self._lines_under(area, list(c.bullets)) as main:
                 self.table(main, c.table)
         elif comp in ("chart_text", "chart") and c.chart is not None:
@@ -2312,7 +2322,7 @@ class Composer:
 
         cols = n if n <= 4 else math.ceil(n / 2)
         cw, pad, inner, fs, one_line = layout(cols)
-        if n == 4 and fs < hero_min and avail.h > 0.55 * area.h:
+        if n == 4 and fs < hero_min and (avail.h > 0.55 * area.h or getattr(self.o, "data", None) is not None):
             # four long figures read as a 2×2 block, not as four small numbers in a row — when the block gives them
             # a larger size (short figures «70 млн», «62» keep their row at 48 pt rather than a grid at 18 pt, B3)
             grid = layout(2)
@@ -2379,8 +2389,11 @@ class Composer:
         label_size = k.body
         for ls in (k.lead, k.body):
             label_size = ls
-            if ls > k.body + 0.05 and fs <= ls + 0.05:
-                continue  # a figure never set under its own label's size (B3: 18 pt figures under 20 pt labels)
+            if ls > k.body + 0.05 and fs <= ls * 1.5 + 0.05:
+                # a figure never set under its own label's size (B3: 18 pt figures under 20 pt labels) — nor next to it:
+                # the label at the lead size only under a figure half as large again (qa3 L3: 33 pt figures over 30 pt
+                # labels read as one size)
+                continue
             if max(para_lines(self.P(x.label, ls, colors.muted), _pt(inner)) for x in numbers) <= 3:
                 break
         # a label word wider than its tile breaks in the middle («Температ / ура», Marketing s8): the row's labels step
@@ -3119,7 +3132,7 @@ class Composer:
         text_h = self.h([best["para"]], best["text_w"])
         best["text_h"] = text_h
         best["h"] = text_h + 2 * best["pad_y"]
-        fig = _aside_figure(text) if self.strategy == "visual" and figure else None
+        fig = _aside_figure(text, self._hero_headline()) if self.strategy == "visual" and figure else None
         if fig and getattr(self.o, "verbatim", False) and not _sole_end_figure(text, fig):
             # the author's sentence is never cut for a figure set large: «Целевое снижение списаний — с 27 000 до 15 000
             # рублей в месяц» read «… — с 27 000» beside «15 000 ₽». Only «label — figure» stands so, nothing lost
@@ -3181,9 +3194,9 @@ class Composer:
             self.strategy == "compact" and bool((self.o.takeaway or "").strip()) and not self._aside
             and getattr(self, "_comp", None) not in (None, "chart", "chart_text", "chart_pair")
         )
-        foot = " ".join((self.o.footnote or "").split())
+        foot = squash(self.o.footnote)
         foot = foot[:1].upper() + foot[1:] if foot[:1].islower() else foot
-        take = "" if (self._aside or self._take_lead) else " ".join((self.o.takeaway or "").split())
+        take = "" if (self._aside or self._take_lead) else squash(self.o.takeaway)
         # the hard floor of the content: the area's foot, above the footnote when there is one (the conclusion's room
         # is not a floor — a block that needs it takes it and the conclusion is said aloud, `_draw_notes`)
         self._floor_y = area.y2
@@ -3280,7 +3293,7 @@ class Composer:
     def _takeaway_to_strip(self, area: Bbox, size: Optional[float] = None, strip: Optional[bool] = None) -> Bbox:
         """The chart the conclusion was to stand beside could not be drawn: the conclusion takes its strip under what
         the slide shows instead (the footnote keeps its place). Returns the area left above the strip."""
-        take = " ".join((self.o.takeaway or "").split())
+        take = squash(self.o.takeaway)
         notes = getattr(self, "_notes", None)
         if not take or (notes and notes[1] is not None):
             return area
@@ -3338,7 +3351,7 @@ class Composer:
                 # place), so the slide has a top and a bottom rather than everything in its upper half
                 y = plan["y_max"]
             return plan, area.x, max(y, area.y), area.w, foot_box
-        take = " ".join((self.o.takeaway or "").split())
+        take = squash(self.o.takeaway)
         top = bottom + int(k.vgap * 1.0)
         # a narrower strip in the free room under the art the area was cut above (trees, a grass band at one side)
         fr = getattr(self, "foot_room", None)
@@ -3369,7 +3382,7 @@ class Composer:
 
     def _said(self) -> str:
         """The line `_draw_notes` says aloud for a conclusion with no room on the slide."""
-        take = " ".join((self.o.takeaway or "").split())
+        take = squash(self.o.takeaway)
         return f"Вывод: {take.rstrip('.')}." if take else ""
 
     def _unsay_conclusion(self) -> None:
@@ -4236,7 +4249,7 @@ class Composer:
         said = " ".join([self.o.headline or "", self.o.subtitle or ""] + side_texts)
         takeaway = None if (pie or kind in ("histogram", "scatter") or (self.o.takeaway or "").strip() or self.o.verbatim) else _series_takeaway(spec, self.outline, said)
         aside = self._takeaway_aside()
-        take = " ".join((self.o.takeaway or "").split())
+        take = squash(self.o.takeaway)
         take = take[:1].upper() + take[1:]
         n0 = len(self.cv.tree)
         tall_h = int(area.h * 0.92)
@@ -4253,7 +4266,7 @@ class Composer:
         if self.strategy == "visual":
             kpis, lines = self._side_split(side_texts)
             if aside:
-                fig = _aside_figure(take) or ""
+                fig = _aside_figure(take, self._hero_headline()) or ""
                 kpis.insert(0, (fig, label_without_figure(take, fig), True))
             elif takeaway is not None:
                 kpis.insert(0, (takeaway[0], takeaway[1], False))
@@ -4281,7 +4294,7 @@ class Composer:
                 self._under_draw(plan, n0)
                 return
         if aside:
-            takeaway = (_aside_figure(take) or "", take)  # a column of callouts did not fit: the conclusion leads the lines
+            takeaway = (_aside_figure(take, self._hero_headline()) or "", take)  # a column of callouts did not fit: the conclusion leads the lines
         show_side = bool(side_texts) or (takeaway is not None and self.strategy != "structured")
         chart_w = int(area.w * (0.64 if show_side else 1.0))
         # (a chart of a data file takes the area's height: its plot is what the slide is for — live QA, H1)
@@ -4337,11 +4350,38 @@ class Composer:
 
     def _chart_failed(self, n0: int, area: Bbox, err: str) -> None:
         """No chart, no caption over an empty frame: a half-built chart goes (and the column set beside it), the slide
-        shows what else it has — the conclusion the column was to hold goes back to its strip."""
+        shows what else it has — the conclusion the column was to hold goes back to its strip. A data file's chart
+        whose rows do not fit is shown as the same data in a table (the data layer's table option)."""
         self._undo(n0)
         if self._takeaway_aside():
             area = self._takeaway_to_strip(area)
+        if getattr(self.o, "data", None) is not None and "строки диаграммы" in err:
+            tbl = self._chart_as_table(self.o.content.chart)
+            if tbl is not None:
+                self.o.content = self.o.content.model_copy(update={"chart": None, "table": tbl})
+                self.table(area, tbl)
+                self.warnings.append(f"{err}: the data shown as a table")
+                return
         self.warnings.append(f"chart failed: {err[:120]}; shown as {self._chart_fallback(area)}")
+
+    def _chart_as_table(self, spec) -> Optional["TableData"]:
+        """The chart's own values as a table: its categories down the first column, a column a series (the axis's
+        name over the categories, each series' name with the unit)."""
+        from verstka.rendering.charts import resolve_series
+        from verstka.schemas.outline import TableData
+        from verstka.data.words import fmt_exact
+
+        try:
+            series = resolve_series(spec, self.outline)
+        except Exception:  # noqa: BLE001
+            return None
+        if not series:
+            return None
+        cats = [str(c) for c in series[0].categories]
+        unit = f", {spec.unit}" if spec.unit else ""
+        cols = [spec.x_title or ""] + [f"{x.name or (spec.y_title or 'Значение')}{unit}" for x in series]
+        rows = [[c] + ["—" if (k >= len(x.values) or x.values[k] is None) else fmt_exact(float(x.values[k])) for x in series] for k, c in enumerate(cats)]
+        return TableData(columns=cols, rows=rows)
 
     def _pair_share(self) -> float:
         """The first chart's share of a pair's width: a trend over time (a line, an area, bars of five periods or more)
@@ -4479,7 +4519,7 @@ class Composer:
         c = self.o.content
         side_texts = [t for t in (list(c.bullets) + list(c.paragraphs)) if t.strip()]
         aside = self._takeaway_aside()
-        take = " ".join((self.o.takeaway or "").split())
+        take = squash(self.o.takeaway)
         gap = int(k.gap * 2.5)
         n0 = len(self.cv.tree)
         region = area
@@ -4504,7 +4544,7 @@ class Composer:
             if pie:
                 # the callouts (the conclusion first) in a row under the charts, in the strip's place
                 if aside:
-                    fig = _aside_figure(take) or ""
+                    fig = _aside_figure(take, self._hero_headline()) or ""
                     kpis.insert(0, (fig, label_without_figure(take[:1].upper() + take[1:], fig), True))
                 row = self._kpi_row_plan(area, kpis, lines) if kpis else None
                 if row is not None and row["main"].h >= 0.6 * area.h:
@@ -4742,6 +4782,11 @@ class Composer:
                     self._trend_ph = min(getattr(self, "_trend_ph", None) or pb.h, pb.h)
                 if getattr(gf, "verstka_cramped", False):
                     self._trend_squeezed = True
+                if getattr(gf, "verstka_rows_fit", True) is False and getattr(self.o, "data", None) is not None:
+                    # a data file's bars whose names the frame cannot hold (charts.verstka_rows_fit): no chart with
+                    # blank rows — the slide takes another sample, or shows the same data as a table (qa3)
+                    need = getattr(gf, "verstka_min_height", None)
+                    return f"строки диаграммы не помещаются: нужно {need:.0f} pt" if need else "строки диаграммы не помещаются"
         except Exception as e:  # noqa: BLE001
             return str(e) or type(e).__name__
         return None
@@ -4786,6 +4831,11 @@ class Composer:
             if err is not None:
                 return err
         return None
+
+    def _hero_headline(self) -> Optional[str]:
+        """The heading whose figures alone may be set large beside a data file's chart (None: any slide of the author's
+        own text keeps the old rule)."""
+        return (self.o.headline or "") if getattr(self.o, "data", None) is not None else None
 
     def chart_need(self, spec) -> int:
         """The least frame height (EMU) in which a data chart keeps a readable plot (`charts.min_frame_height`: the plot
@@ -5406,7 +5456,7 @@ _HEDGE_SIGN = {"около": "≈", "примерно": "≈", "приблизи
 def _sole_end_figure(text: str, fig: Optional[str]) -> bool:
     """The sentence is «label — figure»: its one figure (a year aside) closes it, and the words before it are the
     figure's label (`label_without_figure` takes it off whole)."""
-    t = " ".join((text or "").split())
+    t = squash(text)
     ms = [m for m in _FIG_RE.finditer(t) if not _is_year(m, t)]
     return len(ms) == 1 and bool(fig) and label_without_figure(t, fig) != t
 
@@ -5414,7 +5464,7 @@ def _sole_end_figure(text: str, fig: Optional[str]) -> bool:
 def _first_sentence(text: str) -> str:
     """The first sentence of a conclusion of two or more («Остальные 230 клиентов — 2 167 млн ₽, 62%. Крупнейший …» →
     «Остальные 230 клиентов — 2 167 млн ₽, 62%»); "" when it is one sentence or its first is too short to stand alone."""
-    t = " ".join((text or "").split())
+    t = squash(text)
     for m in re.finditer(r"[.!?](?=\s+[«\"А-ЯЁA-Z0-9])", t):
         head = t[: m.start()].strip()
         if ABBR_END_RE.search(head + "."):
@@ -5428,7 +5478,7 @@ def label_without_figure(text: str, fig: Optional[str]) -> str:
     «22,4%» reads «Рентабельность увеличится», «Месячная выручка составит 1 138 500 ₽» → «Месячная выручка», a figure
     in brackets goes with its brackets. A figure in the middle of the sentence stays (cutting it would break the
     sentence), as does the sentence when too little of it would be left."""
-    text = " ".join((text or "").split())
+    text = squash(text)
     if not fig:
         return text
     want = re.sub(r"\D", "", fig)
@@ -5491,11 +5541,18 @@ def _range_start(text: str, m: "re.Match", nxt: Optional["re.Match"]) -> bool:
     return bool(_RANGE_FROM_RE.search(text[: m.start(1)]))
 
 
-def _aside_figure(text: str) -> Optional[str]:
+def _aside_figure(text: str, headline: Optional[str] = None) -> Optional[str]:
     """The key figure of a conclusion, as the large figure beside the chart: the first sum or share
-    («120 000 рублей» → «120 000 ₽», «112,3%»), else the first figure of three digits or more; None without one."""
+    («120 000 рублей» → «120 000 ₽», «112,3%»), else the first figure of three digits or more; None without one.
+    `headline`: only a figure the slide's heading says is its key figure (qa3 N-L2: «180», the open bin's limit, or
+    «2 167 млн ₽» of the other clients under «Топ-10 клиентов дают 38%» set large) — None when the conclusion has
+    none of the heading's figures. A figure inside quotes («больше 180») is a name, never the key figure."""
     text = text or ""
-    ms = [m for m in _FIG_RE.finditer(text) if not _is_year(m, text)]
+    quoted = [(m.start(), m.end()) for m in re.finditer(r"«[^»]*»", text)]
+    ms = [m for m in _FIG_RE.finditer(text) if not _is_year(m, text) and not any(a <= m.start(1) < b for a, b in quoted)]
+    if headline is not None:
+        heads = {re.sub(r"\D", "", h.group(1)) for h in _FIG_RE.finditer(headline) if not _is_year(h, headline)}
+        ms = [m for m in ms if re.sub(r"\D", "", m.group(1)) in heads]
     # a change «с 13,3% до 22,4%», «от X до Y», «X → Y»: the figure is where it goes, the target (B6) — the first
     # figure beside a growth message read as the old value
     found = [m.group(1).strip() for i, m in enumerate(ms) if not _range_start(text, m, ms[i + 1] if i + 1 < len(ms) else None)]
