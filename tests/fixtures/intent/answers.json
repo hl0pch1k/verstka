@@ -1,0 +1,7246 @@
+{
+"about": "Ответы Qwen3.8-27B (VK inference, qwen38-27b-fp8, мышление выключено) навыку goal_reader 1.0.0 — живой прогон 2026-10-17, по одному вызову на бриф: tests/fixtures/intent/labels.json (168) и holdout.json (30). tables_sha — таблицы, над которыми модель отвечала.",
+"answers": {
+"c4-01A": {
+"reading": {
+"goals": [
+{
+"span": "Какой у нас средний процент завершения курсов по всей платформе?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля завершивших",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Записалось",
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 3.29,
+"tokens_in": 4531,
+"tokens_out": 90,
+"calls": null,
+"tables_sha": [
+"37d1a3cd195ea56a"
+]
+},
+"c4-01B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, какие курсы студенты бросают чаще всего",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля завершивших",
+"dimension": "Курс",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.67,
+"tokens_in": 4528,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"37d1a3cd195ea56a"
+]
+},
+"c4-01C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, какие курсы дочитывают лучше всего",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля завершивших",
+"dimension": "Курс",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": [
+{
+"span": "стоит ли расширять линейку продвинутых программ",
+"reason": "в данных нет динамики по времени или прогноза спроса, чтобы оценить целесообразность расширения",
+"dataset": "d1"
+}
+]
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.59,
+"tokens_in": 4557,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"37d1a3cd195ea56a"
+]
+},
+"c4-02A": {
+"reading": {
+"goals": [
+{
+"span": "Какие магазины не выполнили план в сентябре?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выполнение",
+"dimension": "Магазин",
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": {
+"kind": "plan",
+"name": "План"
+},
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.13,
+"tokens_in": 4661,
+"tokens_out": 92,
+"calls": null,
+"tables_sha": [
+"df6877b14f1ca2b6"
+]
+},
+"c4-02B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни магазины по среднему чеку",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний чек",
+"dimension": "Магазин",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.14,
+"tokens_in": 4659,
+"tokens_out": 75,
+"calls": null,
+"tables_sha": [
+"df6877b14f1ca2b6"
+]
+},
+"c4-02C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, у кого хуже всего с выполнением плана, чтобы разобрать на планёрке.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выполнение",
+"dimension": "Магазин",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.31,
+"tokens_in": 4679,
+"tokens_out": 118,
+"calls": null,
+"tables_sha": [
+"df6877b14f1ca2b6"
+]
+},
+"c4-03A": {
+"reading": {
+"goals": [
+{
+"span": "У какой линии больше всего простоев?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Простои",
+"dimension": "Линия",
+"categories": [],
+"ask": "max",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4580,
+"tokens_out": 113,
+"calls": null,
+"tables_sha": [
+"00ab3e90af7ea978"
+]
+},
+"c4-03B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, как менялся OEE по линиям с начала года",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "OEE",
+"dimension": "Линия",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "2025-01",
+"end": "2025-09",
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.45,
+"tokens_in": 4587,
+"tokens_out": 141,
+"calls": null,
+"tables_sha": [
+"00ab3e90af7ea978"
+]
+},
+"c4-03C": {
+"reading": {
+"goals": [
+{
+"span": "Главное — какая линия работает хуже всех по OEE",
+"dataset": "d1",
+"task": "comparison",
+"metric": "OEE",
+"dimension": "Линия",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": [
+{
+"span": "и стоит ли её модернизировать в первую очередь",
+"reason": "в данных нет информации о стоимости модернизации, сроках окупаемости или приоритетах инвестиций",
+"dataset": "d1"
+}
+]
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.62,
+"tokens_in": 4602,
+"tokens_out": 168,
+"calls": null,
+"tables_sha": [
+"00ab3e90af7ea978"
+]
+},
+"c4-04A": {
+"reading": {
+"goals": [
+{
+"span": "В каком отделе вовлечённость хуже всего?",
+"dataset": "d1",
+"task": "comparison",
+"metric": null,
+"dimension": "Утверждение",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.18,
+"tokens_in": 4680,
+"tokens_out": 104,
+"calls": null,
+"tables_sha": [
+"c0edb404f192ffa0"
+]
+},
+"c4-04B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните отделы по удовлетворённости зарплатой",
+"dataset": "d1",
+"task": "comparison",
+"metric": null,
+"dimension": "Утверждение",
+"categories": [
+"Моя зарплата справедлива"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.33,
+"tokens_in": 4682,
+"tokens_out": 118,
+"calls": null,
+"tables_sha": [
+"c0edb404f192ffa0"
+]
+},
+"c4-04C": {
+"reading": {
+"goals": [
+{
+"span": "Важно понять, где сотрудники меньше всего довольны руководителем по сравнению с остальными отделами.",
+"dataset": "d1",
+"task": "comparison",
+"metric": null,
+"dimension": "Утверждение",
+"categories": [
+"Руководитель даёт обратную связь"
+],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.71,
+"tokens_in": 4706,
+"tokens_out": 137,
+"calls": null,
+"tables_sha": [
+"c0edb404f192ffa0"
+]
+},
+"c4-05A": {
+"reading": {
+"goals": [
+{
+"span": "Как менялось число рейсов за лето?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Рейсов",
+"dimension": "Дата",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.54,
+"tokens_in": 4652,
+"tokens_out": 127,
+"calls": null,
+"tables_sha": [
+"c2e31a0576a8a2e3"
+]
+},
+"c4-05B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи расход топлива по неделям",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Расход топлива",
+"dimension": "Дата",
+"categories": [],
+"ask": null,
+"aggregation": "weighted_mean",
+"weight": "Пробег",
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.44,
+"tokens_in": 4651,
+"tokens_out": 140,
+"calls": null,
+"tables_sha": [
+"c2e31a0576a8a2e3"
+]
+},
+"c4-05C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, снизился ли расход топлива после замены шин в середине августа.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Расход топлива",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2025-07-01",
+"target": "2025-08-15"
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.67,
+"tokens_in": 4670,
+"tokens_out": 115,
+"calls": null,
+"tables_sha": [
+"c2e31a0576a8a2e3"
+]
+},
+"c4-06A": {
+"reading": {
+"goals": [
+{
+"span": "Сколько пользователей мы ожидаем к декабрю?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "MAU прогноз",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "latest",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.27,
+"tokens_in": 4621,
+"tokens_out": 100,
+"calls": null,
+"tables_sha": [
+"95bd0c1fae296d6e"
+]
+},
+"c4-06B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи рост аудитории приложения",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "MAU факт",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.2,
+"tokens_in": 4615,
+"tokens_out": 105,
+"calls": null,
+"tables_sha": [
+"95bd0c1fae296d6e"
+]
+},
+"c4-06C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, насколько выросла месячная аудитория с начала года",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "MAU факт",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2025-01",
+"target": "2025-06"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+},
+{
+"span": "чего мы ждём к концу года",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "MAU прогноз",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "latest",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.85
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.53,
+"tokens_in": 4640,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"95bd0c1fae296d6e"
+]
+},
+"c4-07A": {
+"reading": {
+"goals": [
+{
+"span": "Где дольше всего ждут решения по заявлению?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Срок рассмотрения",
+"dimension": "Регион",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.19,
+"tokens_in": 4556,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"b0110e50bdaa4a97"
+]
+},
+"c4-07B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни регионы по доле онлайн-заявлений",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля онлайн",
+"dimension": "Регион",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.28,
+"tokens_in": 4556,
+"tokens_out": 98,
+"calls": null,
+"tables_sha": [
+"b0110e50bdaa4a97"
+]
+},
+"c4-07C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, в каких регионах рассмотрение занимает больше 15 дней",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Срок рассмотрения",
+"dimension": "Регион",
+"categories": [],
+"ask": "above",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": {
+"value": 15.0,
+"unit": "дн."
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.41,
+"tokens_in": 4573,
+"tokens_out": 139,
+"calls": null,
+"tables_sha": [
+"b0110e50bdaa4a97"
+]
+},
+"c4-08A": {
+"reading": {
+"goals": [
+{
+"span": "Из чего складывается наша аудитория?",
+"dataset": "d1",
+"task": "shares",
+"metric": "Аудитория",
+"dimension": "Канал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.27,
+"tokens_in": 4462,
+"tokens_out": 96,
+"calls": null,
+"tables_sha": [
+"05bbfd4a929514a0"
+]
+},
+"c4-08B": {
+"reading": {
+"goals": [
+{
+"span": "Какой канал приносит больше всего зрителей?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Аудитория",
+"dimension": "Канал",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.09,
+"tokens_in": 4462,
+"tokens_out": 105,
+"calls": null,
+"tables_sha": [
+"05bbfd4a929514a0"
+]
+},
+"c4-08C": {
+"reading": {
+"goals": [
+{
+"span": "Главное — показать, какую долю аудитории дают видеоплатформы по сравнению с телевидением.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля аудитории",
+"dimension": "Канал",
+"categories": [
+"Видеоплатформы",
+"Телевидение"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.62,
+"tokens_in": 4483,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"05bbfd4a929514a0"
+]
+},
+"c4-09A": {
+"reading": {
+"goals": [
+{
+"span": "Где электричество дорожает быстрее всего?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Тарифы",
+"dimension": "Регион",
+"categories": [],
+"ask": "fastest",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.31,
+"tokens_in": 4574,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"8b55748f45d1ccae"
+]
+},
+"c4-09B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни регионы по тарифу 2025 года",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Тарифы",
+"dimension": "Регион",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "latest",
+"start": "2025",
+"end": "2025",
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.17,
+"tokens_in": 4577,
+"tokens_out": 100,
+"calls": null,
+"tables_sha": [
+"8b55748f45d1ccae"
+]
+},
+"c4-09C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, в каком регионе самый низкий тариф",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Тарифы",
+"dimension": "Регион",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "и насколько он вырос с 2021 года",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Тарифы",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2021",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.01,
+"tokens_in": 4598,
+"tokens_out": 219,
+"calls": null,
+"tables_sha": [
+"8b55748f45d1ccae"
+]
+},
+"c4-10A": {
+"reading": {
+"goals": [
+{
+"span": "Какая поликлиника самая загруженная?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Посещений на врача",
+"dimension": "Учреждение",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.27,
+"tokens_in": 4581,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"2ab46d3838e1f2b0"
+]
+},
+"c4-10B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните поликлиники по нагрузке на одного врача",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Посещений на врача",
+"dimension": "Учреждение",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.16,
+"tokens_in": 4584,
+"tokens_out": 103,
+"calls": null,
+"tables_sha": [
+"2ab46d3838e1f2b0"
+]
+},
+"c4-10C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно понять, где не хватает врачей — то есть где на одного врача приходится больше всего посещений.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Посещений на врача",
+"dimension": "Учреждение",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.68,
+"tokens_in": 4603,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"2ab46d3838e1f2b0"
+]
+},
+"c4-11A": {
+"reading": {
+"goals": [
+{
+"span": "Какое среднее время решения заявки по всем категориям?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Среднее время решения",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Заявок",
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.25,
+"tokens_in": 4512,
+"tokens_out": 120,
+"calls": null,
+"tables_sha": [
+"e4870e1a1ab7c18d"
+]
+},
+"c4-11B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, на что уходит больше всего заявок",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Заявок",
+"dimension": "Категория",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.32,
+"tokens_in": 4510,
+"tokens_out": 107,
+"calls": null,
+"tables_sha": [
+"e4870e1a1ab7c18d"
+]
+},
+"c4-11C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим показать, какие категории решаются дольше всего",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Среднее время решения",
+"dimension": "Категория",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "где SLA проседает ниже 90%",
+"dataset": "d1",
+"task": "comparison",
+"metric": "SLA выполнен",
+"dimension": "Категория",
+"categories": [],
+"ask": "below",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": {
+"value": 90.0,
+"unit": "%"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.95,
+"tokens_in": 4534,
+"tokens_out": 220,
+"calls": null,
+"tables_sha": [
+"e4870e1a1ab7c18d"
+]
+},
+"c4-12A": {
+"reading": {
+"goals": [
+{
+"span": "Как менялась средняя цена квадратного метра?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Средняя цена м²",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.5,
+"tokens_in": 4685,
+"tokens_out": 133,
+"calls": null,
+"tables_sha": [
+"63f8f1a124aeef07"
+]
+},
+"c4-12B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи продажи квартир по сравнению с прошлым годом",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Продано квартир",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024-01",
+"target": "2025-01"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.48,
+"tokens_in": 4687,
+"tokens_out": 146,
+"calls": null,
+"tables_sha": [
+"63f8f1a124aeef07"
+]
+},
+"c4-12C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно понять, падает ли спрос — сколько квартир мы продаём сейчас по сравнению с прошлым годом.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Продано квартир",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024-01",
+"target": "2025-01"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.64,
+"tokens_in": 4705,
+"tokens_out": 172,
+"calls": null,
+"tables_sha": [
+"63f8f1a124aeef07"
+]
+},
+"c4-13A": {
+"reading": {
+"goals": [
+{
+"span": "Что даёт основную часть экспортной выручки?",
+"dataset": "d1",
+"task": "shares",
+"metric": "Экспорт, $",
+"dimension": "Продукция",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.03,
+"tokens_in": 4489,
+"tokens_out": 77,
+"calls": null,
+"tables_sha": [
+"f832848cc1d131b9"
+]
+},
+"c4-13B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите структуру экспорта по объёму",
+"dataset": "d1",
+"task": "shares",
+"metric": "Экспорт, т",
+"dimension": "Продукция",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.61,
+"tokens_in": 4488,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"f832848cc1d131b9"
+]
+},
+"c4-13C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим подчеркнуть, что пшеница — главный экспортный товар, и какая у неё доля в долларах.",
+"dataset": "d1",
+"task": "shares",
+"metric": "Экспорт, $",
+"dimension": "Продукция",
+"categories": [
+"Пшеница"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.57,
+"tokens_in": 4515,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"f832848cc1d131b9"
+]
+},
+"c4-14A": {
+"reading": {
+"goals": [
+{
+"span": "Вырос ли турпоток по сравнению с прошлым годом?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.53,
+"tokens_in": 4608,
+"tokens_out": 140,
+"calls": null,
+"tables_sha": [
+"d87898422823c895"
+]
+},
+"c4-14B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи сезонность турпотока",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.12,
+"tokens_in": 4604,
+"tokens_out": 98,
+"calls": null,
+"tables_sha": [
+"d87898422823c895"
+]
+},
+"c4-14C": {
+"reading": {
+"goals": [
+{
+"span": "Важно понять, стал ли летний сезон 2025 сильнее, чем в 2024 году.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Турпоток",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.57,
+"tokens_in": 4627,
+"tokens_out": 162,
+"calls": null,
+"tables_sha": [
+"d87898422823c895"
+]
+},
+"c4-15A": {
+"reading": {
+"goals": [
+{
+"span": "В какой категории больше всего возвратов?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Возвратов",
+"dimension": "Категория",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4501,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"23d70da576199ec1"
+]
+},
+"c4-15B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни категории по доле возвратов",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля возвратов",
+"dimension": "Категория",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4500,
+"tokens_out": 104,
+"calls": null,
+"tables_sha": [
+"23d70da576199ec1"
+]
+},
+"c4-15C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно найти категории, где возвращают больше 10% заказов.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля возвратов",
+"dimension": "Категория",
+"categories": [],
+"ask": "above",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": {
+"value": 10.0,
+"unit": "%"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.57,
+"tokens_in": 4515,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"23d70da576199ec1"
+]
+},
+"c4-16A": {
+"reading": {
+"goals": [
+{
+"span": "Стало ли меньше уходить абонентов?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Ушло",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.26,
+"tokens_in": 4645,
+"tokens_out": 112,
+"calls": null,
+"tables_sha": [
+"0a3f7af109062027"
+]
+},
+"c4-16B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи динамику оттока за последний год",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Отток",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "2024-09",
+"end": "2025-08",
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.57,
+"tokens_in": 4646,
+"tokens_out": 144,
+"calls": null,
+"tables_sha": [
+"0a3f7af109062027"
+]
+},
+"c4-16C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, снизился ли отток после её запуска по сравнению с прошлым годом.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Отток",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024-03",
+"target": "2025-03"
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.57,
+"tokens_in": 4674,
+"tokens_out": 158,
+"calls": null,
+"tables_sha": [
+"0a3f7af109062027"
+]
+},
+"c4-17A": {
+"reading": {
+"goals": [
+{
+"span": "На что уходит больше всего денег в облаке?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Итого за квартал",
+"dimension": "Сервис",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.23,
+"tokens_in": 4607,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"eedae758299b5f00"
+]
+},
+"c4-17B": {
+"reading": {
+"goals": [
+{
+"span": "Как росли расходы на облако за квартал?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Июль",
+"dimension": "Сервис",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "0001-07",
+"end": "0001-09",
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.52,
+"tokens_in": 4606,
+"tokens_out": 156,
+"calls": null,
+"tables_sha": [
+"eedae758299b5f00"
+]
+},
+"c4-17C": {
+"reading": {
+"goals": [
+{
+"span": "Главное — какой сервис дорожает быстрее всех",
+"dataset": "d1",
+"task": "dynamics",
+"metric": null,
+"dimension": "Сервис",
+"categories": [],
+"ask": "fastest",
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "0001-07",
+"end": "0001-09",
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": [
+{
+"span": "и стоит ли переходить на резервирование мощностей",
+"reason": "в данных нет показателей загрузки, доступности или стоимости резервирования для принятия решения",
+"dataset": "d1"
+}
+]
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.91,
+"tokens_in": 4631,
+"tokens_out": 209,
+"calls": null,
+"tables_sha": [
+"eedae758299b5f00"
+]
+},
+"c4-18A": {
+"reading": {
+"goals": [
+{
+"span": "Где у нас перерасход?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Отклонение, ₽",
+"dimension": "Этап",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.24,
+"tokens_in": 4546,
+"tokens_out": 107,
+"calls": null,
+"tables_sha": [
+"a950e9dfe1827617"
+]
+},
+"c4-18B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни этапы по отклонению от плана",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Отклонение, %",
+"dimension": "Этап",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.25,
+"tokens_in": 4547,
+"tokens_out": 100,
+"calls": null,
+"tables_sha": [
+"a950e9dfe1827617"
+]
+},
+"c4-18C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, уложились ли мы в общий бюджет",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Отклонение, ₽",
+"dimension": null,
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": {
+"kind": "plan",
+"name": "План"
+},
+"yes_no": true,
+"confidence": 0.9
+},
+{
+"span": "какой этап превысил план сильнее всего",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Отклонение, %",
+"dimension": "Этап",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.57,
+"tokens_in": 4565,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"a950e9dfe1827617"
+]
+},
+"c4-19A": {
+"reading": {
+"goals": [
+{
+"span": "Какой типичный размер пожертвования?",
+"dataset": "d1",
+"task": "distribution",
+"metric": "Сумма",
+"dimension": null,
+"categories": [],
+"ask": "null",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.07,
+"tokens_in": 4436,
+"tokens_out": 89,
+"calls": null,
+"tables_sha": [
+"9e123cc381958840"
+]
+},
+"c4-19B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, через какой канал приходит больше всего денег",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Сумма",
+"dimension": "Канал",
+"categories": [],
+"ask": "max",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.24,
+"tokens_in": 4436,
+"tokens_out": 117,
+"calls": null,
+"tables_sha": [
+"9e123cc381958840"
+]
+},
+"c4-19C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим показать, как распределены пожертвования по размеру — больше мелких или крупных.",
+"dataset": "d1",
+"task": "distribution",
+"metric": "Сумма",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.52,
+"tokens_in": 4456,
+"tokens_out": 163,
+"calls": null,
+"tables_sha": [
+"9e123cc381958840"
+]
+},
+"c4-20A": {
+"reading": {
+"goals": [
+{
+"span": "Кто лидирует и с каким отрывом?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Очки",
+"dimension": "Команда",
+"categories": [],
+"ask": "margin",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.57,
+"tokens_in": 4653,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"4b39d27b025e09b1"
+]
+},
+"c4-20B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни команды по забитым мячам",
+"dataset": "d1",
+"task": "comparison",
+"metric": null,
+"dimension": "Команда",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.8
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.59,
+"tokens_in": 4650,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"4b39d27b025e09b1"
+]
+},
+"c4-20C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, кто в зоне вылета — у кого меньше всего очков.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Очки",
+"dimension": "Команда",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.13,
+"tokens_in": 4667,
+"tokens_out": 74,
+"calls": null,
+"tables_sha": [
+"4b39d27b025e09b1"
+]
+},
+"c4-21A": {
+"reading": {
+"goals": [
+{
+"span": "В какой школе лучше всего сдали экзамен?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний балл",
+"dimension": "Школа",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.05,
+"tokens_in": 4529,
+"tokens_out": 76,
+"calls": null,
+"tables_sha": [
+"a73a7fc6c72cab8b"
+]
+},
+"c4-21B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните школы по среднему баллу",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний балл",
+"dimension": "Школа",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.47,
+"tokens_in": 4528,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"a73a7fc6c72cab8b"
+]
+},
+"c4-21C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, какой средний балл по району в целом",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний балл",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "mean",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+},
+{
+"span": "какие школы ниже 60 баллов",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний балл",
+"dimension": "Школа",
+"categories": [],
+"ask": "below",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": {
+"value": 60.0,
+"unit": "баллов"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.95,
+"tokens_in": 4545,
+"tokens_out": 214,
+"calls": null,
+"tables_sha": [
+"a73a7fc6c72cab8b"
+]
+},
+"c4-22A": {
+"reading": {
+"goals": [
+{
+"span": "Был ли всплеск продаж в ноябре?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": null,
+"categories": [],
+"ask": "spike",
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "2025-11-01",
+"end": "2025-11-30",
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.53,
+"tokens_in": 4585,
+"tokens_out": 157,
+"calls": null,
+"tables_sha": [
+"a7c8b0a38dc1c2a9"
+]
+},
+"c4-22B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи выручку по неделям",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Дата",
+"categories": [],
+"ask": null,
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.15,
+"tokens_in": 4583,
+"tokens_out": 97,
+"calls": null,
+"tables_sha": [
+"a7c8b0a38dc1c2a9"
+]
+},
+"c4-22C": {
+"reading": {
+"goals": [
+{
+"span": "сколько всего заработали за ноябрь",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": {
+"kind": "range",
+"start": "2025-11-01",
+"end": "2025-11-30",
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "как это соотносится с октябрём",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2025-10-01",
+"target": "2025-11-01"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.59,
+"tokens_in": 4603,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"a7c8b0a38dc1c2a9"
+]
+},
+"c4-23A": {
+"reading": {
+"goals": [
+{
+"span": "Какие линии укладываются в норму по браку?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Брак, ppm",
+"dimension": "Линия",
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": {
+"kind": "column",
+"name": "Норма"
+},
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.58,
+"tokens_in": 4521,
+"tokens_out": 137,
+"calls": null,
+"tables_sha": [
+"96129ffe89db3c46"
+]
+},
+"c4-23B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, у какой линии самый низкий уровень брака",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Брак, ppm",
+"dimension": "Линия",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.01,
+"tokens_in": 4520,
+"tokens_out": 79,
+"calls": null,
+"tables_sha": [
+"96129ffe89db3c46"
+]
+},
+"c4-23C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, какой уровень брака по заводу в целом",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Брак, ppm",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Произведено",
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "какие линии выше 500 ppm",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Брак, ppm",
+"dimension": "Линия",
+"categories": [],
+"ask": "above",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": {
+"value": 500.0,
+"unit": "ppm"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.03,
+"tokens_in": 4536,
+"tokens_out": 234,
+"calls": null,
+"tables_sha": [
+"96129ffe89db3c46"
+]
+},
+"c4-24A": {
+"reading": {
+"goals": [
+{
+"span": "В каком отделе больше всего вакансий в 2025 году?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "2025 Вакансии",
+"dimension": "Отдел",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.26,
+"tokens_in": 4530,
+"tokens_out": 116,
+"calls": null,
+"tables_sha": [
+"bdaa010a43d70016"
+]
+},
+"c4-24B": {
+"reading": {
+"goals": [
+{
+"span": "Как изменился штат по сравнению с прошлым годом?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025 Штат",
+"dimension": "Отдел",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.43,
+"tokens_in": 4526,
+"tokens_out": 142,
+"calls": null,
+"tables_sha": [
+"bdaa010a43d70016"
+]
+},
+"c4-24C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно понять, какие отделы выросли сильнее всех за год.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025 Штат",
+"dimension": "Отдел",
+"categories": [],
+"ask": "fastest",
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.54,
+"tokens_in": 4536,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"bdaa010a43d70016"
+]
+},
+"c4-25A": {
+"reading": {
+"goals": [
+{
+"span": "Какая доля отправлений доставлена вовремя в целом?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доставлено вовремя",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Отправлений",
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.3,
+"tokens_in": 4522,
+"tokens_out": 118,
+"calls": null,
+"tables_sha": [
+"9bcbf49bbaf47e34"
+]
+},
+"c4-25B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни перевозчиков по своевременности",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доставлено вовремя",
+"dimension": "Перевозчик",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.67,
+"tokens_in": 4518,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"9bcbf49bbaf47e34"
+]
+},
+"c4-25C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно понять, с каким перевозчиком хуже всего",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доставлено вовремя",
+"dimension": "Перевозчик",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4536,
+"tokens_out": 110,
+"calls": null,
+"tables_sha": [
+"9bcbf49bbaf47e34"
+]
+},
+"c4-26A": {
+"reading": {
+"goals": [
+{
+"span": "Какой способ оплаты самый популярный?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Транзакций",
+"dimension": "Способ оплаты",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.17,
+"tokens_in": 4484,
+"tokens_out": 105,
+"calls": null,
+"tables_sha": [
+"3a136accc68d4478"
+]
+},
+"c4-26B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи структуру платежей по способам оплаты",
+"dataset": "d1",
+"task": "shares",
+"metric": "Оборот",
+"dimension": "Способ оплаты",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.08,
+"tokens_in": 4485,
+"tokens_out": 89,
+"calls": null,
+"tables_sha": [
+"3a136accc68d4478"
+]
+},
+"c4-26C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим показать, какую долю оборота уже занимает СБП",
+"dataset": "d1",
+"task": "shares",
+"metric": "Оборот",
+"dimension": "Способ оплаты",
+"categories": [
+"СБП"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.33,
+"tokens_in": 4508,
+"tokens_out": 132,
+"calls": null,
+"tables_sha": [
+"3a136accc68d4478"
+]
+},
+"c4-27A": {
+"reading": {
+"goals": [
+{
+"span": "Как росла рекламная выручка?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Квартал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.57,
+"tokens_in": 4553,
+"tokens_out": 160,
+"calls": null,
+"tables_sha": [
+"597a3b54fdb67555"
+]
+},
+"c4-27B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи выручку по годам",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Квартал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.41,
+"tokens_in": 4553,
+"tokens_out": 130,
+"calls": null,
+"tables_sha": [
+"597a3b54fdb67555"
+]
+},
+"c4-27C": {
+"reading": {
+"goals": [
+{
+"span": "Нужно понять, какой рост выручки ожидаем в 2025 году по сравнению с 2024 годом.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Квартал",
+"categories": [],
+"ask": null,
+"aggregation": "sum",
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.67,
+"tokens_in": 4580,
+"tokens_out": 172,
+"calls": null,
+"tables_sha": [
+"597a3b54fdb67555"
+]
+},
+"c4-28A": {
+"reading": {
+"goals": [
+{
+"span": "Какой сектор сократил потребление сильнее всех?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Изменение",
+"dimension": "Сектор",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4515,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"d76a69c350860d34"
+]
+},
+"c4-28B": {
+"reading": {
+"goals": [
+{
+"span": "Сравни сектора по потреблению в 2025 году",
+"dataset": "d1",
+"task": "comparison",
+"metric": "2025",
+"dimension": "Сектор",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "latest",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.33,
+"tokens_in": 4517,
+"tokens_out": 112,
+"calls": null,
+"tables_sha": [
+"d76a69c350860d34"
+]
+},
+"c4-28C": {
+"reading": {
+"goals": [
+{
+"span": "Важно понять, выросло ли общее потребление по сравнению с прошлым годом или снизилось.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": "sum",
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.58,
+"tokens_in": 4532,
+"tokens_out": 157,
+"calls": null,
+"tables_sha": [
+"d76a69c350860d34"
+]
+},
+"c4-29A": {
+"reading": {
+"goals": [
+{
+"span": "Какой средний рейтинг клиники по всем врачам?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средняя оценка",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Отзывов",
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.27,
+"tokens_in": 4552,
+"tokens_out": 117,
+"calls": null,
+"tables_sha": [
+"d318777292eeb64e"
+]
+},
+"c4-29B": {
+"reading": {
+"goals": [
+{
+"span": "Кто из врачей получает самые низкие оценки?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средняя оценка",
+"dimension": "Врач",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.16,
+"tokens_in": 4552,
+"tokens_out": 76,
+"calls": null,
+"tables_sha": [
+"d318777292eeb64e"
+]
+},
+"c4-29C": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, какие специальности оцениваются хуже всего.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средняя оценка",
+"dimension": "Специальность",
+"categories": [],
+"ask": "min",
+"aggregation": "weighted_mean",
+"weight": "Отзывов",
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.6,
+"tokens_in": 4560,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"d318777292eeb64e"
+]
+},
+"c4-30A": {
+"reading": {
+"goals": [
+{
+"span": "Какой тариф растёт быстрее всего?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Абоненты",
+"dimension": "Тариф",
+"categories": [],
+"ask": "fastest",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.14,
+"tokens_in": 4577,
+"tokens_out": 76,
+"calls": null,
+"tables_sha": [
+"07e0f48007974b25"
+]
+},
+"c4-30B": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, сколько всего абонентов на всех тарифах",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Абоненты",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": {
+"kind": "latest",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.32,
+"tokens_in": 4582,
+"tokens_out": 119,
+"calls": null,
+"tables_sha": [
+"07e0f48007974b25"
+]
+},
+"c4-30C": {
+"reading": {
+"goals": [
+{
+"span": "правда ли он теряет абонентов",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Абоненты",
+"dimension": "Тариф",
+"categories": [
+"Базовый"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.53,
+"tokens_in": 4600,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"07e0f48007974b25"
+]
+},
+"c3-01A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, затраты на какой сервис растут быстрее всего.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Стоимость",
+"dimension": "Сервис",
+"categories": [],
+"ask": "fastest",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.38,
+"tokens_in": 4563,
+"tokens_out": 107,
+"calls": null,
+"tables_sha": [
+"b4abf13bd8bf95fa"
+]
+},
+"c3-01B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост затрат по сервисам",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Стоимость",
+"dimension": "Сервис",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "сравните сервисы по стоимости",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Стоимость",
+"dimension": "Сервис",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.58,
+"tokens_in": 4567,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"b4abf13bd8bf95fa"
+]
+},
+"c3-02A": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, что критичных инцидентов стало меньше.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Критичные (P1)",
+"dimension": "Неделя",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.13,
+"tokens_in": 4670,
+"tokens_out": 90,
+"calls": null,
+"tables_sha": [
+"4073464512064b26"
+]
+},
+"c3-02B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите снижение критичных инцидентов.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Критичные (P1)",
+"dimension": "Неделя",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4665,
+"tokens_out": 79,
+"calls": null,
+"tables_sha": [
+"4073464512064b26"
+]
+},
+"c3-03A": {
+"reading": {
+"goals": [
+{
+"span": "Какие сервисы не уложились в SLA в сентябре?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доступность",
+"dimension": "Сервис",
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": {
+"kind": "column",
+"name": "Цель SLA"
+},
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.51,
+"tokens_in": 4497,
+"tokens_out": 139,
+"calls": null,
+"tables_sha": [
+"0094b4a7024401ed"
+]
+},
+"c3-03B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните сервисы по доступности.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доступность",
+"dimension": "Сервис",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.93,
+"tokens_in": 4492,
+"tokens_out": 67,
+"calls": null,
+"tables_sha": [
+"0094b4a7024401ed"
+]
+},
+"c3-04A": {
+"reading": {
+"goals": [
+{
+"span": "Где больше всего обращений остаётся в работе?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "В работе",
+"dimension": "Канал",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.2,
+"tokens_in": 4507,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"9baadeae8b3119b6"
+]
+},
+"c3-04B": {
+"reading": {
+"goals": [
+{
+"span": "Из чего складываются обращения по каналам?",
+"dataset": "d1",
+"task": "shares",
+"metric": "Итого",
+"dimension": "Канал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.09,
+"tokens_in": 4506,
+"tokens_out": 89,
+"calls": null,
+"tables_sha": [
+"9baadeae8b3119b6"
+]
+},
+"c3-05A": {
+"reading": {
+"goals": [
+{
+"span": "За какие лицензии мы переплачиваем — где больше всего свободных мест?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Свободно",
+"dimension": "Продукт",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.53,
+"tokens_in": 4516,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"aaab6cd7bfaff82b"
+]
+},
+"c3-05B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните продукты по свободным местам.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Свободно",
+"dimension": "Продукт",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.47,
+"tokens_in": 4509,
+"tokens_out": 98,
+"calls": null,
+"tables_sha": [
+"aaab6cd7bfaff82b"
+]
+},
+"c3-06A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, как быстро растёт объём хранилища.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Объём данных",
+"dimension": "Квартал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.35,
+"tokens_in": 4559,
+"tokens_out": 112,
+"calls": null,
+"tables_sha": [
+"d3f7775a7d1c0162"
+]
+},
+"c3-06B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост объёма хранилища.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Объём данных",
+"dimension": "Квартал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.23,
+"tokens_in": 4555,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"d3f7775a7d1c0162"
+]
+},
+"c3-07A": {
+"reading": {
+"goals": [
+{
+"span": "Есть ли связь между частотой деплоев и lead time?",
+"dataset": "d1",
+"task": "relationship",
+"metric": "Lead time",
+"dimension": "Деплоев в месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.17,
+"tokens_in": 4557,
+"tokens_out": 97,
+"calls": null,
+"tables_sha": [
+"6fcd29cb0f9c84fb"
+]
+},
+"c3-07B": {
+"reading": {
+"goals": [
+{
+"span": "Есть ли связь между частотой деплоев и lead time?",
+"dataset": "d1",
+"task": "relationship",
+"metric": "Lead time",
+"dimension": "Деплоев в месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.19,
+"tokens_in": 4557,
+"tokens_out": 97,
+"calls": null,
+"tables_sha": [
+"6fcd29cb0f9c84fb"
+]
+},
+"c3-08A": {
+"reading": {
+"goals": [
+{
+"span": "Какой партнёр приносит больше всего выручки?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": "Партнёр",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4495,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"f0e7d0af4ae8face"
+]
+},
+"c3-08B": {
+"reading": {
+"goals": [
+{
+"span": "Кто лидирует среди партнёров по выручке?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": "Партнёр",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.23,
+"tokens_in": 4497,
+"tokens_out": 110,
+"calls": null,
+"tables_sha": [
+"f0e7d0af4ae8face"
+]
+},
+"c3-09A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите долю Центрального округа в продажах.",
+"dataset": "d1",
+"task": "shares",
+"metric": "Доля продаж",
+"dimension": "Федеральный округ",
+"categories": [
+"Центральный"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4454,
+"tokens_out": 109,
+"calls": null,
+"tables_sha": [
+"f81e87f5a1f8ff1c"
+]
+},
+"c3-09B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите структуру продаж по округам.",
+"dataset": "d1",
+"task": "shares",
+"metric": "Доля продаж",
+"dimension": "Федеральный округ",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.1,
+"tokens_in": 4452,
+"tokens_out": 90,
+"calls": null,
+"tables_sha": [
+"f81e87f5a1f8ff1c"
+]
+},
+"c3-10A": {
+"reading": {
+"goals": [
+{
+"span": "Как меняется удержание клиентов в новых когортах?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": null,
+"dimension": "Когорта",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.28,
+"tokens_in": 4744,
+"tokens_out": 105,
+"calls": null,
+"tables_sha": [
+"78aedd6a90ff4457"
+]
+},
+"c3-10B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, как менялось удержание в первый месяц.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Месяц 1",
+"dimension": "Когорта",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.55,
+"tokens_in": 4744,
+"tokens_out": 165,
+"calls": null,
+"tables_sha": [
+"78aedd6a90ff4457"
+]
+},
+"c3-11A": {
+"reading": {
+"goals": [
+{
+"span": "Какой средний NPS по всем продуктам?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "NPS",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Ответов",
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.23,
+"tokens_in": 4451,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"68248e9a36cfd5ad"
+]
+},
+"c3-11B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните продукты по NPS.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "NPS",
+"dimension": "Продукт",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.13,
+"tokens_in": 4449,
+"tokens_out": 94,
+"calls": null,
+"tables_sha": [
+"68248e9a36cfd5ad"
+]
+},
+"c3-12A": {
+"reading": {
+"goals": [
+{
+"span": "Сравните магазины по среднему чеку.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний чек",
+"dimension": "Магазин",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.18,
+"tokens_in": 4513,
+"tokens_out": 99,
+"calls": null,
+"tables_sha": [
+"632334fa587f63f9"
+]
+},
+"c3-12B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните магазины по выручке.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": "Магазин",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.99,
+"tokens_in": 4511,
+"tokens_out": 95,
+"calls": null,
+"tables_sha": [
+"632334fa587f63f9"
+]
+},
+"c3-13A": {
+"reading": {
+"goals": [
+{
+"span": "В каком отделе самый высокий ФОТ на сотрудника?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "ФОТ",
+"dimension": "Отдел",
+"categories": [],
+"ask": "max",
+"aggregation": "mean",
+"weight": "Численность",
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.63,
+"tokens_in": 4466,
+"tokens_out": 125,
+"calls": null,
+"tables_sha": [
+"fb8adb2a0092ff30"
+]
+},
+"c3-13B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните отделы по ФОТ на сотрудника.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "ФОТ",
+"dimension": "Отдел",
+"categories": [],
+"ask": null,
+"aggregation": "mean",
+"weight": "Численность",
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.57,
+"tokens_in": 4466,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"fb8adb2a0092ff30"
+]
+},
+"c3-14A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, где перерасход бюджета.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Остаток",
+"dimension": "Статья расходов",
+"categories": [],
+"ask": "below",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": {
+"value": 0.0,
+"unit": "тыс. ₽"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.7,
+"tokens_in": 4545,
+"tokens_out": 135,
+"calls": null,
+"tables_sha": [
+"bcf5fb89b22b4b8a"
+]
+},
+"c3-14B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите исполнение бюджета по статьям.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Исполнение",
+"dimension": "Статья расходов",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.17,
+"tokens_in": 4543,
+"tokens_out": 95,
+"calls": null,
+"tables_sha": [
+"bcf5fb89b22b4b8a"
+]
+},
+"c3-15A": {
+"reading": {
+"goals": [
+{
+"span": "Сравните тарифы по цене с НДС.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Цена с НДС",
+"dimension": "Тариф",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.15,
+"tokens_in": 4503,
+"tokens_out": 97,
+"calls": null,
+"tables_sha": [
+"2d9f271490bea5e6"
+]
+},
+"c3-15B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите структуру цены тарифов.",
+"dataset": "d1",
+"task": "shares",
+"metric": "Цена с НДС",
+"dimension": "Тариф",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.86,
+"tokens_in": 4500,
+"tokens_out": 53,
+"calls": null,
+"tables_sha": [
+"2d9f271490bea5e6"
+]
+},
+"c3-16A": {
+"reading": {
+"goals": [
+{
+"span": "Какой источник трафика лучше всего конвертирует в заявки?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Конверсия в заявку",
+"dimension": "Источник",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4546,
+"tokens_out": 109,
+"calls": null,
+"tables_sha": [
+"3dbede49ef55f9b7"
+]
+},
+"c3-16B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните источники по конверсии в заявку.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Конверсия в заявку",
+"dimension": "Источник",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.78,
+"tokens_in": 4543,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"3dbede49ef55f9b7"
+]
+},
+"c3-17A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост облачной платформы за последний год.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025",
+"dimension": "Направление",
+"categories": [
+"Облачная платформа"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2024",
+"target": "2025"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.64,
+"tokens_in": 4518,
+"tokens_out": 154,
+"calls": null,
+"tables_sha": [
+"14421582a8b55b2c"
+]
+},
+"c3-17B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост выручки по направлениям.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "2025",
+"dimension": "Направление",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.32,
+"tokens_in": 4517,
+"tokens_out": 121,
+"calls": null,
+"tables_sha": [
+"14421582a8b55b2c"
+]
+},
+"c3-18A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост аудитории за год.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "MAU",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.17,
+"tokens_in": 4523,
+"tokens_out": 101,
+"calls": null,
+"tables_sha": [
+"c7a4ebe5ebacaf25"
+]
+},
+"c3-18B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите динамику MAU.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "MAU",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.1,
+"tokens_in": 4523,
+"tokens_out": 87,
+"calls": null,
+"tables_sha": [
+"c7a4ebe5ebacaf25"
+]
+},
+"c3-19A": {
+"reading": {
+"goals": [
+{
+"span": "Какой регион растёт быстрее всех?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Регион",
+"categories": [],
+"ask": "fastest",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4543,
+"tokens_out": 106,
+"calls": null,
+"tables_sha": [
+"c144c83327b16556"
+]
+},
+"c3-19B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост выручки по регионам",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Регион",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "сравните регионы",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": "Регион",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.64,
+"tokens_in": 4548,
+"tokens_out": 183,
+"calls": null,
+"tables_sha": [
+"c144c83327b16556"
+]
+},
+"c3-20A": {
+"reading": {
+"goals": [
+{
+"span": "Сколько всего отгрузили за полугодие?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Январь",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": {
+"kind": "range",
+"start": "0001-01",
+"end": "0001-06",
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4671,
+"tokens_out": 103,
+"calls": null,
+"tables_sha": [
+"c8dc0aac42e89f88"
+]
+},
+"c3-20B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите динамику отгрузок по складам.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": null,
+"dimension": "Склад",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.18,
+"tokens_in": 4670,
+"tokens_out": 88,
+"calls": null,
+"tables_sha": [
+"c8dc0aac42e89f88"
+]
+},
+"c3-21A": {
+"reading": {
+"goals": [
+{
+"span": "Какой канал лучше всего конвертирует?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Конверсия",
+"dimension": "Канал",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.32,
+"tokens_in": 4473,
+"tokens_out": 105,
+"calls": null,
+"tables_sha": [
+"93a4d16457f1b9a2"
+]
+},
+"c3-21B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните каналы по конверсии.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Конверсия",
+"dimension": "Канал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.0,
+"tokens_in": 4473,
+"tokens_out": 73,
+"calls": null,
+"tables_sha": [
+"93a4d16457f1b9a2"
+]
+},
+"c3-22A": {
+"reading": {
+"goals": [
+{
+"span": "Какой филиал обрабатывает заказы быстрее всех?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Среднее время обработки",
+"dimension": "Филиал",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 0.53,
+"tokens_in": 4508,
+"tokens_out": 2,
+"calls": null,
+"tables_sha": [
+"3b2ddf9906da174e"
+]
+},
+"c3-22B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните филиалы по времени обработки.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Среднее время обработки",
+"dimension": "Филиал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.8,
+"tokens_in": 4507,
+"tokens_out": 107,
+"calls": null,
+"tables_sha": [
+"3b2ddf9906da174e"
+]
+},
+"c3-23A": {
+"reading": {
+"goals": [
+{
+"span": "Кто из операторов отвечает быстрее всех?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Среднее время первого ответа",
+"dimension": "Оператор",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.49,
+"tokens_in": 4488,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"aa78a856a4c16571"
+]
+},
+"c3-23B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните операторов по времени первого ответа.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Среднее время первого ответа",
+"dimension": "Оператор",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.43,
+"tokens_in": 4489,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"aa78a856a4c16571"
+]
+},
+"c3-24A": {
+"reading": {
+"goals": [
+{
+"span": "Какие серверы загружены выше 80%?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Загрузка CPU",
+"dimension": "Сервер",
+"categories": [],
+"ask": "above",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": {
+"value": 80.0,
+"unit": "%"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.35,
+"tokens_in": 4523,
+"tokens_out": 130,
+"calls": null,
+"tables_sha": [
+"f89f698038e6a1a7"
+]
+},
+"c3-24B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите распределение загрузки CPU.",
+"dataset": "d1",
+"task": "distribution",
+"metric": "Загрузка CPU",
+"dimension": "Сервер",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4518,
+"tokens_out": 80,
+"calls": null,
+"tables_sha": [
+"f89f698038e6a1a7"
+]
+},
+"c3-25A": {
+"reading": {
+"goals": [
+{
+"span": "Какие цели квартала выполнены?",
+"dataset": "d1",
+"task": "kpi",
+"metric": null,
+"dimension": null,
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": {
+"kind": "column",
+"name": "Цель MAU"
+},
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.54,
+"tokens_in": 4596,
+"tokens_out": 168,
+"calls": null,
+"tables_sha": [
+"8abcceff01f73f6e"
+]
+},
+"c3-25B": {
+"reading": {
+"goals": [
+{
+"span": "Ключевые показатели квартала в цифрах.",
+"dataset": "d1",
+"task": "kpi",
+"metric": null,
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.5,
+"tokens_in": 4600,
+"tokens_out": 151,
+"calls": null,
+"tables_sha": [
+"8abcceff01f73f6e"
+]
+},
+"c3-26A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост выручки облака.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "II кв. 2026",
+"dimension": "Продукт",
+"categories": [
+"Облако"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2026-Q1",
+"target": "2026-Q2"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.34,
+"tokens_in": 4826,
+"tokens_out": 112,
+"calls": null,
+"tables_sha": [
+"ad4888f09e0bb5e2",
+"a56650d787e6eb71"
+]
+},
+"c3-26B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост выручки облака",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "II кв. 2026",
+"dimension": "Продукт",
+"categories": [
+"Облако"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2026-Q1",
+"target": "2026-Q2"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "как менялась численность разработки",
+"dataset": "d2",
+"task": "dynamics",
+"metric": "II кв. 2026",
+"dimension": "Подразделение",
+"categories": [
+"Разработка"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2026-Q1",
+"target": "2026-Q2"
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.02,
+"tokens_in": 4834,
+"tokens_out": 220,
+"calls": null,
+"tables_sha": [
+"ad4888f09e0bb5e2",
+"a56650d787e6eb71"
+]
+},
+"c3-27A": {
+"reading": {
+"goals": [
+{
+"span": "Главное — показать, что отток клиентов снижается.",
+"dataset": "d2",
+"task": "dynamics",
+"metric": "Отток",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.97,
+"tokens_in": 4797,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"556879481dfe1f1b",
+"c2a6fa36530c56bc",
+"eb184e1272c0fbc9"
+]
+},
+"c3-27B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите снижение оттока клиентов.",
+"dataset": "d2",
+"task": "dynamics",
+"metric": "Отток",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.99,
+"tokens_in": 4793,
+"tokens_out": 102,
+"calls": null,
+"tables_sha": [
+"556879481dfe1f1b",
+"c2a6fa36530c56bc",
+"eb184e1272c0fbc9"
+]
+},
+"c3-30A": {
+"reading": {
+"goals": [
+{
+"span": "Какие товары самые маржинальные?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Рентабельность",
+"dimension": "Номенклатура",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.99,
+"tokens_in": 4644,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"1cbbeb8b464c2fdc"
+]
+},
+"c3-30B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните товары по рентабельности.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Рентабельность",
+"dimension": "Номенклатура",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.95,
+"tokens_in": 4646,
+"tokens_out": 78,
+"calls": null,
+"tables_sha": [
+"1cbbeb8b464c2fdc"
+]
+},
+"c3-31A": {
+"reading": {
+"goals": [
+{
+"span": "У кого из контрагентов самая большая просрочка свыше 90 дней?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Свыше 90 дней",
+"dimension": "Контрагент",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.3,
+"tokens_in": 4611,
+"tokens_out": 118,
+"calls": null,
+"tables_sha": [
+"0adabd83bf1e9fb3"
+]
+},
+"c3-31B": {
+"reading": {
+"goals": [
+{
+"span": "Из чего складывается дебиторская задолженность?",
+"dataset": "d1",
+"task": "shares",
+"metric": "Итого",
+"dimension": "Контрагент",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.62,
+"tokens_in": 4605,
+"tokens_out": 151,
+"calls": null,
+"tables_sha": [
+"0adabd83bf1e9fb3"
+]
+},
+"c3-32A": {
+"reading": {
+"goals": [
+{
+"span": "Был ли всплеск ошибок и когда?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Ошибок 5xx",
+"dimension": "Дата",
+"categories": [],
+"ask": "spike",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.84,
+"tokens_in": 4680,
+"tokens_out": 109,
+"calls": null,
+"tables_sha": [
+"fa7825514bf59664"
+]
+},
+"c3-32B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите динамику ошибок 5xx по дням.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Ошибок 5xx",
+"dimension": "Дата",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.86,
+"tokens_in": 4682,
+"tokens_out": 94,
+"calls": null,
+"tables_sha": [
+"fa7825514bf59664"
+]
+},
+"c3-33A": {
+"reading": {
+"goals": [
+{
+"span": "Сколько менеджеров выполнили план?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выполнение",
+"dimension": "Менеджер",
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": {
+"kind": "column",
+"name": "План"
+},
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.49,
+"tokens_in": 4507,
+"tokens_out": 133,
+"calls": null,
+"tables_sha": [
+"5e8523da509030b5"
+]
+},
+"c3-33B": {
+"reading": {
+"goals": [
+{
+"span": "Как выполнен план по менеджерам?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выполнение",
+"dimension": "Менеджер",
+"categories": [],
+"ask": "meet",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": {
+"kind": "column",
+"name": "План"
+},
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.55,
+"tokens_in": 4506,
+"tokens_out": 132,
+"calls": null,
+"tables_sha": [
+"5e8523da509030b5"
+]
+},
+"c3-34A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите текучесть кадров за полугодие.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Уволено",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.45,
+"tokens_in": 4589,
+"tokens_out": 132,
+"calls": null,
+"tables_sha": [
+"7fe6fc0710146999"
+]
+},
+"c3-34B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, как менялась численность персонала.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "На конец месяца",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4588,
+"tokens_out": 91,
+"calls": null,
+"tables_sha": [
+"7fe6fc0710146999"
+]
+},
+"c3-35A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, как летом растёт PUE.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "PUE",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "0001-06",
+"end": "0001-08",
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.49,
+"tokens_in": 4582,
+"tokens_out": 149,
+"calls": null,
+"tables_sha": [
+"60c37e24178de7e4"
+]
+},
+"c3-35B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост PUE по месяцам.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "PUE",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4581,
+"tokens_out": 104,
+"calls": null,
+"tables_sha": [
+"60c37e24178de7e4"
+]
+},
+"c3-36A": {
+"reading": {
+"goals": [
+{
+"span": "Где у пользователей самая высокая задержка?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "p99",
+"dimension": "Регион",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4506,
+"tokens_out": 104,
+"calls": null,
+"tables_sha": [
+"d3fde7d384f2c390"
+]
+},
+"c3-36B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните регионы по задержке p95.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "p95",
+"dimension": "Регион",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.81,
+"tokens_in": 4509,
+"tokens_out": 107,
+"calls": null,
+"tables_sha": [
+"d3fde7d384f2c390"
+]
+},
+"c3-37A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, как растёт доля мобильного трафика.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Доля мобильного трафика",
+"dimension": "Год",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.53,
+"tokens_in": 4476,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"da2127510e5a0c2c"
+]
+},
+"c3-37B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите рост доли мобильного трафика.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Доля мобильного трафика",
+"dimension": "Год",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.52,
+"tokens_in": 4473,
+"tokens_out": 105,
+"calls": null,
+"tables_sha": [
+"da2127510e5a0c2c"
+]
+},
+"c3-38A": {
+"reading": {
+"goals": [
+{
+"span": "Кто победил на хакатоне и с каким отрывом?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Итого баллов",
+"dimension": "Команда",
+"categories": [],
+"ask": "margin",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.72,
+"tokens_in": 4553,
+"tokens_out": 112,
+"calls": null,
+"tables_sha": [
+"83cae04ef2d81c54"
+]
+},
+"c3-38B": {
+"reading": {
+"goals": [
+{
+"span": "Сравните команды по итоговым баллам.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Итого баллов",
+"dimension": "Команда",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.26,
+"tokens_in": 4546,
+"tokens_out": 96,
+"calls": null,
+"tables_sha": [
+"83cae04ef2d81c54"
+]
+},
+"c3-39A": {
+"reading": {
+"goals": [
+{
+"span": "С каким утверждением сотрудники согласны меньше всего?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Полностью согласен",
+"dimension": "Утверждение",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4547,
+"tokens_out": 108,
+"calls": null,
+"tables_sha": [
+"ffe2635685c14b00"
+]
+},
+"c3-39B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите структуру ответов по утверждениям.",
+"dataset": "d1",
+"task": "shares",
+"metric": null,
+"dimension": "Утверждение",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.16,
+"tokens_in": 4546,
+"tokens_out": 86,
+"calls": null,
+"tables_sha": [
+"ffe2635685c14b00"
+]
+},
+"c3-40A": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, что компания вышла в прибыль.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Прибыль",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.52,
+"tokens_in": 4556,
+"tokens_out": 160,
+"calls": null,
+"tables_sha": [
+"80003209f7f4daba"
+]
+},
+"c3-40B": {
+"reading": {
+"goals": [
+{
+"span": "Покажите динамику прибыли.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Прибыль",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.1,
+"tokens_in": 4553,
+"tokens_out": 87,
+"calls": null,
+"tables_sha": [
+"80003209f7f4daba"
+]
+},
+"sales": {
+"reading": {
+"goals": [
+{
+"span": "Покажи рост выручки",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "range",
+"start": "2026-01",
+"end": "2026-09",
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "сравни регионы",
+"dataset": "d2",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": "Регион",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+},
+{
+"span": "что даёт выручку",
+"dataset": "d3",
+"task": "shares",
+"metric": "Выручка",
+"dimension": "Канал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+},
+{
+"span": "где узкие места",
+"dataset": "d4",
+"task": "distribution",
+"metric": "Минут до ответа",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.6
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 7.92,
+"tokens_in": 5875,
+"tokens_out": 329,
+"calls": null,
+"tables_sha": [
+"d2d107a9fd93d3dc",
+"4ef09294e88e781f",
+"db59df921cf237bb",
+"09805912c0e5878d",
+"37c88f9175137158",
+"4759fa870f90bd39",
+"73bdeba167fdc507"
+]
+},
+"science": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, как подготовка влияет на баллы ЕГЭ",
+"dataset": "d1",
+"task": "relationship",
+"metric": "Средний балл ЕГЭ",
+"dimension": "Подготовка",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "как устроен приём по формам обучения",
+"dataset": "d2",
+"task": "shares",
+"metric": "Всего",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+},
+{
+"span": "как растёт наука",
+"dataset": "d3",
+"task": "dynamics",
+"metric": "Scopus",
+"dimension": "Год",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.85
+},
+{
+"span": "на что ушёл бюджет НИОКР",
+"dataset": "d4",
+"task": "shares",
+"metric": "Бюджет 2026",
+"dimension": "Кафедра",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.9
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.81,
+"tokens_in": 5713,
+"tokens_out": 289,
+"calls": null,
+"tables_sha": [
+"31468144fb9b1974",
+"660c13c80c977d3b",
+"c85fce2e44358a73",
+"174e3f93c15b9372",
+"fa2235fc44ec6d95",
+"f6c28f31b352a389"
+]
+},
+"h-01": {
+"reading": {
+"goals": [
+{
+"span": "Сколько человек всего записалось на курсы?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Записалось",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.11,
+"tokens_in": 4529,
+"tokens_out": 100,
+"calls": 1,
+"tables_sha": [
+"37d1a3cd195ea56a"
+]
+},
+"h-02": {
+"reading": {
+"goals": [
+{
+"span": "Где самый маленький средний чек?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний чек",
+"dimension": "Магазин",
+"categories": [],
+"ask": "min",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4659,
+"tokens_out": 106,
+"calls": 1,
+"tables_sha": [
+"df6877b14f1ca2b6"
+]
+},
+"h-03": {
+"reading": {
+"goals": [
+{
+"span": "Нужен график простоев по месяцам для каждой линии.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Простои",
+"dimension": "Линия",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.03,
+"tokens_in": 4585,
+"tokens_out": 76,
+"calls": 1,
+"tables_sha": [
+"00ab3e90af7ea978"
+]
+},
+"h-04": {
+"reading": {
+"goals": [
+{
+"span": "Сколько всего километров проехал автопарк за квартал?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Пробег",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4655,
+"tokens_out": 99,
+"calls": 1,
+"tables_sha": [
+"c2e31a0576a8a2e3"
+]
+},
+"h-05": {
+"reading": {
+"goals": [
+{
+"span": "Хотим понять, где больше всего жалоб на заявления.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Жалоб на 1000 заявлений",
+"dimension": "Регион",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.14,
+"tokens_in": 4559,
+"tokens_out": 86,
+"calls": 1,
+"tables_sha": [
+"b0110e50bdaa4a97"
+]
+},
+"h-06": {
+"reading": {
+"goals": [
+{
+"span": "Какая доля аудитории приходится на соцсети?",
+"dataset": "d1",
+"task": "shares",
+"metric": "Доля аудитории",
+"dimension": "Канал",
+"categories": [
+"Соцсети"
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.08,
+"tokens_in": 4463,
+"tokens_out": 75,
+"calls": 1,
+"tables_sha": [
+"05bbfd4a929514a0"
+]
+},
+"h-07": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, как менялись тарифы в Тверской области.",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Тарифы",
+"dimension": "Регион",
+"categories": [
+"Тверская обл."
+],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.8,
+"tokens_in": 4579,
+"tokens_out": 182,
+"calls": 1,
+"tables_sha": [
+"8b55748f45d1ccae"
+]
+},
+"h-08": {
+"reading": {
+"goals": [
+{
+"span": "В каких категориях SLA выполняется хуже 85%?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "SLA выполнен",
+"dimension": "Категория",
+"categories": [],
+"ask": "below",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": {
+"value": 85.0,
+"unit": "%"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.44,
+"tokens_in": 4513,
+"tokens_out": 133,
+"calls": 1,
+"tables_sha": [
+"e4870e1a1ab7c18d"
+]
+},
+"h-09": {
+"reading": {
+"goals": [
+{
+"span": "Как менялась выручка девелопера по месяцам?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Выручка",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.15,
+"tokens_in": 4688,
+"tokens_out": 93,
+"calls": 1,
+"tables_sha": [
+"63f8f1a124aeef07"
+]
+},
+"h-10": {
+"reading": {
+"goals": [
+{
+"span": "Нужно показать, сколько всего было заказов.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Заказов",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.14,
+"tokens_in": 4503,
+"tokens_out": 97,
+"calls": 1,
+"tables_sha": [
+"23d70da576199ec1"
+]
+},
+"h-11": {
+"reading": {
+"goals": [
+{
+"span": "Сколько абонентов ушло за последний квартал по сравнению с предыдущим?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Ушло",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": {
+"kind": "compare",
+"start": null,
+"end": null,
+"base": "2025-04",
+"target": "2025-07"
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.3,
+"tokens_in": 4654,
+"tokens_out": 115,
+"calls": 1,
+"tables_sha": [
+"0a3f7af109062027"
+]
+},
+"h-12": {
+"reading": {
+"goals": [
+{
+"span": "Через какой канал приходит меньше всего пожертвований?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Сумма",
+"dimension": "Канал",
+"categories": [],
+"ask": "min",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.28,
+"tokens_in": 4437,
+"tokens_out": 117,
+"calls": 1,
+"tables_sha": [
+"9e123cc381958840"
+]
+},
+"h-13": {
+"reading": {
+"goals": [
+{
+"span": "Покажи, у кого больше всего побед.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "В",
+"dimension": "Команда",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.23,
+"tokens_in": 4652,
+"tokens_out": 104,
+"calls": 1,
+"tables_sha": [
+"4b39d27b025e09b1"
+]
+},
+"h-14": {
+"reading": {
+"goals": [
+{
+"span": "Есть ли школы со средним баллом выше 75?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средний балл",
+"dimension": "Школа",
+"categories": [],
+"ask": "above",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": {
+"value": 75.0,
+"unit": null
+},
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.45,
+"tokens_in": 4533,
+"tokens_out": 135,
+"calls": 1,
+"tables_sha": [
+"a73a7fc6c72cab8b"
+]
+},
+"h-15": {
+"reading": {
+"goals": [
+{
+"span": "Сколько всего брака выпустил завод?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Брак, шт.",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.07,
+"tokens_in": 4517,
+"tokens_out": 68,
+"calls": 1,
+"tables_sha": [
+"96129ffe89db3c46"
+]
+},
+"h-16": {
+"reading": {
+"goals": [
+{
+"span": "У кого самая большая средняя задержка?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Средняя задержка",
+"dimension": "Перевозчик",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4519,
+"tokens_out": 101,
+"calls": 1,
+"tables_sha": [
+"9bcbf49bbaf47e34"
+]
+},
+"h-17": {
+"reading": {
+"goals": [
+{
+"span": "Сравни способы оплаты по числу транзакций.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Транзакций",
+"dimension": "Способ оплаты",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.32,
+"tokens_in": 4488,
+"tokens_out": 101,
+"calls": 1,
+"tables_sha": [
+"3a136accc68d4478"
+]
+},
+"h-18": {
+"reading": {
+"goals": [
+{
+"span": "Какой квартал был лучшим по выручке?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Выручка",
+"dimension": "Квартал",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.27,
+"tokens_in": 4554,
+"tokens_out": 106,
+"calls": 1,
+"tables_sha": [
+"597a3b54fdb67555"
+]
+},
+"h-19": {
+"reading": {
+"goals": [
+{
+"span": "Сравни специальности по числу отзывов.",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Отзывов",
+"dimension": "Специальность",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.16,
+"tokens_in": 4550,
+"tokens_out": 97,
+"calls": 1,
+"tables_sha": [
+"d318777292eeb64e"
+]
+},
+"h-20": {
+"reading": {
+"goals": [
+{
+"span": "Какой тариф самый крупный по числу абонентов сейчас?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Абоненты",
+"dimension": "Тариф",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "latest",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.22,
+"tokens_in": 4582,
+"tokens_out": 88,
+"calls": 1,
+"tables_sha": [
+"07e0f48007974b25"
+]
+},
+"h-21": {
+"reading": {
+"goals": [
+{
+"span": "Сколько всего vCPU-часов потребили за полугодие?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "vCPU-часы",
+"dimension": null,
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.04,
+"tokens_in": 4568,
+"tokens_out": 76,
+"calls": 1,
+"tables_sha": [
+"b4abf13bd8bf95fa"
+]
+},
+"h-22": {
+"reading": {
+"goals": [
+{
+"span": "Где загрузка лицензий ниже 70%?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Загрузка",
+"dimension": "Продукт",
+"categories": [],
+"ask": "below",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": {
+"value": 70.0,
+"unit": "%"
+},
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.08,
+"tokens_in": 4511,
+"tokens_out": 2,
+"calls": 2,
+"tables_sha": [
+"aaab6cd7bfaff82b"
+]
+},
+"h-23": {
+"reading": {
+"goals": [
+{
+"span": "Покажите, из чего складывается выручка по магазинам.",
+"dataset": "d1",
+"task": "shares",
+"metric": "Выручка",
+"dimension": "Магазин",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.41,
+"tokens_in": 4516,
+"tokens_out": 93,
+"calls": 1,
+"tables_sha": [
+"632334fa587f63f9"
+]
+},
+"h-24": {
+"reading": {
+"goals": [
+{
+"span": "Откуда приходит больше всего визитов?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Визиты",
+"dimension": "Источник",
+"categories": [],
+"ask": "max",
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.45,
+"tokens_in": 4542,
+"tokens_out": 104,
+"calls": 1,
+"tables_sha": [
+"3dbede49ef55f9b7"
+]
+},
+"h-25": {
+"reading": {
+"goals": [
+{
+"span": "Какой средний процент заказов, обработанных в срок, по всем филиалам?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Доля в срок",
+"dimension": null,
+"categories": [],
+"ask": "mean",
+"aggregation": "weighted_mean",
+"weight": "Заказов",
+"period": null,
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.6,
+"tokens_in": 4514,
+"tokens_out": 124,
+"calls": 1,
+"tables_sha": [
+"3b2ddf9906da174e"
+]
+},
+"h-26": {
+"reading": {
+"goals": [
+{
+"span": "Как менялась задержка p95 по дням?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Задержка p95",
+"dimension": "Дата",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.41,
+"tokens_in": 4682,
+"tokens_out": 108,
+"calls": 1,
+"tables_sha": [
+"fa7825514bf59664"
+]
+},
+"h-27": {
+"reading": {
+"goals": [
+{
+"span": "Сколько всего запросов по регионам?",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Запросов",
+"dimension": "Регион",
+"categories": [],
+"ask": "total",
+"aggregation": "sum",
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.21,
+"tokens_in": 4507,
+"tokens_out": 107,
+"calls": 1,
+"tables_sha": [
+"d3fde7d384f2c390"
+]
+},
+"h-28": {
+"reading": {
+"goals": [
+{
+"span": "Как менялись расходы компании",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Расходы",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "lower",
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "вышла ли она в прибыль?",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "Прибыль",
+"dimension": "Месяц",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": {
+"kind": "all",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
+"direction": "higher",
+"threshold": null,
+"compare_to": null,
+"yes_no": true,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 2.43,
+"tokens_in": 4559,
+"tokens_out": 293,
+"calls": 1,
+"tables_sha": [
+"80003209f7f4daba"
+]
+},
+"h-29": {
+"reading": {
+"goals": [
+{
+"span": "Сравните отделы по численности",
+"dataset": "d1",
+"task": "comparison",
+"metric": "Численность",
+"dimension": "Отдел",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": [
+{
+"span": "покажите средний возраст сотрудников",
+"reason": "в данных нет колонки с возрастом сотрудников",
+"dataset": "d1"
+}
+]
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.45,
+"tokens_in": 4471,
+"tokens_out": 143,
+"calls": 1,
+"tables_sha": [
+"fb8adb2a0092ff30"
+]
+},
+"h-30": {
+"reading": {
+"goals": [
+{
+"span": "как менялся NPS по кварталам",
+"dataset": "d1",
+"task": "dynamics",
+"metric": "NPS",
+"dimension": "Квартал",
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+},
+{
+"span": "какое типичное время ответа поддержки",
+"dataset": "d2",
+"task": "distribution",
+"metric": "Минут до ответа",
+"dimension": null,
+"categories": [],
+"ask": null,
+"aggregation": null,
+"weight": null,
+"period": null,
+"direction": null,
+"threshold": null,
+"compare_to": null,
+"yes_no": false,
+"confidence": 0.95
+}
+],
+"unanswerable": []
+},
+"model": "qwen38-27b-fp8",
+"error": null,
+"call_seconds": 1.93,
+"tokens_in": 5849,
+"tokens_out": 151,
+"calls": 1,
+"tables_sha": [
+"4759fa870f90bd39",
+"09805912c0e5878d",
+"d2d107a9fd93d3dc",
+"73bdeba167fdc507",
+"db59df921cf237bb",
+"37c88f9175137158",
+"4ef09294e88e781f"
+]
+}
+}
+}

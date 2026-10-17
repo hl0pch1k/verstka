@@ -1,0 +1,23 @@
+name: goal_reader
+version: 1.0.0
+role: llm
+description: >
+  Reads the brief of a deck built from data files and says what it asks, as STRUCTURED goals over the real datasets
+  and columns (verstka/data/intent.py): for each goal the brief's own words, the dataset, the analytical task
+  (dynamics, comparison, shares, distribution, relationship, kpi, reference), the measure column, the breakdown, the
+  categories named, what is asked (largest, smallest, total, overall mean, fastest growth, margin, above or below a
+  threshold, spike, plan met), the aggregation, the period, which direction is better, the threshold with its unit,
+  what to compare with, a yes/no flag and a confidence; and the brief's sentences the data cannot answer, with the
+  reason. It never writes a number of the data: the program checks every part (the quote is in the brief, the columns
+  exist, the task is feasible, the aggregation fits the measure, the threshold's unit is the column's), drops what is
+  wrong and computes everything itself; without the model, or when nothing it says holds, the rules parse the brief.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.data.intent.GoalReading
+params:
+  temperature: 0.0
+  max_tokens: 1500
+changelog:
+  - "1.0.0: second stage, round 10 (2026-10-17): the brief's goals understood by the model and checked by the code;
+    the rules stay the fallback and the cross-check."

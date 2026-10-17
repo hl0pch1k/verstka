@@ -36,6 +36,7 @@ from verstka.data.answer import (
 from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
+from verstka.data.profile import profile_table
 from verstka.data.words import count_words, file_title, fmt_signed, fmt_value, stems_of, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
@@ -122,6 +123,9 @@ class DataStory:
     rephrased: list[dict] = field(default_factory=list)  # {"what", "slide", "from", "to", "accepted", "why"}
     stats: list = field(default_factory=list)  # the storyteller's model calls (what they cost)
     seconds: float = 0.0
+    # the brief's goals as the model understood them and the code checked them (verstka/data/intent.py); None — the
+    # rules parsed the brief (no model)
+    goals_read: Optional[dict] = None
     # the brief's questions and the files that answer them, in the story's order: {"question", "file"} (qa4 NEW-S2)
     questions: list[dict] = field(default_factory=list)
     # the summary's cards: the data slide each was made of and what it says (answer | weak | conclusion) — the model's
@@ -153,6 +157,7 @@ class DataStory:
             "rephrased": sum(1 for r in self.rephrased if r.get("accepted")),
             "rejected": [{k: r.get(k) for k in ("what", "slide", "to", "why")} for r in self.rejected],
             "seconds": round(self.seconds, 2),
+            **({"goals": self.goals_read} if self.goals_read is not None else {}),
             **({"questions": list(self.questions)} if self.questions else {}),
         }
 
@@ -782,12 +787,27 @@ def build_data_story(
     tables = list(tables)
     voice = _Voice(progress)
     voice.say(f"Изучаю данные: {count_words(len(tables), 'таблица', 'таблицы', 'таблиц')}", 0.02, log_it=False)
+    intent, intent_stats = None, []
+    if goals is None and plans is None and use_llm and skills is not None and providers is not None and _has_llm(providers):
+        # the brief's goals understood by the model (one call, every part checked by the code); it fails or says
+        # nothing that holds — the rules parse the brief, as without the model (verstka/data/intent.py)
+        from verstka.data.intent import read_goals, say_goals
+
+        profiles = list(profiles) if profiles is not None else [profile_table(t) for t in tables]
+        intent = read_goals(brief_text, tables, profiles, dataset_ids, skills=skills, providers=providers,
+                            deadline=deadline, stats=intent_stats)
+        goals = intent.goals
+        for line in say_goals(intent):
+            voice.say(line, 0.03)
     plans = list(plans) if plans is not None else plan_datasets(tables, brief_text, profiles, goals=goals)
     ids = list(dataset_ids) if dataset_ids is not None else [p.profile.table_id for p in plans]
     order = story_order(plans, brief_text, goals=goals)
     files = [{"id": i, "file": t.file, "sheet": t.sheet, "sha256": _table_sha(t)} for i, t in zip(ids, tables)]
     notes = [{"file": t.file, "text": " ".join(t.notes.split())[:1500]} for t in tables if (t.notes or "").strip()]
     story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids, notes=notes, brief_text=brief_text)
+    if intent is not None:
+        story.stats.extend(intent_stats)
+        story.goals_read = intent.summary()
 
     # the brief's questions, each with the dataset that answers it: those slides come first, each question gets a card
     # of the summary and the main one is answered on the cover (qa4 NEW-S2)
@@ -819,7 +839,10 @@ def build_data_story(
     entries.append(_Entry(OutlineSlide(id="title", kind=PatternKind.title, headline=title, subtitle=subtitle), "title", keep=100))
 
     # цель текста, о которой нет ни одного файла, не теряется: строка в контексте колоды
-    ctx_lines = _context_lines(brief, title_sentence) + goal_notes(brief_text, plans)
+    from verstka.data.intent import goal_notes as intent_notes
+
+    ctx_lines = _context_lines(brief, title_sentence) + (
+        intent_notes(intent, plans) if intent is not None and intent.goals is not None else goal_notes(brief_text, plans))
     for j in range(0, min(len(ctx_lines), CONTEXT_LINES * MAX_CONTEXT_SLIDES), CONTEXT_LINES):
         chunk = ctx_lines[j : j + CONTEXT_LINES]
         head = "Контекст" if j == 0 else "Контекст (продолжение)"

@@ -215,7 +215,9 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
     mp, reg = _model(ANSWER)
     st = build_data_story(Brief(text=SALES_BRIEF, slide_count=10), sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
     o = st.outline
-    assert len(mp.calls) == 1 and mp.calls[0]["schema"] == "StoryWriting"
+    # the story's model calls: the brief's goals (goal_reader, verstka/data/intent.py) and the connecting text
+    told = [c for c in mp.calls if c["schema"] == "StoryWriting"]
+    assert len(told) == 1 and len(mp.calls) == 2 and mp.calls[0]["schema"] == "GoalReading"
     by = _by_file(o)
     assert o.title == "Продажи VK Cloud в 2026 году" and o.slides[0].headline == o.title
     assert by["Выручка по месяцам.csv"].headline == "Выручка за год выросла на 23%"
@@ -238,7 +240,7 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
     steps = next(s for s in o.slides if s.id == "next-steps")
     assert [i.title for i in steps.content.items] == ["Разобрать узкие места поддержки", "Сократить время ответа поддержки"]
     assert o.planned_by == "model" and st.model == "qwen-test" and st.model_used
-    assert st.usage()["calls"] == 1 and st.usage()["failed"] == 0
+    assert st.usage()["calls"] == 2 and st.usage()["failed"] == 0  # the goals' call and the storyteller's
     assert any("не принято" in x for x in o.agent_log)
 
 
@@ -272,7 +274,7 @@ def test_a_failed_model_leaves_the_deterministic_story(sales):
     st = build_data_story(Brief(text=SALES_BRIEF, slide_count=9), sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
     assert [s.headline for s in st.outline.slides] == [s.headline for s in det.slides]
     assert st.outline.planned_by == "rules" and st.model_error and not st.model_used
-    assert st.usage()["failed"] == 1
+    assert st.usage()["failed"] == 2  # the brief's goals (the rules take over) and the connecting text
     assert any("модель не ответила" in x for x in st.outline.agent_log)
 
 
@@ -310,7 +312,7 @@ def test_the_variants_say_who_wrote_the_plan_and_count_the_storyteller(tmp_path,
     stamp_variants(_Res([v]), st, tmp_path)
     rm = json.loads((vd / "run_manifest.json").read_text(encoding="utf-8"))
     assert rm["planner"]["planned_by"] == "model" and rm["planner"]["model"] == "qwen-test" and "supplied" not in rm["planner"]
-    assert rm["usage"]["calls"] == 3 and "StoryWriting" in rm["usage"]["by_skill"] and "eyes" in rm["usage"]["by_skill"]
+    assert rm["usage"]["calls"] == 4 and "GoalReading" in rm["usage"]["by_skill"] and "StoryWriting" in rm["usage"]["by_skill"] and "eyes" in rm["usage"]["by_skill"]
     assert v.planner["planned_by"] == "model"
     saved = read_story(tmp_path / STORY_FILE)
     assert saved["dataset_ids"] == st.dataset_ids and len(saved["plans"]) == len(sales)
