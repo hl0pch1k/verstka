@@ -408,6 +408,10 @@ def generate_variants(
         # build screen maps «plan: …» to the analyst; the writer's own events put it on «Автор»)
         writer_res = _write_text(brief, skills, rec, budget_end, progress, agent_raw, workspace_root, force=writer is True,
                                  knowledge_id=knowledge_id)
+    elif knowledge_id and brief is not None and writer is not False:
+        # no model: the knowledge base still gives the deck its text — the documents' own sentences, slide by slide
+        writer_res = _kb_text_without_model(brief, knowledge_id, workspace_root)
+    if use_agent or knowledge_id:
         if writer_res is not None:
             fact_warnings.extend(writer_res.warnings)
             if writer_res.written:
@@ -882,6 +886,52 @@ def _brand_warnings(template_id: str, workspace_root, have: list[str]) -> list[s
     from verstka.brand.apply import branded_warnings
 
     return [w for w in branded_warnings(template_id, workspace_root) if w not in have]
+
+
+def _kb_text_without_model(brief: Brief, knowledge_id: str, workspace_root):
+    """Without a model: the deck's text built of the knowledge base's own sentences (verstka/knowledge/compose.py) for
+    a short request or a plan without material of its own; None when the brief has material or the base knows nothing
+    of it. Never raises."""
+    from verstka.ingest.workspace import default_workspace_root
+    from verstka.planning.writer import WriterResult, writer_mode
+
+    try:
+        root = Path(workspace_root) if workspace_root else default_workspace_root()
+        kb = _knowledge(knowledge_id, root)
+        if kb is None:
+            return None
+        mode = writer_mode(brief)
+        if mode.kind == "off":
+            from verstka.planning.topic_writer import kb_plan_mode
+
+            mode = kb_plan_mode(brief, mode)
+        if mode.kind == "off":
+            return None
+        from verstka.knowledge.compose import compose_text
+        from verstka.planning.topic_writer import topic_subject
+        from verstka.planning.writer import with_rules
+
+        subject = topic_subject(mode.topic) or mode.topic
+        text, sources = compose_text(kb, subject, plan=list(mode.plan) or None, slides=int(brief.slide_count or 8))
+        res = WriterResult(mode=mode.kind, topic=mode.topic, lang=mode.language, basis="kb", checked="knowledge",
+                           kb={"id": kb.kb.id, "name": kb.name, "docs": [{"id": k, "title": kb.title_of(k), "url": d.get("url")} for k, d in kb.docs.items()]})
+        if not text:
+            res.status, res.reason = "failed", "knowledge: nothing found"
+            res.warnings.append("knowledge: the base does not know the request (no model to write it)")
+            return res
+        res.text = text
+        res.sources = sources
+        used = list(dict.fromkeys(x["doc"] for x in sources))
+        res.pages_used = [{"title": kb.title_of(d), "url": (kb.docs.get(d) or {}).get("url") or ""} for d in used]
+        res.slides = text.count("\nСлайд ")
+        res.log_lines = [f"Автор: без модели — собрал текст из предложений базы знаний «{kb.name}»: {res.slides + 1} слайдов, у каждого — источник."]
+        res.brief = Brief(text=with_rules(text), slide_count=res.slides + 1, audience=brief.audience, purpose=brief.purpose, language=brief.language,
+                          tone=brief.tone, extra_instructions=brief.extra_instructions)
+        res.status = "written"
+        return res
+    except Exception:  # noqa: BLE001 - the brief is laid out as it is
+        log.warning("knowledge text without a model failed", exc_info=True)
+        return None
 
 
 def _knowledge(knowledge_id: Optional[str], root: Path):

@@ -153,3 +153,20 @@ def test_a_link_adds_its_page_to_the_base(tmp_path):
     src = KbReference(base).source_of("Рынок облачных услуг достиг 210 млрд ₽.")
     assert src.url == "https://example.com/market"
     assert "(https://example.com/market)" in sources_line([src])
+
+
+def test_without_a_model_the_deck_text_is_the_documents_own_sentences_with_sources(kb):
+    from verstka.knowledge.compose import compose_text
+
+    ref = KbReference(kb)
+    text, sources = compose_text(ref, "Итоги", plan=["Выручка по кварталам — покажи на графике", "Что думают клиенты", "Команда и найм", "Риски"])
+    assert text.startswith("Слайд 1. Титульный\nНазвание: «Итоги».")
+    assert "Слайд 2. Выручка по кварталам\n" in text and "| Q3 2026 | 412 | 1 240 |" in text  # the item's table, the ask out of the title
+    assert "Слайд 3. Что думают клиенты" in text and "Отток клиентов за квартал — 2,1%." in text
+    assert "Слайд 5. Риски\nРост цен на оборудование может снизить маржу на 3 п.п." in text
+    assert "| Старт |" not in text  # a table found below the item's best fragment is about something else
+    assert all(ref.unsupported(x["text"]) == set() for x in sources)
+    assert {x["page"] for x in sources} >= {"Клиенты и отзывы", "Команда и найм"}
+    bare, _ = compose_text(ref, "итоги квартала отдела продаж")
+    assert "Слайд 2." in bare and "Отдел продаж облачной платформы." not in bare
+    assert compose_text(ref, "фотосинтез у растений")[0] == ""

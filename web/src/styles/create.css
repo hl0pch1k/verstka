@@ -734,3 +734,5 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .p2-more{align-self:stretch;justify-self:stretch;justify-content:space-between}
   .p2-hx .pp-cta{flex:1 1 100%}
 }
+/* телефон: перетаскивания нет — подсказки «Или перетащите на поле» в меню «Из файла» нет (место — пункту «База знаний») */
+@media (width < 768px){.tx-menu .tx-mdrop{display:none}}

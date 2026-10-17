@@ -301,6 +301,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [improveWait, setImproveWait] = useState<ImproveSource | null>(null);
   // данные и брендбук «Создать» (заводятся ниже, после текста и параметров): «Изменить текст» ставит наборы презентации
   const dataRef = useRef<DataState | null>(null);
+  const kbRef = useRef<KbState | null>(null);
   const editText = useCallback((text: string, preset?: ComposerPreset) => {
     // «Изменить текст» — свой текст поверх прочитанной в фоне презентации: ждущий режим уходит
     setImproveWait(null);
@@ -431,7 +432,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // иначе нужен готовый текст
     const { brief: text, health: h, modelStatus: status, params: p } = latest.current;
     // с файлами данных хватает брифа: слайды соберутся по данным и без модели
-    const withData = (dataRef.current?.cards.length ?? 0) > 0;
+    // с базой знаний тоже: тема — запрос к её документам (и без модели слайды соберутся из их предложений)
+    const withData = (dataRef.current?.cards.length ?? 0) > 0 || (kbRef.current?.kb?.docs.length ?? 0) > 0;
     const issue = textError(text, null, { writer: withData || writerOn({ health: h, status, useModels: p.useModels }) });
     if (!issue) return true;
     setTextIssue(issue);
@@ -453,6 +455,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   dataRef.current = data;
   const kb = useKbState();
+  kbRef.current = kb;
   // файлы приложены: плита 01 сворачивается в полосу, плита 02 встаёт под неё (ui/deck/geometry `fold1`)
   const dataOn = data.cards.length > 0;
   useEffect(() => dispatch({ type: "set", patch: { data: dataOn } }), [dataOn]);

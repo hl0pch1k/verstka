@@ -122,11 +122,12 @@ export function useTextPlate(): TextPlate {
   const readSeq = useRef(0);
   const readBusy = useRef(false);
   const { writer, writes } = useWriting();
-  const { data } = useApp();
+  const { data, kb } = useApp();
   const dataOn = data.cards.length > 0;
   // разбор текста — один раз на изменение текста, для заголовка, тела и полосы 02; с файлами данных хватает брифа
   // (слайды соберутся по данным) — короткий текст тогда «бриф», а не «нужен готовый текст»
-  const line = useMemo(() => textLine(brief, writer || dataOn), [brief, writer, dataOn]);
+  const kbOn = (kb.kb?.docs.length ?? 0) > 0;
+  const line = useMemo(() => textLine(brief, writer || dataOn || kbOn), [brief, writer, dataOn, kbOn]);
   const btnRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dataRef = useRef<HTMLInputElement>(null);

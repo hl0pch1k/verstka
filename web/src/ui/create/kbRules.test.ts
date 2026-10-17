@@ -41,8 +41,8 @@ test("файлы до отправки: формат и размер", () => {
   assert.equal(skippedLine([]), null);
 });
 
-test("подсказка: без модели база не используется", () => {
-  assert.ok(/Без модели/.test(kbHint(false, 2)));
+test("подсказка: без модели слайды — из предложений документов", () => {
+  assert.ok(/предложений самих документов/.test(kbHint(false, 2)));
   assert.ok(/источник/.test(kbHint(true, 2)));
   assert.ok(/Добавьте документы/.test(kbHint(true, 0)));
 });
