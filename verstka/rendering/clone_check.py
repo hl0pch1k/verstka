@@ -74,13 +74,20 @@ SMALL_SHARE = 0.017  # small print (a source line, a caption) never under this s
 
 def body_floor(manifest: TemplateManifest) -> float:
     """The template's body size: running text (a card's text, a step, a bullet, a figure's label) is never set
-    smaller. A template whose scale names no body size (a derived ladder) takes 14 pt, at most 3.1 % of the slide's
-    height (the composer's body there)."""
+    smaller. A template whose scale names no body size takes 14 pt, at most 3.1 % of the slide's height (the
+    composer's body there).
+
+    The declared size is capped where it is a placeholder's size rather than the size of the template's running text
+    (final review C1): a LibreOffice template declares 24–32 pt on a 6.2″ slide, synth_huge 64 pt — as a floor they
+    lifted every sample's text into overflow and broken words and flagged 20 pt bullets. The cap is the composer's own
+    reading of the template's body (`Kit`): 3.1 % of the slide's height on a template whose scale is a derived ladder
+    (a sparse one), 3.7 % otherwise, never under 14 pt; VK Tech's 9, ЛЦТ's 14, Классика's 18 pt stay as declared."""
     typo = manifest.tokens.typography
+    hpt = manifest.slide_size.h / EMU_PER_PT
     got = typo.size_for("body", 0.0)
     if got > 0:
-        return float(got)
-    hpt = manifest.slide_size.h / EMU_PER_PT
+        share = 0.031 if getattr(typo, "derived_sizes", None) else 0.037
+        return float(min(got, max(14.0, round(share * hpt * 2) / 2)))
     return min(14.0, round(0.031 * hpt * 2) / 2)
 
 

@@ -324,7 +324,7 @@ def test_big_csv_is_fast():
         start = time.perf_counter()
         t = read_bytes("big.csv", data)[0]
         best = min(best, time.perf_counter() - start)
-    assert best < 2.0, f"{best:.2f} с"
+    assert best < 6.0, f"{best:.2f} с"  # ≈ 1 с here; a margin for a slower Linux box under load (final review I10)
     assert len(t.rows) == 100_000
     assert t.units == [None, None, "млн ₽", None, "%", None]
     assert t.rows[0][0] == "2020-01-01" and isinstance(t.rows[0][2], float) and isinstance(t.rows[0][3], int)
@@ -814,7 +814,7 @@ def test_formula_column_in_a_big_workbook_reads_fast():
             start = time.perf_counter()
             t = read_bytes("f.xlsx", data)[0]
             best = min(best, time.perf_counter() - start)
-        assert best < 2.0, f"{best:.2f} с"
+        assert best < 6.0, f"{best:.2f} с"  # a margin for a slower Linux box under load (final review I10)
         assert len(t.rows) == 20000 and (t.rows[0][3] == 3) is cached
         assert ("формулы без сохранённых значений" in t.notes) is (not cached)
 

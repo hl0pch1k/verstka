@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from verstka.rendering.lru import Lru, blob_key
 from verstka.schemas.common import Bbox
 
 log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ STEP = 7.0  # a luminance step (0–255) past which a pixel stands off its neigh
 MIN_RUN = 0.22  # a line runs at least this share of the picture's height (width) without a break …
 GAP = 0.012  # … gaps of this share bridged (anti-aliasing, a corner's curve)
 EDGE_MARGIN = 0.012  # lines this close to the picture's border are its border, not a line inside it
-_CACHE: dict = {}
+_CACHE = Lru(48)  # lines and colour grids by picture content and crop (a grid ≈ 1.5 MB), least recently used out first
 
 
 @dataclass(frozen=True)
@@ -101,19 +102,18 @@ def picture_lines(blob: bytes, crop: tuple[float, float, float, float] = (0.0, 0
     must hold, unbroken, over MIN_RUN of the picture. Cached per picture and crop."""
     import numpy as np
 
-    key = (hash(blob), len(blob), crop)
-    if key in _CACHE:
-        return _CACHE[key]
+    key = ("lines", blob_key(blob), crop)
+    got = _CACHE.get(key)
+    if got is not None:
+        return got
     out: list[tuple[bool, float, float, float, float]] = []
     try:
         lum = _lum(blob, crop)
     except Exception:  # noqa: BLE001 - an unreadable picture (EMF, SVG): no lines read
-        _CACHE[key] = out
-        return out
+        return _CACHE.put(key, out)
     h, w = lum.shape
     if h < 20 or w < 20:
-        _CACHE[key] = out
-        return out
+        return _CACHE.put(key, out)
     for vertical in (True, False):
         a = lum if vertical else lum.T  # columns of `a` run along the line
         n_across, n_along = a.shape[1], a.shape[0]
@@ -150,8 +150,7 @@ def picture_lines(blob: bytes, crop: tuple[float, float, float, float] = (0.0, 0
             if pos < EDGE_MARGIN or pos > 1 - EDGE_MARGIN:
                 continue
             out.append((vertical, pos, s / float(n_along), e / float(n_along), st))
-    _CACHE[key] = out
-    return out
+    return _CACHE.put(key, out)
 
 
 def _grounds(slide) -> list[tuple[object, object, Bbox]]:
@@ -161,6 +160,50 @@ def _grounds(slide) -> list[tuple[object, object, Bbox]]:
         return _ground_pictures(slide)
     except Exception:  # noqa: BLE001
         return []
+
+
+def is_photo_blob(blob: bytes) -> bool:
+    """A photograph rather than drawn art (`synth._is_photo`'s measure): an opaque raster with many colours and fine
+    mid-contrast texture, on a 128 px thumbnail. Cached by content."""
+    key = ("photo", blob_key(blob))
+    got = _CACHE.get(key)
+    if got is not None:
+        return got
+    out = False
+    try:
+        import numpy as np
+        from PIL import Image
+
+        im = Image.open(io.BytesIO(blob)).convert("RGBA")
+        im.thumbnail((128, 128))
+        a = np.asarray(im)
+        op = a[..., 3] > 200
+        if op.mean() >= 0.5 and op.sum() >= 400:
+            rgb = a[..., :3][op].astype(np.int32) >> 3
+            colours = len(np.unique(rgb[:, 0] * 1024 + rgb[:, 1] * 32 + rgb[:, 2]))
+            g = np.asarray(im.convert("L"), dtype=np.float32)
+            d = np.abs(np.diff(g, axis=1))
+            both = op[:, 1:] & op[:, :-1]
+            texture = float(((d > 4) & (d < 40))[both].mean()) if both.any() else 0.0
+            out = colours >= 500 and texture >= 0.2
+    except Exception:  # noqa: BLE001 - an unreadable picture: no photograph
+        out = False
+    return _CACHE.put(key, out)
+
+
+def ground_is_photo(slide) -> bool:
+    """Whether a picture under the whole slide is a photograph: its «marks» are the photo itself — text over it is
+    `content_over_art`'s finding, not a designed mark's (lo_candy: candies under every line, counted twice)."""
+    for part, blip, _box in _grounds(slide):
+        rid = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+        if not rid:
+            continue
+        try:
+            if is_photo_blob(part.related_part(rid).blob):
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
 
 
 def ground_lines(slide) -> list[PictureLine]:
@@ -274,10 +317,10 @@ def cell_marks(slide, cells: list[Bbox], sheet_share: float = 0.0) -> list[Optio
             img = part.related_part(rid)
             src = blip.getparent().find("{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect")
             crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
-            key = ("rgb", hash(img.blob), len(img.blob), crop)
-            if key not in _CACHE:
-                _CACHE[key] = _rgb(img.blob, crop)
-            rgb = _CACHE[key]
+            key = ("rgb", blob_key(img.blob), crop)
+            rgb = _CACHE.get(key)
+            if rgb is None:
+                rgb = _CACHE.put(key, _rgb(img.blob, crop))
         except Exception:  # noqa: BLE001 - an unreadable picture: no marks read
             continue
         ph, pw = rgb.shape[:2]

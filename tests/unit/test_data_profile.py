@@ -371,7 +371,7 @@ def test_hundred_thousand_rows_by_ten_columns_in_under_a_second():
     t0 = time.perf_counter()
     p = profile_table(t)
     elapsed = time.perf_counter() - t0
-    assert elapsed < 1.0, f"{elapsed:.2f} с"
+    assert elapsed < 3.0, f"{elapsed:.2f} с"  # a margin for a slower Linux box under load (final review I10)
     assert p.rows == 100_000 and p.cols == 10 and p.size == "large"
     assert [c.type for c in p.columns] == ["date", "id", "category", "category", "money", "number", "percent", "boolean",
                                            "money", "text"]

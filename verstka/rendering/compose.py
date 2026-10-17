@@ -1117,7 +1117,13 @@ class Composer:
                     pass
                 w0 = list(w0) + [f"{gone} sentence(s) of the author's text left to the speaker notes: the area holds the rest at the template's sizes"]
                 self.warnings = list(w0)
-        if self._overflows(n0, area):
+        said_aloud = ALOUD in self.warnings and ALOUD not in w0
+        over_first, short_first = self._overflows(n0, area), bool(getattr(self, "_column_short", False))
+        if over_first or said_aloud or short_first:
+            # (also when the usual sizes say the lines under the block aloud, or leave a column beside a chart longer
+            # than the area or with a word broken: the composer's sizes before the typographic floor set them at the
+            # template's small size — unseen templates, final review C1: lines in the notes, a column over the
+            # conclusion; the dense pass does it now and says so, and a dense setting that brings nothing is undone)
             # the block runs past the foot of its area at every size of the usual ladder: set again denser — sizes
             # below the small size (down to 1.7 % of the slide height), grids instead of long rows, the lines under
             # the block in two columns or in the speaker notes — never drawn past the area
@@ -1212,7 +1218,7 @@ class Composer:
                     self._dense_steps_beside(comp, area, n0, (o0, w0, notes0))
             dense_pass()
             c_now = self.o.content
-            if ALOUD in self.warnings and ALOUD not in w0 and c_now.chart is None and c_now.chart2 is None:
+            if ALOUD in self.warnings and ALOUD not in w0 and ((c_now.chart is None and c_now.chart2 is None) or not (over_first or short_first)):
                 # the dense setting said the lines under the block aloud all the same: it brought nothing onto the
                 # slide, so it keeps nothing of it — the block at its usual sizes in the whole area, the lines in the
                 # speaker notes (VK Tech compact: a ten-row table stepped to 8 pt for lines that left anyway); the
@@ -1558,6 +1564,7 @@ class Composer:
 
     def _compose_body(self, comp: str, area: Bbox) -> None:
         self._band_lift = 0  # (a row of steps set lower than under the heading: `process`)
+        self._column_short = False  # a column beside a chart that no usual size fits (`chart`, `_text_column`)
         c = self.o.content
         kind = self.o.kind
         intro = self._intro_text(comp)
@@ -4452,7 +4459,9 @@ class Composer:
         colour, its figures in the accent), a computed figure of the series under it, then the lines — set dense (a
         short gap between them) at the largest size at which the column fits the height. A hairline at its right
         edge sets it apart from the chart. Returns the height it took."""
-        paras, hh, _ = self._text_column_plan(box, lead, figure, texts)
+        paras, hh, fits = self._text_column_plan(box, lead, figure, texts)
+        if not fits:
+            self._column_short = True  # the dense pass sets it again (`compose`)
         self.cv.text(Bbox(x=box.x, y=box.y, w=box.w, h=hh), paras, name="Chart note")
         return hh
 
@@ -4465,7 +4474,11 @@ class Composer:
             lead = lead[:-1]
         best = None
         fits = False
-        for lead_size, size in ((k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.body, k.body), (k.body, k.small_text)):
+        settings = [(k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.body, k.body), (k.body, k.small_text)]
+        if getattr(self, "_dense", False):
+            dfloor = max(self._dense_floor(), k.small * 0.85)
+            settings += [(k.body, x) for x in reversed(k.sizes) if dfloor - 0.05 <= x < k.small_text - 0.05]
+        for lead_size, size in settings:
             paras: list[Para] = []
             if lead:
                 paras.append(Para(highlight_runs(lead, lead_size, colors.heading, colors.accent if lead_size >= 18 else colors.accent_text, bold=True, accent_bold=True, font=k.font), space_after=lead_size * (0.9 if (texts or figure) else 0)))
@@ -4608,6 +4621,10 @@ class Composer:
             return paras
 
         col_sizes = [None, *[x_ for x_ in k.steps_down(k.lead, k.body) if x_ < k.lead - 0.05], k.small_text]
+        if getattr(self, "_dense", False):
+            dfloor = max(self._dense_floor(), k.small * 0.85)
+            col_sizes += [x_ for x_ in reversed(k.sizes) if dfloor - 0.05 <= x_ < k.small_text - 0.05]
+        col_words = side_texts + ([takeaway[1]] if takeaway is not None else [])
         if show_side and aside and not any(self.h(column(sz), int(w * self.WORD_ROOM)) <= area.h for sz in col_sizes):
             # the slide's conclusion too long for the column beside the chart at every size: its strip under the chart
             # (as `_text_column`'s compact twin above); the column keeps the lines, else the chart takes the width
@@ -4638,8 +4655,10 @@ class Composer:
         for size in col_sizes:
             paras = column(size)
             hh = self.h(paras, int(w * self.WORD_ROOM))
-            if hh <= area.h:
+            if hh <= area.h and self.fits_width(col_words, k.lead if size is None else size, False, w - _emu((k.lead if size is None else size) * 1.1)):
                 break
+        else:
+            self._column_short = True  # no usual size holds the column: the dense pass sets it again (`compose`)
         y = area.y + max(0, int((area.h - hh) * 0.35))
         # a hairline as tall as what it sets apart
         self.cv.line(x - k.gap, y, x - k.gap, y + min(hh, area.h), k.colors.divider, 1.0)

@@ -12,6 +12,7 @@ import io
 import logging
 from typing import Optional
 
+from verstka.rendering.lru import Lru, blob_key
 from verstka.schemas.common import Bbox
 
 log = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ GRID_W, GRID_H = 192, 108  # the ground read on this grid (one cell ≈ 0.5 % of
 COLOR_DIST = 26  # RGB distance from the sheet's colour past which a cell is paint, not the sheet (a pale eraser: ≈ 50)
 EDGE_JUMP = 10  # the median colour jump across a blob's edge under which it is a shade, not an object
 MIN_CELLS = 40  # a blob smaller than this (≈ 0.2 % of the slide) is a texture, a speck — not an object
-_CACHE: dict = {}
+_CACHE = Lru(64)  # decor grids by picture content and crop (≈ 60 KB each), least recently used out first
 
 
 def _ground_pictures(slide) -> list[tuple[object, object, Bbox]]:
@@ -61,9 +62,10 @@ def _grid(part, blip):
     img_part = part.related_part(rid)
     src = blip.getparent().find("{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect")
     crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
-    key = (img_part.partname, len(img_part.blob), crop)
-    if key in _CACHE:
-        return _CACHE[key]
+    key = (blob_key(img_part.blob), crop)  # by content: equal-length pictures of two templates are two pictures (I7)
+    got = _CACHE.get(key)
+    if got is not None:
+        return got
     im = Image.open(io.BytesIO(img_part.blob))
     im.draft("RGB", (GRID_W * 4, GRID_H * 4))
     im = im.convert("RGBA")
@@ -76,8 +78,7 @@ def _grid(part, blip):
     raw = small.tobytes()
     px = [tuple(raw[i:i + 3]) for i in range(0, len(raw), 3)]
     rows = [px[y * GRID_W:(y + 1) * GRID_W] for y in range(GRID_H)]
-    _CACHE[key] = rows
-    return rows
+    return _CACHE.put(key, rows)
 
 
 def _dist(a, b) -> float:

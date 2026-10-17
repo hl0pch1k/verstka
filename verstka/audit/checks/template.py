@@ -564,7 +564,7 @@ HEADLINE_IN_CHIP = CheckSpec(
 BODY_BELOW_TEMPLATE = CheckSpec(
     id="body_below_template",
     title="Основной текст мельче основного кегля шаблона",
-    severity="warn",
+    severity="info",  # a note until calibrated on unseen templates (final review C1)
     category="template",
     description="Строка основного текста (от 25 знаков и четырёх слов: пункт, текст карточки, шаг, подпись цифры) "
                 "набрана мельче основного кегля шаблона (больше чем на полпункта). Сноски, источники, подписи "
@@ -720,9 +720,19 @@ def is_running_text(text: str) -> bool:
     return len(t) >= 25 and len(t.split()) >= 4
 
 
+_SMALL_HERE_RE = re.compile(r"^(?:Photo caption|Label|Takeaway)")
+
+
 def _small_print(e, p, o) -> bool:
-    """A paragraph that is small print by design: a source or a note line, the slide's footnote, a caption."""
+    """A paragraph that is small print by design: a source or a note line, the slide's footnote, a caption — and, for
+    this check, a picture place's description, a figure's label and the conclusion of a slide of data beside or under
+    its chart (final review C1: «Вид теплицы сверху…» at 12 pt took two brief decks from 100 to 91)."""
     if is_small_print(e.name or "", p.text or ""):
+        return True
+    name = e.name or ""
+    if _SMALL_HERE_RE.match(name):
+        return True
+    if name.startswith("Conclusion") and o is not None and getattr(o, "data", None) is not None and (o.content.chart is not None or o.content.table is not None):
         return True
     if o is not None and (o.footnote or "").strip() and (p.text or "").strip()[:30] == (o.footnote or "").strip()[:30]:
         return True

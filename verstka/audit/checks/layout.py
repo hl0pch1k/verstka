@@ -892,7 +892,7 @@ TEXT_OVER_DECOR = CheckSpec(
 @check(TEXT_OVER_DECOR)
 def text_over_decor(ctx: AuditContext) -> list[Issue]:
     from verstka.audit.checks.common import line_boxes
-    from verstka.rendering.picture_lines import _grounds, cell_marks
+    from verstka.rendering.picture_lines import _grounds, cell_marks, ground_is_photo
 
     out: list[Issue] = []
     prs = _deck(ctx)
@@ -905,8 +905,8 @@ def text_over_decor(ctx: AuditContext) -> list[Issue]:
         if kinds.get(s.outline_id or "") in ("title", "section", "thanks") or (not s.outline_id and s.index in (1, n)):
             continue
         try:
-            if not _grounds(slide):
-                continue
+            if not _grounds(slide) or ground_is_photo(slide):
+                continue  # (a photograph under the slide: text over it is `content_over_art`'s — final review C1, lo_candy)
         except Exception:  # noqa: BLE001
             continue
         plates = [o.bbox for o in s.elements if o.type in ("shape", "text", "picture") and (o.fill_hex or o.type == "picture") and fill_alpha(o) >= 0.9 and o.bbox.area > 0]
