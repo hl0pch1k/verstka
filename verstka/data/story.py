@@ -1176,6 +1176,16 @@ def build_data_story(
     if use_llm and skills is not None and providers is not None and _has_llm(providers):
         _tell(story, brief, voice, skills, providers, deadline=deadline, limit=limit, tables=tables)
 
+    # a plan + data (the experts' «примерная структура + данные»): the slides in the order of the author's plan, its
+    # items without data as the author's text, its request last (planning/plan_data.py — the data slides untouched)
+    try:
+        from verstka.planning.plan_data import follow_plan
+
+        for line in follow_plan(story.outline, brief_text, slide_count=limit):
+            voice.say(line, 0.14)
+        outline = story.outline
+    except Exception:  # noqa: BLE001 - the story's own order stays
+        log.warning("the plan's order not applied to the data story", exc_info=True)
     _say_designs(voice, outline)
     outline.agent_log = list(voice.lines) + list(outline.agent_log)
     story.log = list(voice.lines)

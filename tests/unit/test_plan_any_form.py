@@ -296,3 +296,79 @@ def test_finish_deck_is_a_copy():
     o2, said = finish_deck(o, "")
     assert o.slides[1].content.bullets[0] == "Нужна круговая диаграмма."
     assert "Нужна круговая диаграмма." not in o2.slides[1].content.bullets and said
+
+
+# ------------------------------------------------------------------ round 2: plan + data files, tense, large figure, cover
+
+
+def test_a_plan_with_data_files_keeps_the_authors_order():
+    from verstka.data.readers import read_file
+    from verstka.data.story import build_data_story
+    from verstka.planning.brief import parse_brief_text
+
+    folder = ROOT / "examples" / "data-sales-2026"
+    tables = [t for p in sorted(folder.iterdir()) if p.suffix.lower() in {".csv", ".xlsx", ".json", ".txt"} for t in read_file(p)]
+    story = build_data_story(parse_brief_text((PLANS / "sales_plan_with_data.md").read_text(encoding="utf-8")), tables)
+    slides = story.outline.slides
+    assert slides[0].kind == PatternKind.title and slides[0].headline == "Итоги продаж VK Cloud за 9 месяцев"
+    files = [s.data.file for s in slides if s.data is not None and s.data.part[0] == 1]
+    # the key figures first, then one item after another: revenue, NPS, regions, channels, clients, support
+    assert files == ["Итоги квартала.txt", "Выручка по месяцам.csv", "NPS по кварталам.csv", "Регионы.xlsx", "Каналы продаж.json",
+                     "Клиенты.xlsx", "Время ответа поддержки.csv"]
+    # the request, which no file shows, is the author's own slide — last, after the data's summary
+    assert [s.id for s in slides[-2:]] == ["summary", "data-plan-7"]
+    assert "Утвердить найм 12 менеджеров" in " ".join(slides[-1].content.bullets)
+    assert not any(s.id.startswith("context") for s in slides)  # its lines only repeated the plan
+
+
+def test_a_prose_brief_with_data_keeps_the_storys_order():
+    from verstka.planning.plan_data import follow_plan
+    from verstka.schemas.outline import DeckOutline
+
+    o = DeckOutline(title="T", slides=[_slide(1, "title", "T")])
+    assert follow_plan(o, "Итоги продаж за 9 месяцев для правления. Покажи рост выручки, сравни регионы.") == []
+
+
+def test_a_model_heading_never_tells_a_done_fact_as_a_plan_nor_a_plan_as_done():
+    from verstka.planning.meaning import true_tense
+
+    brief = ("Итоги: выручка 1 840 млн рублей, план выполнен на 105%. EBITDA 412 млн рублей, рентабельность 22,4% против 19,8%.\n"
+             "План на 4 квартал — 360 млн ₽.")
+    o = DeckOutline(title="T", planned_by="agent", slides=[
+        _slide(2, headline="План выполнен на 105%, рентабельность достигнет 22,4%"),
+        _slide(3, headline="Выручка выросла до 360 млн ₽"),
+        _slide(4, headline="Рентабельность выросла до 22,4%")])
+    true_tense(o, brief)
+    assert [s.headline for s in o.slides] == ["План выполнен на 105%, рентабельность — 22,4%", "Выручка вырастет до 360 млн ₽",
+                                             "Рентабельность выросла до 22,4%"]
+
+
+def test_the_large_figure_is_the_headings_and_a_count_says_what_it_counts():
+    from verstka.planning.meaning import finish_deck
+    from verstka.schemas.outline import NumberCallout
+
+    brief = "Операционные расходы выросли на 6% к прошлому кварталу, до 1 428 млн рублей, в основном из-за найма 40 инженеров в облачное направление."
+    o = DeckOutline(title="Квартал", planned_by="agent", slides=[_slide(1, "title", "Квартал"), _slide(
+        2, "big_number", "Операционные расходы выросли на 6% до 1 428 млн ₽", content=SlideContent(numbers=[NumberCallout(value="40", label="рост вызван наймом инженеров в облако")]))])
+    o2, _ = finish_deck(o, brief)
+    nums = [(n.value, n.label) for n in o2.slides[1].content.numbers]
+    assert nums == [("1 428 млн ₽", "Операционные расходы"), ("40", "Инженеров в облачное направление")]
+
+
+def test_a_deck_opens_on_its_cover():
+    from verstka.planning.meaning import ensure_cover
+
+    o = DeckOutline(title="Итоги запуска «Почта Плюс»", slides=[_slide(1, headline="Запустили три функции", content=SlideContent(bullets=["a"]))])
+    ensure_cover(o)
+    assert o.slides[0].kind == PatternKind.title and o.slides[0].headline == "Итоги запуска «Почта Плюс»"
+    assert ensure_cover(o) == []
+
+
+def test_a_done_change_is_never_labelled_as_a_goal():
+    from verstka.planning.meaning import true_tense
+
+    brief = "Отдельно — дебиторка: просроченная задолженность снизилась с 96 до 61 млн рублей."
+    o = DeckOutline(title="T", planned_by="agent", slides=[_slide(2, "table", "Просроченная задолженность снизилась с 96 до 61 млн ₽", content=SlideContent(
+        table=TableData(columns=["Показатель", "Сейчас", "Цель"], rows=[["Просроченная задолженность", "96 млн ₽", "61 млн ₽"]])))])
+    true_tense(o, brief)
+    assert o.slides[0].content.table.columns == ["Показатель", "Было", "Стало"]
