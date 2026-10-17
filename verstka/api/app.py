@@ -755,6 +755,28 @@ def _generation_data(req: GenerateRequest) -> GenerationData:
     return data
 
 
+def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: str, gdir: Path, progress, use_models: bool) -> DeckOutline:
+    """The data story's outline with the knowledge base's slides beside it (never raises: the data deck stays)."""
+    from verstka.knowledge.with_data import add_knowledge
+    from verstka.pipeline.generate import _event_sink, _knowledge
+
+    try:
+        kb = _knowledge(knowledge_id, store.root)
+        if kb is None:
+            return outline
+        part = add_knowledge(outline, brief, kb, skills=skills() if use_models else None, providers=providers() if use_models else None,
+                             progress=_event_sink(progress))
+        if part.writer is not None:
+            try:
+                part.writer.write_files(gdir)
+            except OSError:
+                log.debug("writer.json of the knowledge part not written", exc_info=True)
+        return part.outline
+    except Exception:  # noqa: BLE001 - the data deck is built as it is
+        log.warning("knowledge base beside the data failed", exc_info=True)
+        return outline
+
+
 def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: Optional[GenerationData] = None) -> dict:
     from verstka.pipeline.generate import generate_variants
 
@@ -793,9 +815,15 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
             brief, data.tables, profiles=data.profiles, dataset_ids=data.dataset_ids, manifest=manifest, use_llm=use_models,
             skills=skills() if use_models else None, providers=providers() if use_models else None, progress=progress,
         )
-        outline, brief = story.outline, None  # the figures of a data deck are checked against the data, not the text
+        outline, data_brief, brief = story.outline, brief, None  # the figures of a data deck are checked against the data, not the text
         steps["data"] = story.seconds
         data.tables, data.profiles = [], []  # the rows are not needed any more: only the plans and the slides stay
+        if req.knowledge_id:
+            # «примерный план + данные + база знаний»: the data story's charts and conclusions, and the base's slides for
+            # the plan's items the data does not show (verstka/knowledge/with_data.py)
+            tk = time.monotonic()
+            outline = _with_knowledge(outline, data_brief, req.knowledge_id, gdir, progress, use_models)
+            steps["knowledge"] = time.monotonic() - tk
     # «Улучшить готовую» laid out in another template: the original deck's pictures come from its own workspace
     source_pictures = None
     src_tid = (req.improved_from or {}).get("template_id")

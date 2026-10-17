@@ -5092,6 +5092,9 @@ class WriterResult:
     subkind: Optional[str] = None  # a history's story: "conflict" | "event" | "culture" (history_subkind)
     moved: list = field(default_factory=list)  # sentences the cross-slide chronology moved: {"text", "from", "to", "why"}
     basis: str = "wikipedia"  # where the facts come from: "wikipedia" | "kb" (the person's knowledge base)
+    # the written slides as data (topic_writer.TopicSlide dumps with their number «n»): the knowledge base's slides of a
+    # data deck are made of these directly (verstka/knowledge/with_data.py)
+    slides_data: list = field(default_factory=list)
     kb: Optional[dict] = None  # the knowledge base the text is written from: {"id", "name", "docs": [{"id", "title", "url"}]}
 
     @property

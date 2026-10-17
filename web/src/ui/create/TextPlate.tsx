@@ -43,6 +43,9 @@ const HINT_TOPIC_TAIL = ": ключевые факты, даты, формулы
 /** С файлами данных (V2 `txHintShort`, `txHintShortN`): текст — бриф, слайды — по данным. */
 const HINT_BRIEF = "Это бриф — агент напишет текст по данным";
 const HINT_BRIEF_N = "Бриф — текст по данным";
+/** Данные и база знаний вместе: графики — по файлам, остальные пункты — по документам базы. */
+const HINT_BRIEF_KB = "Это бриф — графики по данным, остальное агент напишет по базе знаний";
+const HINT_BRIEF_KB_N = "Бриф — данные и база знаний";
 /** Пример «данные продаж» (GET /api/examples/data-sales-2026): бриф, 7 файлов и брендбук VK Cloud. */
 export const DATA_EXAMPLE = "data-sales-2026";
 /** С базой знаний: тема — агент напишет текст по фактам из документов базы, с источниками. */
@@ -715,10 +718,10 @@ export function TextBody({ tp }: { tp: TextPlate }) {
             </label>
             <div className="p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 20, marginTop: 16 }}>
               <div className="tx-sw">
-                <p className={show(hintOn)} style={LINE} title={dataOn ? HINT_BRIEF : kbOn ? HINT_KB : HINT_TOPIC + HINT_TOPIC_TAIL}>
+                <p className={show(hintOn)} style={LINE} title={dataOn ? (kbOn ? HINT_BRIEF_KB : HINT_BRIEF) : kbOn ? HINT_KB : HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
                   {dataOn ? (
-                    <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_BRIEF}</span><span className="hp-no">{HINT_BRIEF_N}</span></span>
+                    <span className="hp-sw tx-hsw"><span className="hp-wo">{kbOn ? HINT_BRIEF_KB : HINT_BRIEF}</span><span className="hp-no">{kbOn ? HINT_BRIEF_KB_N : HINT_BRIEF_N}</span></span>
                   ) : kbOn ? (
                     <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_KB}</span><span className="hp-no">{HINT_KB_N}</span></span>
                   ) : (

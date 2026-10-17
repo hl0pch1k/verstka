@@ -783,8 +783,11 @@ def plan_items(text: str) -> tuple[str, list[str]]:
     except Exception:  # noqa: BLE001 - the simple reading below
         pf = None
     if pf is not None and pf.items:
-        items = [" — ".join(x for x in [it.title, " ".join(ln.strip() for ln in it.lines if ln.strip() and not ln.strip().startswith("|"))] if x)
-                 for it in pf.items]
+        items = []
+        for it in pf.items:
+            rest = " ".join(ln.strip() for ln in it.lines if ln.strip() and not ln.strip().startswith("|"))
+            # the item's line keeps its title at its head («Как выросла выручка — покажи на графике»): it as it is
+            items.append(rest if rest.lower().startswith(it.title.lower()) else " — ".join(x for x in [it.title, rest] if x))
         return (pf.title or ""), [i for i in items if i]
     head = ""
     items: list[str] = []
@@ -868,6 +871,7 @@ def write_topic_deck(
     config: Optional[dict] = None,
     transport: Any = None,
     knowledge: Any = None,
+    min_slides: int = MIN_CONTENT,
 ) -> WriterResult:
     """The writer phase v2 (see the module's docstring). Never raises: a failure is a result with status «failed»
     (the caller builds the person's text as it is).
@@ -939,7 +943,7 @@ def write_topic_deck(
     asked = int(brief.slide_count or DEFAULT_SLIDES)
     if plan_items and not brief.slide_count:
         asked = len(plan_items) + 1  # the person's plan: one slide per item
-    content_n = max(MIN_CONTENT, min(MAX_CONTENT, asked - 1))
+    content_n = max(min_slides, min(MAX_CONTENT, asked - 1))
     res.asked = content_n + 1
     rcfg = cfg.get("reference") or {}
     # the knowledge base: the deck's source when it knows the topic (its documents are the person's own: a topic about
@@ -1030,7 +1034,7 @@ def write_topic_deck(
             res.answers["plan"] = getattr(r, "text", None)
             got: TopicPlan = r.parsed
             got.slides = [s for s in got.slides if s.title][: content_n + 2]
-            if got.facts and len(got.slides) >= max(MIN_CONTENT, content_n - 3):
+            if got.facts and len(got.slides) >= max(min(MIN_CONTENT, content_n), content_n - 3):
                 plan = got
                 break
         except Exception as e:  # noqa: BLE001 - asked once more, then the deck is not written
@@ -1183,6 +1187,7 @@ def write_topic_deck(
         emit(f"у {n_src} из {n_all} утверждений указан источник в базе знаний — документ и место; они в заметках слайдов.")
     # a topic deck informs: never a pitch of a product (the person's purpose stays for a company or a market)
     purpose = brief.purpose if res.kind in ("company", "market") else "other"
+    res.slides_data = [{"n": k, **s.model_dump(mode="json")} for k, s in enumerate(slides, 2)]
     res.brief = Brief(
         text=with_rules(text), slide_count=len(slides) + 1, audience=brief.audience, purpose=purpose, language=brief.language,
         title_hint=None, tone=brief.tone, extra_instructions=brief.extra_instructions,

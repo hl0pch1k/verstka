@@ -78,8 +78,11 @@ def _clean_item(item: str) -> str:
     return head.strip(" .:;").capitalize()[:120] if head else item[:120]
 
 
-def compose_text(kb: KbReference, topic: str, plan: Optional[list[str]] = None, slides: int = 8) -> tuple[str, list[dict]]:
-    """(the «Слайд N» text, the sources of its sentences) — empty text when the base knows nothing of the request."""
+def compose_text(kb: KbReference, topic: str, plan: Optional[list[str]] = None, slides: int = 8,
+                 slides_out: Optional[list] = None) -> tuple[str, list[dict]]:
+    """(the «Слайд N» text, the sources of its sentences) — empty text when the base knows nothing of the request.
+    `slides_out` gets each slide as data ({"n", "title", "points", "table": {"header", "rows"} | None}) — the
+    knowledge base's slides of a data deck are made of these (verstka/knowledge/with_data.py)."""
     used: set[str] = set()
     out = ["Слайд 1. Титульный", f"Название: «{topic.strip().rstrip('.')[:120]}»."]
     sources: list[dict] = []
@@ -105,6 +108,10 @@ def compose_text(kb: KbReference, topic: str, plan: Optional[list[str]] = None, 
         if not body:
             continue
         out += ["", f"Слайд {n}. {title}", *body]
+        if slides_out is not None:
+            rows = [[c.strip() for c in ln.strip("| ").split(" | ")] for ln in body if ln.startswith("|") and not ln.startswith("|---")]
+            slides_out.append({"n": n, "title": title, "points": [x for x in body if not x.startswith("|") and not x.endswith(":")],
+                               "table": {"header": rows[0], "rows": rows[1:]} if len(rows) >= 2 else None})
         for f in took:
             if f.table:
                 d = kb.docs.get(f.doc) or {}

@@ -192,7 +192,23 @@ def generate(
                     brief_obj, tables, use_llm=False, slide_count=int(slides) if slides else None,
                     progress=lambda stage, frac=None, **_: status.update(f"[данные] {stage}"),
                 )
-            outline_obj, brief_obj = story.outline, None  # the data deck's figures are checked against the data
+            outline_obj, data_brief, brief_obj = story.outline, brief_obj, None  # the data deck's figures are checked against the data
+            kb_items = list(kb or []) or [str(x) for x in (cfg.get("kb") or [])]
+            if kb_items:
+                # план + данные + база знаний: слайды по базе — для пунктов, которых нет в данных
+                from verstka.knowledge.with_data import add_knowledge
+                from verstka.pipeline.generate import _knowledge
+
+                kref = _knowledge(_knowledge_base(kb_items, workspace), Path(workspace) if workspace else _default_root())
+                if kref is not None:
+                    part = add_knowledge(outline_obj, data_brief, kref, skills=skills if use_models else None, providers=providers if use_models else None)
+                    outline_obj = part.outline
+                    for line in part.log:
+                        console.print(f"  {line}")
+                    if part.writer is not None:
+                        Path(out).mkdir(parents=True, exist_ok=True)
+                        part.writer.write_files(Path(out))
+                kb = None  # the base is used: the pipeline gets the outline
             for line in story.log:
                 console.print(f"  {line}")
         res = generate_variants(
@@ -216,7 +232,7 @@ def generate(
             pictures=False if (no_llm and no_vlm) else None,
             image_provider=_image_provider(models) if models and not (no_llm and no_vlm) else None,
             progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"),
-            knowledge_id=_knowledge_base(list(kb or []) or [str(x) for x in (cfg.get("kb") or [])], workspace),
+            knowledge_id=_knowledge_base(list(kb or []) or ([] if story is not None else [str(x) for x in (cfg.get("kb") or [])]), workspace),
         )
     from verstka.data.story import stamp_steps
 
@@ -277,6 +293,12 @@ def _data_files(items: list[str]) -> list[Path]:
 
 
 _DOC_BRIEF_EXTS = (".docx", ".docm", ".pdf", ".doc", ".rtf", ".odt")
+
+
+def _default_root() -> Path:
+    from verstka.ingest.workspace import default_workspace_root
+
+    return default_workspace_root()
 
 
 def _document_brief(path: Path):
