@@ -111,12 +111,11 @@
 .tx-ring>.p2-wrap{position:relative;transition:transform 520ms var(--ease)}
 .tx-ring::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px #DC2626;opacity:0;pointer-events:none;transition:opacity 240ms var(--ease)}
 .tx-ring.ce-bad::after{opacity:1}
-/* «Улучшить готовую»: рамка фокуса — по всему полю, вместе с ростом вниз (сдвиг и рост поля — ниже, по высоте заметки) */
-@media (min-width: 1280px){
+/* «Улучшить готовую»: рамка фокуса — по всему полю, вместе с ростом вниз (сдвиг и рост поля — ниже, по высоте заметки);
+   на любой ширине: стопка повторяет холст */
 .tx-fw-imp .p2-field.tx-ring:has(.p2-ta:focus){box-shadow:none}
 .tx-fw-imp .tx-ring:has(.p2-ta:focus)::after{opacity:1;box-shadow:0 0 0 2px #2563EB;transition:none}
 .tx-fw-imp .tx-ring.ce-bad:has(.p2-ta:focus)::after{box-shadow:0 0 0 2px #DC2626}
-}
 .tx-sw{display:grid;align-items:center;min-width:0}
 .tx-sw>*{grid-area:1 / 1}
 .tx-swr{flex:none;justify-items:end}
@@ -127,12 +126,11 @@
 /* «Улучшить готовую»: поле уходит под заметку и вырастает вниз — низ поля и строка под текстом встают туда же, где на
    доске C-improve; всё едет transform'ом вместе с плитой. Заметка бывает выше двух строк (при 1280 px, с помощником):
    поле уходит под неё на её высоту + 16 и растёт вниз меньше (TextBody ставит --tx-sh и --tx-gr по высоте заметки).
-   Без переменных — числа доски: 88 и 16 */
-@media (min-width: 1280px){
+   Без переменных — числа доски: 88 и 16. Стопка — так же (TextBody меряет заметку в её ширине; колода прибавляет
+   сдвиг и рост к низу шага — useStackMetrics) */
 .tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
 .tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}
 .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-gr,16px) * -1)}
-}
 /* Стрелка «Все параметры» под 03: цвет и прозрачность как у цифры, ширина по ширине «03» */
 .p2-more{display:flex;flex-direction:column;align-items:center;height:64px;padding:0;border:0;border-radius:16px;background:none;color:#FFFFFF;opacity:.22;cursor:pointer;transition:opacity 160ms var(--ease),transform 160ms var(--ease)}
 .p2-more-w{display:block;height:0;overflow:hidden;visibility:hidden;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em}
@@ -219,7 +217,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-root .hp-sw > *{grid-area:1 / 1}
 /* сайт: стопки в потоке флекса — во всю свою клетку и при ≤ 900 px (там узкой копии нет, поле — одно) */
 .hp-txf{flex:1 1 0%;min-width:0}
-@media (min-width: 1280px){
+@media (width >= 1280px){
   .p2-ttl-sz{transition:font-size 340ms var(--ease)}
   .p2-ttl-v{transition:transform 340ms var(--ease)}
   .hp-nar .p2-ttl-sz{font-size:24px;transition-duration:520ms}
@@ -379,7 +377,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 @property --hpp{syntax:'<number>';inherits:false;initial-value:0}
 /* ширина мягкого края растущей копии (ниже) — тоже не наследуется: иначе каждый кадр пересчитывался бы стиль всего её текста */
 @property --hpf{syntax:'<length>';inherits:false;initial-value:0px}
-@media (min-width: 1280px){
+@media (width >= 1280px){
   .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
   .hp-tx.hp-txf{flex:1 1 0%}
   span.hp-tx{display:grid}
@@ -539,7 +537,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-gt{display:inline-block;max-width:var(--gtw,220px);overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
 .dt-zone{z-index:5}
 .dt-gc-x{visibility:hidden}
-@media (min-width: 1280px){
+@media (width >= 1280px){
   /* узкая колода: панель «Данные» 400 → 320 (сайт: в тесной колоде — у́же, --dtn: dataRules `dataPanel`), поле — копии
      текста (c-tad); «→ тип графика» у целей сжимается и гаснет; в разборе брендбука вторая дорожка сжимается до нуля
      (как у разбора шаблона) */
@@ -580,7 +578,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-more-t{display:none}
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): шаги «Создать». Те же плиты, кнопки и ходы; меняется раскладка
    внутри плит — тела шагов под названием (lg) или во всю ширину (md, телефон), ряды переносятся, а не обрезаются ═══ */
-@media (max-width: 1279.98px){
+@media (width < 1280px){
   /* тела шагов 01 и 02 — от колонки номера (lg) или от края (md, телефон) */
   #p2-b1,#p2-b2{margin:24px 0 0 var(--body) !important}
   /* 01 · лента: дорожки по ширине; ряды по четыре — одной сеткой (ряды холста нужны только ходу помощника) */
@@ -604,13 +602,6 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .tx-closed{flex:1 1 100%}
   .tx-closed > span{max-width:none !important}
   .tx-menu.tx-menu2,.tx-menu.bb-menu{max-width:calc(100vw - 2 * var(--gut) - 2 * var(--px))}
-  /* 02 · «Улучшить готовую»: как на компьютере — поле уходит под заметку и растёт вниз transform'ом (TextBody меряет
-     заметку в этой ширине: --tx-sh, --tx-gr); колода прибавляет сдвиг и рост к низу шага (useStackMetrics) */
-  .tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
-  .tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}
-  .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-gr,16px) * -1)}
-  .tx-fw-imp .p2-field.tx-ring:has(.p2-ta:focus){box-shadow:none}
-  .tx-fw-imp .tx-ring:has(.p2-ta:focus)::after{opacity:1;box-shadow:0 0 0 2px #2563EB;transition:none}
   /* 02 · шапка: «Из файла», подсказка о готовом тексте и свёрнутый шаг (текст и «Изменить») — свёрнутый встаёт на место
      кнопки (на компьютере он справа в той же строке) */
   .p2-p2 .p2-hx .tx-closed{position:absolute;top:0;bottom:0;right:0;max-width:100%}
@@ -632,6 +623,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   /* 02 · цели из текста: строка переносится */
   .dt-gl{white-space:normal;align-items:flex-start}
   .dt-gl .hp-sw > span{white-space:normal}
+  /* 02 · цели из текста (I4): все цели видны — коробка по высоте, таблетки переносятся рядами, длинная цель — своими
+     строками (стопкой их не прячет `goalsFit`: GoalsBox) */
+  .dt-goal{height:auto;min-height:88px;padding:16px 24px}
+  .dt-gcs{flex-wrap:wrap;row-gap:8px;overflow:visible}
+  .dt-gc{flex:0 1 auto;max-width:100%;height:auto;min-height:32px;padding:6px 12px;white-space:normal}
+  .dt-gt{display:inline;max-width:none;white-space:normal}
   /* 02 · строка под текстом: переносится в две строки, не обрезается */
   .tx-ring .p2-wrap{height:auto !important;align-items:flex-start !important}
   .tx-ring .p2-wrap p,.tx-ring .p2-wrap p > span:last-child{white-space:normal !important}
@@ -648,7 +645,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .p2-p3 .p2-hx > span:first-child{display:none}
   .p2-hx .pp-sum{display:flex;flex:1 1 auto;min-width:0;overflow:visible}
   .pp-sumt{white-space:normal}
-  .pp-err{grid-area:err;position:static;justify-content:flex-start;margin-top:12px}
+  .pp-err{grid-area:err;position:static;justify-content:flex-start;margin:12px 0 0 var(--body)}
   .pp-err > p{white-space:normal}
   .p2-more{grid-area:tog;position:static !important;flex-direction:row;justify-self:start;gap:8px;height:48px;margin:16px 0 0 var(--body);padding:0 16px 0 12px;border-radius:999px;background:rgba(255,255,255,.06);opacity:1;font-family:'Manrope',sans-serif;font-size:15px;font-weight:700;line-height:24px;color:#FFFFFF}
   .p2-more:hover{opacity:1;background:rgba(255,255,255,.1);transform:translateY(-2px)}
@@ -669,7 +666,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   #p2-b3m .cp-vc{height:auto;min-height:120px}
   #p2-b3m .pp-th{display:none}
 }
-@media (max-width: 1023.98px){
+@media (width < 1024px){
   /* шапки шагов: то, что справа от названия, — строкой под ним, от левого края */
   .p2-hx > span:empty{display:none}
   .p2-p2 .p2-hx{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start;align-items:center}
@@ -684,8 +681,6 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .dt-cell{position:static;overflow:visible}
   .dt-pan{position:static}
   .dt-list{max-height:296px}
-  .dt-goal{height:auto;min-height:88px;padding:16px 24px}
-  .dt-gcs{flex-wrap:wrap}
   #p2-b3m .pp-r1{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
   .pp-swl > .p2-box{align-items:flex-start}
   .pp-swn{flex-direction:column;align-items:flex-start;gap:2px}
@@ -697,7 +692,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   #p2-b3m .pp-r1 > :first-child{grid-column:1 / -1}
   #p2-b3m > .p2-params{grid-template-columns:minmax(0,1fr) !important}
 }
-@media (max-width: 767.98px){
+@media (width < 768px){
   /* служебные плитки ленты на телефоне: пояснение мельче, плитка — по его высоте (не ниже обложки рядом) */
   .p2-cover:is(.tt-act,.an-act){min-height:84px;padding:12px 8px}
   :is(.tt-note,.an-note){padding:0 4px;font-size:12px;line-height:16px}

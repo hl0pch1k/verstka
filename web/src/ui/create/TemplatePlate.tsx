@@ -18,6 +18,7 @@ import { useHeld } from "./ImproveNote";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
 import { BrandHead } from "./BrandMenu";
 import { BrandAnalysis } from "./BrandAnalysis";
+import { usePhone } from "../shell/tier";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
  *  галочки держатся 560 мс; out — разбор гаснет 240 мс; fail — строка ошибки в коробке разбора. */
@@ -229,9 +230,12 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
     was.current = kind;
   });
   const fade = was.current !== null && was.current !== kind;
+  // телефон (доска M-create): свёрнутый шаг — ряд 56 «01 · обложка · название · Сменить», без брендбука (он — в раскрытом
+  // шаге и в полосах: «… · брендбук VK Cloud»)
+  const phone = usePhone();
   return (
     <>
-      <span style={{ flex: 1, minWidth: 0 }} />
+      {!phone && <span style={{ flex: 1, minWidth: 0 }} />}
       {note && (
         <span key={note} className="p2-in" style={{ display: "inline-flex", minWidth: 0 }}>
           <ErrorLine text={note} lines={1} style={{ maxWidth: 480 }} />
@@ -246,7 +250,7 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
         </div>
       ) : (
         <div key="closed" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
-          <BrandHead menu={false} setMenu={setBbMenu} off={upload.busyWhy} />
+          {!phone && <BrandHead menu={false} setMenu={setBbMenu} off={upload.busyWhy} />}
           {kind === "run" ? (
             <HeadSlot key="run" fade={fade}><RunningLine name={upload.file?.name ?? ""} /></HeadSlot>
           ) : kind === "fail" ? (

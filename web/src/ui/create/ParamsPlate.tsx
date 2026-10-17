@@ -23,7 +23,7 @@ import { useDeckWrap } from "../deck/useDeckFit";
 import { ctaShort, paramsRow } from "./morph";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
-  summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
+  summaryLine, paramsBrief, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
   type HeadLine, type ImagesInfo, type SlidesView, type SwitchView, type VariantCard,
 } from "./params";
 
@@ -50,6 +50,10 @@ export interface ParamsPlate {
   toggleWrites(): void; toggleEyes(): void; togglePictures(): void;
   writesHint: string; imagesHint: string;
   summary: string;
+  /** Название выбранного шаблона (в сводке телефона — жирным); шаблона нет — null. */
+  tplName: string | null;
+  /** Телефон: подпись строки «Параметры» (params.ts `paramsBrief`). */
+  brief: string;
   /** Строка под сводкой; null — сказать нечего. */
   line: HeadLine | null;
   /** Запрос сборки ушёл, ответа ещё нет. */
@@ -186,7 +190,7 @@ export function useParamsPlate(): ParamsPlate {
     toggleEyes: () => setParams((p) => nextEyes(p, modelOn)),
     togglePictures: () => setParams((p) => nextPictures(p, images)),
     writesHint: writesHint(writes.on), imagesHint: imagesHint(pictures.on),
-    summary, line, starting, start,
+    summary, tplName: tpl ? tplLabel(tpl) : null, brief: paramsBrief(writes.on, pictures.on), line, starting, start,
     // экран «Сборка» с идущей сборкой (если он показывал законченную — store `goBuild` возвращает к идущей)
     goBuild,
     openEnded, opening,
@@ -346,6 +350,38 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
       </div>
       <ParamsAll pp={pp} on={more} short={!row.switches} />
     </>
+  );
+}
+
+/** Телефон (доска M-create, слот `q3` колоды): плита 03 прижата к низу — «03» и сводка «VK Tech · 12 слайдов · 3
+ *  варианта», строка «Параметры» с подписью (кто пишет тексты, изображения) и «Создать презентацию» во всю ширину; строка
+ *  ошибки запуска — над кнопкой. «Параметры» раскрывают «Все параметры» (`ui.more`): плиты 01 и 02 уходят в полосы,
+ *  плита 03 поднимается под них, меню прокручивается внутри плиты, кнопка остаётся внизу. Колода меряет высоту `.pp-ph`
+ *  (useStackMetrics `q3`). */
+export function PhoneParams({ pp }: { pp: ParamsPlate }) {
+  const { ui, dispatch } = useApp();
+  const more = ui.screen === "create" && ui.more;
+  const rest = pp.tplName && pp.summary.startsWith(pp.tplName) ? pp.summary.slice(pp.tplName.length) : pp.summary;
+  return (
+    <div className="pp-ph">
+      <div className="pp-phr">
+        <span className="mp-snum" aria-hidden="true">03</span>
+        <p className="pp-phs" title={pp.summary}>{pp.tplName && rest !== pp.summary && <b>{pp.tplName}</b>}{rest}</p>
+      </div>
+      <button type="button" className="pp-prm" onClick={() => dispatch({ type: "more" })} aria-expanded={more} aria-controls="p2-b3m">
+        <span className="pp-prmt">
+          <span className="pp-prmn">Параметры</span>
+          <span className="pp-prmd">{pp.brief}</span>
+        </span>
+        <span className={cls("pp-prmi", more && "pp-prmi-up")} aria-hidden="true"><Icon name="chevron-right" size={20} /></span>
+      </button>
+      <ParamsAll pp={pp} on={more} short />
+      <ParamsLine pp={pp} />
+      <button type="button" className="p2-cta pp-cta pp-phc" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={pp.line !== null ? "pp-err" : undefined}>
+        <span>Создать презентацию</span>
+        <Icon name="arrow-right" size={20} />
+      </button>
+    </div>
   );
 }
 

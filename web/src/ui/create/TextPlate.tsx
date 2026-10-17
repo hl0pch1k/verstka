@@ -28,6 +28,7 @@ import {
   charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
   textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
+import { usePhone } from "../shell/tier";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 
@@ -335,6 +336,7 @@ export function TextHead({ tp }: { tp: TextPlate }) {
   const topText = writes ? "Это готовый текст — агент разложит его по слайдам и допишет недостающее" : "Это готовый текст — агент разложит его по слайдам без переписывания";
   const pv = textPreview(brief);
   const wrap = useDeckWrap();
+  const phone = usePhone();
   return (
     <>
       {tp.menu && (
@@ -345,17 +347,27 @@ export function TextHead({ tp }: { tp: TextPlate }) {
           }} />
       )}
       <div className={cls("p2-in tx-fg", show(txOpen))} style={{ display: "flex", alignItems: "center", gap: 12, animationDelay: "40ms" }}>
-        <button ref={tp.btnRef} type="button" className="p2-ob" onClick={() => tp.setMenu(!tp.menu)} title="Текст или данные из файла"
-          aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu" style={{ height: 40 }}>
-          <Icon name="attach" size={18} />
-          <span>Из файла</span>
-        </button>
+        {phone ? (
+          // телефон (доска M-create): круглая кнопка со скрепкой справа от «Текст»
+          <button ref={tp.btnRef} type="button" className="mp-rw" onClick={() => tp.setMenu(!tp.menu)} title="Текст .txt или .md, данные"
+            aria-label="Из файла: текст .txt или .md, данные" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu">
+            <Icon name="attach" size={20} />
+          </button>
+        ) : (
+          <button ref={tp.btnRef} type="button" className="p2-ob" onClick={() => tp.setMenu(!tp.menu)} title="Текст или данные из файла"
+            aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu" style={{ height: 40 }}>
+            <Icon name="attach" size={18} />
+            <span>Из файла</span>
+          </button>
+        )}
         {/* помощник сужает колоду — «.txt или .md» сжимается и гаснет (он и в подсказке кнопки) */}
-        <span className="hp-wo tx-fmtw">
-          <span id="ct-fmt" className={cls("p2-hide-s", show(txOpen && !tp.issue))} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
-            .txt или .md
+        {!phone && (
+          <span className="hp-wo tx-fmtw">
+            <span id="ct-fmt" className={cls("p2-hide-s", show(txOpen && !tp.issue))} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
+              .txt или .md
+            </span>
           </span>
-        </span>
+        )}
         <FileMenu open={tp.menu} off={tp.deckOff} onPick={tp.pick} onData={tp.pickData} onExample={tp.example} exampleBusy={data.exampleBusy}
           onClose={(back) => {
             tp.setMenu(false);

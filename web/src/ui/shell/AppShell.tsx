@@ -13,7 +13,7 @@ import { BuildPlate, BuildReplay } from "../build/BuildPlate";
 import { buildStripText } from "../build/buildView";
 import { buildTopic } from "../build/resume";
 import { ImproveStrip, useModelOn } from "../create/ImproveNote";
-import { ParamsBody, ParamsHead, ParamsMore, useParamsPlate } from "../create/ParamsPlate";
+import { ParamsBody, ParamsHead, ParamsMore, PhoneParams, useParamsPlate } from "../create/ParamsPlate";
 import { tplMeta } from "../create/ribbon";
 import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
 import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
@@ -177,7 +177,8 @@ export function AppShell() {
         <div className={cls("hp-wrap", ui.helper ? (beside ? "hp-open hp-nar" : "hp-open hp-sheet") : "hp-closed")}>
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
-            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />
+            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} q3={<PhoneParams pp={params} />}
+            b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />
           <HelperPlate />
           {/* тень правого края колоды на плиту помощника — видна, только пока плита под колодой (helper.css `.hp-shade`) */}
           <div className="hp-shade" aria-hidden="true" />

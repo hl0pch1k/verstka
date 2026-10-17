@@ -12,7 +12,7 @@
 // двух копий. Что зависит от ширины окна (колонка агента в тесной колоде, кегль фазы, колонки раскадровки, слова хода в
 // сегментах, коробка «Не получилось»), считается по ширине обёртки колоды сразу для обеих раскладок (columns.ts
 // `buildMorph`) и посреди хода не меняется. Ничего, что есть в обеих раскладках, не гаснет.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import type { ActiveJob } from "../../lib/jobState";
 import { useApp } from "../../store";
 import { variantCards } from "../create/params";
@@ -33,8 +33,11 @@ import { Phases } from "./Phases";
 import { Roles } from "./Roles";
 import { Storyboard, type VariantSeg } from "./Storyboard";
 import { usePreviews } from "./usePreviews";
+import { usePhone } from "../shell/tier";
 
 const LEAVE_MS = 240;
+/** Вкладки сборки на телефоне. */
+type BuildTab = "board" | "agent";
 /** Превью пишет экспорт: с этой доли хода их есть смысл спрашивать (generate.py: «export: …» — 0.86). */
 const EXPORT_AT = 0.86;
 
@@ -173,33 +176,77 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const narrow = useNarrow();
   const wide = useWideScreen();
   const vars = buildVars(morph) as CSSProperties;
+  // телефон (доска M-build): под фазой и часами — вкладки «Раскадровка» и «Как думает агент» (сначала — агент), каждая
+  // прокручивается внутри плиты; у упавшей сборки — «Раскадровка» с коробкой «Не получилось» (по её содержимому)
+  const phone = usePhone();
+  const [tab, setTab] = useState<BuildTab>("agent");
+  const failedNow = !!failed;
+  useEffect(() => {
+    if (failedNow) setTab("board");
+  }, [failedNow]);
+
+  // ряд часов: время хода, полоса хода и строка неудачи открытия; на телефоне — ещё шаг («шаг 3 из 6»)
+  const clockRow = (step?: ReactNode) => (
+    <div className={cls("p2-in", step != null && "bd-clk")} style={{ display: "flex", alignItems: "center", gap: 24, height: 24, marginTop: 16, animationDelay: "80ms" }}>
+      <p style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>
+        <b style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: "#FFFFFF" }}>{view.clock}</b>
+      </p>
+      <div role="progressbar" aria-label="Ход сборки" aria-valuemin={0} aria-valuemax={view.roles.length} aria-valuenow={view.doneRoles} aria-valuetext={vt}
+        style={{ position: "relative", flex: 1, height: 4, borderRadius: 999, background: "rgba(255,255,255,.12)", overflow: "hidden" }}>
+        <span className={cls("bs-seg bs-seg-run bd-fx", !queued && "bd-hide")} aria-hidden="true" />
+        <span className={cls("p2-bar bd-bar", (queued || failed) && "bd-hide")}
+          style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#38BDF8", transformOrigin: "left center", transform: `scaleX(${prog})` }} />
+        <span className={cls("p2-bar bd-bar", !failed && "bd-hide")} aria-hidden="true"
+          style={{ position: "absolute", inset: 0, borderRadius: 999, background: "rgba(255,255,255,.24)", transformOrigin: "left center", transform: `scaleX(${prog})` }} />
+      </div>
+      {step}
+      {lineErr && (
+        <div className="p2-in pp-busy" style={{ flex: "0 1 auto", animationDelay: "0ms" }}>
+          <span className={errSwap.cls} style={{ display: "flex", minWidth: 0 }}>
+            <ErrorLine text={errSwap.shown || lineErr} lines={1} style={{ color: "#F87171" }} />
+          </span>
+          <GoLink label="Открыть ещё раз" busy={opening} onClick={openAgain} />
+        </div>
+      )}
+    </div>
+  );
+
+  if (phone) {
+    const tabKey = (e: KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const next: BuildTab = tab === "board" ? "agent" : "board";
+      setTab(next);
+      document.getElementById(`bd-t-${next}`)?.focus({ preventScroll: true });
+    };
+    const tabBtn = (k: BuildTab, label: string) => (
+      <button type="button" role="tab" id={`bd-t-${k}`} aria-selected={tab === k} aria-controls={`bd-p-${k}`} tabIndex={tab === k ? 0 : -1}
+        className={cls("p2-seg", tab === k && "p2-seg-on")} onClick={() => setTab(k)}>{label}</button>
+    );
+    return (
+      <div key={epoch} className={cls("p2-two bd-two bd-mob", (leaving || retry) && "bd-out")} style={vars}>
+        <Phases phase={view.phase} morph={morph} data={view.data} />
+        {clockRow(<span className={cls("bd-stp", failed && "bd-stp-err")}>{view.step}</span>)}
+        <div role="tablist" aria-label="Что показать" className="bd-tabs p2-in" onKeyDown={tabKey} style={{ animationDelay: "120ms" }}>
+          {tabBtn("board", "Раскадровка")}
+          {tabBtn("agent", "Как думает агент")}
+        </div>
+        <div id="bd-p-board" role="tabpanel" aria-labelledby="bd-t-board" className="bd-body" hidden={tab !== "board"}>
+          {failed
+            ? <Failed text={failed.text} onRetry={onRetry} onBack={back} morph={morph} wide={false} narrow={false} />
+            : <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} morph={morph} wide={false} />}
+        </div>
+        <Roles view={view} narrow={false} widths={`${morph.textWide}/${morph.textNarrow}`} panel={{ id: "bd-p-agent", labelledBy: "bd-t-agent", hidden: tab !== "agent" }} />
+      </div>
+    );
+  }
 
   return (
     <div key={epoch} className={cls("p2-two bd-two", morph.tight && "bd-tight", (leaving || retry) && "bd-out")}
       style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652, ...vars }}>
       <Phases phase={view.phase} morph={morph} data={view.data} />
       <div className="bd-body" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-        <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, height: 24, marginTop: 16, animationDelay: "80ms" }}>
-          <p style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>
-            <b style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: "#FFFFFF" }}>{view.clock}</b>
-          </p>
-          <div role="progressbar" aria-label="Ход сборки" aria-valuemin={0} aria-valuemax={view.roles.length} aria-valuenow={view.doneRoles} aria-valuetext={vt}
-            style={{ position: "relative", flex: 1, height: 4, borderRadius: 999, background: "rgba(255,255,255,.12)", overflow: "hidden" }}>
-            <span className={cls("bs-seg bs-seg-run bd-fx", !queued && "bd-hide")} aria-hidden="true" />
-            <span className={cls("p2-bar bd-bar", (queued || failed) && "bd-hide")}
-              style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#38BDF8", transformOrigin: "left center", transform: `scaleX(${prog})` }} />
-            <span className={cls("p2-bar bd-bar", !failed && "bd-hide")} aria-hidden="true"
-              style={{ position: "absolute", inset: 0, borderRadius: 999, background: "rgba(255,255,255,.24)", transformOrigin: "left center", transform: `scaleX(${prog})` }} />
-          </div>
-          {lineErr && (
-            <div className="p2-in pp-busy" style={{ flex: "0 1 auto", animationDelay: "0ms" }}>
-              <span className={errSwap.cls} style={{ display: "flex", minWidth: 0 }}>
-                <ErrorLine text={errSwap.shown || lineErr} lines={1} style={{ color: "#F87171" }} />
-              </span>
-              <GoLink label="Открыть ещё раз" busy={opening} onClick={openAgain} />
-            </div>
-          )}
-        </div>
+        {clockRow()}
         <div style={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           <div className={failed ? "p2-off" : "p2-on"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
             <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} morph={morph} wide={wide} />

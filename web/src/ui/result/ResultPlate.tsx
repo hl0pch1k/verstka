@@ -62,6 +62,8 @@ import { useRebuildResume } from "../details/useRebuild";
 import { compactRow, failInRow, placeShown, staleInRow, type ResultAt, type SlideFail } from "./slideJob";
 import { StaleLine } from "../shell/StaleLine";
 import { WorkHead } from "./WorkHead";
+import { PhoneResult } from "./PhoneResult";
+import { usePhone } from "../shell/tier";
 
 /** Сколько смена варианта ждёт декодирования его картинок, прежде чем смениться как есть. */
 const SWITCH_WAIT = 800;
@@ -133,6 +135,7 @@ function ResultBody({ g }: { g: Generation }) {
   } = useApp();
   const openSheet = useOpenSheet();
   const goHome = useGoHome();
+  const phone = usePhone();
   const v = activeVariant && g.variants.includes(activeVariant) ? activeVariant : g.variants[0];
   const total = slidesOf(v);
   const n = Math.min(Math.max(1, selectedSlide), Math.max(1, total));
@@ -389,6 +392,23 @@ function ResultBody({ g }: { g: Generation }) {
   const g2 = WORK_GEO[geo.shown];
   const noteRow = note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} /> : line ? <NoteRow>{line}</NoteRow> : null;
   const heldRow = useHeld(noteRow);
+
+  // телефон (доска M-result): колонка плиты 04 — те же данные, сцена с разметкой, панель замечаний и карточка
+  // «Изображение» (PhoneResult); слои (текст, весь экран, «Подробнее») поднимаются поверх колоды
+  if (phone) {
+    const marks = pic.spots || rm.stage || rm.sketch
+      ? <>{pic.spots && <PictureSpots {...pic.spots} />}{rm.stage && <StageMarks {...rm.stage} />}{rm.sketch && <FixSketch {...rm.sketch} />}</>
+      : null;
+    const extra = rm.panel ? <RemarksPanel {...rm.panel} helper={false} /> : pic.column?.shown ? <PictureCard {...pic.column.card} /> : null;
+    return (
+      <PhoneResult d={aside} n={n} total={total} src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect} marks={marks}
+        film={<Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={filmMarks} />}
+        note={geo.shown === "note" ? noteRow ?? heldRow : null} extra={extra}
+        remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off} textOff={noteActions.textOff}
+        onVariant={pickVariant} onRemarks={rm.toggle} onQuality={() => openSheet("quality")} onWhy={() => openSheet("why")}
+        onText={onShowText} onLightbox={onOpenLightbox} onEditText={() => editDeck(g.brief ?? null)} onNew={goHome} />
+    );
+  }
 
   return (
     <>

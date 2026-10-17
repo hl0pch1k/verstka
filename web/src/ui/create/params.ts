@@ -131,6 +131,10 @@ export const togglePictures = (p: Params, images: ImagesInfo): Params => ({ ...p
 export function summaryLine(tpl: string | null, count: number, variants: number): string {
   return [tpl, plural(count, "слайд", "слайда", "слайдов"), plural(variants, "вариант", "варианта", "вариантов")].filter(Boolean).join(" · ");
 }
+/** Телефон (доска M-create): подпись строки «Параметры» — кто пишет тексты и будут ли изображения. */
+export function paramsBrief(writes: boolean, pictures: boolean): string {
+  return `${writes ? "тексты пишет модель" : "ваш текст дословно"} · ${pictures ? "с изображениями" : "без изображений"}`;
+}
 export const writesHint = (on: boolean) => (on ? "Сокращает и переформулирует текст под слайды" : "Ваш текст дословно: только раскладка по слайдам шаблона");
 export const imagesHint = (on: boolean) => (on ? "По описаниям в тексте, в палитре шаблона" : "Места под изображения останутся свободными");
 

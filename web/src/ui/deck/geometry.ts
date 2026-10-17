@@ -40,6 +40,9 @@ export const UI0: UiState = {
   tplPreview: null, tplDelete: null, brandLayer: false, rise: false, down: false,
 };
 
+/** Высота колоды на компьютере (холст V2), px. */
+export const DECK_H = 812;
+
 export interface Geometry {
   y: [number, number, number, number];   // translateY плит 01..04, px
   s4: "on" | "off" | "up" | "down";       // класс плиты результата: p2-s4-on / p2-s4-off / + p2-s4-up / p2-s4-down
@@ -58,7 +61,7 @@ export function deckGeometry(ui: UiState): Geometry {
   // файлы с данными (не в «Улучшить готовую» — там своя полоса над плитой 02): V2 `dtCol = txOpen && dataOn && !txImpOn`
   const fold1 = create && !folded && ui.open === "text" && ui.data && !ui.improve;
   if (fold1) y = [y[0], 40, y[2], 0];
-  y[3] = ui.screen === "result" ? 120 : create ? 812 : 80;
+  y[3] = ui.screen === "result" ? 120 : create ? DECK_H : 80;
   const s4 = ui.screen === "result" ? (ui.rise ? "up" : "on") : ui.down ? "down" : "off";
   return { y, s4, heads: create && !ui.more, strips: !create || ui.more, fold1 };
 }

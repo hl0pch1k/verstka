@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildRequest, buildRunning, chosenStrategies, eyesOn, headLine, OWN, PARAMS0, picturesOn, presetParams, readParams, slidesView, slideWord,
+  buildRequest, buildRunning, chosenStrategies, eyesOn, headLine, OWN, PARAMS0, paramsBrief, picturesOn, presetParams, readParams, slidesView, slideWord,
   START_FAILED, startFailure, stepSlides, summaryLine, toggleEyes, togglePictures, toggleStrategy, variantCards, type Params,
 } from "./params";
 import type { ActiveJob } from "../../lib/jobState";
@@ -243,4 +243,9 @@ test("запрос сборки: наборы данных, брендбук и 
   assert.deepEqual([r.dataset_ids, r.brandbook_id, r.brand_priority], [["d1", "d2"], "b1", "template"]);
   const plain = req();
   assert.equal("dataset_ids" in plain || "brandbook_id" in plain || "brand_priority" in plain, false);
+});
+
+test("телефон: подпись строки «Параметры» — кто пишет тексты и изображения", () => {
+  assert.equal(paramsBrief(true, true), "тексты пишет модель · с изображениями");
+  assert.equal(paramsBrief(false, false), "ваш текст дословно · без изображений");
 });

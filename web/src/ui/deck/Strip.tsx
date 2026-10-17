@@ -18,16 +18,16 @@ export function Strip({ n, title, meta, icon, on, dark, onClick, label }: StripD
 }) {
   return (
     <div className={on ? "p2-strip p2-on" : "p2-strip p2-off"} style={{ position: "absolute", left: 48, right: 48, top: 0, height: 40, display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
-      <span style={{ flex: "none", fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 700, fontSize: 13, lineHeight: "20px", color: dark ? "rgba(255,255,255,.56)" : "#5A6272" }}>{n}</span>
+      <span className="p2-sn" style={{ flex: "none", fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 700, fontSize: 13, lineHeight: "20px", color: dark ? "rgba(255,255,255,.56)" : "#5A6272" }}>{n}</span>
       {icon}
       {/* длинное название сжимается многоточием, приписка остаётся целой */}
       {title != null && (
-        <span title={typeof title === "string" ? title : undefined}
+        <span className="p2-st" title={typeof title === "string" ? title : undefined}
           style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 14, fontWeight: 700, lineHeight: "20px", color: dark ? "#FFFFFF" : "#0B1220" }}>
           {title}
         </span>
       )}
-      {meta != null && <span style={{ flex: "none", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: dark ? "rgba(255,255,255,.64)" : "#5A6272" }}>{meta}</span>}
+      {meta != null && <span className="p2-sm" style={{ flex: "none", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: dark ? "rgba(255,255,255,.64)" : "#5A6272" }}>{meta}</span>}
       {onClick && <button type="button" className="p2-sbtn" onClick={onClick} aria-label={label} />}
     </div>
   );

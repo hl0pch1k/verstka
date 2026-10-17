@@ -118,10 +118,12 @@ const logShape = (view: BuildView) =>
   view.roles.map((r) => `${r.key}:${r.status}:${r.lines.map((l) => `${l.key}/${l.slide ?? ""}/${l.text}/${l.fix ?? ""}`).join("\u0001")}`).join("|")
   + `|${view.failed?.text ?? ""}`;
 
-export function Roles({ view, narrow, widths }: {
+export function Roles({ view, narrow, widths, panel }: {
   view: BuildView; narrow: boolean;
   /** Ширины текста ролей в широкой и узкой раскладке (columns.ts `textWide`, `textNarrow`): по ним — замер. */
   widths: string;
+  /** Телефон: лента — вкладка «Как думает агент» (tabpanel). */
+  panel?: { id: string; labelledBy: string; hidden: boolean };
 }) {
   const queued = view.phase === "queued";
   const last = view.roles.length - 1;
@@ -165,7 +167,8 @@ export function Roles({ view, narrow, widths }: {
   const shift = narrow ? roll.narrow : roll.wide;
 
   return (
-    <aside aria-label="Как думает агент" style={{ display: "flex", flexDirection: "column", minWidth: 0, height: 652 }}>
+    <aside aria-label={panel ? undefined : "Как думает агент"} style={{ display: "flex", flexDirection: "column", minWidth: 0, height: 652 }}
+      {...(panel && { id: panel.id, role: "tabpanel", "aria-labelledby": panel.labelledBy, hidden: panel.hidden })}>
       <div className="hq-bdh" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 64 }}>
         <h2 className="hq-bdt" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 20, lineHeight: "28px", letterSpacing: "-0.02em", color: "#FFFFFF", whiteSpace: "nowrap" }}>
           Как думает агент

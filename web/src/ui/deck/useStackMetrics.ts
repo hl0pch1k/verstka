@@ -3,7 +3,8 @@
 // Меряется в том же кадре после каждой отрисовки колоды и когда меняется размер содержимого (ResizeObserver; что
 // наблюдать — пересобирается, когда в колоде появляются и уходят элементы) или окна. На компьютере не меряется.
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { sameMetrics, type StackMetrics } from "./stack";
+import { LAYER_MS } from "../layers/Layer";
+import { deckMin, improveExtra, PHONE_MIN, sameMetrics, STACK_MIN, type StackMetrics } from "./stack";
 
 /** Низ элемента от верха плиты `plate` по раскладке; элемент не внутри плиты (или скрыт) — null. */
 function layoutBottom(e: Element | null | undefined, plate: HTMLElement): number | null {
@@ -30,7 +31,7 @@ function inFlow(el: Element | null | undefined): Element[] {
   });
 }
 
-function read(deck: HTMLElement, watch: (e: Element | null | undefined) => void): StackMetrics | null {
+function read(deck: HTMLElement, watch: (e: Element | null | undefined) => void, phone: boolean): StackMetrics | null {
   const plates = Array.from(deck.querySelectorAll<HTMLElement>(":scope > .p2-slot:not(.p2-lay) > .p2-plate"));
   if (plates.length < 4) return null;
   const [p1, p2, p3, p4] = plates;
@@ -54,7 +55,7 @@ function read(deck: HTMLElement, watch: (e: Element | null | undefined) => void)
   const imp = p2.querySelector<HTMLElement>(".tx-fw-imp");
   if (imp) {
     const vars = getComputedStyle(imp);
-    s2.body += Math.round((parseFloat(vars.getPropertyValue("--tx-sh")) || 88) + (parseFloat(vars.getPropertyValue("--tx-gr")) || 16));
+    s2.body += improveExtra(vars.getPropertyValue("--tx-sh"), vars.getPropertyValue("--tx-gr"));
   }
   const box3 = fx(p3);
   const short = p3.querySelector("#p2-b3");
@@ -68,18 +69,25 @@ function read(deck: HTMLElement, watch: (e: Element | null | undefined) => void)
   for (const e of head3) watch(e);
   const deckTop = deck.getBoundingClientRect().top + window.scrollY;
   const gut = parseFloat(getComputedStyle(deck.closest(".p2-root") ?? deck).paddingBottom) || 0;
+  // телефон: плита 03 «Создать» видна на свою сводку, «Параметры» и кнопку с полем снизу (ParamsPlate `PhoneParams`):
+  // низ кнопки — последней в столбце (сам столбец во всю видимую часть плиты, по нему мерить нельзя: он её и задаёт)
+  const cta = phone ? p3.querySelector<HTMLElement>(".pp-ph > :last-child") : null;
+  if (cta) watch(cta.parentElement);
+  const q3 = cta && box3 ? (layoutBottom(cta, p3) ?? 0) + Math.round(parseFloat(getComputedStyle(box3).paddingBottom) || 0) : 0;
   return {
     pad, strip,
     h1: s1.head, b1: s1.body, h2: s2.head, b2: s2.body,
     c3: Math.max(lowest([short], p3), lowest(head3, p3)), m3: lowest([all], p3),
     k3: lowest([build], p3),
     r4: lowest(res, p4),
-    min: Math.max(480, Math.round(window.innerHeight - deckTop - gut)),
+    min: deckMin(window.innerHeight, deckTop, gut, phone ? PHONE_MIN : STACK_MIN),
+    q3,
   };
 }
 
-/** Замеры колоды `deck` стопкой; `on` — колода стопкой (иначе null и ничего не меряется). */
-export function useStackMetrics(deck: RefObject<HTMLElement>, on: boolean): StackMetrics | null {
+/** Замеры колоды `deck` стопкой; `on` — колода стопкой (иначе null и ничего не меряется), `phone` — телефон (колода во
+ *  весь экран, плита 03 «Создать» прижата к низу). */
+export function useStackMetrics(deck: RefObject<HTMLElement>, on: boolean, phone = false): StackMetrics | null {
   const [m, setM] = useState<StackMetrics | null>(null);
   const measure = useRef<() => void>(() => {});
   useLayoutEffect(() => {
@@ -99,7 +107,7 @@ export function useStackMetrics(deck: RefObject<HTMLElement>, on: boolean): Stac
       }
     };
     const run = () => {
-      const next = read(el, watch);
+      const next = read(el, watch, phone);
       setM((prev) => (sameMetrics(prev, next) ? prev : next));
     };
     const schedule = () => {
@@ -121,7 +129,7 @@ export function useStackMetrics(deck: RefObject<HTMLElement>, on: boolean): Stac
       window.cancelAnimationFrame(raf);
       measure.current = () => {};
     };
-  }, [deck, on]);
+  }, [deck, on, phone]);
   // после каждой отрисовки колоды (другой экран, шаг, вариант) — замер в том же кадре, до отрисовки страницы
   useLayoutEffect(() => {
     measure.current();
@@ -129,8 +137,11 @@ export function useStackMetrics(deck: RefObject<HTMLElement>, on: boolean): Stac
   return m;
 }
 
+/** Колода ниже становится, когда плиты доехали: ход плиты и кадр запаса. */
+export const HOLD_MS = LAYER_MS + 40;
+
 /** Высота колоды на ходу: растёт сразу, ниже становится через `ms` (плита, которая уезжает вниз, не обрезается краем). */
-export function useHeldHeight(h: number, ms = 560): number {
+export function useHeldHeight(h: number, ms = HOLD_MS): number {
   const [held, setHeld] = useState(h);
   useEffect(() => {
     if (h >= held) {

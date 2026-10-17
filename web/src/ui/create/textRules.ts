@@ -251,12 +251,16 @@ export function improveStep(live: ImproveLive, brief: string, templateId: string
   return { live: hadText === live.hadText ? live : { ...live, hadText }, ends: templateId !== live.tpl || (hadText && !has) };
 }
 
+/** «Улучшить готовую» (доска C-improve): поле уходит под заметку на 88 и растёт вниз на 16 — без замера заметки. */
+export const IMPROVE_SHIFT = 88;
+export const IMPROVE_GROW = 16;
+
 /** Сдвиг поля под заметку: на доске заметка в две строки (72 px) — поле уходит вниз на 88 px и вырастает вниз на 16
  *  (`.tx-fw-imp`). Заметка выше (при 1280 px или с помощником) — поле уходит на её высоту + 16, а растёт меньше, чтобы
  *  его низ не ушёл под плиту 03. */
 export function improveShift(noteH: number): { shift: number; grow: number } {
-  const shift = Math.max(88, Math.round(noteH) + 16);
-  return { shift, grow: Math.max(0, 16 - (shift - 88)) };
+  const shift = Math.max(IMPROVE_SHIFT, Math.round(noteH) + IMPROVE_GROW);
+  return { shift, grow: Math.max(0, IMPROVE_GROW - (shift - IMPROVE_SHIFT)) };
 }
 
 /** Первое предложение текста (строка у поля — одна, без переноса). */
