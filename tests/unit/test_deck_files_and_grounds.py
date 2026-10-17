@@ -66,7 +66,8 @@ def test_the_render_copy_drops_an_alpha_channel_opaque_everywhere(tmp_path):
     opaque = _png((10, 20, 30, 255), size=(1600, 900))
     got = _without_opaque_alpha(opaque)
     assert got is not None and Image.open(io.BytesIO(got)).mode == "RGB"
-    assert list(Image.open(io.BytesIO(got)).getdata())[:3] == [(10, 20, 30)] * 3
+    im = Image.open(io.BytesIO(got))
+    assert list(im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata())[:3] == [(10, 20, 30)] * 3
     # a picture that is see-through somewhere keeps its alpha; a small one is not worth the work
     see_through = _png((10, 20, 30, 128), size=(1600, 900))
     assert _without_opaque_alpha(see_through) is None

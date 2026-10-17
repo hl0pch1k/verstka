@@ -99,7 +99,7 @@ def test_the_picture_is_the_formula_at_its_size_in_its_colour():
     assert (w, h) == pytest.approx(E.measure("\\int_0^2 x^2\\,dx = \\frac{8}{3}", 24))
     im = Image.open(io.BytesIO(png)).convert("RGBA")
     assert im.getpixel((0, 0))[3] == 0  # a transparent ground
-    ink = [p for p in im.getdata() if p[3] > 200]
+    ink = [p for p in (im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata()) if p[3] > 200]
     assert ink and all(abs(p[0] - 0xC0) < 8 and abs(p[2] - 0x2B) < 8 for p in ink[:200])
 
 
