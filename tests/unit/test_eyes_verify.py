@@ -79,3 +79,19 @@ def test_only_verified_major_remarks_lay_a_slide_out_again():
     assert [p.code for p in verified] == ["unbalanced"]
     assert len(dropped) == 2 and all(d["why"] for d in dropped)
     assert [p.code for p in keep] == ["unbalanced"]
+
+
+def test_a_strip_over_the_chart_is_verified_by_its_geometry():
+    """u1 live (qa4 round): «голубая плашка с текстом перекрывает нижнюю часть графика» was real — the conclusion strip
+    stood on the line's lower half — and must never be dropped as «labels have room»."""
+    sl = _chart_slide([f"м{k}" for k in range(21)], list(range(21)), kind="line", frac=(0.066, 0.307, 0.871, 0.585))
+    strip = IRElement(id="9", type="shape", name="Conclusion strip", bbox=Bbox(x=int(0.056 * W), y=int(0.678 * H), w=int(0.89 * W), h=int(0.147 * H)),
+                      bbox_frac=BboxFrac(x=0.056, y=0.678, w=0.89, h=0.147))
+    foot = IRElement(id="10", type="text", name="Footnote", bbox=Bbox(x=int(0.056 * W), y=int(0.849 * H), w=int(0.89 * W), h=int(0.033 * H)),
+                     bbox_frac=BboxFrac(x=0.056, y=0.849, w=0.89, h=0.033))
+    remark = _p("overlap", "нижняя часть графика", "голубая плашка с текстом перекрывает нижнюю часть графика: линия и точки скрыты")
+    sl.elements += [foot]
+    assert E.check_problem(remark, sl, DATA, [])[0] == "contradicted"  # the footnote under the axis is no overlap
+    sl.elements += [strip]
+    verdict, why = E.check_problem(remark, sl, DATA, [])
+    assert verdict == "verified" and "Conclusion strip" in why

@@ -366,6 +366,28 @@ def _label_fit(e: Any) -> Optional[bool]:
     return longest * 9.0 * 0.55 <= w_pt * 0.9 / len(cats) * 1.6  # a label may wrap onto two lines under its column
 
 
+# a remark that another element sits on the chart (a caption strip, a text box, a card), not about its own labels
+_OTHER_ON_CHART_RE = re.compile(r"плашк|текст\w*\s+(?:блок|поле)|блок|рамк|карточк|вывод|заголов|сноск|логотип|подпис\w*\s+(?:под|над)\s+график|strip|box", re.I)
+
+
+def _on_chart(slide_ir: Any, e: Any) -> list[Any]:
+    """The slide's other elements that stand on the chart's plot: they cross its frame and their centre is inside the
+    plot (the frame without its top 5% and its bottom 12%, where the axis labels and titles are)."""
+    f = e.bbox_frac
+    top, bottom = f.y + 0.05 * f.h, f.y + f.h * 0.88
+    out = []
+    for o in getattr(slide_ir, "elements", None) or []:
+        if o is e or o.type not in ("text", "shape", "picture", "table") or getattr(o, "nested", False):
+            continue
+        g = o.bbox_frac
+        cx, cy = g.x + g.w / 2, g.y + g.h / 2
+        ix = min(f.x + f.w, g.x + g.w) - max(f.x, g.x)
+        iy = min(f.y + f.h, g.y + g.h) - max(f.y, g.y)
+        if ix > 0 and iy > 0 and f.x <= cx <= f.x + f.w and top <= cy <= bottom and ix * iy >= 0.03 * f.w * f.h:
+            out.append(o)
+    return out
+
+
 def check_problem(p: ReviewProblem, slide_ir: Any, osl: Any, det: list[Issue]) -> tuple[str, str]:
     """What the slide's own data says of the model's remark: ("verified" | "unverified" | "contradicted", why).
     Verified — the chart's IR or a deterministic check shows the same (a gap the data has, a frame past the slide, labels
@@ -380,6 +402,13 @@ def check_problem(p: ReviewProblem, slide_ir: Any, osl: Any, det: list[Issue]) -
     if chart_claim:
         e = charts[0]
         ch = e.chart
+        if p.code == "overlap" or (_CROWD_RE.search(text) and _OTHER_ON_CHART_RE.search(text)):
+            # another element on the chart (u1 live: the conclusion strip over the line's lower half): the geometry says
+            on = _on_chart(slide_ir, e)
+            if on:
+                return "verified", f"«{(on[0].name or on[0].type)[:40]}» стоит на поле диаграммы"
+            if _OTHER_ON_CHART_RE.search(text):
+                return "contradicted", "на поле диаграммы ничего другого не стоит"
         values = [v for sr in ch.series for v in sr.values]
         from_data = getattr(osl, "data", None) is not None
         if _GAP_RE.search(text):
