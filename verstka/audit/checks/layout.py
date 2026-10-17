@@ -279,10 +279,24 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
 def margin_violation(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     safe = ctx.manifest.tokens.spacing.safe_area
+    prs = None
     for s in ctx.ir.slides:
+        home = None
         for e in text_elements(s):
             if is_chrome_like(e, ctx.ir, ctx.manifest) or e.nested or at_template_position(e, ctx.manifest):
                 continue
+            if e.ph_type in ("title", "ctrTitle"):
+                # a heading inside the box its own layout gives it stands where the template sets headings — the
+                # margins measured on other samples (a cover's) are not this layout's
+                if home is None:
+                    prs = prs if prs is not None else _deck(ctx)
+                    try:
+                        home = _title_home(prs.slides[s.index - 1], ctx.ir.slide_w, ctx.ir.slide_h) if prs is not None else None
+                    except Exception:  # noqa: BLE001
+                        home = None
+                    home = home or False
+                if home and contains(home, e.bbox, 0.0):
+                    continue
             f = e.bbox_frac
             if f.x < safe.x - 0.03 or f.x2 > safe.x2 + 0.03 or f.y2 > safe.y2 + 0.05:
                 if ctx.verbatim(s) and f.y2 > safe.y2 + 0.05 and f.x >= safe.x - 0.03 and f.x2 <= safe.x2 + 0.03:
@@ -593,6 +607,13 @@ def _busy_cell(o, px: float, py: float, y0: float, y1: float) -> bool:
     return busy_for_line(c.std, fine, cx, cy, (y0 - b.y) / max(b.h, 1), (y1 - b.y) / max(b.h, 1))
 
 
+def letter_band(row: Bbox) -> Bbox:
+    """The part of a line's box (`common.line_boxes`: a line's height, 1.2 em) its letters fill: from the top of the
+    capitals to the baseline — the half-leading over them and the descenders' room under the baseline aside."""
+    top = int(row.h * 0.15)
+    return Bbox(x=row.x, y=row.y + top, w=row.w, h=max(int(row.h * 0.65), 1))
+
+
 def _photo_crossings(e, s, photos: list, tpl: list, W: int) -> Optional[tuple[float, object]]:
     """(share, photo) of the first line of a text that runs from the calm part of a photo ground onto its busy part
     (LO Candy's subtitle on the candies): each line's letters (common.line_boxes), sampled 24 × 3, on the busy cells of
@@ -618,7 +639,10 @@ def _photo_crossings(e, s, photos: list, tpl: list, W: int) -> Optional[tuple[fl
             if any(t is not o and t.type in ("shape", "text", "group") and ((t.fill_hex and fill_alpha(t) >= 0.6) or t.outline) and _paints_at(t, cx, cy) for t in over):
                 continue  # a panel over the photo (the layout's or the slide's own card): the line stands on the panel
             nx, ny = 24, 3
-            hit = sum(1 for i in range(nx) for j in range(ny) if _busy_cell(o, box.x + (i + 0.5) * box.w / nx, box.y + (j + 0.5) * box.h / ny, box.y, box.y2))
+            # (the band the letters fill — the line's leading and its descenders' room aside: a full-slide parchment
+            # whose ink blot starts right under a source line was taken for the line's ground)
+            g = letter_band(box)
+            hit = sum(1 for i in range(nx) for j in range(ny) if _busy_cell(o, g.x + (i + 0.5) * g.w / nx, g.y + (j + 0.5) * g.h / ny, g.y, g.y2))
             share = hit / float(nx * ny)
             if PHOTO_CROSS[0] <= share <= PHOTO_CROSS[1] and share * box.w >= PHOTO_CROSS_MIN_W * W:
                 return share, o
@@ -889,6 +913,36 @@ TEXT_OVER_DECOR = CheckSpec(
 )
 
 
+def _title_home(slide, W: int, H: int) -> Optional[Bbox]:
+    """The box the slide's layout (or its master) gives its heading, a hair wider — the place the template draws its
+    heading's ground for (a ribbon, a banner baked into the picture under the slide). None when it has none."""
+    try:
+        for owner in (slide.slide_layout, slide.slide_layout.slide_master):
+            for ph in owner.placeholders:
+                kind = str(ph.placeholder_format.type).split(".")[-1].split(" ")[0]
+                if kind in ("TITLE", "CENTER_TITLE") and None not in (ph.left, ph.top, ph.width, ph.height):
+                    pad_x, pad_y = int(0.02 * W), int(0.02 * H)
+                    return Bbox(x=int(ph.left) - pad_x, y=int(ph.top) - pad_y, w=int(ph.width) + 2 * pad_x, h=int(ph.height) + 2 * pad_y)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+MARK_IN_LETTERS = 0.04  # the share of a line's letter band a mark must cover to stand under the letters
+
+
+def _marks_in(slide, row: Bbox, band: Bbox) -> bool:
+    """The marks of the ground cover a part of the line's letter band, not only the bounding box of specks around it
+    (an old paper's texture and a blot under the descenders united into one box as wide as the line)."""
+    from verstka.rendering.picture_lines import mark_share
+
+    try:
+        share = mark_share(slide, row, band, sheet_share=0.55)
+    except Exception:  # noqa: BLE001 - unread: the box test stands
+        return True
+    return share is None or share >= MARK_IN_LETTERS
+
+
 @check(TEXT_OVER_DECOR)
 def text_over_decor(ctx: AuditContext) -> list[Issue]:
     from verstka.audit.checks.common import line_boxes
@@ -923,8 +977,11 @@ def text_over_decor(ctx: AuditContext) -> list[Issue]:
                 rows = [b for b, _ in line_boxes(e)]
             except Exception:  # noqa: BLE001
                 continue
+            home = _title_home(slide, W, H) if e.ph_type in ("title", "ctrTitle") else None
             boxes, own = [], []
             for r in rows:
+                if home is not None and contains(home, r, 0.0):
+                    continue  # the heading's letters where the layout sets its heading: the ribbon under them is its band
                 if r.w <= 0 or r.h <= 0 or any(p.x <= r.x and p.x2 >= r.x2 and p.y <= r.y and p.y2 >= r.y2 for p in plates if p != e.bbox):
                     continue
                 pad = int(0.35 * r.h)
@@ -937,8 +994,10 @@ def text_over_decor(ctx: AuditContext) -> list[Issue]:
             except Exception:  # noqa: BLE001
                 continue
             for r0, r, m in zip(own, boxes, marks):
-                # (the mark under the letters themselves, not beside them: a sheet's edge next to a short figure is none)
-                if m is not None and m.w < 0.9 * r.w and m.intersection(r0) >= 0.15 * min(m.area, r0.area):
+                # (the mark under the letters themselves, not beside them: a sheet's edge next to a short figure is none,
+                # nor a blot that starts under the line's descender room)
+                g0 = letter_band(r0)
+                if m is not None and m.w < 0.9 * r.w and m.intersection(g0) >= 0.15 * min(m.area, g0.area) and _marks_in(slide, r, g0):
                     hit = (e, m)
                     break
             if hit:

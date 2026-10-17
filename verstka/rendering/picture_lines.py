@@ -357,6 +357,50 @@ def cell_marks(slide, cells: list[Bbox], sheet_share: float = 0.0) -> list[Optio
     return out
 
 
+def mark_share(slide, cell: Bbox, inner: Bbox, sheet_share: float = 0.0) -> Optional[float]:
+    """The share of `inner` (a line's letters, slide EMU) the marks of the picture under the whole slide cover —
+    measured, as `cell_marks` finds them, against the commonest colour of `cell` (the line with room around it). None
+    when no picture ground is read or no calm sheet lies under the cell. A watermark digit under a card's text covers
+    a good part of the letters' band; a blot under the line's descenders or the specks of an old paper do not."""
+    import numpy as np
+
+    for part, blip, box in _grounds(slide):
+        rid = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+        if not rid or box.w <= 0 or box.h <= 0:
+            continue
+        try:
+            img = part.related_part(rid)
+            src = blip.getparent().find("{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect")
+            crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
+            key = ("rgb", blob_key(img.blob), crop)
+            rgb = _CACHE.get(key)
+            if rgb is None:
+                rgb = _CACHE.put(key, _rgb(img.blob, crop))
+        except Exception:  # noqa: BLE001 - an unreadable picture: no marks read
+            continue
+        ph, pw = rgb.shape[:2]
+
+        def px(b: Bbox) -> tuple[int, int, int, int]:
+            x0, x1 = int((b.x - box.x) / box.w * pw), int((b.x2 - box.x) / box.w * pw)
+            y0, y1 = int((b.y - box.y) / box.h * ph), int((b.y2 - box.y) / box.h * ph)
+            return max(x0, 0), max(y0, 0), min(x1, pw), min(y1, ph)
+
+        x0, y0, x1, y1 = px(cell)
+        if x1 - x0 < 12 or y1 - y0 < 12:
+            continue
+        q16 = (rgb[y0:y1, x0:x1] // 16).reshape(-1, 3)
+        vals, counts = np.unique(q16, axis=0, return_counts=True)
+        if counts.max() < sheet_share * q16.shape[0]:
+            return None
+        own = vals[int(np.argmax(counts))] * 16 + 8
+        ix0, iy0, ix1, iy1 = px(inner)
+        if ix1 <= ix0 or iy1 <= iy0:
+            return 0.0
+        reg = rgb[iy0:iy1, ix0:ix1]
+        return float((np.sqrt(((reg - own) ** 2).sum(axis=2)) > MARK_DIST).mean())
+    return None
+
+
 def designed_lines(lines: list[PictureLine], manifest, layout_part: Optional[str], W: int, H: int) -> list[PictureLine]:
     """The lines no text slot of the template's own samples on this layout crosses: a line the template writes over
     (ЛЦТ's pale towers at the right, under its wide headings) is part of the ground it designed for text; a line no

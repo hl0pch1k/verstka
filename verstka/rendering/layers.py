@@ -1172,7 +1172,10 @@ def busy_for_line(std: list[float], fine: Optional[list[float]], col: int, row: 
         return True
     fr0 = max(row * 2, int(y0 * FINE_H))
     fr1 = min(row * 2 + 1, int(min(y1, 0.999999) * FINE_H))
+    span = max(y1 - y0, 1e-9)
     for fr in range(fr0, fr1 + 1):
+        if fr0 != fr1 and min(y1, (fr + 1) / FINE_H) - max(y0, fr / FINE_H) < 0.3 * span:
+            continue  # the line only grazes this fine row (a parchment's blot starts in the row under a source line)
         for fc in (col * 2, col * 2 + 1):
             if fine[fr * FINE_W + fc] >= PHOTO_FLAT_STD:
                 return True

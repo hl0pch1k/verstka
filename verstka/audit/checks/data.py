@@ -277,8 +277,10 @@ def _same_labels(want: list[str], have: list[str]) -> bool:
         return False
 
     def norm(x: str) -> str:
-        # «’25» / «'25» — the year said short: the same year as «2025» of the data
-        return re.sub(r"[’'‘`]\s?(\d{2})\b", r"20\1", _norm(x)).lower()
+        # «’25» / «'25» — the year said short: the same year as «2025» of the data; a label cut with an ellipsis
+        # («Электроэнергетика и…» for «Электроэнергетика и электротехника») is its category's start
+        x = re.sub(r"[’'‘`]\s?(\d{2})\b", r"20\1", _norm(x)).lower()
+        return re.sub(r"\s*(?:…|\.\.\.)$", "", x)
 
     pairs = [(norm(w), norm(h)) for w, h in zip(want, have)]
     return all(not h or h == w or h in w or w in h for w, h in pairs)

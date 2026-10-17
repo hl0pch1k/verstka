@@ -404,6 +404,22 @@ def _line_on_slide(text: str, have: str, have_alnum: str) -> bool:
     return False
 
 
+def _said_shorter(text: str, have: str, have_alnum: str, notes_alnum: str) -> bool:
+    """A conclusion of two sentences or more the renderer said shorter: its first sentence on the slide, the rest in
+    the speaker notes (`compose._reserve_notes` — a chart of a data file keeps the height its plot needs). Nothing of
+    it is lost: no issue. The rest missing from the notes is."""
+    try:
+        from verstka.rendering.compose import _first_sentence
+    except Exception:  # noqa: BLE001
+        return False
+    first = _first_sentence(text)
+    if not first or not _line_on_slide(first, have, have_alnum):
+        return False
+    rest = " ".join(text.split())[len(" ".join(first.split())):].strip(" .")
+    key = _alnum(rest)[:NOTE_KEY_CHARS]
+    return not key or key in notes_alnum
+
+
 _KIND_RU = {"takeaway": "Вывод", "footnote": "Сноска", "goal": "Цель обложки"}
 
 
@@ -422,6 +438,8 @@ def content_in_notes(ctx: AuditContext) -> list[Issue]:
         notes = _alnum(s.notes)
         for kind, text in lines:
             if _line_on_slide(text, have, have_alnum):
+                continue
+            if kind == "takeaway" and _said_shorter(text, have, have_alnum, notes):
                 continue
             key = _alnum(text)[:NOTE_KEY_CHARS]
             said = bool(key) and key in notes

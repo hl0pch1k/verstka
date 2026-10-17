@@ -58,6 +58,10 @@ def _allowed_fonts(ctx: AuditContext) -> set[str]:
     fam |= {f.lower() for f in ctx.manifest.embedded_fonts}
     fam |= {f.lower() for f in ctx.ir.embedded_fonts}
     fam |= {f.lower() for f in (getattr(ctx.ir, "theme_fonts", []) or []) if f}
+    # the faces the template's own slots are set in (its samples' and their layouts' placeholder styles): a template
+    # whose sample slides are empty placeholders counts no text of them, yet its headings are designed in that face —
+    # a heading the renderer measured and set in it, «refonted» into the theme's wider face, ran to a third line
+    fam |= {s.style.font_family.lower() for p in ctx.manifest.patterns for s in p.slots if s.style.font_family and not s.style.font_family.startswith("+")}
     # the stand-ins the renderer sets Russian text in where a template family has no Cyrillic (rendering/cyrillic.py)
     if ctx.ws is not None:
         try:
