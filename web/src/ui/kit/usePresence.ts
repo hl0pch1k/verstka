@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { presenceNext, type Presence } from "./presence";
+import { presenceNext, presenceWaits, type Presence } from "./presence";
 
 /** Держит содержимое смонтированным, пока идёт уход (ms), и включает «показ» только после того, как закрытое состояние
  *  встало в DOM (и прошли ещё два кадра) — так CSS-переход входа всегда стартует из закрытого состояния. Шаги — чистая
@@ -19,7 +19,7 @@ export function usePresence(open: boolean, ms: number): Presence {
     const t = window.setTimeout(step, ms);
     return () => window.clearTimeout(t);
   }, [open, ms]);
-  const waiting = open && state.mounted && !state.shown;
+  const waiting = presenceWaits(open, state);
   useEffect(() => {
     if (!waiting) return;
     let inner = 0;

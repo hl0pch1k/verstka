@@ -13,6 +13,7 @@ import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type ReactNo
 import { cls } from "../kit/cls";
 import type { Presence } from "../kit/presence";
 import { usePresence } from "../kit/usePresence";
+import { useFocusReturn } from "../shell/modal";
 
 /** Сколько слой едет (и сколько держится его содержимое после закрытия). */
 export const LAYER_MS = 520;
@@ -64,18 +65,16 @@ function OwnLayer(props: LayerProps) {
 function LayerSlot({ open, top, z, height = 812, label, children, onClose, id, role = "region", tone = "light", bare, plateStyle, p }: LayerProps & { p: Presence }) {
   const plate = useRef<HTMLElement>(null);
   const slot = useRef<HTMLDivElement>(null);
-  // фокус — в слой, когда он открылся; при закрытии — туда, откуда его открыли (если фокус был в слое)
+  // фокус — в слой, когда он открылся; при закрытии — туда, откуда его открыли (если фокус остался в слое, на затемнении
+  // или ни на чём): что открыло, слой запоминает в кадре открытия, раньше, чем колода стопкой сделает плиты под ним inert
+  // (ui/shell/modal.ts — один путь возврата фокуса)
+  useFocusReturn(open, slot);
   useEffect(() => {
     if (!p.shown) return;
-    const back = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const el = slot.current;
     // своя плита у содержимого (bare): фокус — в неё, если она его принимает (tabIndex)
     const own = el?.firstElementChild instanceof HTMLElement && el.firstElementChild.hasAttribute("tabindex") ? el.firstElementChild : null;
     if (el && !el.contains(document.activeElement)) (plate.current ?? own ?? el).focus({ preventScroll: true });
-    return () => {
-      const now = document.activeElement;
-      if (back && back.isConnected && (!now || now === document.body || el?.contains(now))) back.focus({ preventScroll: true });
-    };
   }, [p.shown]);
   if (!p.mounted) return null;
   // закрытие — в том же кадре, что и сам переход (колода едет в этом же рендере); открытие — со следующего кадра

@@ -16,3 +16,7 @@ export function presenceNext(prev: Presence, open: boolean): Presence {
   if (prev.shown) return { mounted: true, shown: false };
   return prev.mounted ? { mounted: false, shown: false } : prev;
 }
+
+/** Содержимое смонтировано закрытым и ждёт отрисовки, чтобы показаться (usePresence делает шаг показа через два кадра
+ *  после неё): вход всегда стартует из закрытого состояния, на любой ширине окна. */
+export const presenceWaits = (open: boolean, p: Presence): boolean => open && p.mounted && !p.shown;

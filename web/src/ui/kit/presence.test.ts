@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { presenceNext, type Presence } from "./presence";
+import { presenceNext, presenceWaits, type Presence } from "./presence";
 
 const HIDDEN: Presence = { mounted: false, shown: false };
 
@@ -24,4 +24,13 @@ test("в покое состояние не меняется — тот же о�
   const open: Presence = { mounted: true, shown: true };
   assert.equal(presenceNext(open, true), open);
   assert.equal(presenceNext(HIDDEN, false), HIDDEN);
+});
+
+test("открытие в два шага на любой ширине: смонтированное закрытым ждёт отрисовки, показ — следующим шагом", () => {
+  const a = presenceNext(HIDDEN, true);
+  assert.equal(presenceWaits(true, a), true);
+  assert.equal(presenceWaits(true, presenceNext(a, true)), false);
+  // закрытие во время ожидания — показа не будет
+  assert.equal(presenceWaits(false, a), false);
+  assert.equal(presenceWaits(true, HIDDEN), false);
 });
