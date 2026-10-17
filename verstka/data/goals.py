@@ -17,7 +17,7 @@ from verstka.data.words import file_title, stem, stem_in, stems_match
 from verstka.data.words import stems_of as _stems_of
 from verstka.schemas.data import DatasetProfile, TaskKind, VizKind
 
-__all__ = ["Goal", "goals_of", "stem", "stems_of", "stems_match", "goal_match", "GOAL_VIZ"]
+__all__ = ["Goal", "goals_of", "goal_focus", "stem", "stems_of", "stems_match", "goal_match", "GOAL_VIZ"]
 
 # вид визуализации, к которому ведёт цель (подпись — как в интерфейсе)
 GOAL_VIZ: dict[TaskKind, tuple[VizKind, str]] = {
@@ -43,6 +43,15 @@ class Goal(BaseModel):
     at: int = 0  # позиция в тексте
     # цель не выполнима на этом датасете — почему (она не теряется: причина в «Почему так»)
     unmet: Optional[str] = None
+    # вопрос: что спрошено — наибольшее/наименьшее («больше всего», «быстрее всех»), итог («сколько всего»), выполнены
+    # ли цели и план, порог («выше 80%»), всплеск; None — обычная цель
+    ask: Optional[str] = None
+    # главное слово величины цели («по свободным местам» → «мест», «удержание клиентов» → «удержан») и отрицания
+    # («без НДС» → ["ндс"])
+    head: Optional[str] = None
+    negate: list[str] = Field(default_factory=list)
+    # вопрос понят, а задача — нет («Расскажите о продажах»): показан главный вывод по данным, это сказано
+    free: bool = False
 
 
 _V = r"(?:покажи(?:те)?|показать|отрази(?:те)?|отразить|продемонстрируй(?:те)?|визуализируй(?:те)?)"
@@ -160,8 +169,170 @@ def goals_of(text: str) -> list[Goal]:
                              metric=_metric_of(ph) if task == "comparison" else [], at=at0 + m.start() + k)
                     if not any(x.task == g.task and x.phrase == g.phrase for x in found):
                         found.append(g)
+    # предложения, где шаблоны цели не нашли, — вопросы и утверждения («Какой партнёр приносит больше всего выручки?»)
+    for at, sent in _sentences(text):
+        if any(at <= g.at < at + len(sent) for g in found):
+            continue
+        for g in _question_goals(sent, at):
+            if not any(x.task == g.task and x.phrase == g.phrase for x in found):
+                found.append(g)
+    for g in found:
+        if g.head is None and not g.free:
+            # главное слово величины — и у целей шаблонов («сравни магазины по среднему чеку» → «чек»)
+            m_, h_, n_ = goal_focus(g.phrase)
+            g.head, g.negate = h_, n_
     found.sort(key=lambda g: (g.at, list(GOAL_VIZ).index(g.task)))
     return found
+
+
+# ── вопросы и утверждения («Какой партнёр приносит больше всего выручки?», «Нужно показать, что…») ────────────────
+_Q_WORD = r"(?:как(?:ой|ая|ое|ие|ого|ую|ом|их|им|ими)|в\s+как(?:ом|ой|их)|у\s+как(?:ого|ой|их)|с\s+как(?:им|ой)|" \
+          r"кто|где|когда|сколько|почему|зачем|чем|что)"
+_MOST = re.compile(r"(?:больше|меньше|выше|ниже|лучше|хуже|быстрее|медленнее|дольше|дороже|дешевле|чаще|реже|сильнее|"
+                   r"слабее)\s+(?:всего|всех)|сам(?:ый|ая|ое|ые|ых|ого|ой|ую|ом)\s+[а-яё]+|наи(?:более|менее)\s+[а-яё]+|"
+                   r"на\s+первом\s+месте|лидиру|отста[её]т|отстают|победил|выиграл|впереди", re.I)
+_LOW = re.compile(r"(?:меньше|ниже|хуже|дешевле|реже|слабее)\s+(?:всего|всех)|сам(?:ый|ая|ое|ые|ых|ого|ой|ую|ом)\s+"
+                  r"(?:низк|мал|медленн|деш|плох|слаб)|наименее|отста[её]т|отстают", re.I)
+_GROW_Q = re.compile(r"(?:раст[её]т|растут|рос(?:ла|ли|ло)?|вырос(?:ла|ли|ло)?|увеличива\w*|прибавля\w*|снижа\w*|"
+                     r"сокраща\w*|пада\w*)\s+(?:быстрее|медленнее|сильнее)\s+(?:всего|всех)|(?:быстрее|медленнее|сильнее)"
+                     r"\s+(?:всего|всех)\s+(?:раст|рос|сниж|пада|сокращ|увелич)", re.I)
+_TREND_Q = re.compile(r"как\s+(?:\S+\s+){0,3}?(?:раст[её]т|растут|рос(?:ла|ли|ло)?|меня\w*|менял\w*|измен\w*|пада\w*|"
+                      r"снижа\w*|сокраща\w*|увеличива\w*|колеблет\w*|разви\w*)"
+                      r"|(?:показать|покажи\w*|видно|доказать|убедиться|подтвердить),?\s+что\s+.*(?:стал[аои]?\s+(?:меньше|больше|"
+                      r"ниже|выше|лучше|хуже)|снижа\w*|раст[её]т|растут|сокраща\w*|увеличива\w*|улучш\w*|ухудш\w*|"
+                      r"вышл[аио]?\s+в\s+(?:прибыль|плюс)|вырос\w*|упал\w*)"
+                      r"|был[аои]?\s+ли\s+(?:всплеск|рост|падени|пик|провал|скач)|когда\s+был[аои]?\s+(?:пик|всплеск)"
+                      r"|за\s+(?:последний|прошлый)\s+(?:год|квартал|месяц)|по\s+(?:месяцам|неделям|дням|кварталам|годам)\b",
+                      re.I)
+_MEET_Q = re.compile(r"(?:хватает|выполнил\w*|выполнен\w*|уложил\w*|достиг\w*|перевыполн\w*)\s+ли|ли\s+(?:план|цел)|"
+                     r"(?:какие|сколько|кто)\s+.*(?:выполнен\w*|выполнил\w*|уложил\w*|достиг\w*|не\s+уложил\w*)|"
+                     r"перерасход|недовыполн", re.I)
+_TOTAL_Q = re.compile(r"сколько\s+(?:всего|в\s+сумме|итого)|сколько\s+[а-яё]+\s+(?:за|в)\s+|каков\w*\s+(?:итог|общ)|"
+                      r"как(?:ой|ая|ое)\s+(?:средн|общ|суммарн)\w*", re.I)
+_THRESH_Q = re.compile(r"(?:выше|больше|ниже|меньше|свыше|более|менее|не\s+меньше|не\s+больше)\s+(\d+(?:[.,]\d+)?)\s*%?",
+                       re.I)
+_SHARE_Q = re.compile(r"(?:что|кто|как(?:ой|ая|ие))\s+(?:\S+\s+){0,2}?(?:да[её]т|дают|приносит|приносят|формиру\w*|"
+                      r"составля\w*)|из\s+чего|доля|долю|структур", re.I)
+_REL_Q = re.compile(r"(?:есть\s+ли|существует\s+ли)\s+(?:связь|зависимост)|зависит\s+ли|влия[ею]т\s+ли|связан[аоы]?\s+ли",
+                    re.I)
+_DIST_Q = re.compile(r"как\s+распредел|какой\s+разброс|типичн", re.I)
+_IMPERATIVE = re.compile(r"^(?:покаж\w*|сравни\w*|расскаж\w*|опиши\w*|оцени\w*|проанализир\w*|разбер\w*|выясни\w*|"
+                         r"посмотр\w*|нужно\s+\w+|надо\s+\w+|главное\s+—?\s*\w+|хочу\s+\w+|важно\s+\w+|давайте\s+\w+)",
+                         re.I)
+_QWORDS = frozenset({"какой", "какая", "какое", "какие", "каком", "каких", "каким", "какого", "какую", "кто", "где",
+                     "когда", "сколько", "почему", "зачем", "больше", "меньше", "всего", "всех", "самый", "самая",
+                     "самое", "самые", "самых", "самого", "самой", "лучше", "хуже", "быстрее", "медленнее", "выше",
+                     "ниже", "дольше", "дороже", "дешевле", "наиболее", "наименее", "нужно", "надо", "главное",
+                     "показать", "видно", "был", "было", "была", "были", "стало", "стал", "стала", "стали", "чаще",
+                     "реже", "сильнее", "слабее", "мы", "нас", "наш", "нам", "из", "тех", "того", "расскажите",
+                     "расскажи", "опишите", "оцените", "проанализируйте", "разберите", "выясните", "хочу", "важно",
+                     "давайте", "ещё", "еще", "очень", "сейчас", "уже", "вообще", "именно", "также", "тоже", "свыше",
+                     "более", "менее", "хватает", "ли", "чего", "каков", "каковы", "итого", "сумме", "высокий",
+                     "высокая", "высокое", "высокие", "низкий", "низкая", "большой", "большая", "маленький", "кого",
+                     "кому", "ком", "чему", "каждый", "каждого", "свои", "своих", "лучший", "лучшая", "худший"})
+# глагол → величина: «лучше конвертирует» — конверсия, «отвечает быстрее» — время ответа
+_VERB_MEASURE = {"конвертир": "конверс", "отвеча": "ответ", "обрабатыва": "обработк", "загруж": "загрузк",
+                 "переплачива": "свободн", "зарабатыва": "выручк", "тратит": "расход", "покупа": "покуп",
+                 "продаёт": "продаж", "продает": "продаж", "терял": "отток", "теря": "потер"}
+
+
+def _sentences(text: str) -> list[tuple[int, str]]:
+    out = []
+    for m in re.finditer(r"[^.!?…\n]+[.!?…]?", text or ""):
+        s = m.group(0).strip()
+        if len(s) >= 6:
+            out.append((m.start() + (len(m.group(0)) - len(m.group(0).lstrip())), s))
+    return out
+
+
+_ADJ_END = re.compile(r"(?:ому|ему|ого|его|ой|ый|ий|ая|яя|ое|ее|ые|ие|ых|их|ым|им|ую|юю|ыми|ими|ей)$")
+_GENERIC_HEAD = {"числ", "количеств", "кол", "дол", "уровн", "объем", "объ", "показател", "значени", "сумм", "всем",
+                 "всех", "перв", "последн"}
+_VERBISH = re.compile(r"(?:ется|ится|ются|ятся|ает|яет|ует|еет|ают|яют|уют|ался|ался|ались|илось|алось)$")
+
+
+def _tail_words(tail: str) -> list[str]:
+    out = []
+    for w in re.findall(r"[а-яёa-z0-9]+", tail):
+        if w in _STOP or w in _QWORDS or len(w) < 2 or re.fullmatch(r"\d+", w):
+            continue
+        mapped = next((meas for v, meas in _VERB_MEASURE.items() if w.startswith(v)), None)
+        if mapped:
+            out.append(mapped)
+        elif len(w) > 5 and _VERBISH.search(w):
+            continue  # глагол («остаётся») — не величина
+        else:
+            out.append(w)
+    return out
+
+
+def goal_focus(phrase_: str) -> tuple[list[str], Optional[str], list[str]]:
+    """(величина, главное слово, отрицания) цели: «сравните тарифы по цене с НДС» → ([цен, ндс], «цен», []);
+    «по свободным местам» → ([свободн, мест], «мест», []); «цена без НДС» → отрицание «ндс». Величина — после «какой
+    средний», «по» (не «по всем X» и не «по месяцам»), «больше/меньше всего», «самый высокий», глагола изменения;
+    главное слово — первое существительное величины (прилагательные и «число», «доля», «уровень» — пропускаются)."""
+    low = " ".join((phrase_ or "").lower().replace("ё", "е").split())
+    negate = [stem(w) for w in re.findall(r"\bбез\s+([а-яёa-z0-9]+)", low)]
+    pats = [r"(?:какой|какая|какое|какие|каков\w*)\s+((?:средн|общ|суммарн)\w*\s+.+?)(?:\s+по\s+все[мх]\b.*)?$",
+            r"\bпо\s+(?!все[мх]\b|месяц|недел|дн|квартал|год)(.+)$",
+            r"(?:больше|меньше|выше|ниже|лучше|хуже|чаще|реже)\s+(?:всего|всех)\s+(.+)$",
+            r"сам(?:ый|ая|ое|ые|ых|ого|ой|ую|ом)\s+[а-яё]+\s+(.+)$",
+            r"(?:рост|снижени\w*|падени\w*|динамик\w*|изменени\w*|как\s+(?:\S+\s+)?(?:меня\w*|раст\w*|рос\w*|"
+            r"пада\w*|снижа\w*|измен\w*))\s+(.+)$"]
+    words: list[str] = []
+    for i, pat in enumerate(pats):
+        m = re.search(pat, low)
+        if m:
+            words = _tail_words(m.group(1))
+            if words:
+                break
+    if not words:
+        words = _tail_words(low) if any(low.find(v) >= 0 for v in _VERB_MEASURE) else []
+        words = [w for w in words if w in _VERB_MEASURE.values()]
+    metric = [x for x in dict.fromkeys(stem(w) for w in words) if x not in _PERIOD_STEMS]
+    nouns = [w for k, w in enumerate(words) if not (_ADJ_END.search(w) and not re.search(r"(?:ни|ти|ви|си)е$", w)
+                                                    and k + 1 < len(words)) and stem(w) not in _GENERIC_HEAD]
+    head = stem(nouns[0]) if nouns else None
+    return metric, head, negate
+
+
+def _question_goals(sent: str, at: int) -> list[Goal]:
+    """Цели из вопроса или утверждения, которые не взяли шаблоны: задача по смыслу фразы, предмет — её слова."""
+    low = " ".join(sent.lower().split())
+    q = low.rstrip(" ?!.…")
+    looks = low.endswith("?") or re.match(_Q_WORD + r"\b", low) is not None or _IMPERATIVE.match(low) is not None \
+        or re.search(r"\bли\b", low) is not None
+    if not looks:
+        return []
+    subject = [x for x in stems_of(q) if x not in {stem(w) for w in _QWORDS}]
+    metric, head, negate = goal_focus(q)
+
+    def g(task: TaskKind, ask: Optional[str] = None, free: bool = False) -> Goal:
+        viz, to = GOAL_VIZ[task]
+        return Goal(phrase=q, task=task, viz=viz, to=to, subject=subject, metric=metric if task == "comparison" else [],
+                    at=at, ask=ask, head=head, negate=negate, free=free)
+
+    if _REL_Q.search(low):
+        return [g("relationship")]
+    if _DIST_Q.search(low):
+        return [g("distribution")]
+    if _GROW_Q.search(low):
+        return [g("dynamics", "fastest"), g("comparison", "fastest")]
+    if _MEET_Q.search(low):
+        return [g("kpi" if re.search(r"\bцел[иеь]", low) else "comparison", "meet")]
+    th = _THRESH_Q.search(low)
+    if th and re.match(_Q_WORD, low):
+        return [g("comparison", f"above:{th.group(1)}")]
+    if _TREND_Q.search(low):
+        return [g("dynamics", "spike" if re.search(r"всплеск|пик|скач", low) else None)]
+    if _SHARE_Q.search(low) and not _MOST.search(low):
+        return [g("shares")]
+    if _MOST.search(low) or re.search(r"\bгде\b.*\b(?:теря\w*|узк\w*|просед\w*|провал\w*)", low):
+        return [g("comparison", "min" if _LOW.search(low) else "max")]
+    if _TOTAL_Q.search(low):
+        return [g("comparison", "total")]
+    # понятно, что спрошено, но не какая задача: главный вывод по данным — это сказано в «Почему так»
+    return [g("comparison", free=True)] if subject else []
 
 
 def goal_match(goal: Goal, profile: DatasetProfile, values: Optional[Iterable[str]] = None) -> float:

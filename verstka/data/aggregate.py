@@ -95,10 +95,15 @@ RATE_COLUMN = re.compile(r"(?:^|[\s(/])на\s+(?:1\s*000|1000|10\s*000|100\s*000
 class Data:
     """Датасет для анализа: таблица, профиль, метрики, подписи и подготовленные виды (лениво)."""
 
-    def __init__(self, table: Table, profile: DatasetProfile, subject: tuple[str, ...] = (), compare: bool = False):
+    def __init__(self, table: Table, profile: DatasetProfile, subject: tuple[str, ...] = (), compare: bool = False,
+                 head: Optional[str] = None, negate: tuple[str, ...] = (), qualifiers: tuple[str, ...] = ()):
         self.table = table
         self.profile = profile
         self.subject = subject
+        # величина цели: главное слово («мест»), уточнения («свободн»), отрицания («без НДС» → «ндс»)
+        self.head = head
+        self.negate = negate
+        self.qualifiers = qualifiers
         # сравнение категорий: главная метрика — колонка-итог («Итого за год»), если она есть, а не первая часть
         self.compare = compare
         cols = profile.columns
@@ -265,8 +270,20 @@ class Data:
         if self.subject and any(RATE_GOAL.match(s_) for s_ in self.subject) and self.rate_measure is not None:
             # «по обеспеченности врачами», «по уровню преступности» — величина на душу, а не абсолютный счёт
             return self.rate_measure
-        if self.subject:
-            hits = [stem_hits(self.subject, m.name) for m in ms]
+        if self.head:
+            # главное слово величины цели решает: «по свободным местам» — «Свободно мест», а не «Куплено мест»;
+            # «по цене с НДС» — не «Цена без НДС»; главного слова нет ни в одной колонке — цель колонку не выбирает
+            picked = self.head_measure
+            if picked is not None:
+                return self._rate_over_count(picked)
+            if not self.head_in_columns:
+                ms_sub = ()
+            else:
+                ms_sub = self.subject
+        else:
+            ms_sub = self.subject
+        if ms_sub:
+            hits = [stem_hits(ms_sub, m.name) for m in ms]
             top = max(hits)
             if top > 0:
                 tied = [m for m, h in zip(ms, hits) if h == top]
@@ -353,6 +370,45 @@ class Data:
         same = (xy.x.unit or "") == (xy.y.unit or "") and xy.x.type == xy.y.type
         years = all(re.fullmatch(r"\s*(?:19|20)\d\d\s*", m.name) for m in (xy.x, xy.y))
         return bool(years or (same and self._siblings(xy.x, xy.y)))
+
+    @cached_property
+    def head_in_columns(self) -> bool:
+        """Главное слово величины цели есть в названии какой-нибудь колонки."""
+        quals = [x for x in self.qualifiers if len(x) >= 3]
+        return bool(self.head) and any(any(stem_in(self.head, w) or any(stem_in(x, w) for x in quals)
+                                           for w in stems_of(m.name)) for m in self.measures)
+
+    @cached_property
+    def head_measure(self) -> Optional[Measure]:
+        """Колонка, названная главным словом цели; из нескольких — по уточнениям («свободн»), без противоречия
+        отрицанию («без НДС» только у цели «без НДС»), потом по словам цели и названию файла; не по порядку колонок."""
+        if not self.head:
+            return None
+        # уточнение цели («свободн», «ндс», «средн») конкретнее главного слова: «свободным местам» — «Свободно», хотя
+        # слово «мест» — только в «Куплено мест»
+        quals = [x for x in self.qualifiers if len(x) >= 3]
+        cands = [m for m in self.measures if any(stem_in(self.head, w) for w in stems_of(m.name))
+                 or any(stem_in(x, w) for x in quals for w in stems_of(m.name))]
+        if not cands:
+            return None
+        title = stems_of(file_title(self.profile.file, self.profile.sheet))
+
+        def neg_bad(m: Measure) -> int:
+            low = m.name.lower().replace("ё", "е")
+            has = {stem(w) for w in re.findall(r"\bбез\s+([а-яёa-z0-9]+)", low)}
+            return len(has - set(self.negate)) + len(set(self.negate) - has)
+
+        def score(m: Measure) -> tuple:
+            words = stems_of(m.name)
+            q = sum(1 for x in quals if any(stem_in(x, w) for w in words))
+            h = int(any(stem_in(self.head, w) for w in words))  # type: ignore[arg-type]
+            sub = sum(1 for x in self.subject if any(stem_in(x, w) for w in words))
+            tit = sum(1 for x in title if any(stem_in(x, w) for w in words))
+            return (-neg_bad(m), q, h, sub, tit, not m.change)
+
+        best = max(score(m) for m in cands)
+        top = [m for m in cands if score(m) == best]
+        return top[0] if len(top) == 1 else None  # ничья и по словам цели, и по файлу — не порядок колонок
 
     @cached_property
     def rate_measure(self) -> Optional[Measure]:
@@ -551,6 +607,19 @@ class Data:
     def composition(self) -> bool:
         """Ряды — части одного целого, только по признаку в данных (`part_group`)."""
         return bool(self.part_group) and self.main in self.part_group
+
+    @cached_property
+    def composition_constant(self) -> bool:
+        """Части одного целого в одной и той же пропорции в каждой строке (налог — один процент цены)."""
+        g = self.part_group
+        if not g or len(g) < 2:
+            return False
+        shares = []
+        for i in self.rows_idx:
+            vals = [x.values[i] for x in g]
+            if all(v is not None for v in vals) and sum(vals) > 0:  # type: ignore[arg-type]
+                shares.append(vals[0] / sum(vals) * 100)  # type: ignore[arg-type, operator]
+        return len(shares) >= 2 and max(shares) - min(shares) < 0.5
 
     @cached_property
     def group_name(self) -> Optional[str]:

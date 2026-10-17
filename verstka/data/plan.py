@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from verstka.data.aggregate import MAX_SLIDES, RATE_GOAL, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import FactSet, facts_for
-from verstka.data.goals import Goal, goal_match, goals_of, stems_of
+from verstka.data.goals import Goal, goal_focus, goal_match, goals_of, stems_of
 from verstka.data.words import stem_in
 from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
@@ -64,10 +64,45 @@ def _relevant(goals: Sequence[Goal], d: Data) -> list[Goal]:
     return [g for g in goals if goal_match(g, d.profile, vals) > 0]
 
 
+def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
+    """«Цель совпала» — только если главная величина цели и есть показанная колонка. Главного слова нет ни в одной
+    колонке — так и сказано («величины «удержание» в колонках нет»), колонку цель не выбирала."""
+    if not decision.goal:
+        return decision
+    _, head, _ = goal_focus(decision.goal)
+    if not head:
+        return decision
+    word = next((w for w in re.findall(r"[а-яёa-z0-9]+", decision.goal.lower()) if w.replace("ё", "е").startswith(head)),
+                head)
+    m = d.main
+    metric, _, _ = goal_focus(decision.goal)
+    shown = m is not None and any(stem_in(x, w) for x in [head] + [y for y in metric if len(y) >= 3]
+                                  for w in stems_of(m.name))
+    title = any(stem_in(head, w) for w in stems_of(file_title(d.profile.file, d.profile.sheet)))
+    if shown or (title and not d.head_in_columns):
+        return decision
+    if d.head_in_columns:
+        note = f"Цель «{decision.goal}»: показана «{m.name if m else '—'}», а не величина «{word}» — она в другой колонке."
+    else:
+        note = f"Цель «{decision.goal}»: величины «{word}» в колонках нет — показан главный вывод по данным."
+    reasons = [r for r in decision.reasons if not (r.startswith(f"Цель «{decision.goal}»") and ("совпала" in r or
+                                                                                               "той же задаче" in r))]
+    return decision.model_copy(update={"reasons": reasons + [note]})
+
+
+def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], compare: bool = False) -> Data:
+    """`Data` глазами цели: предмет — основы её слов, величина — главное слово, уточнения и отрицания
+    («по цене с НДС» → «цен», уточнение «ндс»; «без НДС» — отрицание)."""
+    if not phrase:
+        return Data(table, profile, compare=compare)
+    metric, head, negate = goal_focus(phrase)
+    return Data(table, profile, subject=tuple(stems_of(phrase)), compare=compare, head=head, negate=tuple(negate),
+                qualifiers=tuple(x for x in metric if x != head))
+
+
 def data_of(plan: DatasetPlan, table: Table) -> Data:
     """Тот же `Data`, что видел план (главная метрика — по цели, которая решила задачу; у сравнения — колонка-итог)."""
-    subject = tuple(stems_of(plan.task.goal)) if plan.task.goal else ()
-    return Data(table, plan.profile, subject=subject, compare=plan.task.task == "comparison")
+    return goal_data(table, plan.profile, plan.task.goal, compare=plan.task.task == "comparison")
 
 
 def _source(p: DatasetProfile) -> str:
@@ -83,8 +118,9 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     rel = list(goals or []) if assigned else _relevant(goals or [], d0)
     first = decide_task(Data(table, profile, subject=tuple(s for g in rel for s in g.subject)), rel)
     subject = tuple(stems_of(first.goal)) if first.goal else ()
-    d = Data(table, profile, subject=subject) if subject else d0
+    d = goal_data(table, profile, first.goal) if subject else d0
     decision = decide_task(d, rel)
+    decision = _honest_goal(decision, d)
     source = _source(profile)
     title = file_title(profile.file, profile.sheet)
 
@@ -99,7 +135,7 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     task = decision.task
     if task == "comparison":
         # сравнение категорий — по колонке-итогу («Итого за год»), если она есть, а не по первой части
-        d = Data(table, profile, subject=subject, compare=True)
+        d = goal_data(table, profile, first.goal, compare=True)
     data_task = max(base, key=lambda k: base[k])
     raised = decision.goal is not None and base[data_task] > base[task]
     options = rank_options(task, d, [g for g in rel if base.get(g.task, 0) >= FEASIBLE or g.task == task], raised)
@@ -259,7 +295,7 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
     values = [_values_for_match(d) for d in datas]
     for g in goals:
         # данные глазами цели: главная метрика — по её предмету («структура выручки» — выручка, а не цена)
-        gd = [Data(d.table, d.profile, subject=tuple(g.subject)) if g.subject else d for d in datas]
+        gd = [goal_data(d.table, d.profile, g.phrase) if g.subject else d for d in datas]
         scores = [task_scores(x) for x in gd]
         # величина цели («по прибыли», «по среднему баллу») должна быть в данных — иначе цель не об этом датасете
         ok = [_metric_ok(g, x) for x in gd]

@@ -6,7 +6,7 @@ from datetime import date
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from verstka.data.parse import iso_ord, period_iso, period_parts, season_name, season_ord
+from verstka.data.parse import NO_YEAR, iso_ord, period_iso, period_parts, season_name, season_ord
 from verstka.data.views import MAX_POINTS, MAX_SERIES, Measure, SeriesV, TimeView
 from verstka.data.words import count_gen, period_label, period_text
 
@@ -385,9 +385,15 @@ def columns_time_view(d: "Data") -> Optional[TimeView]:
         pp = period_parts(nm)
         if pp is None and ty is not None:
             pp = period_parts(f"{nm} {ty.group(1)}")
+        if pp is None:
+            # месяц или квартал без года («Январь … Июнь», «I кв. · II кв.») — ось без года
+            sn = season_name(nm)
+            if sn is not None:
+                pp = (sn[0], season_ord(sn[0], sn[1], NO_YEAR, 1))
         if pp is not None and pp[0] in ("month", "quarter", "year"):
             cols.append((pp, m))
-    if len(cols) < 3 or len({pp[0] for pp, _ in cols}) != 1 or len({pp for pp, _ in cols}) != len(cols):
+    # два периода — тоже ряд: «было — стало» («I кв. 2026 · II кв. 2026»)
+    if len(cols) < 2 or len({pp[0] for pp, _ in cols}) != 1 or len({pp for pp, _ in cols}) != len(cols):
         return None
     if len({(m.unit or "") for _, m in cols}) != 1 or len({m.additive for _, m in cols}) != 1:
         return None

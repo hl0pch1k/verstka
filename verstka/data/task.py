@@ -68,7 +68,9 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     elif d.parts_measure is not None:
         s["shares"] = 0.92
     elif d.composition and cats is not None and not has_time:
-        s["shares"] = 0.88  # несколько частей одного целого по категориям (формы обучения по направлениям)
+        # несколько частей одного целого по категориям (формы обучения по направлениям); доли у всех строк одни и
+        # те же (НДС 18% цены у каждого тарифа) — структура не главное, но осуществима
+        s["shares"] = 0.5 if d.composition_constant else 0.88
     elif p.parts_of_whole and m is not None and m.additive and m.nonneg and cats is not None and cat_count <= 12:
         s["shares"] = 0.9  # части целого: строка «Итого» равна сумме
     elif m is not None and m.additive and m.nonneg and cats is not None and 2 <= cat_count <= 60 and not has_time \
@@ -261,13 +263,18 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
     goals = goals or []
     used: Optional[Goal] = None
     notes: list[str] = []
+    feasible_phrases = {g.phrase for g in goals if not g.unmet and not g.free and base.get(g.task, 0.0) >= FEASIBLE}
     for g in goals:
+        if g.free:
+            continue
         if g.unmet:
             notes.append(f"Цель «{g.phrase}» здесь не подходит: {g.unmet}.")
         elif base.get(g.task, 0.0) >= FEASIBLE:
             if used is None or base[g.task] > base[used.task]:
                 used = g
-        else:
+        elif g.phrase not in feasible_phrases:
+            # одна фраза — несколько прочтений («какой регион растёт быстрее»: динамика и сравнение): пометка — только
+            # если не подошло ни одно
             notes.append(f"Цель «{g.phrase}» здесь не подходит: {_infeasible_reason(g.task, d)}.")
     if used is not None:
         scores[used.task] = round(scores[used.task] + GOAL_BONUS, 3)
@@ -289,7 +296,12 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
         reasons.append(f"Цель «{used.phrase}» ведёт к задаче «{TASK_TITLES[used.task].lower()}», но по данным сильнее "
                        f"«{TASK_TITLES[task].lower()}».")
     for g in goals:
-        if g is not used and not g.unmet and base.get(g.task, 0.0) >= FEASIBLE:
+        if g is not used and not g.unmet and not g.free and base.get(g.task, 0.0) >= FEASIBLE \
+                and (used is None or g.phrase != used.phrase):
             notes.append(f"Цель «{g.phrase}» здесь не главная: слайд один, и он отвечает на «{used.phrase}».")
+        if g.free:
+            # вопрос понят как вопрос, но не как задача: ответ — главный вывод по данным, и это сказано
+            notes.append(f"Вопрос «{g.phrase}» не распознан как задача — показан главный вывод по данным "
+                         f"({TASK_TITLES[task].lower()}).")
     reasons.extend(notes)
     return TaskDecision(task=task, reasons=reasons, goal=goal_phrase, scores=scores)

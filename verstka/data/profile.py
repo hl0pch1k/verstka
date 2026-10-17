@@ -511,7 +511,9 @@ def _type_number(c: _Col, lname: str, pct_share: float, money_share: float, firs
     c.role = "metric"
     vmin = float(v.min()) if v.size else 0.0
     vmax = float(v.max()) if v.size else 0.0
-    if "%" in lunit or "п.п" in lunit or "процент" in lunit or pct_share >= _SHARE_OK or "%" in lname:
+    if ("%" in lunit or "п.п" in lunit or "процент" in lunit or pct_share >= _SHARE_OK or "%" in lname) \
+            and not (_has_currency(lunit) and "%" not in lunit and pct_share < _SHARE_OK):
+        # «НДС 22%, ₽» — рубли налога, а «22%» — ставка в имени
         c.type = "percent"
     elif _PERCENT_NAME.search(lname) and v.size and vmin >= 0 and vmax <= 100 and not _has_currency(lunit):
         c.type = "percent"
@@ -849,10 +851,14 @@ def _total_column(cols: list[_Col], metrics: list[_Col]) -> tuple[Optional[_Col]
     сопоставимых или стоящих подряд перед ней): «Бюджет + Платное + Целевое = Всего». → (итог, части)."""
     for tc in metrics:
         name = tc.name.strip().lower()
-        if not (is_total_label(tc.name) or name.startswith(("всего", "итого", "общий итог", "total"))):
+        # «Цена с НДС» = «Цена без НДС» + «НДС»: база, налог и итог — тоже части целого
+        with_tax = bool(re.search(r"(?:^|\s)с\s+(?:ндс|налог|учет|учёт)|брутто|включая\s+ндс|в\s+т\.\s?ч\.", name))
+        if not (is_total_label(tc.name) or name.startswith(("всего", "итого", "общий итог", "total")) or with_tax):
             continue
         pool = [m for m in metrics if m is not tc and (m.type != "percent" or tc.type == "percent") and not m.signed
-                and not _CHANGE_NAME.search(m.name.lower()) and (m.unit == tc.unit or not m.unit or not tc.unit)]
+                and not _CHANGE_NAME.search(m.name.lower())
+                and (m.unit == tc.unit or not m.unit or not tc.unit
+                     or (with_tax and (m.unit or "").split("/")[0].strip() == (tc.unit or "").split("/")[0].strip()))]
         left = []
         for m in reversed([m for m in pool if m.j < tc.j]):
             if left and left[-1].j - m.j != 1:

@@ -415,6 +415,10 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             return vals[p["k"]], vals
         if mode in ("max", "min"):
             return (max(vals) if mode == "max" else min(vals)), vals
+        if mode == "mean":
+            return sum(vals) / len(vals), vals
+        if mode == "neg":
+            return float(sum(1 for v in vals if v < 0)), vals
         if mode == "span":
             return float(len(vals) - 1), vals
         return _change(vals[0], vals[-1], p["kind"]), vals + [vals[0], vals[-1]]
