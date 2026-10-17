@@ -155,7 +155,7 @@ export interface QualityView {
 }
 
 /** Проверки аудита, что сверяют числа слайдов с файлами (verstka/audit/checks/data.py). */
-const DATA_FIGURE_CHECKS = new Set(["chart_values_mismatch", "headline_figure_not_in_data"]);
+const DATA_FIGURE_CHECKS = new Set(["chart_values_mismatch", "headline_figure_not_in_data", "data_text_figure_not_in_data"]);
 
 /** Колода из файлов с данными: числа слайдов сверены с файлами (V2 v105: «Числа на слайдах сверены с файлами», в узкой
  *  колонке — «7 файлов данных — числа сверены»); проверки нашли расхождения — сколько, жёлтым. Без файлов — null; сверки

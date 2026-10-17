@@ -44,5 +44,6 @@ include = ["verstka*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 markers = ["integration: tests that need the VK templates dataset"]
