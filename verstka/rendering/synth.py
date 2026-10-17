@@ -2795,6 +2795,45 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
         h_fit = sizes_[key]
         min_ratio = max(0.6 * h1 / h_fit, 0.5)
     res = fit_size([head_text], box, title_font, h_fit, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+    if rule is not None and not res.fits:
+        # the headline does not keep above the rule in its slot at any size the deck's headings allow (Классика: a
+        # headline of two conclusions, three lines of capitals across the rule): the slot takes the band's whole free
+        # width (past the 86 % a heading usually keeps), then the size steps down the scale — never under half the
+        # deck's heading size nor within a tenth of the body size; a headline too long for both crosses the rule, and
+        # the plan says so (the story's headline is to be shorter)
+        from verstka.rendering.clone_check import body_floor
+
+        if centred:
+            cx = box.x + box.w // 2
+            lim_r = box.x + _free_width(slide, box, W, H, int(safe.x2 * W), skip=(title_ph._element,))
+            lim_l = _free_left(slide, box, W, H, safe_x, skip=(title_ph._element,))
+            lim_r = min(lim_r, cut_r) if cut_r is not None else lim_r
+            lim_l = max(lim_l, cut_l) if cut_l is not None else lim_l
+            half = min(cx - lim_l, lim_r - cx)
+            wide = Bbox(x=cx - half, y=box.y, w=2 * half, h=box.h) if 2 * half > box.w else box
+        else:
+            w_band = _free_width(slide, box, W, H, int(safe.x2 * W), skip=(title_ph._element,))
+            w_band = min(w_band, cut_r - box.x) if cut_r is not None else w_band
+            wide = Bbox(x=box.x, y=box.y, w=max(box.w, w_band), h=box.h)
+        least = max(0.5 * h1, 1.1 * body_floor(manifest))
+        steps = [h_fit] + sorted((x for x in scale if least - 0.05 <= x < min(h_fit, res.size_pt) - 0.05), reverse=True)
+        found = None
+        for s_ in steps:
+            for bx in ([box] if s_ < h_fit - 0.05 else []) + ([wide] if wide.w > box.w else []):
+                r2 = fit_size([head_text], bx, title_font, s_, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=1.0, ladder_only=sparse)
+                if r2.fits and not r2.broken_word:
+                    found = (bx, r2)
+                    break
+            if found is not None:
+                break
+        if found is not None:
+            if found[0].w > box.w:
+                warnings.append("heading widened to the band's free width: it keeps above the template's rule")
+            box, res = found
+            if centred:
+                w_full = max(w_full, box.w)
+        else:
+            warnings.append("heading crosses the template's rule: the headline is too long for its slot at any size")
     if rule is not None and res.size_pt < h_fit - 0.05:
         warnings.append(f"heading set at {res.size_pt:g} pt, under the deck's {h_fit:g} pt: it keeps above the template's rule")
     if res.broken_word and head_text != typeset(oslide.headline):
