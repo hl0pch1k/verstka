@@ -386,17 +386,32 @@ def _bins_problem(osl: OutlineSlide, prep) -> Optional[str]:
     return f"в столбцах гистограммы {_num(shown)} значений из {_num(n)}: {_num(n - shown)} не попали ни в один столбец"
 
 
+_OTHERS_RE = re.compile(r"^(?:прочие|остальные)\b", re.I)
+
+
 def _series_table_problem(prep, s: IRSlide) -> Optional[str]:
-    """The prepared series shown as a table: a row a category (its name first), its values in the row."""
+    """The prepared series shown as a table: a row a category (its name first), its values in the row. A table of at
+    most ten rows (the composer's chart-as-table, qa4 NEW-H1) may show the largest categories and sum the rest in a
+    row «Прочие (n)» / «Остальные …»: that row holds, series by series, the sums of the categories it stands for."""
     rows = [[_norm(c) for c in r] for e in _tables(s) for r in e.table.rows]
+    missing = []
     for k, cat in enumerate(prep.categories):
         row = next((r for r in rows if r and _norm(r[0]).lower() == _norm(cat).lower()), None)
         if row is None:
-            return f"нет строки «{cat}»"
+            missing.append(k)
+            continue
         want = [v[k] for _, v in prep.series if k < len(v) and v[k] is not None]
         have = [n for c in row[1:] for n in _cell_numbers(c)]
         if any(not any(_same(w, h) for h in have) for w in want):
             return f"в строке «{cat}» другие числа"
+    if missing:
+        other = next((r for r in rows if r and _OTHERS_RE.match(_norm(r[0]))), None)
+        if other is None:
+            return f"нет строки «{prep.categories[missing[0]]}»"
+        want = [sum(v[k] for k in missing if k < len(v) and v[k] is not None) for _, v in prep.series]
+        have = [n for c in other[1:] for n in _cell_numbers(c)]
+        if any(not any(_same(w, h) for h in have) for w in want):
+            return f"в строке «{other[0]}» не сумма остальных {len(missing)} строк"
     return None
 
 
