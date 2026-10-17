@@ -4423,7 +4423,8 @@ class Composer:
                             break
                     paras.append(Para(self.figure_para(value, fs, k.colors.figure, k.colors.muted)[0].runs, space_after=2))
                     paras.append(self.P(label, k.body, k.colors.text, space_after=1))
-                    paras.append(self.P(span, k.small, k.colors.muted, space_after=k.body * 1.3))
+                    # (the figures before and after are words of the slide: never under the template's body size)
+                    paras.append(self.P(span, k.small_text, k.colors.muted, space_after=k.body * 1.3))
                 # (measured a little narrower than it is, as the column beside a chart: the renderer sets a line a
                 # little wider than measured — two changes in a quarter of the slide ran a sixth past their box)
                 hh = self.h(paras, int(w * self.WORD_ROOM))

@@ -1026,6 +1026,68 @@ def ground_under(slide, box: Bbox, *, min_share: float = 0.8) -> Optional[tuple[
     return None
 
 
+def letter_grounds(slide, el, family: Optional[str] = None) -> list[str]:
+    """The colours under a text's letters, as the reader sees them: each line's letter band (`clone_check.ink_lines`,
+    from the top of the capitals to the baseline; at most six lines) probed at three to eight places, each probe the
+    composite of everything drawn under the text there — the slide's background, then the master's, the layout's and
+    the slide's own shapes up to the text, each by its real outline and its opacity at the probe (a gradient's colour
+    there, a picture's, a 20 % white circle as the purple it tints). The renderer picks a text colour and the audit
+    judges it on these same colours (a box's single mean read a pink glow as the dark purple around it). [] when
+    nothing is read."""
+    from verstka.rendering.charts import _bg_color, _theme_scheme
+    from verstka.rendering.clone_check import ink_lines
+    from verstka.schemas.common import hex_to_rgb, rgb_to_hex
+
+    try:
+        rows = ink_lines(el, family)
+        layers = drawn_layers(slide)
+        layout = slide.slide_layout
+        holders = {"layout": layout, "master": layout.slide_master, "slide": slide}
+        scheme = _theme_scheme(slide)
+    except Exception:  # noqa: BLE001 - nothing read
+        return []
+    if not rows:
+        return []
+    under = []
+    for lay in layers:
+        if lay.el is el:
+            if lay.paints and lay.fill_hex and lay.kind == "sp":
+                under.append(lay)  # the text's own fill (a badge's circle under its digit) is its nearest ground
+            break
+        if lay.placeholder or not lay.paints or lay.kind in ("graphicFrame", "cxnSp", "grpSp"):
+            continue
+        under.append(lay)
+    W = layers[0].slide_w if layers else 0
+    if len(rows) > 6:
+        rows = [rows[i * (len(rows) - 1) // 5] for i in range(6)]
+    out: list[str] = []
+    for row in rows:
+        band = Bbox(x=row.x, y=row.y + int(row.h * 0.15), w=row.w, h=max(int(row.h * 0.65), 1))
+        n = max(3, min(8, int(band.w / max(0.04 * W, 1)) + 1))
+        for i in range(n):
+            probe = Bbox(x=band.x + i * band.w // n, y=band.y, w=max(band.w // n, 1), h=band.h)
+            try:
+                color = _bg_color(slide, probe, scheme)
+                for lay in under:
+                    if lay.box.intersection(probe) <= 0 or painted_share(lay, probe) < 0.5:
+                        continue
+                    got = layer_paint_at(lay, probe, holders.get(lay.source))
+                    if not got or got[1] <= 0.02:
+                        continue
+                    hx, alpha = got
+                    if color is None or alpha >= 0.995:
+                        color = hx.upper()
+                    else:
+                        r1, g1, b1 = hex_to_rgb(hx)
+                        r2, g2, b2 = hex_to_rgb(color)
+                        color = rgb_to_hex(alpha * r1 + (1 - alpha) * r2, alpha * g1 + (1 - alpha) * g2, alpha * b1 + (1 - alpha) * b2)
+            except Exception:  # noqa: BLE001
+                color = None
+            if color and len(color) == 6:
+                out.append(color.upper())
+    return out
+
+
 def ground_is_mixed(slide, box: Bbox) -> bool:
     """True when the box straddles an edge of what the layout or master paints (a heading half on a triangle, half
     off it): its ground has no single colour."""

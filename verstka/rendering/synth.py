@@ -1788,6 +1788,12 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         except Exception as e:  # noqa: BLE001 - the slide's content is never lost over its photo place
             log.warning("photo place not made on slide %s: %s", oslide.id, e, exc_info=True)
             warnings.append(f"the free place for the user's photo was not made: {str(e)[:120]}")
+    if comp in ("chart_text", "chart", "table") and oslide.data is not None and art is None and not photo:
+        # a data chart or table under an obstacle that slants or stands at one side of the foot (a triangle, a page
+        # number): a narrower but taller area beside it, when the block reads larger there
+        tall = _taller_area(slide, area, sy + sh, title_ph, W, H)
+        if tall is not None:
+            area = _better_area(slide, kit, oslide, outline, manifest, comp, area, tall, foot_room, warnings)
     composer = Composer(slide, kit, oslide, outline, outline.strategy or "structured", manifest)
     composer.foot_room = foot_room
     if comp == "image_text" and oslide.content.image_hint:
@@ -1851,19 +1857,30 @@ def unreadable_text_pass(slide: Slide, manifest: TemplateManifest) -> int:
         b = element_bbox(el) if runs else None
         if not b or b[2] <= 0 or b[3] <= 0:
             continue
-        try:
-            g = slide_ground(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
-        except Exception:  # noqa: BLE001
-            g = None
-        if not g or len(g) != 6:
+        # (what lies under the letters, probe by probe, as `_ink_pass` and the audit read it; the box's one colour
+        # only when nothing is read there — one colour over a gradient turned a white line on its dark part purple)
+        grounds = _letter_grounds(slide, el, manifest)
+        if not grounds:
+            try:
+                g = slide_ground(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+            except Exception:  # noqa: BLE001
+                g = None
+            grounds = [g] if g and len(g) == 6 else []
+        if not grounds:
             continue
+
+        def low(c: str) -> float:
+            return min(contrast_ratio(c, g) for g in grounds)
+
         for r in runs:
             rpr = r.find(q("a:rPr"))
             clr = rpr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if rpr is not None else None
-            if clr is None or not clr.get("val") or contrast_ratio(clr.get("val"), g) >= UNREADABLE:
+            if clr is None or not clr.get("val") or low(clr.get("val")) >= UNREADABLE:
                 continue
-            clr.set("val", next((c for c in inks if contrast_ratio(c, g) >= 4.5), max(inks, key=lambda c: contrast_ratio(c, g))))
-            fixed += 1
+            new = next((c for c in inks if low(c) >= 4.5), max(inks, key=low))
+            if low(new) > low(clr.get("val")):
+                clr.set("val", new)
+                fixed += 1
     return fixed
 
 
@@ -1944,11 +1961,17 @@ def _ink_pass(slide: Slide, added: list, pal: "_Palette", manifest: TemplateMani
     background running from light at the top to navy at the bottom — Office «Circuit»: a legend in the light top half
     was set white for the dark half): such a text takes a colour that reads on what lies under it — the template's
     own inks first (`_inks`). Text on a card or a badge of its own keeps its colours (the card is its ground); text
-    whose ground is the one the palette was chosen for is never touched."""
+    whose ground is the one the palette was chosen for is never touched.
+
+    The ground is read where the letters stand, line by line (`_letter_grounds`: the layout's and master's shapes by
+    their outlines, gradients and pictures where the probe is, the slide's own cards) and a colour must read on every
+    probe — the audit reads the ground under the text the same way; one colour for a whole box measured over its mean
+    set a line dark purple on the dark half of a gradient. A line no ink reads on everywhere (dark on the left, a white
+    glow in the middle) gets a plate under it in a ground its colour reads on (`_plate_under`)."""
     from verstka.rendering.charts import delta_e, slide_ground
 
     inks = _inks(pal, manifest)
-    changed = 0
+    changed = plated = 0
     for el in added:
         if etree.QName(el).localname != "sp" or el.find(q("p:txBody")) is None or _paints(el):
             continue
@@ -1956,15 +1979,19 @@ def _ink_pass(slide: Slide, added: list, pal: "_Palette", manifest: TemplateMani
         b = element_bbox(el) if runs else None
         if not b or b[2] <= 0 or b[3] <= 0:
             continue
-        try:
-            g = slide_ground(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
-        except Exception:  # noqa: BLE001
-            g = None
-        if not g or len(g) != 6:
+        grounds = _letter_grounds(slide, el, manifest)
+        if not grounds:
+            try:
+                g = slide_ground(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+            except Exception:  # noqa: BLE001
+                g = None
+            grounds = [g] if g and len(g) == 6 else []
+        if not grounds:
             continue
         # on the ground the palette was chosen for only what fails outright (under 3:1: an orange figure on the orange
         # gradient of Office «Berlin») — its deliberate choices stand; elsewhere the full line
-        own = delta_e(g, pal.bg) <= 10
+        own = all(delta_e(g, pal.bg) <= 10 for g in grounds)
+        unread = []
         for r in runs:
             rpr = r.find(q("a:rPr"))
             clr = rpr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if rpr is not None else None
@@ -1972,12 +1999,88 @@ def _ink_pass(slide: Slide, added: list, pal: "_Palette", manifest: TemplateMani
                 continue
             size = int(rpr.get("sz") or 1800) / 100.0
             need = 3.0 if own or size >= 18 or (rpr.get("b") in ("1", "true") and size >= 14) else 4.5
-            if contrast_ratio(clr.get("val"), g) >= need:
+            worst = min(contrast_ratio(clr.get("val"), g) for g in grounds)
+            if worst >= need:
                 continue
-            clr.set("val", next((c for c in inks if contrast_ratio(c, g) >= need), max(inks, key=lambda c: contrast_ratio(c, g))))
+            pick = next((c for c in inks if min(contrast_ratio(c, g) for g in grounds) >= need), None)
+            if pick is None:
+                # no ink of the template holds the full line everywhere: the one that reads best, when it reads (3:1
+                # on every probe); a plate only under a line no ink makes readable
+                best = max(inks, key=lambda c: min(contrast_ratio(c, g) for g in grounds))
+                low = min(contrast_ratio(best, g) for g in grounds)
+                if low < 3.0:
+                    unread.append((clr, need))
+                    continue
+                if low <= worst + 0.05:
+                    continue
+                pick = best
+            clr.set("val", pick)
             changed += 1
+        if unread and _plate_under(slide, el, unread, pal, manifest):
+            plated += 1
     if changed:
         warnings.append(f"{changed} text run(s) recoloured for the ground under them")
+    if plated:
+        warnings.append(f"{plated} line(s) set on a plate: no colour of the template reads on every part of the ground under them")
+
+
+def _letter_grounds(slide: Slide, el, manifest: TemplateManifest) -> list[str]:
+    """The colours under a text's letters (`layers.letter_grounds`, the audit's reading too), each once."""
+    from verstka.rendering.layers import letter_grounds
+
+    return list(dict.fromkeys(letter_grounds(slide, el, manifest.tokens.typography.primary_family)))
+
+
+def _plate_under(slide: Slide, el, unread: list, pal: "_Palette", manifest: TemplateManifest) -> bool:
+    """A plate under a text no colour of the template reads on everywhere (a line across the dark half of a gradient
+    and a white glow): a rectangle in the template's ground — the palette's, else its dark or light one — on which the
+    text's own colour reads (4.5:1), drawn under the text's lines with a little air; the runs that did not read take
+    that colour. False when no plate colour holds the text."""
+    from verstka.rendering.clone_check import ink_lines
+    from verstka.rendering.compose import Canvas
+
+    t = manifest.tokens
+    first = unread[0][0].get("val")
+    fills = list(dict.fromkeys(c.upper() for c in (pal.bg, t.color_for("background.dark"), t.color_for("background.light"), "FFFFFF", "000000") if c))
+    fill = next((c for c in fills if contrast_ratio(first, c) >= 4.5), None)
+    ink = first
+    if fill is None:
+        fill = fills[0]
+        ink = max(_inks(pal, manifest), key=lambda c: contrast_ratio(c, fill))
+        if contrast_ratio(ink, fill) < 4.5:
+            return False
+    try:
+        rows = ink_lines(el, t.typography.primary_family)
+    except Exception:  # noqa: BLE001
+        rows = []
+    b = element_bbox(el)
+    if rows:
+        x0, y0 = min(r.x for r in rows), min(r.y for r in rows)
+        x1, y1 = max(r.x2 for r in rows), max(r.y2 for r in rows)
+    else:
+        x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+    W = int(slide.part.package.presentation_part.presentation.slide_width)
+    H = int(slide.part.package.presentation_part.presentation.slide_height)
+    if rows and b:
+        # the text's box keeps to its letters (with the renderer's slack), so the plate holds the whole box — a box
+        # wider than its line would run past the plate's edge
+        bp = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
+        lins = int(bp.get("lIns") or 91440) if bp is not None else 91440
+        rins = int(bp.get("rIns") or 91440) if bp is not None else 91440
+        nx = max(x0 - lins, b[0])
+        nw = min(int((x1 - x0) * 1.04) + int(0.01 * W) + lins + rins, b[0] + b[2] - nx)
+        if 0 < nw < b[2]:
+            from verstka.rendering.deck import set_element_pos
+
+            set_element_pos(el, x=nx, w=nw)
+            x0, x1 = nx, nx + nw
+    px, py = int(0.012 * W), int(0.008 * H)
+    box = Bbox(x=max(x0 - px, 0), y=max(y0 - py, 0), w=min(x1 + px, W) - max(x0 - px, 0), h=min(y1 + py, H) - max(y0 - py, 0))
+    plate = Canvas(slide).rect(box, fill, None, radius_emu=min(_card_radius_emu(manifest), box.h // 3), name="Plate")
+    el.addprevious(plate)
+    for clr, _need in unread:
+        clr.set("val", ink)
+    return True
 
 
 def _keep_turned_heading(title_ph, manifest: TemplateManifest, W: int, H: int, warnings: list[str]) -> Optional[int]:
@@ -3348,6 +3451,121 @@ def _free_width(slide: Slide, box: Bbox, W: int, H: int, right: int, skip: tuple
         if b[1] < box.y2 and b[1] + b[3] > box.y and b[0] >= box.x + int(0.1 * W):
             limit = min(limit, b[0] - int(0.015 * W))
     return max(limit - box.x, int(0.25 * W))
+
+
+def _foot_marks(slide: Slide, W: int, H: int) -> list[Bbox]:
+    """The boxes of the brand marks drawn at the foot of this slide (`_foot_top`'s: logos, a footer line, a page
+    number — small things in the bottom fifth)."""
+    out = []
+    for el in _drawn(slide):
+        if etree.QName(el).localname not in ("sp", "pic", "grpSp", "cxnSp"):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] * b[3] >= 0.2 * W * H or b[3] > 0.15 * H:
+            continue
+        if b[1] >= 0.8 * H and b[1] + b[3] <= H * 1.01:
+            out.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    return out
+
+
+def _taller_area(slide: Slide, area: Bbox, safe_bottom: int, title_ph, W: int, H: int) -> Optional[Bbox]:
+    """A narrower but taller area for the content when what ends the area at its foot does not span it: a page number
+    at one side, a triangle whose slanted edge leaves room at its low end. Columns of 80, 70 and 60 % of the area,
+    at its left and at its right, run down until the template's art (by its real outline) or a foot mark (with the
+    air `_content_bottom_limit` keeps above it) stops them, at most to the safe area's foot. The largest one at least
+    12 % taller than the area; None when there is none."""
+    safe_bottom = min(safe_bottom, H - int(0.05 * H))  # (never down to the slide's edge, whatever the safe area says)
+    if safe_bottom - area.y2 < int(0.05 * H) or area.h <= 0:
+        return None
+    try:
+        from verstka.rendering.layers import art_layers, painted_share
+
+        arts = art_layers(slide, skip=(title_ph._element,) if title_ph is not None else ())
+    except Exception:  # noqa: BLE001
+        return None
+    marks = [Bbox(x=m.x, y=m.y - int(0.035 * H), w=m.w, h=m.h + int(0.035 * H)) for m in _foot_marks(slide, W, H)]
+    step, pad = max(int(0.01 * H), 1), int(0.025 * H)
+
+    def free(x0: int, x1: int, y0: int, y1: int) -> bool:
+        strip = Bbox(x=x0, y=y0, w=x1 - x0, h=y1 - y0)
+        if any(m.intersection(strip) > 0 for m in marks):
+            return False
+        return all(lay.box.intersection(strip) <= 0 or painted_share(lay, strip) <= 0.01 for lay in arts)
+
+    best = None
+    for frac in (0.8, 0.7, 0.6):
+        w = int(area.w * frac)
+        for x0 in dict.fromkeys((area.x, area.x2 - w)):
+            y = area.y2
+            while y + step <= safe_bottom and free(x0, x0 + w, y, y + step):
+                y += step
+            bottom = y if y + step > safe_bottom else y - pad
+            if bottom - area.y < 1.12 * area.h:
+                continue
+            cand = Bbox(x=x0, y=area.y, w=w, h=bottom - area.y)
+            if best is None or cand.area > best.area:
+                best = cand
+    return best
+
+
+def _reading(c, n0: int, slide: Slide) -> dict:
+    """How a composed data block reads: its chart's plot (the largest one) or its table's type size, whether the
+    slide's conclusion stayed on it, whether something ran past the area."""
+    from verstka.rendering.charts import chart_plot_bbox
+
+    added = list(c.cv.tree)[n0:]
+    ids = {id(el) for el in added}
+    plot = None
+    for sh in slide.shapes:
+        if id(sh._element) in ids and getattr(sh, "has_chart", False) and sh.has_chart:
+            pb = chart_plot_bbox(sh)
+            if pb is not None and (plot is None or pb.area > plot.area):
+                plot = pb
+    return {
+        "plot": plot,
+        "size": getattr(c, "_under_cap", None) if any(etree.QName(el).localname == "graphicFrame" and el.find(".//" + q("a:tbl")) is not None for el in added) else None,
+        # (the conclusion left the slide when the composer said it aloud: its «Вывод: …» line in the notes)
+        "kept": not (c.o.takeaway or "").strip() or c._said() not in (c.o.notes or ""),
+        "past": any("runs past its area" in w for w in c.warnings),
+    }
+
+
+def _better_area(slide: Slide, kit, oslide: OutlineSlide, outline: DeckOutline, manifest: TemplateManifest, comp: str, area: Bbox, tall: Bbox, foot_room, warnings: list[str]) -> Bbox:
+    """The area — the usual one or the taller one — where the data block reads larger: both composed on copies of the
+    slide's plan and undone. A chart: its plot at least 12 % taller and still at least 1.5 times as wide as tall; a
+    table: a larger type size; in both, the conclusion staying on the slide when it did in the usual area, nothing
+    past the area. The usual area when neither reads better (or a setting fails)."""
+    from verstka.rendering.compose import Composer
+
+    def trial(a: Bbox) -> Optional[dict]:
+        c = Composer(slide, kit, oslide.model_copy(deep=True), outline, outline.strategy or "structured", manifest)
+        c.foot_room = foot_room
+        n0 = len(c.cv.tree)
+        try:
+            c.compose(comp, a)
+            return _reading(c, n0, slide)
+        except Exception:  # noqa: BLE001 - a trial never breaks the slide
+            log.debug("area trial failed", exc_info=True)
+            return None
+        finally:
+            c._undo(n0)
+
+    base, cand = trial(area), trial(tall)
+    if base is None or cand is None or cand["past"] or (base["kept"] and not cand["kept"]):
+        return area
+    better = False
+    if base["plot"] is not None and cand["plot"] is not None:
+        better = cand["plot"].h >= 1.12 * base["plot"].h and cand["plot"].w >= 1.5 * cand["plot"].h
+    elif base["plot"] is None and cand["plot"] is not None:
+        better = cand["plot"].w >= 1.5 * cand["plot"].h  # the chart fits there, not as a table in the usual area
+    elif base["plot"] is None and cand["plot"] is None and base["size"] and cand["size"]:
+        better = cand["size"] > base["size"] + 0.05
+    if not better and cand["kept"] and not base["kept"] and (cand["plot"] is not None) == (base["plot"] is not None):
+        better = True  # the conclusion stays on the slide there
+    if better:
+        warnings.append(f"область сужена до {tall.w / max(area.w, 1):.0%} ширины и выросла до {tall.h / max(area.h, 1):.0%} высоты рядом с препятствием у низа слайда")
+        return tall
+    return area
 
 
 def _foot_top(slide: Slide, W: int, H: int) -> Optional[int]:
