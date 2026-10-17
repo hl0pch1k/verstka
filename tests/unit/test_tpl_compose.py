@@ -411,9 +411,13 @@ def test_largest_empty_rectangle_of_a_cell_grid():
     assert got is not None and (got.x, got.y, got.w, got.h) == (0, 100, 500, 700)
 
 
-def test_pie_in_a_wide_low_box_keeps_its_legend_beside_the_circle(big_env):
-    """A band left over a conclusion (wide, a quarter of the slide high) on a 15″ slide: the legend goes beside the
-    circle at a dense size — never a dot of a pie over a legend running out of the box."""
+def test_pie_in_a_wide_low_box_keeps_its_legend_readable_and_its_circle(big_env):
+    """A band left over a conclusion (wide, a fifth of the slide high) on a 15″ slide. The legend never goes under the
+    chart labels' readable size (a step within 15 % under `charts.readable_floor`; qa5/C: the old dense floor of 1.7 %
+    of the height set 7.5 pt under a 95 pt circle) and the circle never under the pie's least size: when the legend
+    does not hold in the band at that size, the slide is told so (not clean: its passes set it again — the conclusion's
+    room, the dense pass) rather than a dot of a pie over a legend in small print."""
+    from verstka.rendering.charts import readable_floor
     from verstka.rendering.compose import Composer
 
     deck, manifest, ws = big_env
@@ -427,13 +431,15 @@ def test_pie_in_a_wide_low_box_keeps_its_legend_beside_the_circle(big_env):
     n0 = len(comp.cv.tree)
     comp._pie(box, pie, center=False)
     drawn = [(el, element_bbox(el)) for el in list(comp.cv.tree)[n0:] if element_bbox(el)]
-    legend = [bb for el, bb in drawn if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith(("Legend", "Share", "Swatch"))]
+    legend = [el for el, bb in drawn if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith(("Legend", "Share"))]
     assert legend
-    tol = int(0.01 * BIG_H)
-    assert max(x + w for x, y, w, h in legend) <= box.x + box.w + tol and max(y + h for x, y, w, h in legend) <= box.y + box.h + tol
+    floor = float(readable_floor(slide, manifest.tokens.typography))
+    sizes = [int(r.get("sz")) / 100 for el in legend for r in el.iter(q("a:rPr")) if r.get("sz")]
+    assert sizes and min(sizes) >= 0.85 * floor - 0.05
     charts = [bb for el, bb in drawn if etree.QName(el).localname == "graphicFrame"]
-    assert charts and charts[0][3] >= 0.45 * box.h  # the circle keeps most of the band's height
-    assert "pie legend does not fit its box" not in comp.warnings and getattr(comp, "_pie_clean", False)
+    assert charts and charts[0][3] >= min(comp._pie_min_d(box), int(0.85 * box.w)) - 2  # never a dot
+    if "pie legend does not fit its box" in comp.warnings:
+        assert not getattr(comp, "_pie_clean", True)  # the slide's passes are told
 
 
 def test_heading_starts_after_a_mark_standing_over_its_left_part(simple_deck):

@@ -3698,6 +3698,10 @@ class Composer:
         foot = squash(self.o.footnote)
         foot = foot[:1].upper() + foot[1:] if foot[:1].islower() else foot
         take = "" if (self._aside or self._take_lead) else squash(self.o.takeaway)
+        self._table_side = None
+        if take and self._table_takes_side(area, take, bool(foot)):
+            self._table_side = take
+            take = ""
         # the hard floor of the content: the area's foot, above the footnote when there is one (the conclusion's room
         # is not a floor — a block that needs it takes it and the conclusion is said aloud, `_draw_notes`)
         self._floor_y = area.y2
@@ -3753,6 +3757,50 @@ class Composer:
             bottom = plan["y_max"] - int(k.vgap * 1.2)
         self._notes = (foot_box, plan, area)
         return Bbox(x=area.x, y=area.y, w=area.w, h=max(bottom - area.y, int(area.h * 0.4)))
+
+    TABLE_SIDE_W = 0.68  # a table with its conclusion beside it: the table's share of the area's width
+
+    def _table_takes_side(self, area: Bbox, take: str, foot: bool) -> bool:
+        """A table that does not hold at the body size over its conclusion's strip (a ten-row table squeezed to the
+        readable threshold over a strip and a footnote, a third of the slide left empty — qa5/C) keeps the area's
+        whole height: its conclusion stands beside it, in a column behind a hairline. Only when the narrower table
+        holds at the body size in that height and the conclusion fits the column; the compact variant leads with its
+        conclusion instead (`_take_lead`)."""
+        if getattr(self, "_comp", None) != "table" or self.strategy == "compact" or getattr(self, "_dense", False):
+            return False
+        t = self.o.content.table
+        # a long table only (a short one set small has room to grow under its strip): eight rows and more
+        if t is None or len(t.columns) < 3 or len(t.rows) < 8 or area.w < 0.6 * self.kit.W:
+            return False
+        try:
+            from verstka.rendering.tables import table_need_h, template_bold
+        except ImportError:
+            return False
+        k = self.kit
+        bold = template_bold(k.manifest.tokens.typography)
+        foot_h = (self.h([self.P(squash(self.o.footnote), self._footnote_size(), k.colors.muted)], area.w) + int(k.vgap * 1.2)) if foot else 0
+        full = area.h - foot_h
+        strip = self._takeaway_plan(take, area.w)
+        under = full - strip["h"] - int(k.vgap * 1.2)
+        tw = int(area.w * self.TABLE_SIDE_W)
+        read = self._table_readable()
+        ladder = sorted({x for x in k.sizes if read * 0.85 - 0.05 <= x <= k.body + 0.05} | {k.body}, reverse=True)
+
+        def largest(width: int, room: int) -> float:
+            return next((x for x in ladder if table_need_h(t, width, k.font, x, header_bold=bold) <= room * 0.92), 0.0)
+
+        at_strip = largest(area.w, under)
+        if at_strip >= k.body - 0.05:
+            return False  # the table holds at the body size over its strip: the strip stays
+        if largest(tw, full) <= at_strip + 0.05:
+            return False  # the whole height beside the conclusion gives the table no larger type
+        cw = area.w - tw - k.gap * 2 - max(_emu(3), int(0.006 * k.H)) - k.gap
+        if cw < 0.2 * k.W:
+            return False  # a column too narrow for a sentence: the conclusion keeps its strip
+        para = self.P(take, k.body, k.colors.text)
+        if widest_word_pt(para.text, k.font, k.body, False) > _pt(cw) * self.WORD_ROOM:
+            return False  # a word (or words bound by no-break spaces) wider than the column would break
+        return self.h([para], int(cw * self.WORD_ROOM)) <= min(full * 0.8, _emu(k.body * 1.25 * 5))  # ≤ 5 lines
 
     def _takeaway_aside(self) -> bool:
         """Whether the slide's conclusion stands in the chart's side column instead of a strip under the content. The
@@ -4517,6 +4565,9 @@ class Composer:
         deltas = table_deltas(table) if self.strategy == "visual" and area.w * 0.36 >= 0.3 * k.W and not (self.o.takeaway or "").strip() else []
         if deltas:
             width = int(area.w * 0.64)  # the table and, beside it, what changed most
+        side = getattr(self, "_table_side", None)
+        if side:
+            width = int(area.w * self.TABLE_SIDE_W)  # the table at its full height, its conclusion beside it
         # a table reads at body size; dense tables step down to the small size. A small one (a few rows, a few
         # columns) set at body size is a thin strip over an empty slide: it may take the lead size when nothing wraps
         header_bold = template_bold(k.manifest.tokens.typography)
@@ -4625,6 +4676,19 @@ class Composer:
         )
         if table.caption and total_h + k.vgap + _emu(k.small * 2) <= area.h:
             self.cv.text(Bbox(x=area.x, y=area.y + total_h + int(k.vgap * 0.6), w=width, h=_emu(k.small * 1.6)), [self.P(table.caption, k.small, k.colors.muted)], name="Caption")
+        if side:
+            x = area.x + sum(widths) + k.gap * 2
+            w = area.x + area.w - x
+            bar_w = max(_emu(3), int(0.006 * k.H))
+            tw_ = w - bar_w - k.gap
+            for size in dict.fromkeys((k.lead, k.body)):
+                paras = [self.P(side, size, k.colors.text)]
+                hh = self.h(paras, int(tw_ * self.WORD_ROOM))
+                if hh <= max(total_h, int(0.3 * area.h)) and widest_word_pt(paras[0].text, k.font, size, False) <= _pt(tw_) * self.WORD_ROOM:
+                    break
+            self.cv.rect(Bbox(x=x, y=area.y, w=bar_w, h=hh), k.colors.accent, name="Conclusion bar")
+            self.cv.text(Bbox(x=x + bar_w + k.gap, y=area.y, w=tw_, h=hh), paras, name="Conclusion")
+            self.warnings.append("the conclusion set beside the table: the table keeps the area's height at the body size")
         if deltas:
             x = area.x + width + k.gap * 2
             w = area.x + area.w - x
@@ -5695,7 +5759,9 @@ class Composer:
             pct_plain = [f"{a}  ·  {p_}" for a, p_ in zip(amt, pct)]
             pct = [f"{a}  ·  {chr(0x2007) * (wide - len(p_))}{p_}" for a, p_ in zip(amt, pct)]
             pct_side = list(pct)
-            share_head = "сумма · доля от общей суммы"
+            # what the two figures of a row are, in the slide's words: the unit of the amounts and the share of the
+            # total — never the service line «сумма · доля от общей суммы» (qa5: it read as a note to the designer)
+            share_head = _share_head(unit_txt)
             head = f"{head}\n{share_head}" if head else share_head[:1].upper() + share_head[1:]
         rows = [j for j in range(len(cats)) if vals[j] > 0]
         colors = k.colors
@@ -5738,7 +5804,7 @@ class Composer:
             if legend_mode == "shares" and amounts and not own_only:
                 # a narrow box: the amounts stay on the slices, the legend gives the shares only, headed as such
                 pct = shares_only
-                head = f"{head_plain}\nдоля от общей суммы" if head_plain else "Доля от общей суммы"
+                head = f"{head_plain}\n% от итога" if head_plain else "% от итога"
             lg, d, below, sizes = self._pie_legend_fit(box, legend, rows, cats)
             if lg is not None:
                 got[legend_mode] = (lg, d, below, list(pct), head)
@@ -5795,8 +5861,19 @@ class Composer:
         k = self.kit
         self._pie_last_ok = False
         min_d = int(0.45 * box.h)
+        # the chart labels' readable threshold (`charts.readable_floor`) — a template step within 15 % under it still
+        # reads, as a table's (`table`) — never the old dense floor of 1.7 % H alone (a 7.5 pt legend under a 95 pt
+        # circle on Yellow_Idea)
         floor = max(0.017 * k.hpt, 7.0)
-        sizes = [x for x in reversed(k.sizes) if floor - 0.05 <= x <= k.small + 0.05] or [k.small]
+        read = floor
+        try:
+            from verstka.rendering.charts import readable_floor
+
+            read = max(floor, float(readable_floor(self.slide, k.manifest.tokens.typography)))
+            floor = max(floor, read * 0.85)
+        except Exception:  # noqa: BLE001 - a guard: the old floor stands
+            pass
+        sizes = [x for x in reversed(k.sizes) if floor - 0.05 <= x <= max(k.small, read) + 0.05] or [max(k.small, read)]
         # a wide, low box (the band left over a conclusion): beside the circle at the dense sizes first — the circle as
         # tall as the box, the legend in the width it leaves
         for size in sizes:
@@ -5825,10 +5902,26 @@ class Composer:
                 self.warnings.append("pie legend set under the circle (one column)")
                 self._pie_last_ok = True
                 return lg, d, True
+        # the circle at the pie's least size (PIE_MIN_H), the legend beside it in the width left, names wrapped
+        least = self._pie_min_d(box)
+        cap = box.w - least - k.gap * 2
+        for size in sizes:
+            for cols in ((1, 2) if len(rows) >= 4 else (1,)):
+                name_cap = (cap - (cols - 1) * _emu(size * 1.6)) // cols - _emu(size * 5)  # less swatch and share
+                if name_cap < _emu(size * 5):
+                    continue
+                cand = legend(size, name_cap, cols)
+                if cand["h"] <= box.h and cand["w"] <= cap:
+                    self.warnings.append("pie legend set beside the circle at its least size")
+                    self._pie_last_ok = True
+                    return cand, min(box.h, box.w - cand["w"] - k.gap * 2), False
         self._pie_last_ok = False
         lg = lg or legend(sizes[-1], max(box.w - _emu(sizes[-1] * 4), _emu(sizes[-1] * 5)), 1)
         self.warnings.append("pie legend does not fit its box")
-        return lg, max(min(int(box.w * 0.85), box.h - lg["h"] - k.vgap), int(0.3 * box.h)), True
+        # the circle never under the pie's least size: what does not fit runs past the area, and the overflow sends the
+        # slide to the conclusion's room and the dense pass — never a dot over a legend
+        d_last = max(min(int(box.w * 0.85), box.h - lg["h"] - k.vgap), int(0.3 * box.h))
+        return lg, max(d_last, min(least, int(0.85 * box.w))), True
 
     def _pie_legend_fit(self, box: Bbox, legend, rows: list[int], cats: list[str]):
         """(legend, diameter, legend below?, sizes) of a pie's legend set beside (or under) its circle; legend None
@@ -6063,6 +6156,15 @@ def _lone_thesis(o: OutlineSlide) -> bool:
     if c.items or c.columns or c.numbers or c.chart is not None or c.table is not None or c.quote or (c.formula or "").strip() or c.code is not None:
         return False
     return len([t for t in list(c.bullets) + list(c.paragraphs) if t and t.strip()]) == 1
+
+
+def _share_head(unit: str) -> str:
+    """The line over a pie's legend of amounts and shares: «млн ₽ и % от итога», «чел. и % от итога»; without a unit
+    «значение и % от итога»."""
+    u = (unit or "").strip()
+    if u.lower() in ("рублей", "руб.", "руб", "рубли", "rub"):
+        u = "₽"
+    return f"{u} и % от итога" if u else "значение и % от итога"
 
 
 def _amount_text(v: float, unit: str) -> str:

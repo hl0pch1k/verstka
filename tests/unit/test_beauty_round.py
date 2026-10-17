@@ -228,3 +228,86 @@ def test_a_list_moved_to_the_middle_keeps_its_rules_between_its_rows(env):
     items = sorted(sh.top for sh in _named(slide, "Item"))
     rules = [sh.top for sh in _named(slide, "Line")]
     assert rules and all(items[0] < r < items[-1] for r in rules), (items, rules)
+
+
+def _composer(env, o: OutlineSlide, strategy: str = "structured"):
+    deck, manifest, _ws = env
+    prs = Presentation(str(deck))
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    W, H = manifest.slide_size.w, manifest.slide_size.h
+    return Composer(slide, Kit(manifest, W, H, "FFFFFF"), o, DeckOutline(title="T", strategy=strategy, slides=[o]), strategy, manifest), W, H
+
+
+def test_a_pie_legend_of_last_resort_keeps_the_readable_size_and_the_least_circle(env):
+    """C, qa5: the last resort set the legend at 1.7 % of the slide height (7.5 pt under a 95 pt circle) and shrank the
+    circle to 0.3 of its frame, past the pie's least size."""
+    from verstka.rendering.charts import readable_floor
+
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Доли", content=SlideContent())
+    c, W, H = _composer(env, o)
+    floor = float(readable_floor(c.slide, c.kit.manifest.tokens.typography))
+    box = Bbox(x=int(0.1 * W), y=int(0.3 * H), w=int(0.35 * W), h=int(0.35 * H))
+    seen = []
+
+    def never(size, cap, cols=1):  # a legend that fits nowhere
+        seen.append(size)
+        return dict(size=size, h=box.h * 2, w=box.w * 2, pct_w=0)
+
+    lg, d, below = c._pie_legend_last(box, never, list(range(9)))
+    assert min(seen) >= 0.85 * floor - 0.05 and lg["size"] >= 0.85 * floor - 0.05  # a step within 15 % under it reads
+    assert d >= min(c._pie_min_d(box), int(0.85 * box.w))
+
+    def narrow(size, cap, cols=1):  # a legend that fits beside a circle of the least size only
+        return dict(size=size, h=int(box.h * 0.9), w=min(cap + 1, box.w - c._pie_min_d(box) - 2 * c.kit.gap), pct_w=0)
+
+    lg, d, below = c._pie_legend_last(box, narrow, list(range(9)))
+    assert not below and d >= c._pie_min_d(box) and lg["size"] >= 0.85 * floor - 0.05
+
+
+def test_a_table_that_reads_larger_at_full_height_takes_its_conclusion_beside_it(env, monkeypatch):
+    """C, qa5: a ten-row table squeezed over its conclusion's strip and footnote (219 pt of 446) — the table keeps the
+    area's whole height, its conclusion stands beside it in a column behind an accent bar."""
+    import verstka.rendering.tables as tables
+
+    rows = [[f"Направление {i}", str(100 + i), str(50 + i), str(150 + 2 * i)] for i in range(10)]
+    from verstka.schemas.outline import TableData
+
+    t = TableData(columns=["Направление", "Бюджет", "Платное", "Всего"], rows=rows)
+    take = "Платный приём растёт быстрее бюджетного: две трети прироста дали платные места"
+    o = OutlineSlide(id="t", kind=PatternKind.table, headline="Приём по направлениям", takeaway=take, footnote="Источник: приём.xlsx",
+                     content=SlideContent(table=t))
+    c, W, H = _composer(env, o)
+    c._comp = "table"
+    area = Bbox(x=int(0.06 * W), y=int(0.22 * H), w=int(0.88 * W), h=int(0.7 * H))
+    # at the body size the table needs more than the strip leaves, less than the whole height at 0.68 of the width
+    monkeypatch.setattr(tables, "table_need_h", lambda tb, w, font, size, **kw: int(area.h * (0.8 if size >= c.kit.body - 0.05 else 0.5)))
+    assert c._table_takes_side(area, take, True)
+    monkeypatch.setattr(tables, "table_need_h", lambda tb, w, font, size, **kw: int(area.h * 0.3))
+    assert not c._table_takes_side(area, take, True)  # it holds over the strip: the strip stays
+    c.strategy = "compact"
+    assert not c._table_takes_side(area, take, True)  # the compact variant leads with its conclusion instead
+    # drawn: the conclusion in the column beside the table, no strip under it
+    monkeypatch.undo()
+    monkeypatch.setattr(Composer, "_table_takes_side", lambda self, area, take, foot: getattr(self, "_comp", None) == "table")
+    o2 = o.model_copy(deep=True)
+    slide, warnings = _render(env, o2, "table", "structured")
+    tbl = next(sh for sh in slide.shapes if sh.has_table)
+    concl = _named(slide, "Conclusion")
+    assert concl and all(sh.left >= tbl.left + tbl.width for sh in concl)
+    assert not _named(slide, "Conclusion strip")
+    assert any("beside the table" in w for w in warnings)
+
+
+def test_a_pie_legend_of_amounts_is_headed_by_its_unit_not_a_service_line(env):
+    """qa5: «сумма · доля от общей суммы» over the legend read as a note to the designer — the line names the unit of
+    the amounts and the share of the total."""
+    from verstka.schemas.outline import InlineSeries
+
+    pie = ChartSpec(type="pie", title="Расходы за месяц", unit="₽", categories=["Аренда", "Зарплаты", "Реклама", "Прочее"],
+                    series=[InlineSeries(name="Расходы", values=[150000, 260000, 40000, 20000])])
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Зарплаты — больше половины расходов", content=SlideContent(chart=pie))
+    slide, _ = _render(env, o, "chart")
+    text = " ".join(sh.text_frame.text for sh in slide.shapes if sh.has_text_frame)
+    assert "сумма ·" not in text and "общей суммы" not in text
+    head = _named(slide, "Legend title")
+    assert head and "₽ и % от итога" in head[0].text_frame.text.replace("\u00a0", " ")
