@@ -220,7 +220,8 @@ class Bins:
     counts: list[int]
     labels: list[str]
     width: float
-    open_from: Optional[float] = None  # последний интервал «больше X»
+    open_from: Optional[float] = None  # последний интервал «больше X» (все значения больше X, выбросы тоже)
+    open_to: Optional[float] = None  # первый интервал «меньше X» — только выбросы снизу
 
     @property
     def n(self) -> int:
@@ -266,7 +267,7 @@ class DistView:
         if self.bins.open_from is not None:
             s += f", последний — «больше {fmt_num(self.bins.open_from)}»"
         if self.outliers:
-            s += f"; {count_words(len(self.outliers), 'выброс', 'выброса', 'выбросов')} — отдельно"
+            s += f"; {count_words(len(self.outliers), 'выброс', 'выброса', 'выбросов')} — в крайнем столбце"
         return s
 
 

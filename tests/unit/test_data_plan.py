@@ -62,7 +62,7 @@ def test_revenue_by_month_dynamics_line(plans):
     assert "21 точка" in line.reasons[0] and "тренд виден сразу" in line.reasons[0]
     assert any("покажи рост выручки" in r for r in line.reasons)
     assert "21 столбцом" in p.options[1].why_not and "21 строка" in p.options[2].why_not
-    assert p.headline == "Выручка выросла на 23% к сентябрю"
+    assert p.headline == "Выручка выросла на 23% к сентябрю 2025"
     assert p.plain_headline == "Выручка по месяцам"
     ch = next(f for f in p.headline_facts if f.id == "change")
     assert ch.value == 23 and ch.unit == "%" and "Сентябрь 2026 к сентябрю 2025: 423 млн ₽" in _sp(ch.explain)
@@ -174,7 +174,7 @@ def test_chart_specs_for_chosen_options(plans, tables):
     assert rev.y_title == "Выручка" and rev.x_title == "Месяц" and rev.highlight_index == 20
     hist = chart_spec_of(plans["Время ответа поддержки.csv"], tables["Время ответа поддержки.csv"])
     assert hist.type == "histogram" and 7 <= len(hist.categories) <= 12 and hist.categories[-1] == "больше 180"
-    assert sum(hist.series[0].values) == 509  # без трёх выбросов
+    assert sum(hist.series[0].values) == 512  # все 512 обращений: три выброса — в столбце «больше 180» (раунд 8, A1)
 
 
 def test_other_options_rebuild_the_slide(plans, tables):

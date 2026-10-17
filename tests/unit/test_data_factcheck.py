@@ -741,6 +741,405 @@ def corpus_conv() -> list[tuple[str, bytes, str]]:
 
 
 # ═══════════════════════════════════════════ случайные таблицы ═════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════ корпус сходимости 2 (conv2) ═════════════════════════════════════════════
+def corpus_conv2() -> list[tuple[str, list[tuple[str, bytes]], str]]:
+    """40 таблиц второй проверки сходимости (`scratchpad/s2/conv2/make_data.py`, зерно 20261017): CSV, XLSX и TXT —
+    байтами, как файлы; ключ «20» — два файла под одной целью. Генератор перенесён как есть, только запись — в память.
+    Возвращает (ключ, [(имя, байты)], цель)."""
+    import csv
+    import io
+    from datetime import date, timedelta
+
+    import openpyxl
+
+    R = random.Random(20261017)
+    files_: dict[str, bytes] = {}
+
+    def w_csv(name, rows, delim=";", enc="utf-8"):
+        buf = io.StringIO(newline="")
+        csv.writer(buf, delimiter=delim).writerows(rows)
+        files_[name] = buf.getvalue().encode(enc)
+
+    def w_xlsx(name, rows, sheet="Лист1", fmts=None):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = sheet
+        for r in rows:
+            ws.append(r)
+        if fmts:
+            for col, fmt in fmts.items():
+                for c in ws[col][1:]:
+                    c.number_format = fmt
+        buf = io.BytesIO()
+        wb.save(buf)
+        files_[name] = buf.getvalue()
+
+    def w_txt(name, text):
+        files_[name] = text.encode("utf-8")
+
+    def ru(x, d=1):
+        s = f"{x:.{d}f}".replace(".", ",")
+        return s
+
+    BRIEFS = {}
+
+    # 01 заказы ресторана по часам и дням недели (2-D)
+    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    rows = [["Час"] + days]
+    base = {11: 18, 12: 42, 13: 55, 14: 38, 15: 20, 16: 17, 17: 24, 18: 46, 19: 63, 20: 58, 21: 35, 22: 16}
+    for h, b in base.items():
+        mult = [0.9, 0.95, 1.0, 1.0, 1.25, 1.45, 1.3]
+        rows.append([f"{h}:00"] + [int(round(b * m + R.randint(-3, 3))) for m in mult])
+    w_csv("01 Заказы ресторана по часам.csv", rows)
+    BRIEFS["01"] = "Сравни дни недели по числу заказов"
+
+    # 02 аптека: продажи по группам с «Прочее»
+    rows = [["Группа препаратов", "Продажи, тыс. ₽"],
+            ["Анальгетики", "1 284,5"], ["Антибиотики", "936,2"], ["Витамины и БАД", "1 512,8"],
+            ["Средства от простуды", "1 105,0"], ["Сердечно-сосудистые", "1 448,3"], ["Дерматология", "512,7"],
+            ["Гастроэнтерология", "684,9"], ["Прочее", "1 690,4"]]
+    w_csv("02 Продажи аптеки по группам.csv", rows)
+    BRIEFS["02"] = "Покажи структуру продаж аптеки"
+
+    # 03 распределение оценок (готовая частотная таблица)
+    rows = [["Оценка", "Число учеников"], [2, 14], [3, 61], [4, 88], [5, 47]]
+    w_csv("03 Оценки за контрольную.csv", rows)
+    BRIEFS["03"] = "Как распределены оценки за контрольную"
+
+    # 04 SLA колл-центра по неделям, %
+    rows = [["Неделя", "Доля звонков, принятых за 20 сек, %", "Цель, %"]]
+    d0 = date(2026, 6, 1)
+    sla = [81.4, 79.8, 83.2, 77.5, 74.9, 72.3, 76.8, 80.1, 82.6, 84.0, 85.3, 83.7]
+    for k, v in enumerate(sla):
+        rows.append([(d0 + timedelta(weeks=k)).strftime("%d.%m.%Y"), ru(v), "80"])
+    w_csv("04 SLA колл-центра по неделям.csv", rows)
+    BRIEFS["04"] = "Покажи динамику SLA"
+
+    # 05 выработка электростанции, МВт·ч, с ремонтами (пустые месяцы)
+    rows = [["Месяц", "Выработка, МВт·ч"]]
+    vals = [412300, 398700, 405100, None, None, 361200, 388400, 392800, 401500, 415900, 420700, 431200]
+    for k, v in enumerate(vals):
+        rows.append([date(2025, k + 1, 1), v])
+    w_xlsx("05 Выработка ТЭЦ 2025.xlsx", rows, fmts={"A": "mmmm yyyy"})
+    BRIEFS["05"] = "Как менялась выработка станции"
+
+    # 06 ставки по ипотеке по банкам (уровень, %)
+    rows = [["Банк", "Ставка, % годовых"],
+            ["Сбербанк", "20,9"], ["ВТБ", "21,3"], ["Альфа-Банк", "22,5"], ["Газпромбанк", "20,6"],
+            ["Россельхозбанк", "19,8"], ["Банк ДОМ.РФ", "19,5"], ["Совкомбанк", "23,1"], ["Т-Банк", "24,4"]]
+    w_csv("06 Ставки по ипотеке.csv", rows)
+    BRIEFS["06"] = "Сравни банки по ставке"
+
+    # 07 веса посылок (сырые наблюдения)
+    rows = [["№ посылки", "Вес, кг"]]
+    for k in range(300):
+        v = R.lognormvariate(0.3, 0.8)
+        rows.append([f"RP{100245 + k}", ru(min(v, 29.9), 2)])
+    w_csv("07 Веса посылок.csv", rows)
+    BRIEFS["07"] = "Как распределён вес посылок"
+
+    # 08 велопрокат по станциям
+    st = ["Парк Горького", "Китай-город", "Чистые пруды", "ВДНХ", "Сокольники", "Тверская", "Арбатская",
+          "Курская", "Павелецкая", "Белорусская", "Лужники", "Таганская", "Маяковская", "Бауманская", "Динамо"]
+    rows = [["Станция", "Поездок за сентябрь"]]
+    for s in st:
+        rows.append([s, R.randint(1800, 9800)])
+    w_csv("08 Велопрокат по станциям.csv", rows)
+    BRIEFS["08"] = "Сравни станции по числу поездок"
+
+    # 09 охват вакцинацией по регионам, %
+    rows = [["Регион", "Охват вакцинацией, %", "Привито, чел."]]
+    regs = [("Белгородская область", 78.4, 1530000), ("Воронежская область", 71.2, 2310000), ("Курская область", 69.5, 1530000),
+            ("Липецкая область", 74.8, 1420000), ("Тамбовская область", 65.3, 900000), ("Орловская область", 67.9, 840000),
+            ("Брянская область", 62.1, 1110000), ("Калужская область", 70.6, 1000000)]
+    for n, p, pop in regs:
+        rows.append([n, p, int(pop * p / 100)])
+    w_xlsx("09 Вакцинация по регионам.xlsx", rows)
+    BRIEFS["09"] = "Сравни регионы по охвату вакцинацией"
+
+    # 10 посещаемость vs выручка, 200 дней
+    rows = [["Дата", "Посетители", "Выручка, ₽"]]
+    d0 = date(2026, 1, 1)
+    for k in range(200):
+        v = R.randint(380, 1450)
+        rev = int(v * R.uniform(820, 1180) + R.gauss(0, 60000))
+        rows.append([(d0 + timedelta(days=k)).strftime("%d.%m.%Y"), v, rev])
+    w_csv("10 Посещаемость и выручка магазина.csv", rows)
+    BRIEFS["10"] = "Есть ли связь между посещаемостью и выручкой"
+
+    # 11 возраст покупателя vs чек (слабая связь)
+    rows = [["ID клиента", "Возраст", "Средний чек, ₽"]]
+    for k in range(250):
+        a = R.randint(18, 75)
+        c = int(1400 + 6 * a + R.gauss(0, 650))
+        rows.append([f"C-{5000 + k}", a, max(c, 150)])
+    w_csv("11 Возраст и средний чек.csv", rows)
+    BRIEFS["11"] = "Зависит ли средний чек от возраста"
+
+    # 12 нарастающий итог
+    months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
+              "Декабрь"]
+    rows = [["Месяц 2025", "Продажи за месяц, млн ₽", "Нарастающим итогом, млн ₽"]]
+    cum = 0.0
+    for m in months:
+        v = round(R.uniform(38, 62), 1)
+        cum = round(cum + v, 1)
+        rows.append([m, ru(v), ru(cum)])
+    w_csv("12 Продажи нарастающим итогом.csv", rows)
+    BRIEFS["12"] = "Покажи рост продаж за год"
+
+    # 13 врачи на 1 000 жителей
+    rows = [["Регион", "Население, тыс. чел.", "Врачей, чел.", "Врачей на 1 000 жителей"]]
+    reg13 = [("Москва", 13150, 61200), ("Санкт-Петербург", 5600, 33800), ("Новосибирская область", 2790, 13500),
+             ("Свердловская область", 4240, 19100), ("Республика Татарстан", 4000, 17200), ("Краснодарский край", 5840, 23600),
+             ("Ростовская область", 4160, 16400), ("Самарская область", 3150, 14200)]
+    for n, p, d in reg13:
+        rows.append([n, f"{p:,}".replace(",", " "), f"{d:,}".replace(",", " "), ru(d / p, 2)])
+    w_csv("13 Врачи на 1000 жителей.csv", rows)
+    BRIEFS["13"] = "Сравни регионы по обеспеченности врачами"
+
+    # 14 таблица с «Итого» строкой и «Итого» колонкой
+    rows = [["Филиал", "I квартал", "II квартал", "III квартал", "IV квартал", "Итого"]]
+    br = ["Казань", "Самара", "Уфа", "Пермь", "Нижний Новгород"]
+    cols = [0, 0, 0, 0]
+    for b in br:
+        q = [R.randint(1800, 4200) for _ in range(4)]
+        for k in range(4):
+            cols[k] += q[k]
+        rows.append([b] + q + [sum(q)])
+    rows.append(["Итого"] + cols + [sum(cols)])
+    w_xlsx("14 Выручка филиалов по кварталам.xlsx", rows, sheet="Выручка, тыс. ₽")
+    BRIEFS["14"] = "Сравни филиалы по выручке"
+
+    # 15 только изменения в %
+    rows = [["Категория", "Δ к 2024, %", "Δ к плану, %"],
+            ["Молочная продукция", "+4,2", "-1,5"], ["Хлеб и выпечка", "+1,8", "+0,6"], ["Мясо и птица", "-3,4", "-5,2"],
+            ["Овощи и фрукты", "+7,9", "+2,1"], ["Бакалея", "+0,4", "-0,8"], ["Напитки", "+12,6", "+4,4"],
+            ["Кондитерские изделия", "-1,1", "-2,7"], ["Замороженные продукты", "+5,3", "+1,2"]]
+    w_csv("15 Изменение продаж по категориям.csv", rows)
+    BRIEFS["15"] = "Сравни категории по изменению продаж"
+
+    # 16 кварталы строками, годы колонками
+    rows = [["Квартал", "2023", "2024", "2025"],
+            ["1 квартал", "184,2", "203,5", "221,8"], ["2 квартал", "196,7", "214,9", "236,4"],
+            ["3 квартал", "205,3", "219,1", "244,0"], ["4 квартал", "238,9", "262,4", "281,7"]]
+    w_csv("16 Выручка по кварталам и годам, млн руб.csv", rows)
+    BRIEFS["16"] = "Покажи рост выручки по годам"
+
+    # 17 год к году: месяцы строками, 2024/2025 колонками; 2025 — только 9 месяцев
+    rows = [["Месяц", "2024", "2025"]]
+    v24 = [312, 298, 341, 356, 372, 365, 381, 377, 359, 368, 374, 412]
+    v25 = [334, 319, 362, 371, 395, 388, 402, 399, 381, None, None, None]
+    for m, a, b in zip(months, v24, v25):
+        rows.append([m, a, "" if b is None else b])
+    w_csv("17 Перевозки пассажиров, тыс. чел.csv", rows)
+    BRIEFS["17"] = "Сравни 2025 год с 2024"
+
+    # 18 рейтинг с равенством
+    rows = [["Школа", "Средний балл ЕГЭ"],
+            ["Лицей № 2", "78,4"], ["Гимназия № 1", "78,4"], ["Школа № 15", "71,9"], ["Школа № 7", "69,3"],
+            ["Лицей № 5", "74,6"], ["Школа № 22", "66,8"], ["Школа № 31", "69,3"], ["Гимназия № 3", "75,2"]]
+    w_csv("18 Рейтинг школ по ЕГЭ.csv", rows)
+    BRIEFS["18"] = "Кто лидирует по среднему баллу"
+
+    # 19 бриф просит невозможное (рост по годам, а данных по времени нет)
+    rows = [["Регион", "Продажи, шт."], ["Центр", 18420], ["Северо-Запад", 9310], ["Юг", 11240], ["Поволжье", 13870],
+            ["Урал", 8650], ["Сибирь", 7920], ["Дальний Восток", 3410]]
+    w_csv("19 Продажи по регионам.csv", rows)
+    BRIEFS["19"] = "Покажи рост продаж по годам"
+
+    # 20 два файла в одном брифе
+    rows = [["Месяц", "Выручка, млн ₽"]]
+    for k, m in enumerate(months[:10]):
+        rows.append([f"{m} 2026", ru(120 + 4.5 * k + R.uniform(-6, 6))])
+    w_csv("20a Выручка по месяцам.csv", rows)
+    rows = [["Отдел", "Сотрудников"], ["Продажи", 48], ["Маркетинг", 17], ["Разработка", 64], ["Поддержка", 31],
+            ["Бухгалтерия", 9], ["HR", 6]]
+    w_csv("20b Персонал по отделам.csv", rows)
+    BRIEFS["20"] = "Покажи рост выручки"
+
+    # 21 ряд из двух точек
+    rows = [["Год", "Экспорт, млн $"], ["2024", "1 245,6"], ["2025", "1 108,3"]]
+    w_csv("21 Экспорт по годам.csv", rows)
+    BRIEFS["21"] = "Покажи динамику экспорта"
+
+    # 22 курс с тремя знаками
+    rows = [["Дата", "Курс USD, ₽"]]
+    d0 = date(2026, 9, 1)
+    v = 92.457
+    k = 0
+    for i in range(30):
+        dd = d0 + timedelta(days=i)
+        if dd.weekday() >= 5:
+            continue
+        v = round(v + R.uniform(-0.9, 0.8), 3)
+        rows.append([dd.strftime("%d.%m.%Y"), f"{v:.3f}".replace(".", ",")])
+    w_csv("22 Курс доллара за сентябрь.csv", rows)
+    BRIEFS["22"] = "Как менялся курс доллара"
+
+    # 23 падение везде
+    rows = [["Направление", "2024, тыс. туристов", "2025, тыс. туристов"],
+            ["Турция", 6890, 6210], ["Египет", 1540, 1320], ["ОАЭ", 1120, 1060], ["Таиланд", 980, 842],
+            ["Вьетнам", 410, 388], ["Китай", 760, 701], ["Абхазия", 1350, 1104]]
+    w_csv("23 Выездной туризм по направлениям.csv", rows)
+    BRIEFS["23"] = "Сравни направления"
+
+    # 24 выброс-опечатка
+    rows = [["Месяц", "Продажи, шт."]]
+    vals = [4210, 4385, 4520, 4610, 4475, 4702, 4520000, 4810, 4655, 4890, 5012, 5240]
+    for m, v_ in zip(months, vals):
+        rows.append([f"{m} 2025", v_])
+    w_csv("24 Продажи по месяцам.csv", rows)
+    BRIEFS["24"] = "Покажи динамику продаж"
+
+    # 25 римские кварталы
+    rows = [["Период", "Ввод жилья, тыс. м²"]]
+    qs = ["I кв. 2024", "II кв. 2024", "III кв. 2024", "IV кв. 2024", "I кв. 2025", "II кв. 2025", "III кв. 2025"]
+    vals = ["812,4", "945,1", "1 021,7", "1 388,2", "768,9", "902,3", "984,6"]
+    for q, v_ in zip(qs, vals):
+        rows.append([q, v_])
+    w_csv("25 Ввод жилья по кварталам.csv", rows)
+    BRIEFS["25"] = "Как менялся ввод жилья"
+
+    # 26 английские месяцы
+    rows = [["Month", "Active users, тыс."]]
+    en = ["January", "February", "March", "April", "May", "June", "July", "August"]
+    vals = [184.2, 191.5, 203.8, 199.4, 215.6, 228.9, 241.3, 236.7]
+    for m, v_ in zip(en, vals):
+        rows.append([f"{m} 2026", v_])
+    w_csv("26 Active users 2026.csv", rows, delim=",")
+    BRIEFS["26"] = "Покажи рост активной аудитории"
+
+    # 27 строка единиц под заголовком
+    rows = [["Склад", "Отгрузки", "Выручка", "Возвраты"],
+            ["", "шт.", "тыс. ₽", "%"],
+            ["Подольск", 18240, 42150.5, 2.1], ["Химки", 15610, 38920.0, 3.4], ["Домодедово", 21350, 51230.8, 1.8],
+            ["Ногинск", 9870, 21480.2, 4.6], ["Электросталь", 7420, 16850.9, 2.9]]
+    w_xlsx("27 Склады.xlsx", rows)
+    BRIEFS["27"] = "Сравни склады по выручке"
+
+    # 28 загрузка отеля, %
+    rows = [["Месяц", "Загрузка номеров, %"]]
+    occ = [48.2, 52.6, 58.1, 61.4, 72.8, 88.5, 94.1, 95.6, 79.3, 63.2, 51.7, 66.4]
+    for m, v_ in zip(months, occ):
+        rows.append([f"{m} 2025", ru(v_)])
+    w_csv("28 Загрузка отеля.csv", rows)
+    BRIEFS["28"] = "Покажи динамику загрузки"
+
+    # 29 длительность поездок такси (длинный хвост)
+    rows = [["Поездка", "Длительность, мин"]]
+    for k in range(500):
+        v_ = R.gammavariate(2.2, 9.0)
+        rows.append([k + 1, round(v_, 1)])
+    w_xlsx("29 Длительность поездок такси.xlsx", rows)
+    BRIEFS["29"] = "Покажи распределение длительности поездок"
+
+    # 30 бюджет план/факт
+    rows = [["Статья", "План, тыс. ₽", "Факт, тыс. ₽", "Исполнение, %"],
+            ["Образование", 1845200, 1802350, None], ["Здравоохранение", 924600, 931880, None],
+            ["ЖКХ", 612300, 498120, None], ["Транспорт", 433900, 401270, None], ["Культура", 118500, 116240, None],
+            ["Социальная политика", 702100, 699830, None], ["Спорт", 95400, 71620, None]]
+    for r in rows[1:]:
+        r[3] = round(r[2] / r[1] * 100, 1)
+    w_xlsx("30 Исполнение бюджета города.xlsx", rows)
+    BRIEFS["30"] = "Как исполнен бюджет по статьям"
+
+    # 31 воронка
+    rows = [["Этап", "Пользователей"], ["Визит на сайт", 184500], ["Просмотр товара", 92300], ["Добавление в корзину", 21870],
+            ["Оформление заказа", 9640], ["Оплата", 7215]]
+    w_csv("31 Воронка интернет-магазина.csv", rows)
+    BRIEFS["31"] = "Покажи, где теряем покупателей: сравни этапы"
+
+    # 32 KPI markdown
+    w_txt("32 Итоги квартала.txt", """Итоги III квартала 2026
+
+| Показатель | Значение | К прошлому кварталу |
+|---|---|---|
+| Выручка, млн ₽ | 842,6 | +6,3% |
+| Валовая маржа, % | 31,4 | -1,2 п.п. |
+| Новых клиентов | 12 480 | +18% |
+| Отток клиентов, % | 4,7 | +0,4 п.п. |
+| NPS | 46 | +3 |
+""")
+    BRIEFS["32"] = "Ключевые показатели квартала"
+
+    # 33 температура с отрицательными
+    rows = [["Месяц", "Средняя температура, °C"]]
+    tt = [-9.8, -8.6, -2.4, 5.3, 12.8, 17.1, 19.4, 17.2, 11.3, 4.6, -1.9, -6.7]
+    for m, v_ in zip(months, tt):
+        rows.append([m, ru(v_)])
+    w_csv("33 Температура в Москве.csv", rows)
+    BRIEFS["33"] = "Покажи, как менялась температура"
+
+    # 34 иерархия: отдел → статья
+    rows = [["Отдел", "Статья расходов", "Сумма, тыс. ₽"]]
+    h = {"Производство": [("Сырьё", 48200), ("Энергия", 12400), ("Ремонт оборудования", 8100)],
+         "Логистика": [("Топливо", 9600), ("Аренда складов", 7200)],
+         "Офис": [("Аренда", 6400), ("Связь", 1200), ("Канцелярия", 380)],
+         "Маркетинг": [("Реклама онлайн", 5400), ("Выставки", 2100)]}
+    for dep, items in h.items():
+        for it, v_ in items:
+            rows.append([dep, it, v_])
+    w_xlsx("34 Расходы по отделам.xlsx", rows)
+    BRIEFS["34"] = "На что ушли расходы"
+
+    # 35 доли рынка в % (сумма 100) с «Прочие»
+    rows = [["Компания", "Доля рынка, %"], ["Магнит", "15,8"], ["X5", "18,6"], ["Лента", "4,9"], ["ВкусВилл", "3,2"],
+            ["Ашан", "3,9"], ["Окей", "1,7"], ["Прочие", "51,9"]]
+    w_csv("35 Доли рынка ритейла.csv", rows)
+    BRIEFS["35"] = "Из чего складывается рынок"
+
+    # 36 прибыль/убыток магазинов
+    rows = [["Магазин", "Прибыль, тыс. ₽"], ["ТЦ Мега", 1840], ["ТЦ Европейский", 1215], ["ТЦ Авиапарк", -320],
+            ["ТЦ Океания", 640], ["ТЦ Метрополис", -785], ["ТЦ Атриум", 410], ["ТЦ Columbus", 95]]
+    w_csv("36 Прибыль магазинов.csv", rows)
+    BRIEFS["36"] = "Из чего складывается прибыль сети"
+
+    # 37 ежедневные продажи, последний месяц неполный
+    rows = [["Дата", "Продажи, ₽"]]
+    d0 = date(2026, 1, 1)
+    for k in range(69):  # до 10 марта
+        dd = d0 + timedelta(days=k)
+        rows.append([dd.isoformat(), int(R.uniform(52000, 68000) * (1.15 if dd.weekday() >= 5 else 1.0))])
+    w_csv("37 Продажи по дням.csv", rows)
+    BRIEFS["37"] = "Покажи динамику продаж по месяцам"
+
+    # 38 оценки учеников по предметам (markdown)
+    w_txt("38 Оценки 9Б.txt", """Средние оценки 9Б за четверть
+
+| Ученик | Алгебра | Геометрия | Русский язык | Физика | История |
+|---|---|---|---|---|---|
+| Андреев И. | 4,2 | 3,9 | 4,5 | 4,0 | 4,8 |
+| Белова М. | 4,8 | 4,7 | 4,9 | 4,6 | 5,0 |
+| Васильев П. | 3,4 | 3,1 | 3,8 | 3,5 | 4,1 |
+| Григорьева А. | 4,5 | 4,4 | 4,7 | 4,3 | 4,6 |
+| Дмитриев К. | 3,8 | 3,6 | 3,9 | 4,1 | 3,7 |
+| Ершова Л. | 4,9 | 4,8 | 5,0 | 4,7 | 4,9 |
+""")
+    BRIEFS["38"] = "Сравни предметы по средней оценке"
+
+    # 39 преступность на 100 тыс.
+    rows = [["Регион", "Зарегистрировано преступлений", "На 100 тыс. населения"],
+            ["Республика Тыва", 7120, 2130.5], ["Забайкальский край", 18950, 1810.2], ["Пермский край", 41200, 1663.8],
+            ["Москва", 152300, 1158.1], ["Санкт-Петербург", 61800, 1103.6], ["Республика Дагестан", 9850, 312.4],
+            ["Чеченская Республика", 4210, 270.9]]
+    w_xlsx("39 Преступность по регионам.xlsx", rows)
+    BRIEFS["39"] = "Сравни регионы по уровню преступности"
+
+    # 40 тарифы на электроэнергию (цена по годам)
+    rows = [["Год", "Тариф, ₽/кВт·ч"]]
+    for y, v_ in zip(range(2019, 2026), [5.38, 5.47, 5.66, 5.92, 6.43, 6.99, 7.83]):
+        rows.append([y, ru(v_, 2)])
+    w_csv("40 Тариф на электроэнергию.csv", rows)
+    BRIEFS["40"] = "Покажи рост тарифа"
+
+    out = []
+    for key in sorted(BRIEFS):
+        out.append((key, [(n, b) for n, b in sorted(files_.items()) if n[:2] == key], BRIEFS[key]))
+    return out
+
+
 def _num(x: float, dec: int = 1) -> str:
     return (f"{x:.{dec}f}" if dec else str(int(round(x)))).replace(".", ",")
 
@@ -1040,7 +1439,7 @@ BENCH_LAB = re.compile(r"^(?:среднее|в\s+среднем|средн\w*\s+
                        r"(?:\s|$|,)", re.I)
 OTHER_LAB = re.compile(r"^(?:прочее|прочие|другое|другие|остальное|остальные)$", re.I)
 REST_LAB = re.compile(r"^Остальные \d+")
-CHANGE_COL = re.compile(r"изменени|прирост|(?:^|\s)рост(?:\s|$|,)|динамик|разниц|отклонени|δ|г/г", re.I)
+CHANGE_COL = re.compile(r"изменени|прирост|(?:^|\s)рост(?:\s|$|,)|динамик|разниц|отклонени|δ|г/г|к прошл", re.I)
 BIN_LAB = re.compile(r"^\s*(?:до|от|свыше|более|больше|менее|меньше)?\s*\d+(?:[.,]\d+)?\s*(?:[–—-]\s*\d|\+|"
                      r"(?:лет\s+)?(?:и|или)\s+(?:старше|более|больше|выше|младше))", re.I)
 T_LEVEL_UNIT = re.compile(r"/|°|‰|балл|очк|^п\.|^%$|^(?:мин|ч|час|дн|с|сек)\.?$", re.I)
@@ -1051,7 +1450,8 @@ T_CURRENCY = {"USD", "EUR", "CNY", "GBP", "JPY", "CHF", "KZT"}
 T_COUNT_UNIT = re.compile(r"^(?:(?:тыс|млн|млрд)\.?\s*)?(?:шт|чел|человек|ед|экз|статей|заказов|кг|т|л|м²|га|"
                           r"квт·ч|км|м)\.?$", re.I)
 T_MONEY = re.compile(r"₽|руб|\$|€", re.I)
-T_FLOW = re.compile(r"выручк|доход|расход|затрат|продаж|продано|сумм|оплат|поступлен|плат[её]ж|бюджет|фонд|прибыл|"
+T_FLOW = re.compile(r"выручк|доход|расход|затрат|продаж|продано|сумм|оплат|поступлен|плат[её]ж|бюджет|фонд|прибыл|поездк|поездок|"
+                    r"зарегистрир|преступлен|случа|"
                     r"оборот|выпуск|брак|отгруз|доставк|доставлен|заказ|количеств|число|клиент|сотрудник|студент|"
                     r"участник|пользовател|сделк|численност|населен|мужчин|женщин|побед|ничь|поражен|добавили|"
                     r"начали|оплатили|уволил|сеанс|ответ|утвержд|исполн|освоен|лимит|норматив|факт|план|заяв|"
@@ -1156,6 +1556,8 @@ class Raw:
         if not unit and re.fullmatch(r"[А-ЯЁ]{2,5}", name.strip()) and self.vals(j) and \
                 all(float(v).is_integer() for v in self.vals(j)):
             return True  # «ДТП», «ЧС» целыми числами — число случаев (раунд 7, C4)
+        if re.fullmatch(r"(?:пн|вт|ср|чт|пт|сб|вс|(?:19|20)\d\d)", name.strip().lower()) and T_FLOW.search(self.title):
+            return True  # колонка-день или колонка-год о величине не говорит: «Заказы ресторана по часам» — счёт
         if T_LEVEL_TITLE.search(self.title):
             return False
         return bool(T_MONEY.search(unit))
@@ -1167,6 +1569,10 @@ class Raw:
         """Величина вывода по таблице: названная целью; для сравнения — колонка-итог; иначе поток денег; иначе —
         не определена (тогда проверяется только арифметика заявленной колонки)."""
         ms = self.metrics()
+        rate = [j for j in ms if re.search(r"на\s+(?:1\s*000|1000|100\s*тыс|100\s*000|душу|человека|жителя)",
+                                            self.cols[j] + " " + (self.units[j] or ""), re.I)]
+        if goal and rate and re.search(r"обеспеченн|уровн|на душу|на человека", goal, re.I):
+            return rate[0]  # «по уровню преступности», «по обеспеченности врачами» — величина на душу
         if goal:
             hits = [_hits(goal, self.cols[j]) for j in ms]
             if hits and max(hits) > 0:
@@ -1228,7 +1634,8 @@ def _pct_shown(fact: float, pct: float) -> bool:
 def _labels(t: Table, prof=None, specs: Optional[dict] = None) -> list[str]:
     """Имена в таблице и на графике (подписи, названия колонок и их числа — «2026» в «Выручка 2026», единицы — «100» в
     «л/100 км», коды-подписи — «404», подписи оси — «нед. 18, 2025»): их цифры — имена, а не числа вывода."""
-    out = list(t.columns) + [w for c in t.columns for w in re.findall(r"\d+", c)] + [t.file, re.sub(r"\.\w+$", "", t.file)]
+    out = list(t.columns) + [w for c in t.columns for w in re.findall(r"\d+(?:[\s\u00a0]\d{3})*", c)] + \
+        [t.file, re.sub(r"\.\w+$", "", t.file)]
     out += [u for u in (t.units or []) if u]
     roles = [c.role for c in prof.columns] if prof is not None else []
     for r in t.rows:
@@ -1237,8 +1644,13 @@ def _labels(t: Table, prof=None, specs: Optional[dict] = None) -> list[str]:
                 and j < len(roles) and roles[j] != "metric" and float(v).is_integer()]
     for b in (specs or {}).values():
         if isinstance(b, ChartSpec):
-            out += [str(c) for c in b.categories]
-    return out
+            out += [str(c) for c in b.categories] + [x.name for x in b.series if x.name] + [b.y_title or ""]
+            out += [lower_first_(x.name) for x in b.series if x.name] + [lower_first_(b.y_title or "")]
+    return [x for x in out if x]
+
+
+def lower_first_(s: str) -> str:
+    return s[:1].lower() + s[1:] if s else s
 
 
 def _claimed(explain: str) -> Optional[str]:
@@ -1295,6 +1707,36 @@ def _days_of(f: str, k) -> list[dt.date]:
     return []
 
 
+T_MONTHS = {n: k + 1 for k, ns in enumerate([
+    ("январь", "янв", "january", "jan"), ("февраль", "фев", "february", "feb"), ("март", "мар", "march", "mar"),
+    ("апрель", "апр", "april", "apr"), ("май", "may"), ("июнь", "июн", "june", "jun"), ("июль", "июл", "july", "jul"),
+    ("август", "авг", "august", "aug"), ("сентябрь", "сен", "сент", "september", "sep"), ("октябрь", "окт", "october", "oct"),
+    ("ноябрь", "ноя", "november", "nov"), ("декабрь", "дек", "december", "dec")]) for n in ns}
+T_QUARTERS = {**{f"{a} квартал": k + 1 for k, a in enumerate(("1", "2", "3", "4"))},
+              **{f"{a} кв": k + 1 for k, a in enumerate(("i", "ii", "iii", "iv"))},
+              **{f"q{k + 1}": k + 1 for k in range(4)}}
+
+
+def _t_seasons(raw: Raw, tj: int) -> dict:
+    """Месяцы или кварталы без года в колонке времени (своё чтение): год — из колонки или названия файла, иначе
+    условный; ось, перешедшая через конец года, — следующий год."""
+    cells = [" ".join(str(raw.t.rows[i][tj]).split()).lower().strip(" .") for i in raw.rows
+             if raw.t.rows[i][tj] is not None]
+    for table, per, gran in ((T_MONTHS, 12, "month"), (T_QUARTERS, 4, "quarter")):
+        if cells and all(c in table for c in cells):
+            ym = re.search(r"(?<!\d)((?:19|20)\d\d)(?!\d)", raw.cols[tj]) or re.search(
+                r"(?<!\d)((?:19|20)\d\d)(?!\d)", f"{raw.t.file} {raw.t.sheet or ''}")
+            year = int(ym.group(1)) if ym else 1
+            seen = []
+            for c in cells:
+                if table[c] not in seen:
+                    seen.append(table[c])
+            rot = sum(1 for a_, b_ in zip(seen, seen[1:]) if b_ < a_) == 1 and seen[-1] < seen[0]
+            start = seen[0] if rot else min(seen)
+            return {c: (gran, (year if table[c] >= start else year + 1) * per + table[c] - 1) for c in set(cells)}
+    return {}
+
+
 def t_series(raw: Raw, j: Optional[int], cat: Optional[str] = None, dim_j: Optional[int] = None):
     """Ожидаемый ряд по времени: [(период, значение)], частота, способ («sum», «mean», «last», «week_mean»).
     `j=None` — число строк; `cat` — только строки этой категории (длинный формат)."""
@@ -1305,6 +1747,7 @@ def t_series(raw: Raw, j: Optional[int], cat: Optional[str] = None, dim_j: Optio
     if tj is None:
         return None
     pts = []
+    seasons = _t_seasons(raw, tj)
     for i in raw.rows:
         if cat is not None and raw.text(i, dim_j) != cat:
             continue
@@ -1313,6 +1756,8 @@ def t_series(raw: Raw, j: Optional[int], cat: Optional[str] = None, dim_j: Optio
             pp = ("year", int(cell))
         else:
             pp = period_parts(" ".join(str(cell).split()), with_time=True) if cell is not None else None
+        if pp is None and seasons:
+            pp = seasons.get(" ".join(str(cell).split()).lower().strip(" ."))
         if pp is None:
             continue
         v = 1.0 if j is None else raw.num[j][i]
@@ -1506,6 +1951,33 @@ def _check_guards(raw: Raw, p: DatasetPlan, specs: dict, facts) -> list[str]:
     return bad
 
 
+def _crosstab_leader(raw: Raw, v: float) -> bool:
+    """Лидер перекрёстной таблицы (часы × дни, ученики × предметы) или таблицы одних изменений: наибольшее среди сумм
+    (у потока) или средних (у уровня) строк и колонок одной единицы — или наибольшее значение колонки-изменения."""
+    num = [j for j in raw.num if raw.vals(j)]
+    for j in num:  # одни изменения («Δ к 2024, %»): лидер — наибольшее значение колонки
+        if CHANGE_COL.search(raw.cols[j]) and _close(v, max(raw.vals(j)), rel=1e-4, absol=0.051):
+            return True
+    by_unit: dict = {}
+    for j in num:
+        if not CHANGE_COL.search(raw.cols[j]):
+            by_unit.setdefault(raw.units[j] or "", []).append(j)
+    for js in by_unit.values():
+        if len(js) < 3:
+            continue
+        add = all(raw.additive(j) for j in js)
+        rows_ = []
+        for i in raw.rows:
+            xs = [raw.num[j][i] for j in js if raw.num[j][i] is not None]
+            if xs:
+                rows_.append(sum(xs) if add else sum(xs) / len(xs))
+        cols_ = [(sum(raw.vals(j)) if add else sum(raw.vals(j)) / len(raw.vals(j))) for j in js]
+        for agg in (rows_, cols_):
+            if agg and _close(v, max(agg), rel=1e-4, absol=0.051):
+                return True
+    return False
+
+
 def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> list[str]:
     """Лидер, последний и доля лидера — по ожидаемой величине и правильной сборке (сумма или среднее)."""
     bad = []
@@ -1524,11 +1996,15 @@ def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> lis
         for dj in dims:
             agg = {k: v / f for k, v in raw.by_cat(dj, j, add).items()}
             real = {k: v for k, v in agg.items() if not OTHER_LAB.match(k)}
-            if real and _close(lv.value, max(real.values()), rel=1e-4, absol=0.051 if max(map(abs, real.values())) >= 1
+            dec = next((k for k in range(0, 7) if abs(round(lv.value, k) - lv.value) < 1e-9), 7)
+            tol = min(0.051, 0.5 * 10 ** -dec + 1e-9)  # как записано в факте: 4,86 — до сотых, 413 — до целых
+            if real and _close(lv.value, max(real.values()), rel=1e-4, absol=tol if max(map(abs, real.values())) >= 1
                                else 1e-9):
                 hits.append((j, dj, add, agg, real))
         if hits:
             break
+    if not hits and _crosstab_leader(raw, lv.value):
+        return bad  # перекрёстная таблица: лидер — итог или среднее строки либо колонки (проверено своим счётом)
     if not hits:
         what = f"«{raw.cols[exp]}»" if exp is not None else "ни одной колонке"
         bad.append(f"значение лидера {lv.value} не сходится с {what} (сумма — у потока, среднее — у уровня)")
@@ -1661,10 +2137,47 @@ def _check_change(fid: str, f, base: float, last: float, kinds: tuple[str, ...] 
     return []
 
 
+def _check_years(raw: Raw, facts) -> list[str]:
+    """Колонки-годы («2024 · 2025») по месяцам без года: последний год к предыдущему по общим строкам."""
+    bad = []
+    ys = sorted((raw.cols[j].strip(), j) for j in raw.num if re.fullmatch(r"(?:19|20)\d\d", raw.cols[j].strip()))
+    if len(ys) < 2:
+        return [f"сравнение лет без колонок-лет: {facts['change'].text}"]
+    (_, j0), (_, j1) = ys[-2], ys[-1]
+    rows = [i for i in raw.rows if raw.num[j0][i] is not None and raw.num[j1][i] is not None]
+    a0 = [raw.num[j0][i] for i in rows]
+    a1 = [raw.num[j1][i] for i in rows]
+    add = raw.additive(j1) or bool(re.search(r"тыс\.|чел|шт|руб|₽", raw.t.file))
+    s0, s1 = (sum(a0), sum(a1)) if add else (sum(a0) / len(a0), sum(a1) / len(a1))
+    ch, up = facts.get("change"), facts.get("up")
+    if ch is not None and ch.unit == "%" and not _pct_shown(ch.value, (s1 / s0 - 1) * 100):
+        bad.append(f"год к году: {ch.value}% против {(s1 / s0 - 1) * 100:.2f}% по сырым")
+    if up is not None and int(up.value) != sum(1 for x, y in zip(a0, a1) if y > x):
+        bad.append(f"«выше в {up.value:g}» против {sum(1 for x, y in zip(a0, a1) if y > x)} по сырым")
+    if "periods" in facts and int(facts["periods"].value) != len(rows):
+        bad.append(f"общих периодов {facts['periods'].value:g} против {len(rows)}")
+    return bad
+
+
+def _drop_typos(s_: list) -> list:
+    """Значения в сто и больше раз больше остальных (опечатка «4 520 000» среди «4 210…»): ряд без них."""
+    vs = [abs(v) for _, v in s_]
+    out = []
+    for k, v in s_:
+        others = sorted(x for x in vs if x != abs(v))
+        med = others[len(others) // 2] if others else 0
+        if med > 0 and (abs(v) >= 100 * med or abs(v) * 100 <= med):
+            continue
+        out.append((k, v))
+    return out
+
+
 def _check_dynamics(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, goal) -> list[str]:
     bad = []
     exp = raw.expected_metric(goal, "dynamics")
     ch = facts.get("change")
+    if "year_last" in facts and "up" in facts:
+        return _check_years(raw, facts)
     # части целого по времени: целое — колонка-итог или сумма частей; самая подвижная часть
     if "mover" in facts:
         tj = raw.total_col()
@@ -1735,6 +2248,8 @@ def _check_dynamics(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, 
     if sr is None:
         return bad
     s_, target, how = sr
+    if spec is not None and spec.series and "без выброса" in (spec.series[0].name or ""):
+        s_ = _drop_typos(s_)  # опечатка убрана из ряда и сказано об этом — сверяем ряд без неё
     if len(s_) < 2:
         return bad
     # значения на графике — тот же ряд (сумма, среднее, среднее за неделю), без неполных краёв
@@ -1749,6 +2264,18 @@ def _check_dynamics(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, 
                 not _close(facts["mean"].value, sum(vs) / len(vs), rel=0.005, absol=0.51):
             bad.append("пик или среднее за час не по сырым")
         return bad
+    mc = facts.get("mean_change")
+    if mc is not None and "k" in facts:
+        # тренд не выражен: средние первых и последних k периодов
+        k = int(facts["k"].value)
+        vs = [v for _, v in s_]
+        m1, m2 = sum(vs[:k]) / k, sum(vs[-k:]) / k
+        if mc.unit == "%":
+            ok = m1 > 0 and _pct_shown(mc.value, (m2 / m1 - 1) * 100)
+        else:
+            ok = _close(mc.value, abs(m2 - m1), rel=0.005, absol=0.051)
+        if not ok:
+            bad.append(f"среднее последних {k} к первым {k}: {mc.value} против {m1:.3f} → {m2:.3f}")
     if ch is None:
         return bad
     k_last, last = s_[-1]
@@ -1791,6 +2318,14 @@ def _kpi_rows(raw: Raw):
             lab = raw.text(i, lab_j)
             u = (ru[i] if i < len(ru) else None) or split_unit(lab)[1]
             out.append((lab, raw.num[cur][i], raw.num[prev][i], raw.t.rows[i][chj] if chj is not None else None, u))
+        return out
+    vj = next((j for j in raw.num if j != chj and j != lab_j), None)
+    if chj is not None and vj is not None and raw.prof.time_axis is None:
+        # «Показатель | Значение | К прошлому кварталу»: изменение — своей колонкой, прошлого значения нет
+        for i in raw.rows:
+            lab = raw.text(i, lab_j)
+            u = (ru[i] if i < len(ru) else None) or split_unit(lab)[1]
+            out.append((lab, raw.num[vj][i], None, raw.t.rows[i][chj], u))
         return out
     ax = raw.prof.time_axis
     if ax is not None and raw.metrics():
@@ -1977,6 +2512,26 @@ def test_conv_corpus_numbers_from_raw_rows(name, data, brief):
     prof = profile_table(t)
     p = plan_datasets([t], brief, profiles=[prof])[0]
     assert not check(name, t, p), (p.headline, check(name, t, p))
+
+
+def _conv2_cases() -> list[tuple[str, list[tuple[str, bytes]], str]]:
+    out = []
+    for key, files, brief in corpus_conv2():
+        out.append((key, files, ""))
+        out.append((key, files, brief))
+    return out
+
+
+@pytest.mark.parametrize("key,files,brief", _conv2_cases(), ids=[f"{k}|{'b' if b else 'nb'}" for k, _, b in _conv2_cases()])
+def test_conv2_corpus_numbers_from_raw_rows(key, files, brief):
+    """40 таблиц второй проверки сходимости (ключ «20» — два файла под одной целью): числа и правила — по сырым
+    строкам."""
+    tables = [read_bytes(n, b)[0] for n, b in files]
+    plans = plan_datasets(tables, brief, profiles=[profile_table(t) for t in tables])
+    for (n, _), t, p in zip(files, tables, plans):
+        assert not check(n, t, p), (n, p.headline, check(n, t, p))
+        for k in range(len(p.options)):
+            assert chart_spec_of(p, t, option=k) is not None
 
 
 def test_random_tables_numbers_from_raw_rows():

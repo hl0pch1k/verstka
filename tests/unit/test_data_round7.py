@@ -127,7 +127,8 @@ def test_duration_column_is_a_measure_not_numbers():
     assert p.task.task == "distribution" and p.options[0].kind == "histogram" and "дней" in p.headline
     # без цели — список по длительности: «дольше всех», а не «первое место по числу дней открыт»
     q = _plan(t)
-    assert q.task.task == "reference" and q.headline.replace(NB, " ").endswith("дольше всех: 40 дн."), q.headline
+    # у шести багов по 40 дней — ничья названа (раунд 8, M7), а не «первое место» первой строки
+    assert q.task.task == "reference" and q.headline.replace(NB, " ").endswith("дольше всех: по 40 дн."), q.headline
 
 
 # ── M1/W4: составные единицы ──────────────────────────────────────────────────────────────────────────────────────
@@ -175,7 +176,8 @@ def test_main_metric_follows_file_title_and_goal():
                                               ["Центральный", 182400, 212], ["Северный", 241900, 176],
                                               ["Заречный", 94300, 241]])
     p = _plan(t, "Сравни районы по потреблению воды на человека.")
-    assert p.task.goal and p.headline.startswith("Заречный") and "241 л/сут на человека" in _sp(p.headline)
+    # величина на человека — «выше/ниже всего» (раунд 8, W2), а не «впереди»
+    assert p.task.goal and _sp(p.headline).startswith("Выше всего — Заречный: 241 л/сут на человека")
 
 
 # ── M4: цели — сложные слова, порядок слов, падежи ────────────────────────────────────────────────────────────────
@@ -214,7 +216,7 @@ def test_doughnut_merges_others_into_one_slice():
     p = _plan(t, "Покажи доли рынка смартфонов.")
     s = chart_spec_of(p, t)
     assert s.type == "doughnut" and s.categories[-1] == "Прочие" and not any(c.startswith("Остальные") for c in s.categories)
-    assert abs(s.series[0].values[-1] - 21.0) < 0.05 and "Прочие (вместе с Honor и Infinix) — 21%" in _sp(p.caption)
+    assert abs(s.series[0].values[-1] - 21.0) < 0.05 and "Прочие (в том числе Honor и Infinix) — 21%" in _sp(p.caption)
 
 
 # ── M8: сравнение категорий — без рядов по дате ───────────────────────────────────────────────────────────────────

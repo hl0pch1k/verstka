@@ -300,8 +300,10 @@ def test_reference_reason_agreement_and_lost_column():
     t = _t(["Клиент", "Отрасль", "Выручка", "Средний балл"], rows, [None, None, "млн ₽", None])
     p = _plan(t)
     text = " ".join(r for o in p.options for r in o.reasons) + " " + " ".join(o.why_not or "" for o in p.options)
-    assert "Средний балл не вошёл" in text or "средний балл не вошёл" in text
-    assert "теряется отрасль" in text
+    # раунд 8 (M6): таблица-справочник держит каждую числовую колонку — «Средний балл» в ней, а не «не вошёл»
+    tab = next(k for k, o in enumerate(p.options) if o.kind == "table")
+    assert any("Средний балл" in c for c in chart_spec_of(p, t, option=tab).columns)
+    assert "теряется отрасль" in text or "теряются отрасль" in text
 
 
 # ── сквозная проверка на настоящих файлах ─────────────────────────────────────────────────────────────────────────────

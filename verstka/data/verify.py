@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Optional, Sequence
 
-from verstka.data.parse import iso_ord, period_parts, quantity
+from verstka.data.parse import iso_ord, period_parts, quantity, season_name, season_ord
 from verstka.data.words import fmt_num, stem, stems_of
 from verstka.schemas.data import HeadlineFact, Table
 
@@ -87,11 +87,16 @@ class _Raw:
     def text(self, i: int, j: int) -> str:
         return _text(self.cell(i, j))
 
-    def groups(self, by: int, j: Optional[int], scale: float = 1.0) -> dict[str, list[float]]:
+    def groups(self, by: int, j: Optional[int], scale: float = 1.0, rowcols: Sequence[int] = (),
+               rowagg: str = "sum") -> dict[str, list[float]]:
         out: dict[str, list[float]] = {}
         for i in self.rows:
             lab = self.text(i, by)
-            v = 1.0 if j is None else self.num(i, j, scale)
+            if rowcols:  # перекрёстная таблица: значение строки — сумма или среднее её колонок
+                xs = [x for x in (self.num(i, c, scale) for c in rowcols) if x is not None]
+                v = None if not xs else (sum(xs) if rowagg == "sum" else sum(xs) / len(xs))
+            else:
+                v = 1.0 if j is None else self.num(i, j, scale)
             if lab and v is not None:
                 out.setdefault(lab, []).append(v)
         return out
@@ -160,10 +165,17 @@ def _series(raw: _Raw, p: dict) -> dict[int, float]:
     cols = p.get("cols") or ([p["col"]] if p.get("col") is not None else [])
     pts: list[tuple[int, int, float]] = []  # (номер периода, строка, значение)
     hourly = any((_time(raw.cell(i, tj)) or ("", 0))[0] == "hour" for i in raw.rows)
+    st = iso_ord(p["ax_start"]) if p.get("ax_start") else None
     for i in raw.rows:
         if cat is not None and raw.text(i, cat[0]) != cat[1]:
             continue
         tt = _time(raw.cell(i, tj))
+        if tt is None and st is not None and st[0] in ("month", "quarter"):
+            # месяц или квартал без года — по началу оси (год из колонки, файла или условный)
+            sn = season_name(raw.cell(i, tj))
+            if sn is not None and sn[0] == st[0]:
+                per = 12 if st[0] == "month" else 4
+                tt = (sn[0], season_ord(sn[0], sn[1], st[1] // per, st[1] % per + 1))
         if tt is None:
             continue
         g, o = tt
@@ -223,19 +235,48 @@ class _Fail(Exception):
 def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
     """(значение по сырым строкам, промежуточные значения для проверки подписи)."""
     op = p["op"]
-    raw = _Raw(t, p.get("skip", ()))
+    raw = _Raw(t, list(p.get("skip", ())) + list(p.get("exclude", ())))
+    if p.get("only") is not None:
+        only = set(p["only"])
+        raw.rows = [i for i in raw.rows if i in only]
     scale = p.get("scale", 1.0)
     if op == "add":
         got = [_compute(t, q) for q in p["parts"]]
         return float(sum(g[0] for g in got)), [x for g in got for x in g[1]]
+    if op == "change2":
+        # изменение между двумя пересчитанными величинами (средние первых и последних периодов)
+        a, ea = _compute(t, p["base"])
+        b, eb = _compute(t, p["cur"])
+        if p["kind"] == "pct" and a <= 0:
+            raise _Fail("база не положительная")
+        return _change(a, b, p["kind"]), ea + eb + [a, b]
     if op == "ratio":
         a, ea = _compute(t, p["a"])
         b, eb = _compute(t, p["b"])
         if not b:
             raise _Fail("делитель — ноль")
         return a / b, ea + eb + [a, b]
+    if op == "colrank":
+        # перекрёстная таблица: колонки сравниваются по сумме или среднему по строкам
+        agg = {}
+        for name, j in p["cols"].items():
+            xs = [v for v in (raw.num(i, j, scale) for i in raw.rows) if v is not None]
+            if xs:
+                agg[name] = _agg(xs, p.get("agg", "sum"))
+        keys = p["keys"]
+        if any(k not in agg for k in keys):
+            raise _Fail(f"нет колонки «{keys[0]}»")
+        vals = [agg[k] for k in keys]
+        rank = p.get("rank")
+        if rank == "max" and any(v < max(agg.values()) - 1e-9 * max(1.0, abs(v)) for v in vals):
+            raise _Fail(f"«{keys[0]}» — не наибольшее значение")
+        if rank == "min" and any(v > min(agg.values()) + 1e-9 * max(1.0, abs(v)) for v in vals):
+            raise _Fail(f"«{keys[0]}» — не наименьшее значение")
+        if p.get("share"):
+            return sum(vals) / sum(agg.values()) * 100, list(agg.values())
+        return vals[0], list(agg.values())
     if op in ("cat", "share", "neg", "above"):
-        g = raw.groups(p["by"], p.get("col"), scale)
+        g = raw.groups(p["by"], p.get("col"), scale, p.get("rowcols") or (), p.get("rowagg", "sum"))
         agg = {k: _agg(v, p.get("agg", "sum")) for k, v in g.items()}
         ex = list(agg.values())
         if op == "neg":
@@ -276,9 +317,39 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         if not sum(sums):
             raise _Fail("целое — ноль")
         return part / sum(sums) * 100, sums + [part, sum(sums)]
+    if op == "freq":
+        # частотная таблица: значение и сколько раз оно встретилось
+        pairs = [(raw.num(i, p["value"]), raw.num(i, p["count"])) for i in raw.rows]
+        pairs = [(a, int(b)) for a, b in pairs if a is not None and b is not None]
+        tot = sum(n for _, n in pairs)
+        if not tot:
+            raise _Fail("счёт — ноль")
+        st = p["stat"]
+        top = max(n for _, n in pairs)
+        if st in ("mode_count", "mode_share"):
+            modes = sorted(a for a, n in pairs if n == top)
+            if sorted(p.get("modes", modes)) != modes:
+                raise _Fail("самое частое значение — другое")
+            return (float(top) if st == "mode_count" else top / tot * 100), [float(tot)]
+        if st == "total":
+            return float(tot), []
+        if st == "count_at":
+            got = [n for a, n in pairs if abs(a - p["at"]) < 1e-9]
+            if not got:
+                raise _Fail("нет такого значения")
+            return float(got[0]), [float(tot)]
+        xs = sorted(a for a, n in pairs for _ in range(n))
+        return (sum(xs) / len(xs) if st == "mean" else _pct(xs, 50)), [float(tot)]
+    if op == "rows_gt":
+        pairs = [(raw.num(i, p["a"]), raw.num(i, p["b"])) for i in raw.rows]
+        return float(sum(1 for a, b in pairs if a is not None and b is not None and a > b)), []
     if op == "colsum":
         if p.get("cols"):
             xs = [v for j in p["cols"] for v in (raw.num(i, j, scale) for i in raw.rows) if v is not None]
+            if p.get("agg") == "mean":
+                if not xs:
+                    raise _Fail("нет значений")
+                return float(sum(xs) / len(xs)), []
             return float(sum(xs)), []
         if p.get("row") is not None:
             v = raw.num(p["row"], p["col"], scale)
@@ -318,12 +389,16 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             if tk not in s:
                 raise _Fail("нет значения за период")
             return s[tk], [s[tk]]
+        if mode == "year":
+            if tk not in s:
+                raise _Fail("такого периода в файле нет")
+            return float(int(str(p["to"])[:4])), []
         rng = [s[k] for k in ks if fk is not None and tk is not None and fk <= k <= tk]
-        if mode in ("max", "min", "mean", "count"):
+        if mode in ("max", "min", "mean", "count", "neg"):
             if not rng:
                 raise _Fail("нет значений за периоды")
             v = max(rng) if mode == "max" else min(rng) if mode == "min" else len(rng) if mode == "count" else \
-                sum(rng) / len(rng)
+                sum(1 for x in rng if x < 0) if mode == "neg" else sum(rng) / len(rng)
             return float(v), rng
         if fk not in s or tk not in s:
             raise _Fail("нет значения в начале или в конце")
@@ -381,6 +456,8 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             return (xs[0] if st == "min" else xs[-1]), []
         if st == "neg":
             return float(sum(1 for v in xs if v < 0)), []
+        if st == "count_eq":
+            return float(sum(1 for v in xs if abs(v - p["thr"]) <= 1e-9 * max(1.0, abs(v)))), []
         if st == "upper":
             # граница «не больше X» — перцентиль, округлённый вверх: не ниже него
             if p["thr"] < _pct(xs, p["q"]) - 1e-9 * max(1.0, abs(p["thr"])):

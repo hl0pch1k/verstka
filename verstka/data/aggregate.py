@@ -6,7 +6,7 @@
 - Категории (`CatView`): сумма или среднее по категории, ранжирование (порядковые подписи «0–30», «1 курс» — как
   в файле), топ-N и «Остальные» больше 12 категорий, доли от итога.
 - Распределение (`DistView`): интервалы по Фридману–Диаконису с «круглой» шириной, 7–12 интервалов (5–12 на малых
-  выборках), открытый последний «больше X»; выбросы — отдельно.
+  выборках), открытый последний «больше X» — все значения за X, выбросы тоже.
 - Ключевые показатели (`KpiView`): значение, единица и изменение каждой строки («1,24 млрд ₽», «+23%», «+6 п.»).
 - Справочник (`RefView`): топ-10 по главной метрике и строка «Остальные 230 …», до 5 колонок, доля посчитана;
   разбиение на слайды по 10 строк, если агрегация теряет смысл (не больше 3 слайдов).
@@ -25,7 +25,7 @@ from typing import Any, Optional
 import numpy as np
 
 from verstka.data.kpi import _kpi_view
-from verstka.data.parse import is_total_label, split_unit
+from verstka.data.parse import is_total_label, season_name, split_unit
 from verstka.data.reference import _ref_view, describe_dropped
 from verstka.data.timeaxis import columns_time_view, resample_freq, time_view
 from verstka.data.units import (
@@ -57,6 +57,15 @@ _CENTRAL = re.compile(r"(?:^|[^а-яёa-z])(?:медиан\w*|средн\w*|см
 _CLOCK = re.compile(r"^\s*\d{1,2}:\d{2}(?:\s*[–—-]\s*\d{1,2}:\d{2})?\s*$")
 _STAT_ANY = re.compile(r"(?:^|[^а-яёa-z])(?:минимум\w*|максимум\w*|мин\.|макс\.|минимальн\w*|максимальн\w*|min|max)",
                        re.I)
+_WEEKDAY = re.compile(r"^(?:пн|вт|ср|чт|пт|сб|вс|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|"
+                      r"mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\.?$", re.I)
+_METRIC_WORD = re.compile(r"выручк|расход|доход|прибыл|продаж|сумм|цен[аы]|стоимост|колич|числ|дол[яи]|средн|процент|"
+                          r"итог|всего|план|факт|(?:^|\s)рост|изменени|балл|рейтинг|индекс|ставк|курс|тариф|вес(?:\s|$)|"
+                          r"объ[её]м|площад|длительн|время|минимум|максимум|медиан|мин\.|макс\.|затрат|бюджет|"
+                          r"конверси|охват|населени|штук|ед\.", re.I)
+_COUNT_NAME = re.compile(r"^(?:число|количество|кол-во|частота|сколько|человек|учеников|студентов|семей|случаев)", re.I)
+_TARGET_NAME = re.compile(r"(?:^|[^а-яё])(?:цел[ьи]|целев|норматив|норма|target|таргет|kpi|ориентир)", re.I)
+_CUMUL = re.compile(r"нараста|накоплен|с начала года|с начала периода|ytd|cumulative|running total", re.I)
 # «Прочее», «Другие», «Остальное» — строка-остаток: в конце списка и никогда не лидер
 _OTHER = re.compile(r"^(?:прочее|прочие|другое|другие|остальное|остальные|иное|иные|прочее\s+\S+|другие\s+\S+)$", re.I)
 
@@ -74,7 +83,11 @@ def stem_hits(subject: tuple[str, ...] | list[str], text: str) -> int:
 
 # слова величин-уровней в цели: «по конверсии», «по доле», «по среднему» — из равных колонок берётся уровень (процент)
 _LEVEL_GOAL = re.compile(r"^(?:конверс|дол[ьиея]?$|процент|средн|оценк|балл|рейтинг|скорост|цен|тариф|медиан|уров|"
-                         r"удельн|частот|плотн|открываем|посещаем|загрузк|заполняем)", re.I)
+                         r"удельн|частот|плотн|открываем|посещаем|загрузк|заполняем|обеспеченн|охват)", re.I)
+# цель о величине на душу («обеспеченность врачами», «уровень преступности»): колонка «на 1 000 жителей», «на 100 тыс.»
+RATE_GOAL = re.compile(r"^(?:обеспеченн|уров|частот|плотн|интенсивн|распространенн|заболеваем|смертн|рождаем)", re.I)
+RATE_COLUMN = re.compile(r"(?:^|[\s(/])на\s+(?:1\s*000|1000|10\s*000|100\s*000|100\s*тыс|10\s*тыс|тыс\.?\s*(?:жител|человек|"
+                         r"населени)|душу|человека|жителя|\d[\d\s]*(?:жител|человек|населени))|per\s+capita|‰", re.I)
 
 
 # ── главный объект ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -97,6 +110,14 @@ class Data:
         self.n = len(self.rows_idx)
         self.measures: list[Measure] = [build_measure(self, j, c) for j, c in enumerate(cols) if c.role == "metric"]
         self.measures = [m for m in self.measures if m.present]
+        # нарастающий итог («Нарастающим итогом», «С начала года») — не второй ряд и не слагаемое: последнее значение
+        # равно сумме за период; в рядах и долях его нет, итог — в подписи
+        self.cumulative: list[tuple[Measure, Measure]] = []
+        for b_ in list(self.measures):
+            a_ = next((x for x in self.measures if x is not b_ and self._running_sum(x, b_)), None)
+            if a_ is not None:
+                self.cumulative.append((b_, a_))
+                self.measures.remove(b_)
         # номера, а не величины (аудитории в расписании): единственное «число» без единицы и признака суммы, с
         # повторами, среди трёх и больше текстовых колонок — таблицей, «не для графика»
         self.not_numbers: list[str] = []
@@ -122,6 +143,20 @@ class Data:
                              None)
 
     # ── строки и колонки
+    def _running_sum(self, a: Measure, b: Measure) -> bool:
+        """b — нарастающий итог a: по строкам подряд b = a₁ + … + aₖ (с точностью до округления записи), строк ≥ 3."""
+        if (a.unit or "") != (b.unit or "") or a.change or b.change:
+            return False
+        rows = [i for i in self.rows_idx if a.values[i] is not None and b.values[i] is not None]
+        if len(rows) < 3 or len(rows) < 0.8 * self.n:
+            return False
+        run = 0.0
+        for i in rows:
+            run += float(a.values[i])  # type: ignore[arg-type]
+            if abs(run - float(b.values[i])) > 0.051 + 1e-6 * abs(run):  # type: ignore[arg-type]
+                return False
+        return bool(_CUMUL.search(b.name)) or len(rows) >= 4
+
     def _total_rows(self) -> set[int]:
         marked = getattr(self.table, "totals", None) or []
         out = {int(i) for i in marked if isinstance(i, int) and 0 <= i < len(self.table.rows)}
@@ -226,6 +261,9 @@ class Data:
         ms = self.measures
         if not ms:
             return None
+        if self.subject and any(RATE_GOAL.match(s_) for s_ in self.subject) and self.rate_measure is not None:
+            # «по обеспеченности врачами», «по уровню преступности» — величина на душу, а не абсолютный счёт
+            return self.rate_measure
         if self.subject:
             hits = [stem_hits(self.subject, m.name) for m in ms]
             top = max(hits)
@@ -269,6 +307,56 @@ class Data:
                 if pred(m):
                     return self._rate_over_count(latest(m))
         return ms[0]
+
+    @cached_property
+    def target_pair(self) -> Optional[tuple[Measure, Measure]]:
+        """(величина, цель): колонка цели («Цель, %», «Норматив», «План») с одним значением на весь ряд рядом с
+        величиной той же единицы — ориентир, а не второй ряд («ниже цели в 5 из 12 недель»)."""
+        for t_ in self.measures:
+            if not _TARGET_NAME.search(t_.name) or len(set(t_.present)) > 2 or len(t_.present) < 2:
+                continue
+            m = next((x for x in self.measures if x is not t_ and (x.unit or "") == (t_.unit or "") and not x.change),
+                     None)
+            if m is not None:
+                return m, t_
+        return None
+
+    @cached_property
+    def typo_rows(self) -> dict[str, list[int]]:
+        """Выбросы-опечатки: значение, отмеченное профилем, в сто и больше раз больше (или меньше) медианы остальных
+        («4 520 000» среди «4 210 … 5 240»). В ряду по времени их нет — линию не сплющивает; подпись говорит о них."""
+        out: dict[str, list[int]] = {}
+        for m in self.measures:
+            rows = sorted({o.row for o in self.profile.outliers if o.column == m.name})
+            if not rows:
+                continue
+            others = [abs(m.values[i]) for i in self.rows_idx if m.values[i] is not None and i not in rows]
+            if len(others) < 4:
+                continue
+            med = float(np.median(others))
+            if med <= 0:
+                continue
+            bad = [i for i in rows if m.values[i] is not None and (abs(m.values[i]) >= 100 * med
+                                                                  or abs(m.values[i]) * 100 <= med)]
+            if bad:
+                out[m.name] = bad
+        return out
+
+    @cached_property
+    def parallel_time_only(self) -> bool:
+        """Колонки на оси времени — ряды одного рода («ИТ · Продажи · Маркетинг» по месяцам, «2024 · 2025»): их не
+        сопоставляют друг с другом как причину и следствие."""
+        xy = self.xy
+        if xy is None:
+            return True
+        same = (xy.x.unit or "") == (xy.y.unit or "") and xy.x.type == xy.y.type
+        years = all(re.fullmatch(r"\s*(?:19|20)\d\d\s*", m.name) for m in (xy.x, xy.y))
+        return bool(years or (same and self._siblings(xy.x, xy.y)))
+
+    @cached_property
+    def rate_measure(self) -> Optional[Measure]:
+        """Колонка «на душу»: «Врачей на 1 000 жителей», «На 100 тыс. населения», единица «на 1 000 чел.»."""
+        return next((m for m in self.measures if not m.change and RATE_COLUMN.search(f"{m.name} {m.unit or ''}")), None)
 
     @cached_property
     def _title_head(self) -> str:
@@ -395,6 +483,8 @@ class Data:
         m = self.main
         if m is None or m.change or m.mixed or m is self.total_metric:
             return []
+        if self.matrix and self.matrix_axis is not None:
+            return []  # перекрёстная таблица: сравниваются итоги строк или колонок, а не колонки рядом
         if self.part_group and m in self.part_group:
             return list(self.part_group)
         pf = self.plan_fact
@@ -523,8 +613,126 @@ class Data:
     def time_view(self, m: Optional[Measure], max_points: int = MAX_POINTS) -> Optional[TimeView]:
         return time_view(self, m, max_points)
 
+    # ── перекрёстная таблица: строки × колонки одной величины ────────────────────────────────────────────────────
+    @cached_property
+    def matrix(self) -> list[Measure]:
+        """Колонки одной величины по второму признаку (часы × дни недели, ученики × предметы, регионы × каналы): одна
+        колонка не представляет всю таблицу — сравнивают итоги (сумма) или средние строк или колонок. Признак: от трёх
+        колонок одной единицы, рода и сложения; имена — значения признака (дни, месяцы, годы, названия), а не разные
+        величины («Выручка · Расходы · Прибыль»)."""
+        if self.time_col is not None or self.part_group or self.plan_fact is not None:
+            return []
+        ms = [m for m in self.measures if not is_total_label(m.name)]
+        if len(ms) < 3 or any(m.change or m.mixed for m in ms):
+            return []
+        if len({m.unit_text or "" for m in ms}) != 1 or len({m.type for m in ms}) != 1 \
+                or len({m.additive for m in ms}) != 1:
+            return []
+        names = [(split_unit(m.name)[0] or m.name).strip() for m in ms]
+        calendar = all(_WEEKDAY.match(n) or season_name(n) or re.fullmatch(r"(?:19|20)\d\d", n) for n in names)
+        if not calendar and any(_METRIC_WORD.search(n) or len(n.split()) > 3 or re.search(r"\d", n) for n in names):
+            return []
+        if not calendar:
+            # варианты одной величины («Город · Трасса · Смешанный», «Пиковая зона · Ночная зона») — не значения
+            # второго признака: общее слово в именах или сводная колонка («смешанный», «средний»)
+            words = [set(re.findall(r"[а-яёa-z]{3,}", n.lower())) for n in names]
+            if set.intersection(*words) or any(_CENTRAL.search(n) or _STAT_ANY.search(n) for n in names):
+                return []
+        means = [sum(m.present) / len(m.present) for m in ms if m.present]
+        if len(means) != len(ms) or min(means) <= 0 or max(means) > 5 * min(means):
+            return []
+        dj = self._matrix_rows()
+        return ms if dj is not None else []
+
+    def _matrix_rows(self) -> Optional[int]:
+        """Подпись строк перекрёстной таблицы: каждая строка — своя (часы, ученики, регионы)."""
+        for j in ([self.label] if self.label is not None else []) + list(self.dims):
+            labs = [self.text(i, j) for i in self.rows_idx]
+            if labs and all(labs) and len(set(labs)) == len(labs):
+                return j
+        return None
+
+    @cached_property
+    def matrix_axis(self) -> Optional[str]:
+        """Что сравнивать в перекрёстной таблице: строки («row» — итог или среднее строки по всем колонкам) или колонки
+        («col» — дни недели, предметы). Цель решает: названы строки — строки; названы колонки как род («дни недели»,
+        «месяцы», «годы») или цель говорит о другом, чем строки и отдельные колонки, — колонки; названа одна колонка
+        («по алгебре») — она и сравнивается (тогда она названа в заголовке). Без цели — строки."""
+        ms = self.matrix
+        if not ms:
+            return None
+        if not self.subject:
+            return "row"
+        rj = self._matrix_rows()
+        if rj is not None and stems_match(self.subject, self.cols[rj].name):
+            return "row"
+        names = " ".join(m.name for m in ms)
+        if any(stem_in(s, m.name) for s in self.subject for m in ms):
+            return None
+        if re.search(r"(?:^|\s)(?:дн|недел|месяц|год|лет|квартал|предмет|колонк|столбц)", " ".join(self.subject)) \
+                or not stems_match(self.subject, names):
+            return "col"
+        return "row"
+
+    @cached_property
+    def matrix_note(self) -> Optional[str]:
+        """Как собраны значения перекрёстной таблицы — для заголовка: «сумма Пн–Вс», «в среднем по 6 строкам»."""
+        ms, ax = self.matrix, self.matrix_axis
+        if not ms or ax is None:
+            return None
+        add = ms[0].additive
+        if ax == "row":
+            first, last = ms[0].name, ms[-1].name
+            return (f"сумма {first}–{last}" if add else f"среднее {first}–{last}") if len(first) <= 12 and \
+                len(last) <= 12 else (f"сумма по {len(ms)} колонкам" if add else f"в среднем по {len(ms)} колонкам")
+        n = len(self.rows_idx)
+        return f"сумма по {n} строкам" if add else f"в среднем по {n} строкам"
+
+    def _matrix_view(self) -> Optional[CatView]:
+        ms, ax = self.matrix, self.matrix_axis
+        rj = self._matrix_rows()
+        if not ms or ax is None or rj is None:
+            return None
+        add = ms[0].additive
+        unit = ms[0].unit
+        if ax == "row":
+            vals: list[Optional[float]] = []
+            for i in range(len(self.table.rows)):
+                xs = [m.values[i] for m in ms if m.values[i] is not None] if i in set(self.rows_idx) else []
+                vals.append(None if not xs else float(sum(xs)) if add else float(sum(xs) / len(xs)))
+            vm = Measure(j=-3, name=upper_first(self.matrix_note or ""), unit=unit, type=ms[0].type, values=vals,
+                         level=not add, time_unit=ms[0].time_unit, basis=ms[0].basis, scale=ms[0].scale)
+            return self.cat_view(vm)
+        aggs = []
+        for m in ms:
+            xs = [m.values[i] for i in self.rows_idx if m.values[i] is not None]
+            aggs.append(float(sum(xs)) if add else float(sum(xs) / len(xs)))
+        order = sorted(range(len(ms)), key=lambda k: (-aggs[k], k))
+        vm = Measure(j=-4, name=upper_first(self.matrix_note or ""), unit=unit, type=ms[0].type, values=[],
+                     level=not add, time_unit=ms[0].time_unit, basis=ms[0].basis, scale=ms[0].scale)
+        dim = "День недели" if all(_WEEKDAY.match(m.name.strip()) for m in ms) else \
+            upper_first(self.subject_word or "Колонка")
+        return CatView(dim=dim, labels=[ms[k].name for k in order], values=[aggs[k] for k in order], measure=vm,
+                       ranked=True, total=float(sum(aggs)) if add else None, distinct=len(ms), aggregated=True)
+
+    @cached_property
+    def subject_word(self) -> Optional[str]:
+        """Предмет цели как подпись оси колонок («Предмет», «Канал»), если цель его называет."""
+        words = {"предмет": "Предмет", "дисциплин": "Дисциплина", "канал": "Канал", "месяц": "Месяц", "год": "Год",
+                 "квартал": "Квартал", "магазин": "Магазин", "регион": "Регион", "город": "Город", "отдел": "Отдел",
+                 "филиал": "Филиал", "продукт": "Продукт", "товар": "Товар", "направлен": "Направление"}
+        for s_ in self.subject:
+            for k, v in words.items():
+                if s_.startswith(k):
+                    return v
+        return None
+
     @cached_property
     def cats(self) -> Optional[CatView]:
+        if self.matrix and self.matrix_axis is not None:
+            mv = self._matrix_view()
+            if mv is not None:
+                return mv
         if self.composition and self._rows100:
             return self.cat_view(self.main, rank=False)  # строки по 100: порядок — как в файле
         return self.cat_view(self.main, rank_with=self.parallel if self.composition else None)
@@ -659,7 +867,41 @@ class Data:
         )
 
     @cached_property
+    def freq_table(self) -> Optional[tuple[Measure, Measure]]:
+        """Готовая частотная таблица: значение (оценка, число детей, размер) и сколько раз оно встретилось («Оценка |
+        Число учеников»). Это распределение значения, взвешенное счётом, а не две величины и не список."""
+        ms = [m for m in self.measures if not m.change and not m.mixed]
+        if len(ms) != 2 or len(self.measures) != 2 or self.label is not None or self.time_col is not None:
+            return None
+        v, c = sorted(ms, key=lambda x: x.j)
+        vals = [v.values[i] for i in self.rows_idx]
+        cnt = [c.values[i] for i in self.rows_idx]
+        if any(x is None for x in vals + cnt) or not 3 <= len(vals) <= 20 or len(set(vals)) != len(vals):
+            return None
+        if any(not float(2 * x).is_integer() for x in vals):  # type: ignore[operator]
+            return None
+        if not (vals == sorted(vals) or vals == sorted(vals, reverse=True)):  # type: ignore[type-var]
+            return None
+        if any(not float(x).is_integer() or x < 0 for x in cnt):  # type: ignore[operator, union-attr]
+            return None
+        if not (_COUNT_NAME.search(c.name) or is_counter(c.name) or (c.unit or "").rstrip(".") in ("чел", "шт", "ед")):
+            return None
+        return v, c
+
+    @cached_property
     def dist(self) -> Optional[DistView]:
+        ft = self.freq_table
+        if ft is not None:
+            # частотная таблица: значения, повторённые столько раз, сколько их было; интервалы — сами значения
+            v, c = ft
+            vals = [float(v.values[i]) for i in self.rows_idx]  # type: ignore[arg-type]
+            cnt = [int(c.values[i]) for i in self.rows_idx]  # type: ignore[arg-type]
+            order = sorted(range(len(vals)), key=lambda k: vals[k])
+            x = np.repeat(np.array([vals[k] for k in order]), [cnt[k] for k in order]).astype(float)
+            step = min(b - a for a, b in zip(sorted(vals), sorted(vals)[1:])) if len(vals) > 1 else 1.0
+            bins = Bins(edges=[vals[k] for k in order], counts=[cnt[k] for k in order],
+                        labels=[fmt_num(vals[k]) for k in order], width=step)
+            return DistView(measure=v, values=x, inliers=x, outliers=[], bins=bins, entity=None)
         m = self.main
         if m is None:
             return None
@@ -672,6 +914,21 @@ class Data:
         if inl.size < 2:
             inl = x
         bins = histogram_bins(inl, m.unit_text)
+        if outliers and inl.size:
+            # выбросы — на графике, в крайних столбцах: «больше 180» считает все значения больше 180, а не только обычные
+            hi = [v for v in outliers if v > float(inl.max())]
+            lo = [v for v in outliers if v < float(inl.min())]
+            if hi:
+                if bins.open_from is not None:
+                    bins.counts[-1] += sum(1 for v in hi if v > bins.open_from)
+                else:
+                    bins.counts.append(len(hi))
+                    bins.labels.append(f"больше {fmt_num(bins.edges[-1])}")
+                    bins.open_from = bins.edges[-1]
+            if lo:
+                bins.counts.insert(0, len(lo))
+                bins.labels.insert(0, f"меньше {fmt_num(bins.edges[0])}")
+                bins.open_to = bins.edges[0]
         return DistView(measure=m, values=x, inliers=inl, outliers=outliers, bins=bins, entity=self.entity)
 
     @cached_property

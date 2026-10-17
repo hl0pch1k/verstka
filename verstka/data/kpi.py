@@ -6,7 +6,7 @@ import math
 from typing import TYPE_CHECKING, Any, Optional
 
 from verstka.data.parse import parse_quantity, split_unit
-from verstka.data.timeaxis import _cell_time, _iso
+from verstka.data.timeaxis import _cell_time, _iso, cell_period
 from verstka.data.units import kpi_change
 from verstka.data.views import KpiItem, KpiView
 from verstka.data.words import fmt_value, is_counter, metric_phrase, period_text
@@ -118,7 +118,7 @@ def _kpi_long(d: Data) -> Optional[KpiView]:
     rows_by: dict[str, list[tuple[tuple[str, int], int]]] = {}
     for i in d.rows_idx:
         lab = d.text(i, lab_j)
-        t = _cell_time(d.cell(i, d.time_col))
+        t = cell_period(d.cell(i, d.time_col), d.profile.time_axis)
         if lab and t is not None:
             rows_by.setdefault(lab, []).append((t, i))
     if not rows_by or len(rows_by) > 6 or any(len(v) > 4 for v in rows_by.values()):

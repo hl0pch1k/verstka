@@ -125,7 +125,9 @@ def test_outliers_counted_apart_from_bins():
     facts = {f.id: f for f in p.headline_facts}
     assert facts["outliers"].value == 2
     spec = chart_spec_of(p, t)
-    assert 7 <= len(spec.categories) <= 12 and sum(spec.series[0].values) == 300
+    # раунд 8 (A1): выбросы — в крайнем столбце «больше X», он считает все значения за X: всего на графике — 302
+    assert 7 <= len(spec.categories) <= 12 and sum(spec.series[0].values) == 302
+    assert spec.categories[-1].startswith("больше ")
     assert p.headline.startswith(f"{int(facts['share_within'].value)}% заказов ")
 
 

@@ -13,7 +13,7 @@ import math
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from verstka.data.parse import parse_quantity, period_parts, quantity, split_unit
+from verstka.data.parse import parse_quantity, period_parts, quantity, season_name, split_unit
 from verstka.data.views import Measure
 from verstka.data.words import file_title, fmt_count, head_word, is_counter, is_event_name, phrase
 from verstka.schemas.data import ColumnProfile
@@ -169,6 +169,8 @@ def _time_unit_of(name: str, unit: Optional[str]) -> Optional[str]:
 
 
 
+_CALENDAR_NAME = re.compile(r"^(?:пн|вт|ср|чт|пт|сб|вс|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|"
+                            r"mon|tue|wed|thu|fri|sat|sun|(?:19|20)\d\d)\.?$", re.I)
 _TITLE_NOT_FLOW = {"итоги", "итог", "данные", "отчёт", "отчет", "сводка", "выгрузка", "таблица", "список"}
 
 
@@ -250,9 +252,17 @@ def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     unit = c.unit
     if mixed:
         unit = None
+    if not unit and not mixed and re.fullmatch(r"\s*(?:19|20)\d\d\s*", name):
+        # колонка-год («2024», «2025») без единицы: единица — из названия файла («Перевозки пассажиров, тыс. чел.»)
+        unit = split_unit(file_title(d.profile.file, d.profile.sheet))[1] or unit
     tu = _time_unit_of(name, unit)
     present = [v for v in vals if v is not None]
-    add, why = additivity(name, unit, c.type, file_title(d.profile.file, d.profile.sheet), sums=d.sums_check(j, vals),
+    # колонка-значение признака («Пн», «Январь», «2025», «Алгебра» в перекрёстной таблице) о величине не говорит —
+    # складывается ли она, решает название датасета («Заказы ресторана по часам»)
+    add_name = name
+    if _CALENDAR_NAME.match((split_unit(name)[0] or name).strip()) or season_name(split_unit(name)[0] or name):
+        add_name = file_title(d.profile.file, d.profile.sheet)
+    add, why = additivity(add_name, unit, c.type, file_title(d.profile.file, d.profile.sheet), sums=d.sums_check(j, vals),
                           duration=tu is not None, ints=bool(present) and all(float(v).is_integer() for v in present))
     level = not add
     # огромные деньги без множителя (капитализация в рублях: 7 345 000 000 000) — в млрд или трлн: «7,3 из 30,6 трлн ₽»

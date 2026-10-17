@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from verstka.data.parse import period_iso, period_parts
+from verstka.data.parse import iso_ord, period_iso, period_parts, season_name, season_ord
 from verstka.data.views import MAX_POINTS, MAX_SERIES, Measure, SeriesV, TimeView
 from verstka.data.words import count_gen, period_label, period_text
 
@@ -139,6 +140,22 @@ def _cell_time(cell: Any) -> Optional[tuple[str, int]]:
     return None
 
 
+def cell_period(cell: Any, ax: Any = None) -> Optional[tuple[str, int]]:
+    """Период ячейки оси; месяц или квартал без года («Январь», «1 квартал») — по началу оси из профиля (год из колонки,
+    файла или условный; ось через конец года — следующий год)."""
+    r = _cell_time(cell)
+    if r is not None or ax is None or not isinstance(cell, str):
+        return r
+    sn = season_name(cell)
+    if sn is None or sn[0] != ax.freq:
+        return None
+    st = iso_ord(ax.start)
+    if st is None:
+        return None
+    y0, k0 = (st[1] // 12, st[1] % 12 + 1) if ax.freq == "month" else (st[1] // 4, st[1] % 4 + 1)
+    return sn[0], season_ord(sn[0], sn[1], y0, k0)
+
+
 def _iso(freq: str, o: int) -> str:
     return period_iso("day" if freq == "irregular" else freq, o)
 
@@ -149,7 +166,7 @@ def time_view(d: "Data", m: Optional[Measure], max_points: int = MAX_POINTS) -> 
     if ax is None or d.time_col is None:
         return None
     tj = d.time_col
-    cells = [(i, _cell_time(d.cell(i, tj))) for i in d.rows_idx]
+    cells = [(i, cell_period(d.cell(i, tj), ax)) for i in d.rows_idx]
     cells = [(i, t) for i, t in cells if t is not None]
     if not cells:
         return None
@@ -325,14 +342,17 @@ def time_view(d: "Data", m: Optional[Measure], max_points: int = MAX_POINTS) -> 
                 measures = list(d.parallel)
             for mm in measures:
                 buckets: dict[int, list[float]] = {}
+                typos = set(d.typo_rows.get(mm.name, ()))  # опечатки (×100 и больше) — не точка ряда
                 for i, k in keyed:
                     v = mm.values[i]
-                    if v is not None:
+                    if v is not None and i not in typos:
                         buckets.setdefault(pos[k], []).append(v)
                 h = how if mm is m else mm.how
                 nm = d.series_names.get(mm.name, mm.name) if len(measures) > 1 else mm.name
                 series.append(SeriesV(nm, mm.unit_text, [agg(buckets.get(p, []), h) for p in range(len(order))]))
-    if len(series) > 1 and not dim_name:
+    if len(series) > 1 and not dim_name and all(re.fullmatch(r"(?:19|20)\d\d", sv.name.strip()) for sv in series):
+        series.sort(key=lambda sv: sv.name)  # ряды-годы («2024», «2025») — по порядку лет
+    elif len(series) > 1 and not dim_name:
         # главный ряд — первым (тот, что назван целью или первый по порядку)
         series.sort(key=lambda sv: sv.name != d.series_names.get(m.name, m.name))
     meas = m if m is not None else Measure(j=-1, name="Число строк", unit=None, type="number",

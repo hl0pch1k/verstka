@@ -20,7 +20,7 @@ __all__ = [
     "lower_first", "upper_first", "join_and", "fmt_exact", "each_unit", "is_participle", "verb_agree", "parts_words",
     "by_group", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
-    "period_text", "period_dative", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
+    "period_text", "period_dative", "no_year", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
     "stem", "stems_of", "same_stem", "stems_match", "file_title", "period_acc", "period_in", "fmt_count",
     "fmt_pct_any", "round_pct_any", "is_event_name", "count_gen", "count_dat", "is_period_name", "stem_in",
 ]
@@ -537,6 +537,8 @@ def is_counter(name: Optional[str]) -> bool:
         return True  # родительный мн. женского рода: «Доставок», «Поездок», «Перевозок»
     if len(first) >= 6 and first.endswith(("ений", "аний", "ций", "тий")):
         return True  # «Обращений», «Операций», «Посещений», «Событий»
+    if len(first) >= 5 and first.endswith(("чей", "щей", "жей", "шей")):
+        return True  # «Врачей», «Москвичей», «Товарищей» — родительный мн.
     return len(first) >= 5 and first.endswith(("ов", "ев", "ых", "их", "елей", "телей", "лей"))
 
 
@@ -791,12 +793,23 @@ _ISO_W = re.compile(r"^(\d{4})-W(\d{2})$")
 _ISO_Y = re.compile(r"^(\d{4})$")
 
 
+def _yr(y: str) -> str:
+    """« 2025» после периода; у месяцев и кварталов без года (условный год 0001…) — пусто."""
+    return "" if int(y) < 1000 else f" {y}"
+
+
+def no_year(iso: str) -> bool:
+    """Период без года (месяц или квартал «вообще»: климат, сезонность)."""
+    m = re.match(r"^(\d{4})", iso or "")
+    return bool(m) and int(m.group(1)) < 1000
+
+
 def period_label(iso: str, freq: str, with_year: bool = True) -> str:
-    """Подпись периода на оси: «янв 2025», «IV кв. 2024», «2025», «13 янв 2025», «нед. 3, 2025»."""
+    """Подпись периода на оси: «янв 2025», «IV кв. 2024», «2025», «13 янв 2025», «нед. 3, 2025»; без года — «янв»."""
     if m := _ISO_M.match(iso):
-        return f"{_MONTHS_SHORT[int(m.group(2)) - 1]} {m.group(1)}" if with_year else _MONTHS_SHORT[int(m.group(2)) - 1]
+        return (_MONTHS_SHORT[int(m.group(2)) - 1] + _yr(m.group(1))) if with_year else _MONTHS_SHORT[int(m.group(2)) - 1]
     if m := _ISO_Q.match(iso):
-        return f"{_ROMAN[int(m.group(2)) - 1]} кв. {m.group(1)}"
+        return f"{_ROMAN[int(m.group(2)) - 1]} кв.{_yr(m.group(1))}"
     if m := _ISO_D.match(iso):
         d = f"{int(m.group(3))} {_MONTHS_SHORT[int(m.group(2)) - 1]}"
         if m.group(4):
@@ -810,9 +823,9 @@ def period_label(iso: str, freq: str, with_year: bool = True) -> str:
 def period_text(iso: str) -> str:
     """Период в тексте: «сентябрь 2026», «III кв. 2026», «2026 год», «31 января 2025»."""
     if m := _ISO_M.match(iso):
-        return f"{_MONTHS_NOM[int(m.group(2)) - 1]} {m.group(1)}"
+        return f"{_MONTHS_NOM[int(m.group(2)) - 1]}{_yr(m.group(1))}"
     if m := _ISO_Q.match(iso):
-        return f"{_ROMAN[int(m.group(2)) - 1]} кв. {m.group(1)}"
+        return f"{_ROMAN[int(m.group(2)) - 1]} кв.{_yr(m.group(1))}"
     if m := _ISO_D.match(iso):
         day = f"{int(m.group(3))} {_MONTHS_GEN[int(m.group(2)) - 1]} {m.group(1)}"
         return f"{day}, {m.group(4)}:{m.group(5)}" if m.group(4) else day
@@ -823,12 +836,13 @@ def period_text(iso: str) -> str:
     return iso
 
 
-def period_dative(iso: str) -> Optional[str]:
-    """«к сентябрю», «к III кварталу» — без года (в заголовке каждое число — из фактов); None — для дней, недель, лет."""
+def period_dative(iso: str, with_year: bool = False) -> Optional[str]:
+    """«к сентябрю», «к III кварталу»; with_year — «к III кварталу 2024» (год — подпись периода, не число вывода);
+    None — для дней, недель, лет."""
     if m := _ISO_M.match(iso):
-        return "к " + _MONTHS_DAT[int(m.group(2)) - 1]
+        return "к " + _MONTHS_DAT[int(m.group(2)) - 1] + (_yr(m.group(1)) if with_year else "")
     if m := _ISO_Q.match(iso):
-        return f"к {_ROMAN[int(m.group(2)) - 1]} кварталу"
+        return f"к {_ROMAN[int(m.group(2)) - 1]} кварталу" + (_yr(m.group(1)) if with_year else "")
     return None
 
 
@@ -842,7 +856,7 @@ def times_word(r: float) -> str:
 def period_gen(iso: str) -> str:
     """Период в родительном: «января 2025», «IV кв. 2024», «2025 года», «10-й недели 2026»."""
     if m := _ISO_M.match(iso):
-        return f"{_MONTHS_GEN[int(m.group(2)) - 1]} {m.group(1)}"
+        return f"{_MONTHS_GEN[int(m.group(2)) - 1]}{_yr(m.group(1))}"
     if m := _ISO_Y.match(iso):
         return f"{m.group(1)} года"
     if m := _ISO_W.match(iso):
@@ -860,11 +874,11 @@ def period_acc(iso: str) -> str:
 def period_in(iso: str) -> str:
     """«в сентябре 2026», «в 2019 году», «в III кв. 2026», «на 10-й неделе 2026», «31 января 2025»."""
     if m := _ISO_M.match(iso):
-        return f"в {_MONTHS_PREP[int(m.group(2)) - 1]} {m.group(1)}"
+        return f"в {_MONTHS_PREP[int(m.group(2)) - 1]}{_yr(m.group(1))}"
     if m := _ISO_Y.match(iso):
         return f"в {m.group(1)} году"
     if m := _ISO_Q.match(iso):
-        return f"в {_ROMAN[int(m.group(2)) - 1]} кв. {m.group(1)}"
+        return f"в {_ROMAN[int(m.group(2)) - 1]} кв.{_yr(m.group(1))}"
     if m := _ISO_W.match(iso):
         return f"на {int(m.group(2))}-й неделе {m.group(1)}"
     return period_text(iso)
@@ -873,7 +887,7 @@ def period_in(iso: str) -> str:
 def period_dat_full(iso: str) -> str:
     """Период в дательном с годом: «сентябрю 2025», «III кв. 2025», «2025 году», «10-й неделе 2026»."""
     if m := _ISO_M.match(iso):
-        return f"{_MONTHS_DAT[int(m.group(2)) - 1]} {m.group(1)}"
+        return f"{_MONTHS_DAT[int(m.group(2)) - 1]}{_yr(m.group(1))}"
     if m := _ISO_Y.match(iso):
         return f"{m.group(1)} году"
     if m := _ISO_W.match(iso):
@@ -989,6 +1003,8 @@ def stems_match(subject: Sequence[str], text: str) -> bool:
 def file_title(file: Optional[str], sheet: Optional[str] = None) -> str:
     """Название датасета по файлу: «Выручка по месяцам.csv» → «Выручка по месяцам» (лист XLSX — через «·»)."""
     s = re.sub(r"\.[A-Za-z0-9]+$", "", file or "").strip()
+    # номер файла в начале («01 Заказы…», «3_Продажи», «12a Выручка») — не часть названия; год («2025 Выручка») — часть
+    s = re.sub(r"^(?:\d{1,3}[a-zа-я]?)[\s._\-–)]+(?=[A-ZА-ЯЁ])", "", s).strip() or s
     if sheet:
         s = f"{s} · {sheet}" if s else sheet
     return upper_first(s) if s else "Данные"

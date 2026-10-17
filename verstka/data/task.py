@@ -94,7 +94,9 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         s["comparison"] = 0.6 if d.label is None else 0.55  # список с подписью строк — скорее справочник
 
     # распределение
-    if m is not None and len(m.present) >= 30 and not has_time:
+    if d.freq_table is not None:
+        s["distribution"] = 0.88  # готовая частотная таблица («Оценка | Число учеников») — это и есть распределение
+    elif m is not None and len(m.present) >= 30 and not has_time:
         only = len([x for x in ms if not x.mixed]) == 1 and not d.dims and d.label is None
         s["distribution"] = 0.88 if only else 0.35
 
@@ -111,6 +113,11 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         else:
             # много безымянных наблюдений (коды, опыты): сильная связь — главное в данных
             s["relationship"] = round(0.4 + (0.5 if strong else 0.3) * r, 3)
+    elif d.xy is not None and has_time and d.xy.n >= 8 and not d.parallel_time_only:
+        # по дням две величины (посетители и выручка): ряд по времени главнее, но связь осуществима — цель её поднимет;
+        # сильная связь на 30+ парах — вторым вариантом и без цели
+        r = min(1.0, abs(d.xy.r))
+        s["relationship"] = 0.5 if d.xy.n >= 30 and r >= 0.7 else FEASIBLE
 
     # справочник
     if n > 30 and len(d.cols) >= 4:
@@ -255,7 +262,9 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
     used: Optional[Goal] = None
     notes: list[str] = []
     for g in goals:
-        if base.get(g.task, 0.0) >= FEASIBLE:
+        if g.unmet:
+            notes.append(f"Цель «{g.phrase}» здесь не подходит: {g.unmet}.")
+        elif base.get(g.task, 0.0) >= FEASIBLE:
             if used is None or base[g.task] > base[used.task]:
                 used = g
         else:
@@ -275,5 +284,12 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
             reasons.append(f"Цель «{used.phrase}» совпала с тем, что видно по данным.")
         else:
             reasons.append(f"Цель «{used.phrase}» ведёт к той же задаче.")
+    elif used is not None:
+        # цель не потерялась: её задача слабее того, что видно по данным, — сказано
+        reasons.append(f"Цель «{used.phrase}» ведёт к задаче «{TASK_TITLES[used.task].lower()}», но по данным сильнее "
+                       f"«{TASK_TITLES[task].lower()}».")
+    for g in goals:
+        if g is not used and not g.unmet and base.get(g.task, 0.0) >= FEASIBLE:
+            notes.append(f"Цель «{g.phrase}» здесь не главная: слайд один, и он отвечает на «{used.phrase}».")
     reasons.extend(notes)
     return TaskDecision(task=task, reasons=reasons, goal=goal_phrase, scores=scores)

@@ -34,6 +34,10 @@ def _ref_view(d: Data) -> RefView:
             budget -= 1
     if m is not None:
         cols.append(m.j)
+        # остальные числа строки не теряются («Оценка | Число учеников»): таблица держит каждую числовую колонку
+        for x in d.measures:
+            if x.j not in cols and len(cols) < 6:
+                cols.append(x.j)
     else:
         for j, c in enumerate(d.cols):
             if j not in cols and len(cols) < 5 and c.role != "id":

@@ -18,21 +18,21 @@ from typing import Optional, Sequence, Union
 import numpy as np
 from pydantic import BaseModel
 
-from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data, KpiItem
+from verstka.data.aggregate import MAX_SLIDES, RATE_GOAL, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import FactSet, facts_for
 from verstka.data.goals import Goal, goal_match, goals_of, stems_of
 from verstka.data.words import stem_in
 from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
 from verstka.data.profile import profile_table
-from verstka.data.task import FEASIBLE, decide_task, task_scores
+from verstka.data.task import FEASIBLE, _infeasible_reason, decide_task, task_scores
 from verstka.data.verify import numbers_ok, verify
 from verstka.data.viz import find_candidate, rank_options
 from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_signed, fmt_value, phrase, upper_first
 from verstka.schemas.data import NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption
 from verstka.schemas.outline import ChartSpec, InlineSeries, NumberCallout, TableData, XYSeries
 
-__all__ = ["plan_dataset", "plan_datasets", "assign_goals", "chart_spec_of", "slides_of", "slide_data_of", "data_of",
+__all__ = ["plan_dataset", "plan_datasets", "assign_goals", "goal_notes", "chart_spec_of", "slides_of", "slide_data_of", "data_of",
            "SlideBody", "NotBuilt"]
 
 
@@ -118,6 +118,9 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
         name = " ".join(words[:3]) if words else "Перечень"
         headline = f"{upper_first(name)}: {count_words(d.n, 'строка', 'строки', 'строк')}"
     headline = headline or plain
+    freq_note = _freq_note(decision.goal, d, task)
+    if freq_note:
+        decision = decision.model_copy(update={"reasons": list(decision.reasons) + [freq_note]})
     facts = list(fs.facts)
     # самопроверка: каждое число заголовка и подписи пересчитано по сырым строкам файла; не подтвердилось — тема
     # вместо вывода и подпись только из подтверждённого, причина — в «Почему так»
@@ -136,6 +139,25 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     )
     plan.slides = slides_of(plan, table, 0, d)
     return plan
+
+
+_FREQ_ASK = {"дням": "day", "неделям": "week", "месяцам": "month", "кварталам": "quarter", "годам": "year"}
+_FREQ_SHOWN = {"day": "по дням", "week": "по неделям", "month": "по месяцам", "quarter": "по кварталам", "year": "по годам",
+               "hour": "по часам", "irregular": "по датам"}
+
+
+def _freq_note(goal: Optional[str], d: Data, task: str) -> Optional[str]:
+    """Цель просит «по месяцам», а ряд показан по неделям: это сказано и почему (не молча)."""
+    m = re.search(r"по\s+(дням|неделям|месяцам|кварталам|годам)", goal or "")
+    tv = d.time if task == "dynamics" else None
+    if m is None or tv is None or tv.freq == _FREQ_ASK[m.group(1)]:
+        return None
+    why = ""
+    if tv.partial_txt:
+        why = f": крайние периоды неполные ({tv.partial_txt[0]})"
+    elif tv.freq == "week" and _FREQ_ASK[m.group(1)] == "month":
+        why = ": месяцы в ряду неполные или их мало — по неделям ряд честнее и подробнее"
+    return f"Цель просит «по {m.group(1)}», ряд показан {_FREQ_SHOWN.get(tv.freq, tv.freq)}{why}."
 
 
 def _check_labels(fs: FactSet, d: Data, title: str) -> list[str]:
@@ -169,14 +191,51 @@ def _file_match(g: Goal, d: Data) -> bool:
     return all(any(stem_in(s, w) for w in words) for s in g.subject)
 
 
+# слова величины цели, которые колонку не называют, а описывают: статистика («средней»), темп («изменению»), величина
+# на душу («обеспеченности», «уровню») — им отвечают колонка-изменение, колонка «на 1 000 жителей» или среднее
+_STAT_METRIC = re.compile(r"^(?:средн|медиан|общ|суммарн|итогов|совокупн)")
+_CHANGE_METRIC = re.compile(r"^(?:изменен|рост|прирост|динамик|снижен|паден|отклонен)")
+
+
+def _near(a: str, b: str) -> bool:
+    """Одно слово: основы совпадают, одна — часть сложного слова, или общее начало от 6 букв («преступн» и
+    «преступлен»)."""
+    if stem_in(a, b):
+        return True
+    k = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        k += 1
+    return k >= 6
+
+
 def _metric_ok(g: Goal, d: Data) -> bool:
-    """Величина цели («по прибыли») есть в колонках или в названии файла; цель без величины — да."""
+    """Величина цели («по прибыли») есть в колонках или в названии файла; цель без величины — да. Слова-описания
+    величины понимаются по смыслу: «по обеспеченности врачами», «по уровню преступности» — колонка на душу населения;
+    «по изменению продаж» — колонка изменения; «по средней оценке» — среднее оценок."""
     if not g.metric:
         return True
     words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(
         f"{c.name} {c.unit or ''}" for c in d.profile.columns))
+    metric = list(g.metric)
+    if any(RATE_GOAL.match(s_) for s_ in metric):
+        if d.rate_measure is None:
+            return False
+        metric = [s_ for s_ in metric if not RATE_GOAL.match(s_)]
+    if any(_CHANGE_METRIC.match(s_) for s_ in metric) and any(m.change for m in d.measures):
+        metric = [s_ for s_ in metric if not _CHANGE_METRIC.match(s_)]
+    metric = [s_ for s_ in metric if not _STAT_METRIC.match(s_)] or metric[:0]
     # части сложных слов тоже: «воды» — в «Водопотребление», «на человека» — в единице «л/сут на человека»
-    return all(any(stem_in(s_, w) for w in words) for s_ in g.metric)
+    return all(any(_near(s_, w) for w in words) for s_ in metric)
+
+
+def _unmet_reason(g: Goal, d: Data) -> str:
+    """Почему цель не выполнима на датасете — для «Почему так»."""
+    if not _metric_ok(g, d):
+        what = " ".join(g.metric) if g.metric else ""
+        return f"в данных нет величины, о которой она говорит{f' («{what}…»)' if what else ''}"
+    return _infeasible_reason(g.task, d)
 
 
 def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal]]:
@@ -221,8 +280,27 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
                 top = [k for s_, k in feas if abs(s_ - best_s) < 1e-9]
                 if len(top) == 1:
                     who = top
+        if not who:
+            # цель не выполнима ни на одном датасете — не теряется: достаётся самому похожему по предмету (или
+            # единственному) с причиной, почему не выполнена; совсем ни о чём — в контекст колоды (`goal_notes`)
+            near = sorted(((goal_match(g, d.profile, values[k]) + (1.0 if _file_match(g, d) else 0.0), -k)
+                           for k, d in enumerate(datas)), reverse=True)
+            if near and (near[0][0] > 0 or len(datas) == 1):
+                k = -near[0][1]
+                out[k].append(g.model_copy(update={"unmet": _unmet_reason(g, gd[k])}))
+            continue
         for k in who:
             out[k].append(g)
+    return out
+
+
+def goal_notes(brief_text: str, plans: Sequence[DatasetPlan]) -> list[str]:
+    """Цели текста, которые не достались ни одному датасету (ни о чём в файлах), — строки для контекста колоды."""
+    used = " ".join(" ".join(p.task.reasons) + " " + (p.task.goal or "") for p in plans)
+    out = []
+    for g in goals_of(brief_text):
+        if g.phrase not in used:
+            out.append(f"Цель «{g.phrase}» данными не подтверждается: ни в одном файле нет того, о чём она.")
     return out
 
 
@@ -373,6 +451,14 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
         vals = [(lab, v) for lab, v in zip(tv.labels, tv.main.values) if v is not None]
         return [NumberCallout(value=fmt_value(v, unit), label=lab) for lab, v in vals[-3:]]
     series = [InlineSeries(name=s.name, values=list(s.values), unit=s.unit) for s in tv.series]
+    typo = [m for m in d.measures if d.typo_rows.get(m.name)]
+    if typo and len(series) == 1:
+        # опечатка убрана из ряда — это сказано в легенде: «Продажи (без выброса: июль 2025)»
+        from verstka.data.facts import facts_for
+
+        note = facts_for("dynamics", d).ctx.get("typo_note")
+        if note:
+            series[0] = series[0].model_copy(update={"name": f"{series[0].name} ({note})"})
     kind = opt.kind if opt.kind in ("line", "column", "area", "grouped_column", "stacked_column", "bar") else "line"
     last = max((i for i, v in enumerate(tv.main.values) if v is not None), default=None)
     if tv.split:
@@ -398,8 +484,13 @@ def _series_title(d: Data) -> str:
     return upper_first(" ".join(words)) if words else "Значение"
 
 
-def _argmax(values: Sequence[Optional[float]]) -> Optional[int]:
-    ks = [k for k, v in enumerate(values) if v is not None]
+def _argmax(values: Sequence[Optional[float]], labels: Optional[Sequence[str]] = None) -> Optional[int]:
+    """Выделенный столбец — лидер по значению; «Прочее» файла и «Остальные N» — никогда (как и в фактах)."""
+    from verstka.data.aggregate import is_other_label
+
+    ks = [k for k, v in enumerate(values) if v is not None
+          and not (labels is not None and k < len(labels) and (is_other_label(labels[k])
+                                                               or str(labels[k]).startswith("Остальные ")))]
     return max(ks, key=lambda k: (values[k], -k)) if ks else None
 
 
@@ -413,7 +504,7 @@ def _cats_spec(cv: CatView, kind: str, src: str, values: Optional[list[float]] =
         series.append(InlineSeries(name=nm, values=list(vs), unit=unit))
     real = list(vals[:-1]) + [None] if cv.others else list(vals)
     return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit,
-                     highlight_index=_argmax(real) if len(series) == 1 else None,
+                     highlight_index=_argmax(real, cv.labels) if len(series) == 1 else None,
                      x_title=cv.dim, y_title=name, source=src)
 
 
@@ -459,8 +550,8 @@ def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:
     series = []
     for x in g:
         vals = cv.values if x is m else cv.extra.get(x.name, [])
-        series.append(InlineSeries(name=names.get(x.name, x.name), values=[0.0 if v is None else v for v in vals],
-                                   unit=unit))
+        # пропуск — пустое место, а не ноль (месяцы, которых ещё не было)
+        series.append(InlineSeries(name=names.get(x.name, x.name), values=list(vals), unit=unit))
     # подпись оси значений — группа частей из шапки («Форма обучения»), единица дописывается движком
     return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit, x_title=cv.dim,
                      y_title=d.group_name or unit or "Значение", source=src)
@@ -537,7 +628,7 @@ def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan
         labels = [cv.labels[k] for k in top] + [rest_label]
         shares = [shares[k] for k in top] + [sum(shares[k] for k in rest)]
     vals = [round(x, 1) for x in shares]
-    lead = _argmax(vals[:-1] + [None]) if labels[-1].startswith("Остальные ") else _argmax(vals)
+    lead = _argmax(vals, labels)
     if opt.kind == "table":
         rows = [[a, fmt_num(b, 1)] for a, b in zip(labels, vals)]
         return _pages_ok(rows, part) or TableData(columns=[cv.dim, "Доля, %"], rows=_part(rows, part))
@@ -570,6 +661,8 @@ def _spec_distribution(d: Data, opt: VizOption, src: str, part: int, plan: Datas
     unit = m.unit_text
     ent = phrase(dv.entity) if dv.entity else None
     count_name = f"Число {ent.low.gen_pl}" if ent is not None and ent.sure else "Число значений"
+    if d.freq_table is not None:
+        count_name = d.freq_table[1].name  # частотная таблица: счёт — своя колонка («Число учеников»)
     if opt.kind == "kpi_cards":
         out = [NumberCallout(value=fmt_value(dv.median, unit), label="Медиана"),
                NumberCallout(value=fmt_value(dv.percentile(80), unit), label="80-й перцентиль"),

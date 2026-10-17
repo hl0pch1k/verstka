@@ -184,7 +184,9 @@ def test_goal_metric_must_be_in_the_dataset():
     regions = _t("Выручка по регионам.csv", [["Регион", "Выручка, млн ₽"], ["Центр", 500], ["Юг", 300], ["Урал", 200]])
     datas = [Data(x, profile_table(x)) for x in (checks, regions)]
     for brief in ("Сравни классы по среднему баллу.", "Сравни регионы по прибыли."):
-        assert assign_goals(goals_of(brief), datas) == [[], []], brief
+        # раунд 8 (M1): цель не теряется — достаётся похожему датасету как невыполнимая, с причиной; задачу она не решает
+        got = assign_goals(goals_of(brief), datas)
+        assert sum(len(x) for x in got) == 1 and all(g.unmet for x in got for g in x), (brief, got)
 
 
 def test_goal_parsing_neuter_split_and_plan():
@@ -379,7 +381,7 @@ def test_minor_wording():
     t = _t("Выручка.csv", [["Месяц", "Выручка, млн ₽"]] + [[f"{2025 + (m - 1) // 12}-{(m - 1) % 12 + 1:02d}", 100 + 3 * m]
                                                            for m in range(1, 22)])
     p = _plan(t)
-    assert p.headline.endswith("к сентябрю") and _sp(p.caption).startswith("Сентябрь 2026 к сентябрю 2025: 163 млн ₽ против")
+    assert p.headline.endswith("к сентябрю 2025") and _sp(p.caption).startswith("Сентябрь 2026 к сентябрю 2025: 163 млн ₽ против")
     # ответы по шкале: «в среднем по N утверждениям»
     t = _t("Опрос.csv", [["Утверждение", "Не согласен", "Скорее нет", "Скорее да", "Согласен"],
                          ["Цели понятны", 10, 20, 40, 30], ["Есть рост", 20, 30, 30, 20], ["Хватает инструментов", 5, 15, 50, 30]])

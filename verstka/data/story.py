@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
-from verstka.data.plan import NotBuilt, chart_spec_of, plan_datasets, slide_data_of
+from verstka.data.plan import NotBuilt, chart_spec_of, goal_notes, plan_datasets, slide_data_of
 from verstka.data.words import count_words, file_title, fmt_signed, fmt_value, stems_of, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
@@ -641,7 +641,8 @@ def build_data_story(
     title, subtitle, title_sentence = _title(brief, plans)
     entries.append(_Entry(OutlineSlide(id="title", kind=PatternKind.title, headline=title, subtitle=subtitle), "title", keep=100))
 
-    ctx_lines = _context_lines(brief, title_sentence)
+    # цель текста, о которой нет ни одного файла, не теряется: строка в контексте колоды
+    ctx_lines = _context_lines(brief, title_sentence) + goal_notes(brief_text, plans)
     for j in range(0, min(len(ctx_lines), CONTEXT_LINES * MAX_CONTEXT_SLIDES), CONTEXT_LINES):
         chunk = ctx_lines[j : j + CONTEXT_LINES]
         head = "Контекст" if j == 0 else "Контекст (продолжение)"

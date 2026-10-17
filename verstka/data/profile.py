@@ -26,7 +26,10 @@ import numpy as np
 from verstka.data.parse import (
     BOOL,
     MISSING,
+    NO_YEAR,
     Quantity,
+    season_name,
+    season_ord,
     dayfirst_hint,
     decimal_hint,
     is_total_label,
@@ -198,6 +201,7 @@ class _Col:
     outlier_rows: list[int] = field(default_factory=list)
     hi_fence: float = math.inf  # верхняя граница Тьюки (у колонки без выбросов — бесконечность)
     outliers: list[Outlier] = field(default_factory=list)
+    season: bool = False  # месяцы или кварталы без года («Январь», «1 квартал»)
 
 
 def _key_kind(v: Any) -> tuple[str, Any]:
@@ -245,7 +249,35 @@ def _str_of(k: Any) -> str:
     return str(k)
 
 
-def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndarray, first_col: bool) -> _Col:
+def _try_season(str_keys: list, kinds: dict, cnt: Counter, str_rows: int, name: str, cells: list,
+                year_hint: Optional[int]) -> Optional[tuple[str, dict]]:
+    """Месяцы или кварталы без года («Январь … Декабрь», «1 квартал … 4 квартал») — ось времени в календарном порядке.
+    Год — из имени колонки («Месяц 2025»), иначе из названия файла или листа, иначе условный (без года в тексте).
+    Ось, которая начинается не с января («сентябрь … август»), переходит в следующий год."""
+    if len(str_keys) > 60 or any(season_name(kinds[k][1]) is None for k in str_keys[:20]):
+        return None  # месяцев и кварталов не больше 24 разных — длинные колонки сразу мимо
+    parsed = {k: season_name(kinds[k][1]) for k in str_keys}
+    parsed = {k: v for k, v in parsed.items() if v is not None}
+    if not parsed or not _enough(sum(cnt[k] for k in parsed), str_rows):
+        return None
+    grans = {g for g, _ in parsed.values()}
+    if len(grans) != 1 or len({v for _, v in parsed.values()}) < 3:
+        return None
+    gran = grans.pop()
+    ym = re.search(r"(?<!\d)((?:19|20)\d\d)(?!\d)", name)
+    year = int(ym.group(1)) if ym else (year_hint or NO_YEAR)
+    seen: list[int] = []
+    for v in cells:
+        if v in parsed and parsed[v][1] not in seen:
+            seen.append(parsed[v][1])
+    # один переход через конец года («сентябрь … декабрь, январь … август») — ось с первого месяца; иначе — с меньшего
+    descents = sum(1 for a, b in zip(seen, seen[1:]) if b < a)
+    start = seen[0] if descents == 1 and seen[-1] < seen[0] else min(seen)
+    return gran, {k: season_ord(gran, kk, year, start) for k, (_, kk) in parsed.items()}
+
+
+def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndarray, first_col: bool,
+             year_hint: Optional[int] = None, seasons: bool = True) -> _Col:
     n = len(cells)
     c = _Col(j=j, name=name, unit=unit, cells=cells)
     n_total = int(total.sum())
@@ -276,6 +308,9 @@ def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndar
     # время: строки-даты и периоды
     if str_keys and rows["num"] == 0:
         tmap = _try_time(str_keys, kinds, cnt, rows["str"], lname, cells, first_col)
+        if tmap is None and seasons:
+            tmap = _try_season(str_keys, kinds, cnt, rows["str"], name, cells, year_hint)
+            c.season = tmap is not None
         if tmap is not None:
             gran, lookup = tmap
             c.kind, c.gran = "time", gran
@@ -616,7 +651,7 @@ def _find_outliers(c: _Col) -> None:
             mask |= vals <= cut_lo
     rows = np.flatnonzero(mask)
     c.outlier_rows = [int(r) for r in rows]
-    apart = "и отдельно от остальных значений"
+    apart = "и отделено от остальных значений промежутком больше 1,5 межквартильного размаха"
     hi_txt = f"выше границы {_fmt(hi_fence)} (третий квартиль{basis} + 1,5 межквартильного размаха) {apart}"
     lo_txt = f"ниже границы {_fmt(lo_fence)} (первый квартиль{basis} − 1,5 межквартильного размаха) {apart}"
     c.outliers = [
@@ -1018,7 +1053,14 @@ def profile_table(t: Table) -> DatasetProfile:
         total[:] = False
     total_rows = np.flatnonzero(total)
 
-    cols = [_analyze(j, names[j], t.unit_of(j), columns_cells[j], total, j == 0) for j in range(ncols)]
+    # год из названия файла или листа («Продажи 2025.csv») — для месяцев без года в строках
+    years = set(re.findall(r"(?<!\d)((?:19|20)\d\d)(?!\d)", f"{t.file or ''} {t.sheet or ''}"))
+    year_hint = int(years.pop()) if len(years) == 1 else None
+    cols = [_analyze(j, names[j], t.unit_of(j), columns_cells[j], total, j == 0, year_hint) for j in range(ncols)]
+    if any(c.season for c in cols) and any(c.kind == "time" and not c.season for c in cols):
+        # «1 квартал» рядом с колонкой «Год» (развёрнутая таблица кварталы × годы): ось — годы, кварталы — категории
+        cols = [_analyze(j, names[j], t.unit_of(j), columns_cells[j], total, j == 0, year_hint, seasons=False)
+                if cols[j].season else cols[j] for j in range(ncols)]
     _plan_fact_money(cols)
     _complementary_blanks(cols)
 

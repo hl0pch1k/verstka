@@ -22,6 +22,9 @@ from typing import Any, Optional, Union
 
 __all__ = [
     "word_unit_column",
+    "NO_YEAR",
+    "season_name",
+    "season_ord",
     "BOOL",
     "COUNT_UNITS",
     "CURRENCIES",
@@ -229,11 +232,13 @@ _IN_WORDS = {"процентах": "%", "рублях": "₽", "долларах
 
 _COMPOUND_UNIT = re.compile(r"^(?:[%‰]|[^\W\d_]{1,6}\.?(?:\s?[·*]\s?[^\W\d_]{1,4}\.?)?)\s*/\s*\d{0,4}\s*[^\W\d_]{1,8}\.?"
                             r"(?:\s+(?:на|в|за)\s+[^\W\d_]{1,12})?$")
-_PCT_YOY = re.compile(r"^%\s*(?:г/г|г\.\s?г\.|y/y|yoy|к\s+прошлому\s+году|к\s+пред\w*\s+году)$", re.IGNORECASE)
+_PCT_YOY = re.compile(r"^%\s*(?:г/г|г\.\s?г\.|y/y|yoy|к\s+прошлому\s+году|к\s+пред\w*\s+году|годовых|в\s+год|"
+                      r"годовые|p\.a\.|per\s+annum|в\s+месяц|в\s+день)$", re.IGNORECASE)
 
 
 def compound_unit(text: str) -> Optional[str]:
-    """Составная единица после запятой: «л/100 км», «мг/л», «л/сут на человека» — как написана; «% г/г» → «%»."""
+    """Составная единица после запятой: «л/100 км», «мг/л», «л/сут на человека» — как написана; «% г/г», «% годовых»
+    → «%»."""
     t = " ".join(str(text or "").split())
     if _PCT_YOY.match(t):
         return "%"
@@ -771,6 +776,35 @@ def period_str(s: str, dayfirst: bool = True, years: bool = True) -> Optional[st
     return None
 
 
+# ── месяцы и кварталы без года («Январь», «1 квартал», «Q3») ──────────────────────────────────────────────────────────
+# год неизвестен (климат по месяцам, сезонность): условные годы 1, 2, … — в тексте года нет («январь», «III кв.»)
+NO_YEAR = 1
+_P_Q_ONLY = re.compile(r"(?:" + _QWORD + r"\s*([1-4])|(iv|i{1,3}|[1-4])" + _ORD + r"\s*" + _QWORD + r")")
+
+
+def season_name(s: Any) -> Optional[tuple[str, int]]:
+    """Месяц или квартал без года: «Январь», «янв.», «January» → («month», 1); «1 квартал», «III кв.», «Q3» →
+    («quarter», 3). Иначе None (в том числе «январь 2025» — это уже период)."""
+    if not isinstance(s, str):
+        return None
+    t = " ".join(s.translate(_SPACE_TRANS).lower().replace("ё", "е").split()).strip(" .,")
+    if not t or len(t) > 20:
+        return None
+    if t in _MONTH_FORMS:
+        return "month", _MONTH_FORMS[t]
+    m = _P_Q_ONLY.fullmatch(t)
+    if m:
+        return "quarter", _ROMAN[m.group(1) or m.group(2)]
+    return None
+
+
+def season_ord(gran: str, k: int, start_year: int, start_k: int) -> int:
+    """Номер периода месяца (квартала) без года на оси, которая начинается с (start_year, start_k): месяцы раньше
+    начального — уже следующий год (учебный год «сентябрь … август»)."""
+    y = start_year if k >= start_k else start_year + 1
+    return y * 12 + k - 1 if gran == "month" else y * 4 + k - 1
+
+
 def iso_of_datetime(v: Union[dt.datetime, dt.date, dt.time]) -> str:
     if isinstance(v, dt.datetime):
         return _iso_date(v.year, v.month, v.day, v.hour, v.minute, v.second) or v.date().isoformat()
@@ -807,7 +841,7 @@ def iso_ord(iso: str, with_time: bool = False) -> Optional[tuple[str, int]]:
     if not m:
         return None
     y = int(m.group(1))
-    if not 1900 <= y <= 2100:
+    if not (1900 <= y <= 2100 or NO_YEAR <= y < NO_YEAR + 10):  # условный год месяцев без года
         return None
     if m.group(6):
         return "quarter", y * 4 + int(m.group(6)) - 1

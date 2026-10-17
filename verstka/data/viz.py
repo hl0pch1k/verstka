@@ -337,9 +337,15 @@ def _distribution(d: Data) -> list[_Cand]:
     n = dv.n
     vals = count_words(n, "значение", "значения", "значений")
     out: list[_Cand] = []
-    flat = dv.bins.n < 5  # почти одно значение: интервалов нет
+    flat = dv.bins.n < 5 and d.freq_table is None  # почти одно значение: интервалов нет
     h = _Cand("histogram", 0.9, title="Гистограмма", aggregation=dv.note)
-    if n < 30:
+    if d.freq_table is not None:
+        # готовая частотная таблица: столбец на каждое значение — сколько раз оно встретилось
+        h.title = "Столбцы по значениям"
+        h.reasons.append(f"Готовая частотная таблица: {count_words(dv.bins.n, 'значение', 'значения', 'значений')} и "
+                         f"сколько раз каждое встретилось — видно, какое чаще.")
+        h.why_not = "Видна форма, а средняя и медиана — в подписи."
+    elif n < 30:
         h.score, h.feasible = 0.1, False
         h.why_not = f"{upper_first(vals)} — для гистограммы мало."
     elif flat:
@@ -349,7 +355,8 @@ def _distribution(d: Data) -> list[_Cand]:
     else:
         h.reasons.append(f"Одна числовая колонка, {vals} — видно, где большинство и насколько длинный хвост.")
         if dv.outliers:
-            h.reasons.append(f"{upper_first(count_words(len(dv.outliers), 'выброс', 'выброса', 'выбросов'))} — отдельно.")
+            h.reasons.append(f"{upper_first(count_words(len(dv.outliers), 'выброс', 'выброса', 'выбросов'))} — в крайнем "
+                             f"столбце, вместе с остальными значениями за его границей.")
         h.why_not = "Видна форма, но не точные числа."
     out.append(h)
     k = _Cand("kpi_cards", 0.6 if flat else 0.45, title="Карточки ключевых показателей",
