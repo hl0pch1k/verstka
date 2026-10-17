@@ -965,15 +965,16 @@ def test_pdf_steps_come_as_the_reader_reads_and_fold_on_the_client(api, monkeypa
     folded = _client_fold(events, "pdf", tmp_path)
     assert folded["trail"] == sorted(folded["trail"]) and folded["run"]["done"] == 6
     assert all(d <= said for d, said in zip(folded["trail"], _steps_said(events)) if said < 6)
-    rows = [r["a"] + r["b"] for r in folded["rows"]]
-    assert rows[0] == "открыт файл: 12 страниц" and rows[1] == "палитра: 6 цветов" and rows[-1] == "сверка с шаблоном VK Tech: шаблон не выбран"
-    assert rows[4] == f"правила: {len(job.result['brand']['rules'])}"
-    assert [t["meta"] for t in folded["tiles"]] == ["2 шрифта", "6 цветов", "4"]
+    facts = [r["b"] for r in folded["rows"]]  # the step's result after the client's label (the labels are the client's own)
+    assert facts[:2] == ["12 страниц", "6 цветов"] and facts[4] == str(len(job.result["brand"]["rules"])) and facts[-1] == "шаблон не выбран"
+    assert all(r["state"] == "done" for r in folded["rows"])
+    tiles = [t["meta"] for t in folded["tiles"]]
+    assert all(t["on"] for t in folded["tiles"]) and tiles[0] == "2 шрифта" and tiles[1] == "6 цветов" and tiles[2].startswith("4")
     roles = {c["hex"]: c["role"] for c in folded["run"]["brand"]["colors"]}
     assert roles["#2787F5"] == "chart"  # the refined palette reached the tiles
 
 
-@pytest.mark.parametrize("name,src,first", [("tokens.json", "json", "прочитаны токены: цвета, шрифты, отступы"), ("archive", "dir", "открыт архив: логотипы и примеры слайдов")])
+@pytest.mark.parametrize("name,src,first", [("tokens.json", "json", "цвета, шрифты, отступы"), ("archive", "dir", "логотипы и примеры слайдов")])
 def test_fast_sources_say_their_steps_at_the_end_and_fold_on_the_client(api, tmp_path, name, src, first):
     c, _, _ = api
     if name == "archive":
@@ -990,7 +991,7 @@ def test_fast_sources_say_their_steps_at_the_end_and_fold_on_the_client(api, tmp
         assert job.events[[e.get("step") for e in job.events].index("open")]["message"] == "Открыт архив: 2 файла"
     folded = _client_fold(job.events, src, tmp_path)
     assert folded["run"]["done"] == 6 and folded["trail"] == sorted(folded["trail"])
-    assert folded["rows"][0]["a"] + folded["rows"][0]["b"] == first
+    assert folded["rows"][0]["b"] == first  # the reader's result of «open» (the label is the client's own)
 
 
 def test_steps_a_reader_did_not_say_are_said_after_it(api, monkeypatch):

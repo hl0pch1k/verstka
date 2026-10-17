@@ -53,6 +53,22 @@ _PINNED = ("play", "vk sans", "montserrat", "arial", "helvetica", "open sans", "
 _LO_FONT_DIRS = (Path("/Applications/LibreOffice.app/Contents/Resources/fonts/truetype"), Path("/usr/lib/libreoffice/share/fonts/truetype"), Path("/opt/libreoffice/share/fonts/truetype"))
 
 
+def _lo_font_dirs() -> list[Path]:
+    """The fonts LibreOffice ships: the known places, the official Linux builds (/opt/libreofficeX.Y/share/fonts) and
+    the folder beside the soffice that renders the decks (find_soffice: $VERSTKA_SOFFICE, PATH…)."""
+    dirs = list(_LO_FONT_DIRS) + sorted(Path("/opt").glob("libreoffice*/share/fonts/truetype"), reverse=True)
+    try:
+        from verstka.ingest.render import find_soffice
+
+        exe = find_soffice()
+        if exe:
+            program = Path(exe).resolve().parent  # …/program/soffice (Linux) or …/Contents/MacOS/soffice
+            dirs += [program.parent / "share" / "fonts" / "truetype", program.parent / "Resources" / "fonts" / "truetype"]
+    except Exception:  # noqa: BLE001 - the known places stand
+        pass
+    return list(dict.fromkeys(dirs))
+
+
 def _norm(name: str) -> str:
     return re.sub(r"[\s_\-]+", "", (name or "").lower())
 
@@ -72,7 +88,7 @@ def is_pinned(family: Optional[str]) -> bool:
 def _bundled_index() -> dict[tuple[str, bool], str]:
     """(normalised family, bold) → file of the fonts LibreOffice ships (Noto Sans, Liberation, DejaVu, Carlito…)."""
     out: dict[tuple[str, bool], str] = {}
-    for d in _LO_FONT_DIRS:
+    for d in _lo_font_dirs():
         if not d.is_dir():
             continue
         for f in sorted(d.iterdir()):

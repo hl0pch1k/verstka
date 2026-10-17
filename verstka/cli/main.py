@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from verstka.providers.registry import ProviderRegistry
+from verstka.ru import ru_count
 from verstka.skills_registry.registry import SkillsRegistry
 
 app = typer.Typer(help="Verstka — reads any PPTX template as a set of rules and generates decks in its style.", no_args_is_help=True)
@@ -64,27 +65,29 @@ def analyze(
     with console.status("Analyzing template…") as status:
         manifest = analyze_template(template, workspace_root=workspace, providers=providers, skills=skills, use_llm=not no_llm, use_vlm=not no_vlm, tag_assets=tag_assets, render=not no_render, force=force, max_workers=workers, progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"))
     t = manifest.tokens
-    console.print(f"[bold]{manifest.source_file}[/bold] → template_id [cyan]{manifest.template_id}[/cyan]")
-    console.print(f"{manifest.n_slides} slides · {len(manifest.patterns)} patterns · {len(manifest.assets)} assets · {len(t.chrome)} chrome elements · fonts: {', '.join(f.family for f in t.typography.families[:3])}")
-    console.print("Scale: " + ", ".join(f"{s.role} {s.size_pt:g}" for s in t.typography.scale))
-    tbl = Table(title="Colours")
-    tbl.add_column("hex")
-    tbl.add_column("roles")
-    tbl.add_column("weight", justify="right")
+    console.print(f"[bold]{manifest.source_file}[/bold] → шаблон [cyan]{manifest.template_id}[/cyan]")
+    console.print(f"{ru_count(manifest.n_slides, 'слайд', 'слайда', 'слайдов')} · {ru_count(len(manifest.patterns), 'макет', 'макета', 'макетов')} · "
+                  f"{ru_count(len(manifest.assets), 'картинка', 'картинки', 'картинок')} · {ru_count(len(t.chrome), 'постоянный элемент', 'постоянных элемента', 'постоянных элементов')} · "
+                  f"шрифты: {', '.join(f.family for f in t.typography.families[:3])}")
+    console.print("Кегли: " + ", ".join(f"{s.role} {s.size_pt:g}" for s in t.typography.scale))
+    tbl = Table(title="Цвета")
+    tbl.add_column("HEX")
+    tbl.add_column("роли")
+    tbl.add_column("вес", justify="right")
     for c in t.colors[:12]:
         tbl.add_row(f"[#{c.hex}]■[/] #{c.hex}", ", ".join(c.roles), f"{c.weight:g}")
     console.print(tbl)
     kinds = Counter(p.kind.value for p in manifest.patterns)
-    tbl2 = Table(title="Patterns by kind")
-    tbl2.add_column("kind")
-    tbl2.add_column("count", justify="right")
+    tbl2 = Table(title="Макеты по типам")
+    tbl2.add_column("тип")
+    tbl2.add_column("сколько", justify="right")
     for k, v in kinds.most_common():
         tbl2.add_row(k, str(v))
     console.print(tbl2)
     if manifest.warnings:
-        console.print(f"[yellow]{len(manifest.warnings)} warnings[/yellow] (see manifest.json)")
+        console.print(f"[yellow]{ru_count(len(manifest.warnings), 'предупреждение', 'предупреждения', 'предупреждений')}[/yellow] (см. manifest.json)")
     ws_dir = Path(workspace or "workspace") / "templates" / manifest.template_id
-    console.print(f"Manifest: {ws_dir / 'manifest.json'}\nGallery:  {ws_dir / 'gallery.html'}")
+    console.print(f"Разбор:  {ws_dir / 'manifest.json'}\nГалерея: {ws_dir / 'gallery.html'}")
 
 
 def _load_run_config(path: Optional[Path]) -> dict:
@@ -141,9 +144,9 @@ def generate(
     brand = brand or cfg.get("brand")
     brand_priority = cfg.get("brand_priority", brand_priority) if brand_priority == "brand" else brand_priority
     if brand_priority not in ("brand", "template"):
-        raise typer.BadParameter("--brand-priority: brand | template")
+        raise typer.BadParameter("--brand-priority: «brand» (важнее брендбук) или «template» (важнее шаблон)")
     if template is None or (brief is None and outline is None and not data):
-        raise typer.BadParameter("--template and (--brief, --outline or --data) are required (or a --config run.yaml)")
+        raise typer.BadParameter("нужны --template и что-то из --brief, --outline, --data (или --config run.yaml)")
     strategies = None if strategy in ("all", None) else [s.strip() for s in str(strategy).split(",")]
     exports = ["pdf", "html"] if export == "all" else [e.strip() for e in export.split(",") if e.strip() and e.strip() != "pptx"]
     use_models = not no_llm
@@ -168,11 +171,18 @@ def generate(
             from verstka.data.story import build_data_story
 
             tables = _read_data(data)
-            story = build_data_story(
-                brief_obj, tables, use_llm=use_models, skills=skills if use_models else None,
-                providers=providers if use_models else None, slide_count=int(slides) if slides else None,
-                progress=lambda stage, frac=None, **_: status.update(f"[data] {stage}"),
-            )
+            try:
+                story = build_data_story(
+                    brief_obj, tables, use_llm=use_models, skills=skills if use_models else None,
+                    providers=providers if use_models else None, slide_count=int(slides) if slides else None,
+                    progress=lambda stage, frac=None, **_: status.update(f"[данные] {stage}"),
+                )
+            except Exception as e:  # noqa: BLE001 - the data story's failure never aborts the generation (F9)
+                console.print(f"[yellow]История данных с моделью не построилась ({str(e)[:160]}) — по правилам[/yellow]")
+                story = build_data_story(
+                    brief_obj, tables, use_llm=False, slide_count=int(slides) if slides else None,
+                    progress=lambda stage, frac=None, **_: status.update(f"[данные] {stage}"),
+                )
             outline_obj, brief_obj = story.outline, None  # the data deck's figures are checked against the data
             for line in story.log:
                 console.print(f"  {line}")
@@ -211,27 +221,31 @@ def generate(
         from verstka.data.story import stamp_variants
 
         stamp_variants(res, story, out)
-        made = f"the model ({story.model}) wrote the connecting text" if story.model_used else "deterministic wording"
-        refused = f", {len(story.rejected)} rephrasings refused by the facts check" if story.rejected else ""
-        console.print(f"Data story: {len(story.plans)} datasets, {len(story.outline.slides)} slides, {made}{refused}")
-    console.print(f"[bold]{res.manifest.source_file}[/bold] · template {res.template_id} · {res.seconds}s total")
+        made = f"связку написала модель ({story.model})" if story.model_used else "формулировки — по правилам, без модели"
+        refused = f", проверка фактов отклонила {ru_count(len(story.rejected), 'переформулировку', 'переформулировки', 'переформулировок')}" if story.rejected else ""
+        console.print(f"История из данных: {ru_count(len(story.plans), 'набор', 'набора', 'наборов')}, "
+                      f"{ru_count(len(story.outline.slides), 'слайд', 'слайда', 'слайдов')}; {made}{refused}")
+    console.print(f"[bold]{res.manifest.source_file}[/bold] · шаблон {res.template_id} · всего {res.seconds} с")
     for v in res.variants:
-        tbl = Table(title=f"{v.strategy}: {len(v.outline.slides)} slides in {v.seconds}s" + (f" · audit score {v.audit.summary.score} (errors {v.audit.summary.errors}, warnings {v.audit.summary.warnings}, fixes {len(v.audit.applied_fixes)})" if v.audit else ""))
-        tbl.add_column("#", justify="right")
-        tbl.add_column("kind")
-        tbl.add_column("headline")
-        tbl.add_column("mode")
-        tbl.add_column("pattern / composition")
-        tbl.add_column("issues", justify="right")
+        a = v.audit.summary if v.audit else None
+        tbl = Table(title=f"{v.strategy}: {ru_count(len(v.outline.slides), 'слайд', 'слайда', 'слайдов')} за {v.seconds} с"
+                    + (f" · проверка: {a.score} из 100 (ошибок {a.errors}, предупреждений {a.warnings}, исправлений {len(v.audit.applied_fixes)})" if a else ""))
+        tbl.add_column("№", justify="right")
+        tbl.add_column("тип")
+        tbl.add_column("заголовок")
+        tbl.add_column("режим")
+        tbl.add_column("макет / композиция")
+        tbl.add_column("замечаний", justify="right")
         per_slide = v.audit.per_slide if v.audit else {}
         for s in v.render.slides:
             osl = next((o for o in v.outline.slides if o.id == s.outline_id), None)
             tbl.add_row(str(s.index), osl.kind.value if osl else "", (osl.headline[:48] if osl else ""), s.mode, s.pattern_id or s.composition or "", str(len(per_slide.get(s.index, []))))
         console.print(tbl)
         console.print("  " + " · ".join(f"{k}: {p}" for k, p in v.exports.items()))
-    console.print(f"Output: {out.resolve()}")
+    console.print(f"Готово: {out.resolve()}")
 
 
+_SEVERITY_RU = {"error": "ошибка", "warn": "предупреждение", "info": "заметка"}
 _DATA_EXT = {".csv", ".tsv", ".xlsx", ".json", ".txt", ".md"}
 _NOT_DATA = {"scenario.md", "readme.md"}
 
@@ -282,7 +296,7 @@ def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path
         from verstka.pipeline.generate import _recording
 
         providers, _ = _recording(providers, stats)
-    status.update("[brand] reading the brandbook")
+    status.update("[брендбук] читаю брендбук")
     key = hashlib.sha256(str(Path(brand).resolve() if Path(brand).exists() else brand).encode("utf-8")).hexdigest()[:16]
     assets = root / "brandbooks" / f"cli-{key}"
     assets.mkdir(parents=True, exist_ok=True)
@@ -291,13 +305,14 @@ def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path
     # (with models on, the template met here for the first time is analysed with them: the cache a later model run
     # reuses is not the poorer no-model one)
     m = analyze_template(template, workspace_root=root, providers=providers if (use_llm or use_vlm) else None, skills=skills if (use_llm or use_vlm) else None,
-                         use_llm=use_llm, use_vlm=use_vlm, progress=lambda s, f: status.update(f"[brand] analyse: {s}"))
-    tid = branded_template(m.template_id, spec, priority, workspace_root=root, brand_dir=assets, progress=lambda s, f: status.update(f"[brand] {s}"))
-    console.print(f"Brandbook «{spec.name or Path(brand).name}» → branded copy {tid} (priority: {priority})")
+                         use_llm=use_llm, use_vlm=use_vlm, progress=lambda s, f: status.update(f"[брендбук] разбор шаблона: {s}"))
+    tid = branded_template(m.template_id, spec, priority, workspace_root=root, brand_dir=assets, progress=lambda s, f: status.update(f"[брендбук] {s}"))
+    important = "брендбук" if priority == "brand" else "шаблон"
+    console.print(f"Брендбук «{spec.name or Path(brand).name}» → брендированная копия шаблона {tid} (при расхождении важнее {important})")
     from verstka.brand.apply import branded_warnings
 
     for w in branded_warnings(tid, root):
-        console.print(f"[yellow]brand:[/yellow] {w}")
+        console.print(f"[yellow]брендбук:[/yellow] {w}")
     return TemplateWorkspace.open(tid, root).source
 
 
@@ -327,17 +342,18 @@ def audit(
     report = run_audit(deck, manifest, outline_obj, ws, providers=providers, skills=skills, use_vlm=with_models, use_llm=with_models, render=not no_render, images_dir=deck.parent / "slides", brief_text=brief.read_text(encoding="utf-8") if brief else None)
     target = out or deck.parent / "audit_report.json"
     target.write_text(report.model_dump_json(indent=2), encoding="utf-8")
-    console.print(f"score {report.summary.score} · errors {report.summary.errors} · warnings {report.summary.warnings} · model flags {report.summary.model_flags} · checks {len(report.summary.checks_run)}")
-    tbl = Table(title="Issues")
-    tbl.add_column("slide", justify="right")
-    tbl.add_column("severity")
-    tbl.add_column("check")
-    tbl.add_column("message")
-    tbl.add_column("fix")
+    sm = report.summary
+    console.print(f"оценка {sm.score} из 100 · ошибок {sm.errors} · предупреждений {sm.warnings} · замечаний модели {sm.model_flags} · проверок {len(sm.checks_run)}")
+    tbl = Table(title="Замечания")
+    tbl.add_column("слайд", justify="right")
+    tbl.add_column("важность")
+    tbl.add_column("проверка")
+    tbl.add_column("что не так")
+    tbl.add_column("исправление")
     for i in sorted(report.issues, key=lambda i: (i.slide, {"error": 0, "warn": 1, "info": 2}[i.severity])):
-        tbl.add_row(str(i.slide), i.severity, i.check_id, i.message[:80], i.autofix.action if i.autofix else "")
+        tbl.add_row(str(i.slide), _SEVERITY_RU.get(i.severity, i.severity), i.check_id, i.message[:80], i.autofix.action if i.autofix else "")
     console.print(tbl)
-    console.print(f"Report: {target}")
+    console.print(f"Отчёт: {target}")
 
 
 @app.command()
@@ -363,10 +379,10 @@ def export(
 def skills() -> None:
     """List skills and agents with versions and content hashes."""
     reg = SkillsRegistry.load()
-    tbl = Table(title="Skills")
-    tbl.add_column("name")
-    tbl.add_column("version")
-    tbl.add_column("role")
+    tbl = Table(title="Навыки")
+    tbl.add_column("название")
+    tbl.add_column("версия")
+    tbl.add_column("роль")
     tbl.add_column("sha256")
     for name, spec in sorted(reg.skills.items()):
         tbl.add_row(name, spec.version, spec.role, spec.sha256[:12])
@@ -379,16 +395,16 @@ def list_checks() -> None:
     from verstka.audit.model_checks import model_check_specs
     from verstka.audit.registry import all_checks
 
-    tbl = Table(title="Audit checks")
+    tbl = Table(title="Проверки качества")
     tbl.add_column("id")
-    tbl.add_column("kind")
-    tbl.add_column("severity")
-    tbl.add_column("category")
-    tbl.add_column("title")
+    tbl.add_column("вид")
+    tbl.add_column("важность")
+    tbl.add_column("группа")
+    tbl.add_column("что проверяет")
     for spec, _ in all_checks():
-        tbl.add_row(spec.id, spec.kind, spec.severity, spec.category, spec.title)
+        tbl.add_row(spec.id, spec.kind, _SEVERITY_RU.get(spec.severity, spec.severity), spec.category, spec.title)
     for spec in model_check_specs():
-        tbl.add_row(spec.id, spec.kind, spec.severity, spec.category, spec.title)
+        tbl.add_row(spec.id, spec.kind, _SEVERITY_RU.get(spec.severity, spec.severity), spec.category, spec.title)
     console.print(tbl)
 
 

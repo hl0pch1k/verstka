@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
@@ -513,7 +514,8 @@ def read_zip(path: Path | str, *, providers: Any = None, skills: Any = None, use
         for info in zf.infolist():
             if info.is_dir():
                 continue
-            parts = PurePosixPath(info.filename.replace("\\", "/")).parts
+            # NFC: a name packed on macOS (decomposed «й») matches the same name typed anywhere else
+            parts = PurePosixPath(unicodedata.normalize("NFC", info.filename).replace("\\", "/")).parts
             if not parts or info.filename.startswith("/") or ".." in parts or any(p.startswith("__MACOSX") for p in parts):
                 continue
             n += 1

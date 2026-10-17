@@ -315,8 +315,33 @@ class RenderError(RuntimeError):
     pass
 
 
+def _runnable(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _lo_version(path: str) -> tuple[int, ...]:
+    """/opt/libreoffice24.8/program/soffice → (24, 8): the newest of several official builds goes first."""
+    return tuple(int(x) for x in re.findall(r"\d+", Path(path).parent.parent.name))
+
+
 def find_soffice() -> Optional[str]:
-    return shutil.which("soffice") or (_MAC_SOFFICE if os.path.exists(_MAC_SOFFICE) else None)
+    """LibreOffice's `soffice`: $VERSTKA_SOFFICE when it is set (a path or a command), then PATH (`soffice`,
+    `libreoffice`), the macOS app, a distribution's package (/usr/lib/libreoffice/program) and the official .deb/.rpm
+    builds, which install into /opt/libreofficeX.Y/program and put no `soffice` on PATH (the newest first)."""
+    own = (os.environ.get("VERSTKA_SOFFICE") or "").strip()
+    if own:
+        found = shutil.which(own) or (own if _runnable(own) else None)
+        if found:
+            return found
+        log.warning("VERSTKA_SOFFICE=%s is not a runnable soffice: looking for LibreOffice elsewhere", own)
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found:
+        return found
+    import glob
+
+    candidates = [_MAC_SOFFICE, "/usr/lib/libreoffice/program/soffice", "/usr/lib64/libreoffice/program/soffice"]
+    candidates += sorted(glob.glob("/opt/libreoffice*/program/soffice"), key=_lo_version, reverse=True)
+    return next((c for c in candidates if _runnable(c)), None)
 
 
 def find_pdftoppm() -> Optional[str]:

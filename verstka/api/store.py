@@ -343,6 +343,25 @@ class Store:
         shutil.rmtree(d, ignore_errors=True)
         return not d.exists()
 
+    def sweep_unused_datasets(self, older_than: float, used: set[str]) -> list[str]:
+        """Наборы, которыми не собрана ни одна презентация (`used` — их id из generation.json) и которые не менялись
+        `older_than` секунд, — убираются. Возвращает их id."""
+        now = time.time()
+        gone = []
+        for d in sorted(self.datasets.glob("*")):
+            if not d.is_dir() or not _ID_RE.fullmatch(d.name) or d.name in used:
+                continue
+            try:
+                age = now - max(p.stat().st_mtime for p in [d, *d.iterdir()])
+            except (OSError, ValueError):
+                continue
+            if age < older_than:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+            if not d.exists():
+                gone.append(d.name)
+        return gone
+
     # ---- brandbooks (вторая ступень) --------------------------------------------------
     # brandbooks/<id>/: source/ — загруженный файл или папка, logos/ — логотипы (BrandLogo.file — пути от папки
     # брендбука), brand.json — разобранный BrandSpec (его id — id папки: verstka.brand.apply находит её по нему)

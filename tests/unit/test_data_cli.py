@@ -31,7 +31,7 @@ def test_generate_builds_a_data_story_on_the_branded_template(tmp_path):
     r = CliRunner().invoke(app, ["generate", "-t", str(UNSEEN), "-b", str(brief), "--data", str(SALES), "--brand", str(TOKENS),
                                  "--slides", "9", "--no-llm", "--no-vlm", "-s", "structured", "-w", str(ws), "-o", str(out)])
     assert r.exit_code == 0, r.output
-    assert "branded copy" in r.output and "Data story: 7 datasets, 9 slides" in r.output
+    assert "брендированная копия шаблона" in r.output and "История из данных: 7 наборов, 9 слайдов" in r.output
     o = json.loads((out / "structured" / "outline.json").read_text(encoding="utf-8"))
     assert len([s for s in o["slides"] if s.get("data")]) == 7
     rm = json.loads((out / "structured" / "run_manifest.json").read_text(encoding="utf-8"))

@@ -228,7 +228,9 @@ def test_a_rebuild_without_its_file_is_refused(api, deck):
     keep = root / "kept-dataset"
     shutil.copytree(saved, keep)
     try:
-        assert c.delete(f"/api/datasets/{did}").status_code == 200
+        # the API keeps a dataset a deck uses (409); the file can still go from the disk by other means
+        assert c.delete(f"/api/datasets/{did}").status_code == 409
+        assert store.delete_dataset(did)
         r = c.post(f"/api/generations/{gid}/structured/slides/{n}/rebuild", json={"option": 1})
         assert r.status_code == 409 and "Клиенты.xlsx" in r.json()["detail"]
     finally:

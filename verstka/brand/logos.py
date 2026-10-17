@@ -750,7 +750,8 @@ def logo_path(logo: BrandLogo, brand_dir: Optional[Path | str]) -> Optional[Path
 
 
 def _raster(path: Path) -> Optional[tuple[bytes, str]]:
-    """PNG/JPEG как есть; SVG — соседний PNG с тем же именем, иначе растр через rsvg-convert (если есть)."""
+    """PNG/JPEG как есть; SVG — соседний PNG с тем же именем, иначе растр через rsvg-convert (если есть), иначе встроенный
+    растеризатор (`svg_raster.py`: контуры, фигуры, заливки — как у папки брендбука; на Linux без librsvg тоже)."""
     ext = path.suffix.lower().lstrip(".")
     if ext in ("png", "jpg", "jpeg"):
         return path.read_bytes(), ("jpeg" if ext == "jpg" else ext)
@@ -764,8 +765,19 @@ def _raster(path: Path) -> Optional[tuple[bytes, str]]:
                 res = subprocess.run([exe, "-h", "512", str(path)], capture_output=True, timeout=20)
                 if res.returncode == 0 and res.stdout:
                     return res.stdout, "png"
-            except Exception:  # noqa: BLE001
-                return None
+            except Exception:  # noqa: BLE001 - the built-in rasteriser below
+                pass
+        try:
+            from verstka.brand.svg_raster import render_svg
+
+            im = render_svg(path, 512)
+            if im is None:
+                return None  # strokes, text or pictures inside: it cannot be drawn without a tool
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            return buf.getvalue(), "png"
+        except Exception:  # noqa: BLE001
+            return None
     return None
 
 

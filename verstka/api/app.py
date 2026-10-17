@@ -10,6 +10,7 @@ import re
 import shutil
 import threading
 import time
+import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -108,6 +109,15 @@ _BRAND_EXTS = {".json", ".pdf", ".zip", ".pptx", ".potx", ".pptm", ".svg", ".png
 # разбор с моделью идёт до 150 с, а рабочую папку может делить ещё один сервер со своим разбором
 _BRAND_SWEEP_AGE = 600.0
 _SLACK = 1 << 20  # заголовки частей multipart сверх самих файлов
+_MAX_GOALS_BRIEF = 20_000  # символов текста, из которого читаются цели (/api/goals)
+
+
+def dataset_keep_days() -> float:
+    """Набор, которым не собрана ни одна презентация, живёт столько дней (уборка при запуске сервера)."""
+    try:
+        return float(os.environ.get("VERSTKA_DATASET_KEEP_DAYS", "14"))
+    except ValueError:
+        return 14.0
 
 
 def _upload_cap(path: str) -> Optional[tuple[int, str]]:
@@ -153,8 +163,8 @@ async def _lifespan(_app: FastAPI):
 
 
 def _on_start() -> None:
-    """At launch: the models profile goes to the log (default_models_path logs it once), and the brandbooks a restart
-    interrupted are cleared away."""
+    """At launch: the models profile goes to the log (default_models_path logs it once), the brandbooks a restart
+    interrupted are cleared away, and so are the datasets no deck uses, older than dataset_keep_days()."""
     from verstka.providers.registry import default_models_path
 
     try:
@@ -168,6 +178,14 @@ def _on_start() -> None:
         swept = []
     if swept:
         log.info("swept %d brandbook(s) a restart interrupted: %s", len(swept), ", ".join(swept))
+    try:
+        used = {str(i) for g in store.list_generations() for i in (g.get("dataset_ids") or [])}
+        old = store.sweep_unused_datasets(dataset_keep_days() * 86400, used)
+    except OSError:
+        log.warning("old datasets not swept", exc_info=True)
+        old = []
+    if old:
+        log.info("removed %d dataset(s) no deck uses, older than %g days", len(old), dataset_keep_days())
 
 
 app = FastAPI(title="Verstka API", version=__version__, lifespan=_lifespan)
@@ -398,6 +416,17 @@ def ru_framework_detail(detail: str) -> str:
 async def _request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """422 in the API's own format — `detail` is one line for people, in Russian (not pydantic's English list)."""
     return JSONResponse({"detail": _validation_message(exc)}, status_code=422)
+
+
+_SERVER_ERROR = "Что-то пошло не так на сервере — попробуйте ещё раз. Если повторится, подробности — в журнале сервера"
+
+
+@app.exception_handler(Exception)
+async def _server_error(request: Request, exc: Exception) -> JSONResponse:
+    """Anything unexpected: a calm Russian 500 in the API's format (never «Internal Server Error»); the traceback goes
+    to the log."""
+    log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse({"detail": _SERVER_ERROR}, status_code=500)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -1239,7 +1268,7 @@ def _cut_name(name: str) -> str:
 def safe_file_name(raw: Optional[str], fallback: str) -> str:
     """A name that becomes a path (a brandbook's file or a part of its folder — BrandSpec.file is it too), safe as one
     path segment: no folders, no characters a file system refuses, not hidden, at most _NAME_MAX characters."""
-    base = re.split(r"[\\/]", raw or "")[-1]
+    base = re.split(r"[\\/]", unicodedata.normalize("NFC", raw or ""))[-1]
     name = " ".join(_BAD_NAME_CHARS.sub(" ", base).split()).lstrip(". ").strip()
     return _cut_name(name) if name else fallback
 
@@ -1248,7 +1277,8 @@ def data_file_name(raw: Optional[str], fallback: str = "данные") -> str:
     """A data file's name as the person gave it — the card and «Источник: …» under the chart: without its folders and
     control characters, everything else kept («Отчёт: продажи?.csv»). It never becomes a path (the file is kept as
     datasets/<id>/source.<ext>)."""
-    base = re.split(r"[\\/]", raw or "")[-1]
+    # NFC: a name from macOS (decomposed «й», «ё») is the same name the brief and the cards write
+    base = re.split(r"[\\/]", unicodedata.normalize("NFC", raw or ""))[-1]
     name = " ".join(_CONTROL_CHARS.sub(" ", base).split())
     return _cut_name(name) if name.strip(". ") else fallback
 
@@ -1430,10 +1460,27 @@ def get_dataset(did: str) -> dict:
     return {**summary, "id": did, "profile": profile.model_dump(mode="json"), "plan": plan}
 
 
+def _decks_with_dataset(did: str) -> list[dict]:
+    """The decks (generation.json) built — or being built — with this dataset: «Собрать ещё раз» and «Пересобрать слайд
+    так» read it again."""
+    return [g for g in store.list_generations() if did in (g.get("dataset_ids") or [])]
+
+
+def _deck_name(meta: dict) -> str:
+    title = (meta.get("title") or "").strip() or next((ln.strip() for ln in str(meta.get("brief") or "").splitlines() if ln.strip()), "")
+    return f"«{title[:60]}»" if title else "без названия"
+
+
 @app.delete("/api/datasets/{did}")
 def delete_dataset(did: str) -> dict:
+    """Убрать набор с сервера — только если ни одна презентация его не использует (иначе 409 с причиной)."""
     if not SAFE_ID_RE.fullmatch(did):
         raise HTTPException(404, "Файл с данными не найден")
+    decks = _decks_with_dataset(did)
+    if decks:
+        who = f"презентация {_deck_name(decks[0])}" if len(decks) == 1 else f"{ru_count(len(decks), 'презентация', 'презентации', 'презентаций')}"
+        raise HTTPException(409, f"Этот файл с данными использует {who} — он остаётся на сервере, пока она есть" if len(decks) == 1
+                            else f"Этот файл с данными используют {who} — он остаётся на сервере, пока они есть")
     return {"deleted": store.delete_dataset(did)}
 
 
@@ -1450,6 +1497,8 @@ def read_brief_goals(req: GoalsRequest) -> dict:
     модели кешируется по тексту и файлам: сборка с тем же текстом и файлами её не зовёт снова."""
     from verstka.data.intent import read_goals
 
+    if len(req.brief) > _MAX_GOALS_BRIEF:
+        raise HTTPException(413, f"Текст длиннее {_grouped(_MAX_GOALS_BRIEF)} символов — сократите его: цели читаются из брифа")
     tables, profiles = [], []
     for did in req.dataset_ids[:_MAX_DATA_TABLES]:
         loaded = store.read_dataset(did) if SAFE_ID_RE.fullmatch(did or "") else None
@@ -1964,7 +2013,7 @@ def create_generation(req: GenerateRequest) -> dict:
         raise HTTPException(400, "Нужен текст презентации")
     bad = [s for s in req.strategies if s not in STRATEGY_NAMES]
     if bad:
-        raise HTTPException(400, f"Неизвестные варианты: {bad}")
+        raise HTTPException(400, f"Неизвестные варианты: {', '.join(f'«{b}»' for b in bad)} — бывают {', '.join(f'«{n}»' for n in STRATEGY_NAMES)}")
     if not req.strategies:
         req.strategies = list(STRATEGY_NAMES)  # (none chosen: all three — the pipeline builds them, the page shows them)
     if req.outline is not None:
