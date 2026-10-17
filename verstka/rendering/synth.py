@@ -22,7 +22,7 @@ from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.assets_pick import pick_asset
 from verstka.rendering.charts import add_chart
-from verstka.rendering.clone import _fill_hex, _SlideCtx, clear_width, renumber_page_chrome
+from verstka.rendering.clone import _fill_hex, _SlideCtx, clear_width, is_label_chip as _is_chip, renumber_page_chrome
 from verstka.rendering.fonts import text_width_pt
 from verstka.rendering.brand_logo import hold_brand_logos, put_back_brand_logos
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, slide_shape_elements
@@ -654,6 +654,47 @@ def _layout_rules(builder: DeckBuilder, canvas: Pattern) -> int:
     return n
 
 
+def _splitting(lines, band: Bbox, middle: float = 0.2, span: float = 0.5) -> list:
+    """The lines (`picture_lines.PictureLine`) that split `band`: through its middle (not within `middle` of its sides,
+    where a panel's edge or the art at the side of the page stands) over at least `span` of its extent."""
+    out = []
+    for ln in lines:
+        if ln.vertical:
+            inside = band.x + middle * band.w < ln.pos < band.x2 - middle * band.w
+            run = min(ln.end, band.y2) - max(ln.start, band.y) >= span * band.h
+        else:
+            inside = band.y + middle * band.h < ln.pos < band.y2 - middle * band.h
+            run = min(ln.end, band.x2) - max(ln.start, band.x) >= span * band.w
+        if inside and run:
+            out.append(ln)
+    return out
+
+
+def _ground_splits(builder: DeckBuilder, manifest: TemplateManifest, canvas: Pattern) -> bool:
+    """The picture under the canvas's whole slide draws a line through its content band (qa4 NEW-L1: VK Tech's
+    «3_Содержание» lays a panel with a hairline down its middle under every slide of the layout — the divider ran
+    through the composed cards and their caption): a composed slide's content would be cut by it."""
+    cache = builder.__dict__.setdefault("_ground_splits", {})
+    if canvas.id in cache:
+        return cache[canvas.id]
+    W, H = builder.slide_w, builder.slide_h
+    got = False
+    try:
+        from verstka.rendering.picture_lines import ground_lines
+
+        src = builder.source_slide(canvas.source_slide)
+        t = _top_title(canvas)
+        safe = manifest.tokens.spacing.safe_area
+        y0 = max(safe.y, (t.bbox.y2 if t is not None else safe.y) + 0.04)
+        band = Bbox(x=int(safe.x * W), y=int(y0 * H), w=int(safe.w * W), h=max(int((safe.y2 - y0) * H), 1))
+        got = bool(_splitting(ground_lines(src), band))
+    except Exception:  # noqa: BLE001 - a ground that cannot be read is not judged
+        log.debug("ground lines not read", exc_info=True)
+        got = False
+    cache[canvas.id] = got
+    return got
+
+
 def _title_turned(builder: DeckBuilder, canvas: Pattern) -> bool:
     """The canvas's heading is set turned or vertically («Agenda» running up the side of a photo): a composed
     heading written into it would run up the slide too."""
@@ -693,8 +734,9 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         # in 54 pt over two thirds of the height) — a composed heading there is set under it, low on the slide
         t0 = _top_title(canvas)
         ok = ok and not (t0 is not None and t0.bbox.h > 0.33 and canvas.kind.value not in ("title", "section", "thanks"))
-        # nor one whose layout rules the content band (lines would cross the composed text)
-        ok = ok and _layout_rules(builder, canvas) == 0
+        # nor one whose layout rules the content band (lines would cross the composed text), drawn as shapes or
+        # inside the picture under the whole slide
+        ok = ok and _layout_rules(builder, canvas) == 0 and not _ground_splits(builder, manifest, canvas)
         # a backdrop busy behind the content band (VK WorkSpace's chart slides glow blue under their pictures) only
         # when no calm canvas passes (a template whose every slide stands on its photograph keeps its own)
         if ok and _canvas_rank(builder, manifest, canvas, wide)[1]:
@@ -2113,11 +2155,19 @@ def _clear_of_cutouts(slide, area: Bbox, title_ph, W: int, H: int, warnings: lis
 def _clear_of_rules(slide: Slide, area: Bbox, W: int, H: int, warnings: list[str]) -> Bbox:
     """The content area clear of the rules the template draws through it or along its edges (`layers.clear_of_rules`):
     a composed list laid across a layout's middle rule had the line run through its words. The area stays as it was
-    when no side of the rule is large enough to hold the content."""
+    when no side of the rule is large enough to hold the content. A line drawn inside the picture under the slide (a
+    panel's divider — qa4 NEW-L1) that splits the area is a rule too."""
     try:
-        from verstka.rendering.layers import clear_of_rules
+        from verstka.rendering.layers import clear_of_rules, largest_free
+        from verstka.rendering.picture_lines import ground_lines
 
         out = clear_of_rules(slide, area)
+        split = _splitting(ground_lines(slide), out)
+        if split:
+            free = largest_free(out, [ln.box(int(0.02 * W)) for ln in split])
+            if free.w >= 0.4 * out.w and free.h >= 0.5 * out.h:
+                warnings.append("содержимое не пересекает линию рисунка шаблона")
+                out = free
     except Exception:  # noqa: BLE001 - a slide that cannot be read keeps its area
         return area
     if out == area:
@@ -2258,20 +2308,34 @@ def _image_text(builder, slide, oslide, manifest, ws, kit, composer, area: Bbox)
 _KIND_LABEL = {
     PatternKind.stat_row: "Ключевые цифры", PatternKind.big_number: "Главная цифра", PatternKind.chart: "Динамика",
     PatternKind.table: "Сравнение", PatternKind.comparison: "Сравнение", PatternKind.two_column: "Сравнение",
-    PatternKind.process: "План", PatternKind.timeline: "Этапы", PatternKind.cards: "Главное", PatternKind.bullets: "Тезисы",
-    PatternKind.agenda: "Содержание", PatternKind.quote: "Цитата", PatternKind.image_text: "Пример", PatternKind.team: "Команда",
+    PatternKind.process: "Шаги", PatternKind.timeline: "Этапы", PatternKind.cards: "Главное", PatternKind.bullets: "Тезисы",
+    PatternKind.agenda: "Содержание", PatternKind.quote: "Цитата", PatternKind.team: "Команда",
 }
 _CHART_LABEL = {"pie": "Структура", "doughnut": "Структура", "line": "Динамика", "area": "Динамика", "column": "Сравнение", "bar": "Сравнение"}
 _COVER_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
 
 
+_NEXT_RE = re.compile(r"^(?:следующие шаги|дальнейшие шаги|что дальше|план(?:\s|$|:)|дорожная карта|next steps)", re.I)
+_PAIR_RE = re.compile(r"^(?:было|стало|до|после|сейчас|раньше|теперь|сегодня|завтра|план|факт|проблема|решение|без|с|против|vs)\b", re.I)
+
+
 def _kind_label(oslide: OutlineSlide) -> str:
-    """The label that names the kind of slide: a chart by what it shows (the parts of a whole are not a trend)."""
+    """The label that names the kind of slide: a chart by what it shows (the parts of a whole are not a trend). A label
+    names what the slide is, never a guess: next steps are «План» whatever their layout, two columns are a comparison
+    only when their titles pair up («Было / Стало»), a process is its steps. "" when no label says it truly (qa4: next
+    steps in two columns wore «СРАВНЕНИЕ»)."""
     c = oslide.content
     if oslide.kind == PatternKind.chart and c.chart is not None:
         return _CHART_LABEL.get(str(c.chart.type or "").lower(), "Данные")
     if oslide.kind == PatternKind.bullets and (c.formula or "").strip():
         return "Расчёт"
+    if _NEXT_RE.match((oslide.headline or "").strip()):
+        return "План"
+    if oslide.kind == PatternKind.two_column:
+        titles = [(x.title or "").strip() for x in c.columns]
+        if len(titles) == 2 and all(_PAIR_RE.match(t) for t in titles if t) and all(titles):
+            return "Сравнение"
+        return ""
     return _KIND_LABEL.get(oslide.kind, "")
 
 
@@ -2348,6 +2412,7 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
     pilled, sizes, uppers, texted, bolds = 0, Counter(), 0, 0, 0
     title_box: Optional[Bbox] = None
     title_layout: Optional[str] = None
+    labelled: set[str] = set()  # samples whose «title» is a label on a plate, not a heading
     for p in same:
         try:
             src = builder.source_slide(p.source_slide)
@@ -2359,6 +2424,7 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
         if el is None:
             continue
         if _backing_of(src, el, W, H) is not None:
+            labelled.add(p.id)
             pilled += 1
             if t.style.size_pt:
                 sizes[round(t.style.size_pt)] += 1
@@ -2391,7 +2457,9 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
         head = max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
     # a template whose content headings are all typed in capitals («OUR SERVICES», SlidesCarnival and Google Slides
     # decks) keeps that voice on the composed headings (not in pill mode: there the label carries it)
-    typed = [(_top_title(p).sample_text or "").strip() for p in same if _top_title(p) is not None]
+    # (only real headings count: a label typed in capitals on its chip — «КЛЮЧЕВЫЕ ЦИФРЫ» — says how labels are set,
+    # not headings: qa4 NEW-B4)
+    typed = [(_top_title(p).sample_text or "").strip() for p in same if _top_title(p) is not None and p.id not in labelled]
     typed = [t for t in typed if any(ch.isalpha() for ch in t)]
     caps = not pill and len(typed) >= 3 and sum(1 for t in typed if t.isupper()) >= 0.8 * len(typed)
     ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0, head_cap_reason=reason, caps=caps, headlines=tuple(heads))
@@ -2430,33 +2498,33 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
         # «Пример») and none is cut from the heading — the pill goes, the heading is set plainly in its place
         remove_element(backing[0])
         backing = None
+    if backing is not None and _is_chip(backing[1], W, H):
+        # a label's chip never carries the heading, whatever its length (qa4 NEW-L4: «Четыре главных вывода» in the
+        # pill with no heading under it): it names the slide's section or its kind, or it goes
+        headline = oslide.headline.strip()
+        tag0 = _section_of(oslide, outline)
+        if not tag0 or _same_words(tag0, headline):
+            tag0 = _kind_label(oslide)
+        if not tag0 or _same_words(tag0, headline):
+            remove_element(backing[0])
+            backing = None
+            warnings.append("label chip removed: nothing but the heading to put on it")
     if backing is not None:
         back_el, bb = backing
-        kicker_mode = ds.kicker if ds is not None else (len(oslide.headline) > 34)
+        kicker_mode = _is_chip(bb, W, H) or (ds.kicker if ds is not None else (len(oslide.headline) > 34))
         if kicker_mode:
             # a pill is a label: it carries the section (a kicker), the assertion is set as a heading below it
             upper = ds.upper if ds is not None else False
             head_size = ds.head_size if ds is not None else _snap_heading(max(h1 * 1.25, 0.046 * H / EMU_PER_PT), scale)
             head_bold = ds.head_bold if ds is not None else title_bold
             headline = oslide.headline.strip()
-            short = len(headline.split()) <= 5
             from verstka.ru import typeset
 
             display = no_orphan(typeset(headline))
-            tag = (oslide.section or "").strip() if short else _section_of(oslide, outline)
-            only_label = False
+            tag = _section_of(oslide, outline)
             if not tag or _same_words(tag, headline):
-                if len(headline.split()) <= 5:
-                    tag, only_label = headline, True  # the headline is itself a section name: it goes on the label
-                else:
-                    tag = _kind_label(oslide)
-            short_tag = _short_kicker(tag)
-            if only_label and short_tag.lower().strip(" .:") != headline.lower().strip(" .:"):
-                # a label would cut the headline («Результаты пилота: до и после» → «Результаты пилота»): the whole
-                # headline is set under a label that names the kind of slide
-                only_label = False
-                short_tag = _short_kicker(_kind_label(oslide) or short_tag)
-            tag = short_tag
+                tag = _kind_label(oslide)  # never the headline itself: the heading is set under the label
+            tag = _short_kicker(tag)
             label = tag.upper() if upper else tag
             hctx = _SlideCtx(builder, slide, canvas, manifest, ws, outline)
             nb = hctx._widen_on_backing(title_ph._element, (box.x, box.y, box.w, box.h), [label], title_font, h1, title_bold, insets)
@@ -2467,14 +2535,7 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
             below = max(bb.y2, (b2[1] + b2[3]) if b2 else bb.y2)
             y = below + int(0.022 * H)
             one_line = int(head_size * typo.line_height * EMU_PER_PT)
-            if only_label:
-                lede = _lede_of(oslide)
-                if not lede:
-                    # the content starts where it starts under a one-line headline: one rhythm for the whole deck
-                    return y + one_line, bb.x, False
-                display, lede_used = typeset(lede), True  # the slide's lede is its message: it takes the heading's place
-            else:
-                lede_used = False
+            lede_used = False
             ground = pal.bg
             color = _heading_on(ground, manifest, pal)
             right = min(int(manifest.tokens.spacing.safe_area.x2 * W), W - bb.x)
