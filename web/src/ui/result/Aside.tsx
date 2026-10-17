@@ -68,14 +68,14 @@ export function Aside({ d, onVariant, onEditText, open, id, className, enter = t
   ].filter(Boolean);
   const content = <>
     {/* длинное название — две строки и многоточие, целиком — в подсказке */}
-    <h1 title={d.title} style={{
+    <h1 className="ra-h1" title={d.title} style={{
       margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 40, lineHeight: "48px", letterSpacing: "-0.03em", color: "#0B1220",
       display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere",
     }}>{d.title}</h1>
-    <p style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>{d.line}</p>
+    <p className="ra-line" style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>{d.line}</p>
     {d.score !== null && (
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 16, height: 72, marginTop: 32 }}>
-        <span key={d.variant} className={swapped ? "ra-xf" : undefined}
+      <div className="ra-scr" style={{ display: "flex", alignItems: "flex-end", gap: 16, height: 72, marginTop: 32 }}>
+        <span key={d.variant} className={swapped ? "ra-xf ra-scn" : "ra-scn"}
           style={{ fontFamily: UNB, fontWeight: 700, fontSize: 88, lineHeight: "72px", letterSpacing: "-0.04em", color: "#0B1220" }}>{d.score}</span>
         <span style={{ display: "flex", flexDirection: "column", paddingBottom: 4 }}>
           <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220" }}>из 100</span>
@@ -85,7 +85,7 @@ export function Aside({ d, onVariant, onEditText, open, id, className, enter = t
     )}
     {/* один вариант — выбирать не из чего */}
     {d.variants.length > 1 && (
-      <Segmented label="Вариант оформления" value={d.variant} onPick={onVariant} style={{ marginTop: 24 }}
+      <Segmented label="Вариант оформления" value={d.variant} onPick={onVariant} className="ra-segs" style={{ marginTop: 24 }}
         items={d.variants.map((v) => ({
           key: v.key,
           title: v.title,
@@ -103,11 +103,11 @@ export function Aside({ d, onVariant, onEditText, open, id, className, enter = t
         <span>Скачать PowerPoint</span>
       </a>
     )}
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${second.length}, minmax(0, 1fr))`, gap: 16, marginTop: 16 }}>{second}</div>
+    <div className="ra-acts2" style={{ display: "grid", gridTemplateColumns: `repeat(${second.length}, minmax(0, 1fr))`, gap: 16, marginTop: 16 }}>{second}</div>
     <AsideCards data={d.cards} open={open} />
-    {extra && <div style={{ marginTop: 8 }}>{extra}</div>}
-    <div style={{ height: 1, marginTop: 16, background: "rgba(11,18,32,.08)" }} />
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+    {extra && <div className="ra-extra" style={{ marginTop: 8 }}>{extra}</div>}
+    <div className="ra-sep" style={{ height: 1, marginTop: 16, background: "rgba(11,18,32,.08)" }} />
+    <div className="ra-links" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
       {LINKS.map((l) => (
         <button key={l.tab} type="button" className="p2-gb" onClick={() => open(l.tab)}>
           <Icon name={l.icon} size={18} />

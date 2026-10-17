@@ -31,6 +31,7 @@ import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
 import { SWAP_OUT, useSwap } from "../kit/useSwap";
 import { useDeckFit } from "../deck/useDeckFit";
+import { useNarrow } from "../create/useNarrow";
 import { BackStrip } from "../details/BackStrip";
 import { useGoHome } from "../shell/useGoHome";
 import { textStripMeta, writtenText } from "../layers/writerText";
@@ -356,13 +357,15 @@ function ResultBody({ g }: { g: Generation }) {
     fileBase: aside.fileBase, pptxTitle: aside.pptxTitle, checks: compactChecks(g, v, note), hasText,
   };
   const wide = rm.shown || !!pic.column?.shown;
+  // колода сужена помощником (компьютер); стопкой помощник поверх колоды, и результат остаётся полным
+  const narrowed = useNarrow();
   // колонка компактного вида 184 ↔ 320: слайд и колонка гаснут, сетка подменяется невидимой, новое проявляется (без хода
   // ширины); при закрытом помощнике ширина колонки не меняется — сразу
-  const swap = useSwap(wide, ui.helper);
+  const swap = useSwap(wide, narrowed);
   // карточка «Изображение» — одна, в колонке того вида, что сейчас на месте. В компактную она встаёт через 120 мс (та ещё
   // невидима), из полной уходит ещё через 120 мс: к тому времени колонка погасла (240 мс) — уйди карточка раньше, всё
   // остальное содержимое колонки (внизу, `column-reverse`) подскочило бы на её высоту на 16-процентной видимости
-  const compactCard = useSwap(ui.helper).shown;
+  const compactCard = useSwap(narrowed).shown;
   const fullCard = usePresence(!compactCard, SWAP_OUT).mounted;
   // шапка рабочей области в тесной колоде рядом с колонкой 320 — без подписи «Замечания» (helper.css `.ra-whx`): смена —
   // перекрёстным затуханием шапки, пока результат на экране; в подмене сетки (`swap`, слайд уже невидим) — сразу
@@ -402,7 +405,7 @@ function ResultBody({ g }: { g: Generation }) {
       </div>
       {/* полоса «04 …» под листом «Подробнее»: клик закрывает лист */}
       <BackStrip g={g} v={v} />
-      <CompactResult d={compact} live={ui.helper} wide={wide} snap={{ wide: swap.shown, now: swap.phase === "in" }} note={note} noteActions={noteActions}
+      <CompactResult d={compact} live={narrowed} wide={wide} snap={{ wide: swap.shown, now: swap.phase === "in" }} note={note} noteActions={noteActions}
         onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onShowText={onShowText} onDetails={openSheet} onNew={goHome}
         card={pic.column ? { shown: pic.column.shown, node: compactCard ? <PictureCard {...pic.column.card} idp="hp-p" /> : null } : null} />
       <div className={cls("ra-work", geo.cls)}>
@@ -428,7 +431,7 @@ function ResultBody({ g }: { g: Generation }) {
               className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1, height: g2.height }}
               extra={fullCard ? <PictureCard {...pic.column.card} /> : undefined} />
           )}
-          {rm.panel && <RemarksPanel {...rm.panel} helper={ui.helper} />}
+          {rm.panel && <RemarksPanel {...rm.panel} helper={narrowed} />}
         </div>
       </div>
     </>

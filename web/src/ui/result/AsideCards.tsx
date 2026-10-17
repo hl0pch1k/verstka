@@ -39,7 +39,7 @@ export function AsideCards({ data, open }: { data: AsideCardsData; open(tab: She
   }, []);
   if (!quality && !agent.length && !why && !eyes && !look) return null;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 24 }}>
+    <div className="ra-cards" style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 24 }}>
       {quality && <QualityCard q={quality} variant={data.variant} onOpen={() => open("quality")} />}
       {agent.length > 0 && <AgentCard lines={agent} variant={data.variant} onOpen={() => open("agent")} />}
       {why && <WhyCard text={why} file={data.whyFile ?? null} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("why")} />}
