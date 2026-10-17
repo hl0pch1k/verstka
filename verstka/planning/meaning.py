@@ -626,7 +626,10 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
     `author_order`: the slides are the ones the author dictated, in the author's order — no slide is moved."""
     o = outline.model_copy(deep=True)
     said: list[str] = []
-    for step in (lambda: scrub_outline(o), lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
+    from verstka.planning.proportions import check_outline
+
+    # (the proportions before the tables' conclusions: those are counted from the cells, not said by anyone)
+    for step in (lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
                  lambda: tidy(o), lambda: conclusion_headlines(o) if o.planned_by not in ("agent", "model") else [],
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],

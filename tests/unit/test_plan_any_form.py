@@ -372,3 +372,45 @@ def test_a_done_change_is_never_labelled_as_a_goal():
         table=TableData(columns=["Показатель", "Сейчас", "Цель"], rows=[["Просроченная задолженность", "96 млн ₽", "61 млн ₽"]])))])
     true_tense(o, brief)
     assert o.slides[0].content.table.columns == ["Показатель", "Было", "Стало"]
+
+
+# ------------------------------------------------------------------ round 3: proportions as strict as figures
+
+
+CLOUD = (ROOT / "examples" / "briefs" / "cloud_initiative.md")
+
+
+@pytest.mark.parametrize(
+    "line, ok",
+    [
+        ("Расчёты срываются в 1 из 5 пиковых дней", False),  # 6/30 reduced: what is counted changed
+        ("В 6 из 30 пиковых дней расчёты не успевают", False),  # the pair, but «пиковых дней» is not the brief's «случаях»
+        ("В 6 случаях из 30 расчёты не успевают", True),
+        ("2 из 140 отчётов используют нестандартные расширения", True),
+        ("Расчёты в пик ускоряются в 3,4 раза", True),  # said in the brief
+        ("Экономия — почти половина затрат", False),  # 26 of 61 is not a half
+        ("Затраты снизятся на 43%", True),  # 61 → 35 in one line of the table
+        ("Затраты снизятся вдвое", False),
+    ],
+)
+def test_a_proportion_is_the_briefs_or_counted_from_one_of_its_sentences(line, ok):
+    from verstka.planning.proportions import claims, supported
+
+    brief = CLOUD.read_text(encoding="utf-8")
+    cs = claims(line)
+    assert cs and all(supported(c, brief, line) for c in cs) == ok
+
+
+def test_a_wrong_proportion_goes_back_to_the_authors_words():
+    from verstka.planning.meaning import finish_deck
+
+    brief = CLOUD.read_text(encoding="utf-8")
+    o = DeckOutline(title="T", planned_by="agent", slides=[_slide(1, "title", "T"), _slide(
+        2, "stat_row", "В 6 из 30 пиковых дней расчёты не успевают", takeaway="Расчёты срываются в 1 из 5 пиковых дней",
+        content=SlideContent(bullets=["Каждый третий отчёт нестандартный", "Загрузка в среднем 23%"]))])
+    o2, said = finish_deck(o, brief)
+    s = o2.slides[1]
+    assert s.headline == "Ночные расчёты не успевают к утру в 6 случаях из 30"
+    assert s.takeaway is None
+    # «каждый третий» is no one's: the author's own words of the reports instead
+    assert s.content.bullets == ["2 из 140 отчётов используют нестандартные расширения — переписываем", "Загрузка в среднем 23%"]
