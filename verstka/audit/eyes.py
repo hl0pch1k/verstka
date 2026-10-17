@@ -305,6 +305,21 @@ def _form(osl: Any) -> str:
         return str(getattr(osl.kind, "value", osl.kind))
 
 
+def _data_note(osl: Any) -> str:
+    """What the data layer already checked on a slide made from a file (its categories, its gaps): the eyes judge how it
+    reads, not whether a point sits at its label (qa3 U2: «52 … далеко от своей отметки» on a correct chart)."""
+    d = getattr(osl, "data", None) if osl is not None else None
+    ch = getattr(getattr(osl, "content", None), "chart", None) if osl is not None else None
+    if d is None or ch is None:
+        return ""
+    cats = [str(c) for c in (ch.categories or [])]
+    gaps = [cats[k] for s in (ch.series or [])[:1] for k, v in enumerate(s.values) if v is None and k < len(cats)]
+    note = f"categories in order: {', '.join(cats[:24])}." if cats else ""
+    if gaps:
+        note += f" No data for {', '.join(gaps)}: the gap in the line is intended."
+    return note.strip()
+
+
 def _said(problems: list[ReviewProblem]) -> str:
     return "; ".join(f"{CODES.get(p.code, p.code)} ({p.where})" if p.where else CODES.get(p.code, p.code) for p in problems) or "—"
 
@@ -386,7 +401,7 @@ def look(
         try:
             res = skills.run(
                 "slide_design_review", providers,
-                {"slide_index": i, "deck_title": title, "form": _form(osl), "headline": (osl.headline if osl else "") or ""},
+                {"slide_index": i, "deck_title": title, "form": _form(osl), "headline": (osl.headline if osl else "") or "", "data_note": _data_note(osl)},
                 images=[image_bytes_for_vlm(before[i])],
             )
             return i, res.parsed
@@ -629,7 +644,7 @@ def look_only(pptx: Path, out_dir: Path, *, providers: Any, skills: Any, cfg: Op
             if _left(deadline) < 5.0:
                 return i, []
             try:
-                res = skills.run("slide_design_review", providers, {"slide_index": i, "deck_title": "", "form": "слайд", "headline": names.get(i, "")},
+                res = skills.run("slide_design_review", providers, {"slide_index": i, "deck_title": "", "form": "слайд", "headline": names.get(i, ""), "data_note": ""},
                                  images=[image_bytes_for_vlm(shots[i])])
                 return i, res.parsed.known()
             except Exception as e:  # noqa: BLE001

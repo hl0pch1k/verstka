@@ -305,7 +305,18 @@ def test_a_label_digit_and_a_data_year_are_no_figures():
             assert bad_numbers(s.headline, s) == [], s.headline  # «на 1 курс», «бюджета 2026»
     kpi = next(s for s in o.slides if s.data is not None and s.data.file == "Итоги года.txt")
     assert bad_numbers("Принято на 1 курс: +7%", kpi) == [7.0]
-    assert _issues(o) == []
+    # (the stacked shares' headline lists values — «Платное — 53% приёма, бюджет — 35%» —, live QA N-A2: a description)
+    got = [(i.check_id, i.message) for i in _issues(o)]
+    assert all(c == "headline_no_conclusion" and "перечисляет числа" in m for c, m in got), got
+
+
+def test_a_headline_that_only_lists_values_is_no_conclusion(outline):
+    s = _slide(outline, "Каналы продаж.json")
+    s.headline = "Прямые продажи — 46%, партнёры — 28%"
+    got = [i for i in _issues(outline) if i.check_id == "headline_no_conclusion"]
+    assert len(got) == 1 and "перечисляет числа" in got[0].message
+    s.headline = "Прямые продажи приносят почти половину выручки — 46%"
+    assert not [i for i in _issues(outline) if i.check_id == "headline_no_conclusion"]
 
 
 # ── live QA (U1): what the data checks missed ───────────────────────────────────────────────────────────────────────
@@ -389,3 +400,54 @@ def test_a_promised_count_the_slide_does_not_keep():
         assert bool(issues) is bad
         if bad:
             assert issues[0].severity == "error" and "обещает 4, а на слайде 3" in issues[0].message
+
+
+# ── qa3 (N-U1): the chart in the heading's band, the hero figure, nameless categories ─────────────────────────────
+def _boxed(eid: str, kind: str, x: float, y: float, w: float, h: float, **kw) -> IRElement:
+    W, H = 12192000, 6858000
+    b = Bbox(x=int(x * W), y=int(y * H), w=int(w * W), h=int(h * H))
+    return IRElement(id=eid, type=kind, bbox=b, bbox_frac=BboxFrac(x=x, y=y, w=w, h=h), **kw)
+
+
+def _one_slide_ctx(outline, s, els) -> AuditContext:
+    ir = DeckIR(source="x.pptx", slide_w=12192000, slide_h=6858000, slides=[IRSlide(index=1, elements=els, outline_id=s.id)])
+    o = outline.model_copy(update={"slides": [s]})
+    return AuditContext(ir=ir, manifest=TemplateManifest.model_construct(template_id="t"), outline=o)
+
+
+def test_a_chart_over_its_heading_is_caught(outline):
+    s = _slide(outline, "Регионы.xlsx")
+    ch = s.content.chart
+    chart = IRChart(type="bar", categories=list(ch.categories), series=[IRChartSeries(name=x.name, values=list(x.values)) for x in ch.series], x_title="Регион", y_title="Выручка, млн ₽")
+    head = _boxed("h", "text", 0.35, 0.14, 0.6, 0.08, paragraphs=[IRParagraph(text=s.headline)], name="Title", ph_type="title")
+    low = _boxed("c", "chart", 0.05, 0.25, 0.9, 0.55, chart=chart)
+    high = _boxed("c", "chart", 0.05, 0.02, 0.28, 0.8, chart=chart)  # beside the heading, from the slide's top edge
+    assert not run_checks(_one_slide_ctx(outline, s, [head, low]), only={"chart_in_heading_band"})[0]
+    got, _ = run_checks(_one_slide_ctx(outline, s, [head, high]), only={"chart_in_heading_band"})
+    assert len(got) == 1 and got[0].severity == "error"
+
+
+def test_a_hero_figure_the_heading_does_not_say_is_caught(outline):
+    s = _slide(outline, "Время ответа поддержки.csv")
+    ch = s.content.chart
+    chart = IRChart(type="column", categories=list(ch.categories), series=[IRChartSeries(name=x.name, values=list(x.values)) for x in ch.series])
+    head = _boxed("h", "text", 0.05, 0.05, 0.9, 0.08, paragraphs=[IRParagraph(text=s.headline)], name="Title", ph_type="title")
+    c = _boxed("c", "chart", 0.05, 0.2, 0.6, 0.6, chart=chart)
+    for fig, bad in (("180", True), ("80%", False)):
+        hero = _boxed("f", "text", 0.7, 0.2, 0.25, 0.1, paragraphs=[IRParagraph(text=fig)], name="Figure 9")
+        got, _ = run_checks(_one_slide_ctx(outline, s, [head, c, hero]), only={"hero_not_in_heading"})
+        assert bool(got) is bad, fig
+
+
+def test_nameless_categories_are_caught_but_a_thinned_time_axis_is_not(outline):
+    reg = _slide(outline, "Регионы.xlsx")
+    ch = reg.content.chart
+    cats = [c if k % 2 == 0 else "" for k, c in enumerate(ch.categories)]
+    chart = IRChart(type="bar", categories=cats, series=[IRChartSeries(name=x.name, values=list(x.values)) for x in ch.series])
+    got, _ = run_checks(_one_slide_ctx(outline, reg, [_boxed("c", "chart", 0.05, 0.2, 0.9, 0.6, chart=chart)]), only={"chart_labels_missing"})
+    assert len(got) == 1 and "4 из 8" in got[0].message
+    rev = _slide(outline, "Выручка по месяцам.csv")
+    ch = rev.content.chart
+    cats = [c if k % 2 == 0 else "" for k, c in enumerate(ch.categories)]
+    chart = IRChart(type="line", categories=cats, series=[IRChartSeries(name=x.name, values=list(x.values)) for x in ch.series])
+    assert not run_checks(_one_slide_ctx(outline, rev, [_boxed("c", "chart", 0.05, 0.2, 0.9, 0.6, chart=chart)]), only={"chart_labels_missing"})[0]

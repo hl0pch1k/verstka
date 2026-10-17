@@ -767,6 +767,10 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
                         rows = [b for b, _ in line_boxes(e)] or [box]
                     except Exception:  # noqa: BLE001
                         rows = [box]
+                    # (a line the measure puts outside the block's own box is the estimate's, not the slide's: the
+                    # composer's figure «423 млн ₽» on its accent rule, bottom-anchored on one line, was measured as two
+                    # and its «first line» crossed the layout's rule above it — qa3 U2)
+                    rows = [b for b in rows if b.y >= e.bbox.y - int(0.005 * H)] or [box]
                     # (a plate of the slide itself under the text — the conclusion's strip, a card — hides the layout's
                     # hairline: the slide's shapes are drawn over its layout)
                     plates = [o.bbox for o in s.elements if o.type in ("shape", "text") and o.fill_hex and fill_alpha(o) >= 0.9 and o.bbox.area > 0]

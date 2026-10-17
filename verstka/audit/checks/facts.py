@@ -60,7 +60,9 @@ def _texts(e: IRElement) -> list[str]:
         return []  # a chart's values are checked as numbers (below), its categories are labels
     if not e.has_text or _BADGE_RE.match(e.text):
         return []
-    return [p.text for p in e.paragraphs if p.text.strip()]
+    # (a paragraph that is only an item's badge — «1» over «Основы SQL» in one box — is a number of the list, not a
+    # figure: qa3 N-L6, o03's «1», «2» warnings)
+    return [p.text for p in e.paragraphs if p.text.strip() and not _BADGE_RE.match(p.text)]
 
 
 def _chart_parts(slide: IRSlide) -> tuple[list[float], list[float]]:
@@ -68,8 +70,8 @@ def _chart_parts(slide: IRSlide) -> tuple[list[float], list[float]]:
     shares: list[float] = []
     totals: list[float] = []
     for e in slide.elements:
-        if e.chart is None:
-            continue
+        if e.chart is None or (e.chart.type == "doughnut" and [str(c).strip().lower() for c in e.chart.categories] == ["value", "rest"]):
+            continue  # (a progress ring's track is drawing, not a part of a whole)
         for s in e.chart.series:
             vals = [v for v in s.values if v is not None and v >= 0]
             total = sum(vals)
@@ -241,7 +243,10 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                     found.append((written, v))
             if e.chart is not None:
                 for ser in e.chart.series:
-                    for val in ser.values:
+                    # (a progress ring — «18%» drawn as a doughnut of «value» and its hidden «rest» track — says one
+                    # figure: the track's 82 is drawing, not a figure of the slide — qa3 N-L7)
+                    ring = e.chart.type == "doughnut" and [str(c).strip().lower() for c in e.chart.categories] == ["value", "rest"]
+                    for val in (ser.values[:1] if ring else ser.values):
                         if val is None:
                             continue
                         written = f"{val:.12g}".replace(".", ",")  # 1138500, not 1.1385e+06

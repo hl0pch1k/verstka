@@ -137,3 +137,23 @@ def test_a_decline_and_a_series_step_are_derived(tmp_path):
     shown = " ".join(i.message.replace("\u00a0", " ") for i in figure_not_in_brief(_ctx(ir, brief=PROFIT_BRIEF)))
     assert "18 000" not in shown  # 120 000 → 138 000
     assert "77 000" in shown  # no two values of the series differ by it
+
+
+def test_a_badge_paragraph_and_a_rings_track_are_no_figures(tmp_path):
+    # qa3 N-L6: «1» over its module's name in one box; N-L7: an 18 % ring drawn with its hidden 82 % track
+    from pptx.chart.data import CategoryChartData
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    tb = s.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(2))
+    tb.text_frame.text = "1"
+    tb.text_frame.add_paragraph().text = "Основы SQL и Python"
+    data = CategoryChartData()
+    data.categories = ["value", "rest"]
+    data.add_series("share", (18.0, 82.0))
+    s.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, Inches(6), Inches(1), Inches(3), Inches(3), data)
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+    ctx = _ctx(build_deck_ir(path), brief="Ручные напоминания ставят только 18% сотрудников. Программа: Основы SQL и Python.")
+    assert figure_not_in_brief(ctx) == []

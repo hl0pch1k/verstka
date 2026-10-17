@@ -24,7 +24,7 @@ HEADLINE_NO_CONCLUSION = CheckSpec(
     severity="warn",
     category="content",
     description="У слайда с графиком или таблицей из файла заголовок говорит, что видно в данных («Выручка выросла на 23% "
-                "к сентябрю»), а не только тему («Выручка по месяцам»).",
+                "к сентябрю»), а не только тему («Выручка по месяцам») и не перечень чисел («Платное — 53%, бюджет — 35%»).",
 )
 HEADLINE_FIGURE_NOT_IN_DATA = CheckSpec(
     id="headline_figure_not_in_data",
@@ -223,6 +223,16 @@ def headline_no_conclusion(ctx: AuditContext) -> list[Issue]:
                 f"Заголовок «{_shown_headline(s, osl) or '—'}» называет тему, а не вывод из данных «{d.file}»",
                 suggestion="Скажите в заголовке, что видно в данных, с числом из них: «Выручка выросла на 23% к сентябрю».",
             ))
+            continue
+        from verstka.data.story import is_description
+
+        if not osl.content.numbers and is_description(_shown_headline(s, osl)):  # (a key figures' slide lists them)
+            # «Платное — 53% приёма, бюджет — 35%»: values against names, no claim — a description, not a conclusion
+            out.append(ctx.new_issue(
+                HEADLINE_NO_CONCLUSION, s.index,
+                f"Заголовок «{_shown_headline(s, osl)}» перечисляет числа, а не говорит, что из них следует",
+                suggestion="Скажите вывод: «Больше половины приёма — платное: 53%».",
+            ))
     return out
 
 
@@ -323,6 +333,8 @@ def _prepared(osl: OutlineSlide):
 
 def _chart_problem(prep, s: IRSlide) -> Optional[str]:
     charts = [e.chart for e in _charts(s)]
+    if not charts and _tables(s) and prep.categories and not prep.points:
+        return _series_table_problem(prep, s)  # the chart's data as a table (its rows did not fit a chart, qa3)
     if not charts:
         return "диаграммы на слайде нет"
     if prep.points:
@@ -372,6 +384,20 @@ def _bins_problem(osl: OutlineSlide, prep) -> Optional[str]:
     if re.search(r"не\s+показан|не\s+вошл|не\s+отображ", said):
         return None
     return f"в столбцах гистограммы {_num(shown)} значений из {_num(n)}: {_num(n - shown)} не попали ни в один столбец"
+
+
+def _series_table_problem(prep, s: IRSlide) -> Optional[str]:
+    """The prepared series shown as a table: a row a category (its name first), its values in the row."""
+    rows = [[_norm(c) for c in r] for e in _tables(s) for r in e.table.rows]
+    for k, cat in enumerate(prep.categories):
+        row = next((r for r in rows if r and _norm(r[0]).lower() == _norm(cat).lower()), None)
+        if row is None:
+            return f"нет строки «{cat}»"
+        want = [v[k] for _, v in prep.series if k < len(v) and v[k] is not None]
+        have = [n for c in row[1:] for n in _cell_numbers(c)]
+        if any(not any(_same(w, h) for h in have) for w in want):
+            return f"в строке «{cat}» другие числа"
+    return None
 
 
 def _cell_numbers(text: str) -> list[float]:
@@ -634,4 +660,138 @@ def data_split_inconsistent(ctx: AuditContext) -> list[Issue]:
                 DATA_SPLIT_INCONSISTENT, s.index, f"Таблица «{first.data.file}» на нескольких слайдах: {why}",
                 suggestion="Пересоберите слайд: части таблицы строятся заново по файлу.",
             ))
+    return out
+
+
+# ── qa3 (N-U1): a chart in the heading's band, a hero figure the heading does not say, nameless categories ──────────
+CHART_IN_HEADING_BAND = CheckSpec(
+    id="chart_in_heading_band",
+    title="Диаграмма заходит в полосу заголовка",
+    severity="error",
+    category="layout",
+    description="Рамка диаграммы слайда с данными начинается выше первой строки заголовка или заходит на его рамку: "
+                "диаграмма лезет к краю слайда над заголовком.",
+)
+HERO_NOT_IN_HEADING = CheckSpec(
+    id="hero_not_in_heading",
+    title="Крупная цифра рядом с диаграммой — не из заголовка",
+    severity="warn",
+    category="content",
+    description="Крупная цифра, вынесенная рядом с диаграммой (визуальный вариант), — это главная цифра заголовка "
+                "слайда; граница столбца («больше 180»), число точек или «остальные 230 клиентов» под «Топ-10 дают 38%» — "
+                "не она.",
+)
+CHART_LABELS_MISSING = CheckSpec(
+    id="chart_labels_missing",
+    title="У категорий диаграммы нет подписей",
+    severity="error",
+    category="content",
+    description="Названия категорий (направления, регионы, каналы) подписаны все: пропускать через одну можно только "
+                "подписи оси времени (месяцы, кварталы, годы), где пропущенное читается по соседям.",
+)
+_HERO_NAMES = ("Figure", "Conclusion figure")
+
+
+@check(CHART_IN_HEADING_BAND)
+def chart_in_heading_band(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        title = _title_element(s, osl)
+        if title is None:
+            continue
+        from verstka.audit.checks.density import _ink
+
+        tb = _ink(title)  # (the heading's lines, not its box: a tall title box over the chart is the template's)
+        if tb.w <= 0 or tb.h <= 0:
+            continue
+        for e in _charts(s):
+            b = e.bbox
+            # (a chart beside the heading may start a little higher — the template's own side-by-side; far above its
+            # first line, at the slide's edge, it climbs)
+            if b.y < tb.y - int(0.06 * ctx.ir.slide_h) or b.intersection(tb) > 0.05 * min(tb.area, b.area):
+                out.append(ctx.new_issue(
+                    CHART_IN_HEADING_BAND, s.index, f"Диаграмма «{osl.data.file}» поднимается к краю слайда над заголовком или заходит на него",
+                    suggestion="Диаграмма начинается под заголовком.", **_bboxes([e, title]),
+                ))
+                break
+    return out
+
+
+def _digits(text: str) -> str:
+    return re.sub(r"\D", "", text or "")
+
+
+@check(HERO_NOT_IN_HEADING)
+def hero_not_in_heading(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        if not _charts(s):
+            continue
+        # (the heading as shown and as planned: a template's label chip «СТРУКТУРА» may be the title placeholder)
+        heads = {_digits(m) for m in re.findall(r"[+\-−–]?\d[\d\s  ]*(?:[.,]\d+)?", _shown_headline(s, osl) + " " + (osl.headline or "")) if _digits(m)}
+        for e in s.elements:
+            if e.type != "text" or not e.has_text or not (e.name or "").startswith(_HERO_NAMES):
+                continue
+            fig = " ".join(e.text.split())
+            d = _digits(fig)
+            if d and d not in heads:
+                out.append(ctx.new_issue(
+                    HERO_NOT_IN_HEADING, s.index, f"Крупная цифра «{fig}» рядом с диаграммой — не та, что в заголовке «{_shown_headline(s, osl)}»",
+                    suggestion="Вынесите цифру из заголовка или уберите крупную цифру.", **_bboxes([e]),
+                ))
+    return out
+
+
+@check(CHART_LABELS_MISSING)
+def chart_labels_missing(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.charts import is_time_axis
+
+    out = []
+    for s, osl in _data_slides(ctx):
+        prep = _prepared(osl)
+        cats = [str(c) for c in prep.categories]
+        if len(cats) < 2 or is_time_axis(cats):
+            continue
+        for e in _charts(s):
+            c = e.chart
+            if c.type in ("pie", "doughnut", "scatter") or len(c.categories) != len(cats):
+                continue
+            blank = sum(1 for x in c.categories if not str(x).strip())
+            if blank:
+                out.append(ctx.new_issue(
+                    CHART_LABELS_MISSING, s.index, f"У {blank} из {len(cats)} категорий диаграммы «{osl.data.file}» нет подписи",
+                    suggestion="Подпишите все категории: дайте диаграмме больше высоты, оставьте топ и «Прочие» или покажите таблицей.", **_bboxes([e]),
+                ))
+    return out
+
+
+CHART_ROWS_DONT_FIT = CheckSpec(
+    id="chart_rows_dont_fit",
+    title="Строки диаграммы не помещаются",
+    severity="error",
+    category="content",
+    description="У горизонтальных столбцов на каждую категорию нужна строка в 1,3 кегля подписи: в рамке ниже этого имена "
+                "категорий наезжают друг на друга или пропадают. Такую диаграмму дают в рамке выше или таблицей.",
+)
+
+
+@check(CHART_ROWS_DONT_FIT)
+def chart_rows_dont_fit(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.charts import min_frame_height
+
+    out = []
+    hpt = ctx.ir.slide_h / 12700.0
+    fs = max(8.0, 0.02 * hpt)  # (the least size a chart sets its labels at: 2 % of the slide's height)
+    for s, osl in _data_slides(ctx):
+        for e in _charts(s):
+            c = e.chart
+            if c.type != "bar" or len(c.categories) < 2:
+                continue
+            need = min_frame_height("bar", len(c.categories), fs, legend_rows=1 if len(c.series) > 1 else 0)
+            have = e.bbox.h / 12700.0
+            if have < 0.9 * need:
+                out.append(ctx.new_issue(
+                    CHART_ROWS_DONT_FIT, s.index, f"Строки диаграммы «{osl.data.file}» не помещаются: {len(c.categories)} категорий в рамке {have:.0f} pt, нужно от {need:.0f}",
+                    suggestion="Дайте диаграмме рамку выше или покажите данные таблицей.", **_bboxes([e]),
+                ))
     return out
