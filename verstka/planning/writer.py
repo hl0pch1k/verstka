@@ -5095,6 +5095,9 @@ class WriterResult:
     # the written slides as data (topic_writer.TopicSlide dumps with their number «n»): the knowledge base's slides of a
     # data deck are made of these directly (verstka/knowledge/with_data.py)
     slides_data: list = field(default_factory=list)
+    # "kb_with_data": the text is the knowledge base's part of a data deck (its charts are the data's) — the rest of the
+    # deck is checked against the data, not this text
+    part: Optional[str] = None
     kb: Optional[dict] = None  # the knowledge base the text is written from: {"id", "name", "docs": [{"id", "title", "url"}]}
 
     @property
@@ -5109,7 +5112,7 @@ class WriterResult:
             "removed": len(self.removed), "checked": self.checked, "model_label": self.model_label,
             "seconds": self.seconds.get("total", 0.0), "short_by": self.short_by,
             "pages": self.pages_used, "sources": [{k: x[k] for k in ("text", "page", "url", "sentence")} for x in self.sources],
-            "genders": self.genders, "basis": self.basis, "kb": self.kb,
+            "genders": self.genders, "basis": self.basis, "kb": self.kb, **({"part": self.part} if self.part else {}),
         }
 
     def summary(self) -> dict:
@@ -5129,7 +5132,7 @@ class WriterResult:
             "version": 1, "mode": self.mode, "status": self.status, "kind": self.kind, "subkind": self.subkind, "topic": self.topic, "theses": self.theses,
             "skills": self.skills, "model": self.model, "model_label": self.model_label, "seconds": self.seconds, "tokens": self.tokens,
             "reference": {"source": "wikipedia", "lang": self.lang, "pages": self.pages, "cut_chars": self.reference_chars} if self.pages else None,
-            "knowledge": self.kb, "basis": self.basis,
+            "knowledge": self.kb, "basis": self.basis, "part": self.part,
             "answers": self.answers, "removed": self.removed, "edits": self.edits, "overruled": self.overruled, "continuation": self.continuation, "salvaged": self.salvaged,
             "sources": self.sources, "pages_used": self.pages_used, "anchor": self.anchor or None, "genders": self.genders,
             "numbered": self.numbered, "moved": self.moved,

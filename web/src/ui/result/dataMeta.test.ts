@@ -100,3 +100,9 @@ test("файлы без слайда: одна тихая строка, прич
   assert.equal(two?.text, "Без слайда: 2 файла");
   assert.equal(two?.title, "«a.csv» — x\n«b.xlsx · Лист2» — y");
 });
+
+test("данные и база знаний: «Графики — по 2 файлам данных, остальное агент написал по базе знаний «…»»", () => {
+  const writer = { mode: "topic", status: "written", text: "Слайд 1…", basis: "kb", part: "kb_with_data", kb: { id: "k", name: "Квартал", docs: [{ id: "a", title: "A" }] } } as GenerationMeta["writer"];
+  const g = { ...meta({ brief: "План", dataset_ids: ["a", "b"], writer }), variants: [] } as Generation;
+  assert.equal(sourceText(g, null), "Графики — по 2 файлам данных, остальное агент написал по базе знаний «Квартал»");
+});

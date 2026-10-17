@@ -485,6 +485,8 @@ export interface WriterInfo {
   basis?: "wikipedia" | "kb";
   /** The knowledge base the text was written from. */
   kb?: { id: string; name: string; docs: { id: string; title: string; url?: string | null }[] } | null;
+  /** "kb_with_data": the text is the knowledge base's part of a data deck (the charts are the data files'). */
+  part?: string | null;
 }
 export interface VariantEdit {
   at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null;

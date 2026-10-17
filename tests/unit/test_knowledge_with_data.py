@@ -144,10 +144,41 @@ def test_the_writer_s_slides_take_the_plan_items_by_place_and_the_request_closes
           {"n": 3, "title": "Рост NPS и причины оттока", "lead": "Удовлетворённость клиентов выросла."},
           {"n": 4, "title": "Расширение команды и найм", "lead": "В отделе продаж 46 человек."},
           {"n": 5, "title": "Запрос на поддержку ночной смены", "lead": "Правлению предлагается утвердить найм 8 инженеров."}]
-    monkeypatch.setattr(W, "_write", lambda *a, **k: (SimpleNamespace(sources=[], written=True), sl))
+    monkeypatch.setattr(W, "_write", lambda *a, **k: (SimpleNamespace(sources=[], written=True, kb=None, basis="kb", pages_used=[]), sl))
     plan = ("Закрытие квартала\n\n1. Как росла выручка по месяцам — покажи на графике\n2. Какие сегменты клиентов растут быстрее\n"
             "3. Что думают клиенты\n4. Команда и найм\n5. Что просим у правления\n")
     story = _story()
     story.slides[2].headline = "Выручка по месяцам росла: с 96 до 144 млн ₽"
     ids = [s.id for s in W.add_knowledge(story, Brief(text=plan), ref).outline.slides]
     assert ids[-1] == "kb-4" and ids.index("summary") == len(ids) - 2
+
+
+def test_the_build_storyboard_hears_every_slide_of_the_joined_deck_and_the_writer_is_one_record(ref):
+    """Экран «Сборка» рисует раскадровку по строкам дизайнера: после вставки слайдов по базе каждая карточка получает
+    строку со своим номером (слайды по базе — «по базе знаний»); часть по базе — запись писателя с part «kb_with_data»."""
+    events: list[dict] = []
+    part = add_knowledge(_story(), Brief(text=PLAN), ref, progress=events.append)
+    lines = {e["slide"]: e["message"] for e in events if e.get("step") == "designer"}
+    assert sorted(lines) == list(range(1, len(part.outline.slides) + 1))
+    for n, s in enumerate(part.outline.slides, 1):
+        assert f"«{s.headline}»" in lines[n]
+        if s.id.startswith("kb-"):
+            assert "по базе знаний" in lines[n]
+    assert "по данным файла" not in lines[2]  # (the story's own slide without its data object here: «из текста»)
+    meta = part.writer.meta()
+    assert meta["part"] == "kb_with_data" and meta["basis"] == "kb" and meta["kb"]["name"] == "Квартал" and meta["status"] == "written"
+    assert meta["sources"] and {p["title"] for p in meta["pages"]} >= {"Клиенты и отзывы"}
+
+
+def test_a_data_deck_with_a_knowledge_part_grounds_edits_on_the_brief_and_that_part(tmp_path, monkeypatch):
+    import verstka.api.app as A
+    from verstka.api.store import Store
+
+    st = Store(tmp_path)
+    monkeypatch.setattr(A, "store", st)
+    gid, gdir = st.new_generation_dir()
+    (gdir / "writer.md").write_text("Слайд 2. Клиенты\nNPS вырос с 31 до 44.\n", encoding="utf-8")
+    meta = {"id": gid, "brief": "1. Выручка\n2. Клиенты", "writer": {"status": "written", "part": "kb_with_data", "text": ""}}
+    assert A._written_text(gid, meta) is None  # the knowledge part is not the deck's text
+    got = A._brief_text_of_meta(gid, meta)
+    assert got.startswith("1. Выручка") and "NPS вырос с 31 до 44." in got

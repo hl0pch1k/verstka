@@ -755,15 +755,16 @@ def _generation_data(req: GenerateRequest) -> GenerationData:
     return data
 
 
-def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: str, gdir: Path, progress, use_models: bool) -> DeckOutline:
-    """The data story's outline with the knowledge base's slides beside it (never raises: the data deck stays)."""
+def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: str, gdir: Path, progress, use_models: bool):
+    """(the data story's outline with the knowledge base's slides beside it, the writer's result of that part or None)
+    — never raises: the data deck stays."""
     from verstka.knowledge.with_data import add_knowledge
     from verstka.pipeline.generate import _event_sink, _knowledge
 
     try:
         kb = _knowledge(knowledge_id, store.root)
         if kb is None:
-            return outline
+            return outline, None
         part = add_knowledge(outline, brief, kb, skills=skills() if use_models else None, providers=providers() if use_models else None,
                              progress=_event_sink(progress))
         if part.writer is not None:
@@ -771,10 +772,10 @@ def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: 
                 part.writer.write_files(gdir)
             except OSError:
                 log.debug("writer.json of the knowledge part not written", exc_info=True)
-        return part.outline
+        return part.outline, part.writer if part.writer is not None and part.writer.written else None
     except Exception:  # noqa: BLE001 - the data deck is built as it is
         log.warning("knowledge base beside the data failed", exc_info=True)
-        return outline
+        return outline, None
 
 
 def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: Optional[GenerationData] = None) -> dict:
@@ -796,6 +797,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         manifest = store.manifest(template_id) or manifest
         steps["brand"] = time.monotonic() - tb
     brief = None
+    kb_writer = None  # the knowledge base's part of a data deck (verstka/knowledge/with_data.py)
     outline = None
     if req.outline is not None:
         outline = DeckOutline.model_validate(req.outline)
@@ -822,7 +824,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
             # «примерный план + данные + база знаний»: the data story's charts and conclusions, and the base's slides for
             # the plan's items the data does not show (verstka/knowledge/with_data.py)
             tk = time.monotonic()
-            outline = _with_knowledge(outline, data_brief, req.knowledge_id, gdir, progress, use_models)
+            outline, kb_writer = _with_knowledge(outline, data_brief, req.knowledge_id, gdir, progress, use_models)
             steps["knowledge"] = time.monotonic() - tk
     # «Улучшить готовую» laid out in another template: the original deck's pictures come from its own workspace
     source_pictures = None
@@ -913,6 +915,8 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         },
         "planner": generation_planner([{"planner": planners[v.strategy]} for v in res.variants], use_models=use_models, supplied=supplied),
     }
+    if getattr(res, "writer", None) is None and kb_writer is not None:
+        res.writer = kb_writer  # the knowledge base's part of a data deck: in one place with every writer's text
     if getattr(res, "writer", None) is not None:
         # writer mode: the text the agent wrote from the topic (the result screen shows it; edits ground against it)
         meta["writer"] = res.writer.meta()
@@ -2550,8 +2554,8 @@ def _written_text(gid: Optional[str], meta: dict) -> Optional[str]:
     """The text the writer wrote from the topic (writer mode), when the deck was built from it: writer.md of the
     generation (the whole text), else the copy in generation.json; None for a deck built from the user's own text."""
     w = meta.get("writer") if isinstance(meta.get("writer"), dict) else None
-    if not w or w.get("status") != "written":
-        return None
+    if not w or w.get("status") != "written" or w.get("part") == "kb_with_data":
+        return None  # (a data deck's knowledge part is not the deck's text: _brief_text_of_meta adds it to the brief)
     gdir = store.generation_dir(gid) if gid else None
     if gdir is not None and (gdir / "writer.md").is_file():
         try:
@@ -2564,7 +2568,18 @@ def _written_text(gid: Optional[str], meta: dict) -> Optional[str]:
 
 
 def _brief_text_of_meta(gid: Optional[str], meta: dict) -> Optional[str]:
-    """The text the deck's figures were checked against: the writer's text in writer mode, else the user's brief."""
+    """The text the deck's figures were checked against: the writer's text in writer mode, else the user's brief (a
+    data deck with a knowledge part: the brief and that part's text — the base's slides keep their figures)."""
+    w = meta.get("writer") if isinstance(meta.get("writer"), dict) else None
+    if w and w.get("part") == "kb_with_data" and w.get("status") == "written":
+        gdir = store.generation_dir(gid) if gid else None
+        part = ""
+        try:
+            part = (gdir / "writer.md").read_text(encoding="utf-8") if gdir is not None and (gdir / "writer.md").is_file() else ""
+        except OSError:
+            part = ""
+        part = part or (w.get("text") or "")
+        return "\n\n".join(x for x in [meta.get("brief") or "", part] if x.strip()) or None
     return _written_text(gid, meta) or meta.get("brief")
 
 

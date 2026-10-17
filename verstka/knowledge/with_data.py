@@ -197,6 +197,13 @@ def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference,
             out.log.append("База знаний: о теме в ней ничего нет — колода по данным.")
             return out
     res, slides = _write(brief, kb, todo, topic, TOPIC_SLIDES, skills=skills, providers=providers, progress=progress, budget_end=budget_end)
+    res.part = "kb_with_data"
+    if res.kb is None:
+        res.kb = {"id": kb.kb.id, "name": kb.name, "docs": [{"id": k, "title": kb.title_of(k), "url": d.get("url")} for k, d in kb.docs.items()]}
+        res.basis = "kb"
+    if not res.pages_used:
+        used = list(dict.fromkeys(x.get("doc") for x in res.sources or [] if x.get("doc")))
+        res.pages_used = [{"title": kb.title_of(d), "url": (kb.docs.get(d) or {}).get("url") or ""} for d in used]
     out.writer = res
     if not slides:
         out.log.append("База знаний: текст по ней не написан — колода по данным.")
@@ -259,7 +266,30 @@ def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference,
     o.agent_log = list(o.agent_log) + [f"База знаний: {len(made)} слайд(а) по документам — " + "; ".join(f"«{s.headline}»" for _, s in made[:6])]
     out.outline = o
     out.log.append(o.agent_log[-1])
+    if progress is not None:
+        say_designs(o, progress)
     return out
+
+
+def say_designs(outline: DeckOutline, progress: Callable[[dict], None]) -> None:
+    """The designer's line for every slide of the joined deck (the build's storyboard draws the deck from them: the
+    data story said its own slides under their old numbers — the base's slides moved them): «Заголовок» — its form,
+    whose it is."""
+    try:
+        from verstka.planning.agent import form_ru
+    except Exception:  # noqa: BLE001 - the lines are a nicety
+        return
+    for pos, s in enumerate(outline.slides, 1):
+        if s.kind.value == "title":
+            text = f"Обложка «{s.headline}»"
+        else:
+            how = ("по данным файла" if s.data is not None else "из выводов данных" if s.id in ("summary", "key-figures")
+                   else "по базе знаний" if s.id.startswith("kb-") else "из текста")
+            text = f"«{s.headline}» {how} — {form_ru(s)}"
+        try:
+            progress({"type": "agent", "step": "designer", "message": text, "slide": pos, "variant": None, "share": 0.36})
+        except Exception:  # noqa: BLE001 - a listener never stops the deck
+            log.debug("designer line not said", exc_info=True)
 
 
 __all__ = ["KbPart", "add_knowledge", "item_covered", "outline_slide"]

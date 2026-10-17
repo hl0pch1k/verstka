@@ -25,6 +25,11 @@ export function sourceText(g: Generation, note: { title: string } | null): strin
   if (g.writer?.status === "written" && g.writer.text) {
     if (g.writer.basis === "kb" && g.writer.kb) {
       const n = g.writer.kb.docs.length;
+      const files = g.dataset_ids?.length ?? 0;
+      // данные и база знаний: графики — по файлам, остальные слайды — по документам базы
+      if (g.writer.part === "kb_with_data" && files) {
+        return `Графики — по ${files} ${files % 10 === 1 && files % 100 !== 11 ? "файлу" : "файлам"} данных, остальное агент написал по базе знаний «${g.writer.kb.name}»`;
+      }
       return `Текст написал агент — по базе знаний «${g.writer.kb.name}»: ${n} ${n % 10 === 1 && n % 100 !== 11 ? "документ" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "документа" : "документов"}, источники — в заметках`;
     }
     const p = pages(g);
