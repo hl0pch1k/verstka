@@ -242,7 +242,8 @@ def _pixels(images: list[Path]) -> Optional[dict[str, float]]:
         try:
             with Image.open(p) as im:
                 small = im.convert("RGB").resize((48, 27), Image.BILINEAR)
-                px.extend(colorsys.rgb_to_hsv(r / 255, g / 255, b / 255) for r, g, b in small.getdata())
+                raw = small.tobytes()
+                px.extend(colorsys.rgb_to_hsv(raw[i] / 255, raw[i + 1] / 255, raw[i + 2] / 255) for i in range(0, len(raw), 3))
         except Exception:  # noqa: BLE001 - битая миниатюра пропускается
             continue
     if not px:
