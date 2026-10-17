@@ -75,6 +75,15 @@ def test_step_numbers_are_not_figures(tmp_path):
     assert figure_not_in_brief(ctx) == []
 
 
+def test_module_lesson_and_part_numbers_are_not_figures(tmp_path):
+    # live QA (o03/e4): «Модуль 1», «Модуль 2» were reported as figures the brief does not have
+    ir = _deck(tmp_path, [["Модуль 1", "Модуль 2: потоковая обработка", "Урок 3", "Блок 4", "Неделю 2 — практика", "Часть 2", "Занятие 5"]])
+    ctx = _ctx(ir)
+    assert figure_not_in_brief(ctx) == []
+    ir = _deck(tmp_path, [["Модуль 2 стоит 47 300 ₽"]])  # a price beside a module's number is still a figure
+    assert len(figure_not_in_brief(_ctx(ir))) == 1
+
+
 # ---------------------------------------------------------------------------- gate 3: a chart's own changes are derived
 
 PROFIT_BRIEF = (

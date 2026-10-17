@@ -36,8 +36,13 @@ FIGURE_NOT_IN_BRIEF = CheckSpec(
 )
 
 _BADGE_RE = re.compile(r"^\s*0?\d{1,2}[.)]?\s*$")
-# a step's number, not a quantity: «Месяц 2», «Этап 1», «Шаг 3:», «3‑й мес.» (a label shortened on a chart axis)
-_STEP_BEFORE_RE = re.compile(r"(?:месяц|мес\.|этап|шаг|недел[яи]|квартал|день|пункт|слайд|раздел|волна|спринт|№|Q)\s*$", re.I)
+# a step's number, not a quantity: «Месяц 2», «Этап 1», «Шаг 3:», «Модуль 2», «Урок 4», «3‑й мес.» (a label shortened
+# on a chart axis)
+_STEP_BEFORE_RE = re.compile(
+    r"(?:месяц|мес\.|этап|шаг|недел[яию]|квартал|день|дн[яи]|пункт|слайд|раздел|волна|спринт|модул[ьяи]|урок|"
+    r"заняти[еяй]|блок|семестр|глав[аы]|част[ьи]|№|Q)\s*$",
+    re.I,
+)
 _ORDINAL_AFTER_RE = re.compile(r"^[-‑\u2060]*(?:й|я|е|го|м|ом|ый|ой|ая|ую)\b", re.I)
 
 
