@@ -19,7 +19,10 @@ their exact figures, dates, names and units; no fact, figure or date from your o
 cannot fill is left out rather than invented. The documents may be about the person's own company, product or project:
 write about it as the documents do. The deck tells what the documents say to the audience: an opening (why it
 matters), the substance, the evidence in figures, and the last slide — the conclusion and what is asked or what comes
-next.
+next (its title says so: «Выводы и что просим», «Что предлагаем»). Every figure of the documents goes to ONE slide —
+never the same figure or fact on two slides. A table of the documents stays a table (form "table") or becomes a chart
+(form "chart") when it compares figures of one measure. No pictures ("picture": false) unless the request asks for them.
+A «timeline» only for events with their own dates (not one year repeated).
 {{ reference }}
 {% elif reference %}
 Reference excerpt («{{ reference_title }}», Wikipedia):

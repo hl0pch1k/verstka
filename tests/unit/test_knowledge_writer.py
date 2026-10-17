@@ -150,3 +150,107 @@ def test_each_slide_notes_name_the_sources_of_its_facts(ref):
     from verstka.api.app import _notes_sources
 
     assert _notes_sources(got, 3).startswith("Источник: «Команда и найм»")
+
+
+def test_a_table_is_a_block_of_its_own_and_never_a_headline():
+    """qa5 06 s4/s12: таблица сразу под списком читалась строками списка — «| Малый бизнес | 610 | 49,2 % |» стал
+    заголовком слайда. Таблица — отдельный блок, анализатор видит её таблицей."""
+    from verstka.planning.brief_structure import read_structure
+
+    plan = T.TopicPlan(title="Итоги", slides=[{"title": "Клиенты по сегментам", "form": "table"}])
+    s = T.TopicSlide(title="Клиенты по сегментам", lead="Малый бизнес — крупнейший сегмент.", points=["Всего 1 240 клиентов."],
+                     table={"header": ["Сегмент", "Клиенты"], "rows": [["Малый бизнес", "610"], ["Средние | крупные", "630"]]})
+    text = T.render_text(plan, [s])
+    assert "- Всего 1 240 клиентов.\n\n| Сегмент | Клиенты |" in text and "Средние / крупные" in text and "\n\n\n" not in text
+    spec = read_structure(text).specs[-1]
+    assert not spec.title.startswith("|")
+    assert "|" not in " ".join(spec.title.split())
+
+
+def test_the_deck_from_documents_ends_with_its_conclusion_and_says_each_fact_once():
+    plan = T.TopicPlan(title="Итоги", facts=["x"], slides=[{"title": "Выручка"}, {"title": "Инвестиции и команда"}])
+    assert T.kb_final(plan) and plan.slides[-1].title == "Выводы и что предлагаем"
+    assert not T.kb_final(plan)  # (a closing slide already)
+    mixed = T.TopicPlan(title="Итоги", facts=["x"], slides=[{"title": "Выручка"}, {"title": "Инвестиции и выводы", "must": [1]}])
+    assert T.kb_final(mixed) and [s.title for s in mixed.slides] == ["Выручка", "Инвестиции", "Выводы и что предлагаем"]
+    assert mixed.slides[1].must == [1]  # the topic keeps its facts
+    slides = [
+        T.TopicSlide(title="Клиенты", lead="На 30 сентября у платформы 1 240 корпоративных клиентов.", points=["Средний чек — 110 тыс. ₽ в квартал."]),
+        T.TopicSlide(title="Цели", lead="К 2027 году — 3 000 клиентов.", points=["На 30 сентября у платформы 1 240 корпоративных клиентов.", "Офисы окупаются за 18 месяцев."],
+                     timeline=[{"when": "2026", "what": "Открыт офис в Казани"}, {"when": "2026", "what": "Планируются офисы в Екатеринбурге"},
+                               {"when": "1 квартал 2027", "what": "Запуск в Казахстане"}]),
+    ]
+    done = T.kb_tidy(slides)
+    assert slides[1].timeline == [] and "2026 — Открыт офис в Казани." in slides[1].points  # one bare year twice: a list
+    assert "На 30 сентября у платформы 1 240 корпоративных клиентов." not in slides[1].points  # said on the slide before
+    assert {d["kind"] for d in done} == {"timeline_to_points", "repeat"}
+    risk = [T.TopicSlide(title="Риски", lead="Главный риск — цены.")]
+    put = T.cover_facts(T.TopicPlan(facts=["Рост цен на оборудование может снизить маржу на 3 п.п."], slides=[{"title": "Риски", "must": [1]}]), risk)
+    assert put and risk[0].points == ["Рост цен на оборудование может снизить маржу на 3 п.п."]  # one stop, never «п.п..»
+
+
+def test_a_fact_lives_where_it_is_the_lead_and_the_closing_slide_concludes():
+    slides = [
+        T.TopicSlide(title="Выручка", lead="Выручка за третий квартал 2026 года — 412 млн ₽, на 18% больше, чем во втором.",
+                     takeaway="Рост на 18% подтверждает устойчивую динамику в 2026 году."),
+        T.TopicSlide(title="Планы на четвёртый квартал", lead="В четвёртом квартале — выйти на рынок Казахстана и довести выручку до 450 млн ₽.",
+                     points=["Первый зарубежный рынок — Казахстан: запуск в первом квартале 2027 года, партнёр — местный интегратор."],
+                     takeaway="План создаёт базу для целевых 3 000 клиентов и 2,4 млрд ₽ выручки к концу 2027 года."),
+        T.TopicSlide(title="Цели на 2027 год", lead="К концу 2027 года — 3 000 корпоративных клиентов и 2,4 млрд ₽ выручки в год.",
+                     takeaway="Цели требуют роста клиентской базы в 2,4 раза."),
+        T.TopicSlide(title="Зарубежные рынки", lead="Первый зарубежный рынок — Казахстан: запуск в первом квартале 2027 года с местным интегратором.",
+                     takeaway="Партнёрство с местным интегратором обеспечивает запуск в Казахстане в первом квартале 2027 года."),
+        T.TopicSlide(title="Выводы и что просим", lead="Просим утвердить найм 8 инженеров поддержки.",
+                     points=["В отделе продаж работают 30 менеджеров, 9 инженеров предпродажи и 7 руководителей.",
+                             "Ключевой риск: рост цен на оборудование может снизить маржу на 3 п.п."]),
+    ]
+    done = T.kb_tidy(slides)
+    kinds = [d["kind"] for d in done]
+    assert slides[1].points == []  # Kazakhstan is the lead of «Зарубежные рынки»
+    assert slides[1].takeaway == ""  # 3 000 and 2,4 млрд are the figures of «Цели», not of this slide
+    assert slides[3].takeaway == ""  # the takeaway repeats the lead
+    assert slides[0].takeaway  # its own figures (and a year) stay
+    shares = [T.TopicSlide(title="Инвестиции", lead="В 2027 году — 240 млн ₽ в дата-центры, 150 млн ₽ в разработку, 90 млн ₽ в продажи.",
+                           takeaway="Половина бюджета (50 %) идёт в дата-центры."),
+              T.TopicSlide(title="Тариф «Старт»", lead="Тариф «Старт» — для компаний до 50 сотрудников.")]
+    T.kb_tidy(shares)
+    assert shares[0].takeaway  # a derived share, not the «50 сотрудников» of another slide
+    goals = [T.TopicSlide(title="Цели", lead="К концу 2027 года — 3 000 корпоративных клиентов и 2,4 млрд ₽ выручки в год.",
+                          points=["Целевой показатель по выручке — 2,4 млрд ₽ в год.", "Каждый офис окупается за 18 месяцев."])]
+    T.kb_tidy(goals)
+    assert goals[0].points == ["Каждый офис окупается за 18 месяцев."]  # the lead's figure again in fewer words goes
+    close = slides[-1].points
+    assert not any("30 менеджеров" in p for p in close)  # a new fact on the closing slide: no conclusion, no ask
+    assert any("риск" in p for p in close) and any("18%" in p for p in close)  # the asks stay, the conclusions come
+    assert {"repeat", "repeat_takeaway", "closing_new_fact", "closing_conclusions"} <= set(kinds)
+
+
+def test_a_table_fragment_reaches_the_writer_as_a_table(ref):
+    got = ref.relevant("выручка и клиенты по кварталам", 3000)
+    assert "| Квартал | Выручка, млн ₽ | Клиенты |" in got and "|---|---|---|" in got
+
+
+def test_a_fact_check_correction_the_documents_do_not_back_is_not_applied(ref):
+    slides = [
+        T.TopicSlide(title="Тариф «Старт»", lead="Тариф «Старт» для компаний до 50 сотрудников: подключение за 1 день с оплатой картой."),
+        T.TopicSlide(title="Планы", lead="В четвёртом квартале 2026 года — выйти на рынок Казахстана и довести выручку до 450 млн ₽."),
+        T.TopicSlide(title="Выручка", lead="Выручка за третий квартал выросла до 500 млн ₽."),
+    ]
+    issues = [
+        T.FactIssue(id="s2.lead", problem="wrong time", fix="Тариф «Старт» для компаний до 50 сотрудников: подключение за 5 дней с оплатой картой."),
+        T.FactIssue(id="s3.lead", problem="wrong quarter", fix="В первом квартале 2027 года — выйти на рынок Казахстана и довести выручку до 450 млн ₽."),
+        T.FactIssue(id="s4.lead", problem="wrong figure", fix="Выручка за третий квартал выросла до 412 млн ₽."),
+    ]
+    kept = T.kb_weigh_fixes(slides, issues, ref)
+    assert [it.id for it in kept] == ["s4.lead"]  # the right correction stays, the two that break a true statement go
+    T.apply_fixes(slides, kept)
+    assert "1 день" in slides[0].lead and "четвёртом квартале 2026" in slides[1].lead and "412 млн ₽" in slides[2].lead
+
+
+def test_the_authors_words_of_a_list_line_come_without_its_marker():
+    from verstka.planning.proportions import authors_words
+
+    text = "Слайд 4. Структура\nНа 30 сентября у платформы 1 240 клиентов.\n- Малый бизнес формирует крупнейший сегмент клиентской базы, насчитывая 610 компаний.\n"
+    got = authors_words("Малый бизнес — крупнейший сегмент клиентской базы: 610 из 1 240", text)
+    assert got == "Малый бизнес формирует крупнейший сегмент клиентской базы, насчитывая 610 компаний"  # never «- Малый…» as a headline
+    assert authors_words("Иван продал 30% акций", "Иван продал 30% акций компании.") == "Иван продал 30% акций компании"

@@ -211,7 +211,7 @@ def authors_words(line: str, brief_text: str) -> Optional[str]:
                 best, score = cl, sc
     if best is None or score < 2:
         return None
-    best = re.sub(r"^(?:из-за\s+чего|поэтому|а|но|и)\s+", "", best.strip(), flags=re.I)
+    best = re.sub(r"^(?:[-–—•*]\s+)?(?:(?:из-за\s+чего|поэтому|а|но|и)\s+)?", "", best.strip(), flags=re.I)  # (a list line's marker too)
     return H.cap_first(best)
 
 

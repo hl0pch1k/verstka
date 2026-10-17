@@ -87,11 +87,20 @@ def test_the_writer_reads_the_base_and_every_figure_is_checked_against_it(kb):
     assert "[«Клиенты и отзывы», раздел «Удовлетворённость», абз. 3]" in ref.relevant("NPS удовлетворённость", 2000)
     assert ref.unsupported("Выручка за квартал выросла до 412 млн ₽, на 18%.") == set()
     assert ref.unsupported("Выручка выросла до 500 млн ₽.") == {"500"}
+    assert ref.misses("Тариф «Старт» для компаний до 50 сотрудников: подключение за 1 день, цель — 1 500 клиентов к 2027 году.") == 0
+    assert ref.misses("Тариф «Старт» для компаний до 50 сотрудников: подключение за 5 дней.") == 1
+    # a ratio is its fragment's arithmetic: «вдвое» of 120 → 240 is, «вдвое больше доли 2025 года» (50 % then too) is not
+    assert ref.unsupported("Инвестиции в дата-центры выросли вдвое: с 120 до 240 млн ₽.") == set()
+    assert ref.unsupported("Выручка выросла с 301 до 412 млн ₽ — в 1,4 раза.") == set()
+    assert ref.unsupported("Доля дата-центров в 2027 году — 50 % инвестиций, вдвое больше доли 2025 года.") == {"2"}
+    assert ref.unsupported("Цели предполагают рост годовой выручки в 5,8 раза.") == {"5.8"}
     assert ref.unsupported("Наняли 3 инженера.") == set()
     # a share and a change the documents' figures give: 610 of 1 240 — 49,2 %; 301 → 412 — +37 %
     assert ref.unsupported("Малый бизнес — 49,2 % корпоративных клиентов.") == set()
     assert ref.unsupported("Выручка по кварталам выросла на 37% — с 301 до 412 млн ₽.") == set()
     assert ref.unsupported("Отток клиентов за квартал составил 7,5%.") == {"7.5"}
+    # a share of two figures the statement does not name is not «derived» (any pair of a table would do)
+    assert ref.unsupported("Инвестиции в 2027 году вырастут на 28%.") == {"28"}
     assert ref.unsupported("Выручка выросла на 73%.") == {"73"}  # small integers: a document writes «три»
     assert ref.unsupported("Наняли 27 инженеров.", given="план: 27 инженеров") == set()  # the person's own figure
     src = ref.source_of("Индекс NPS вырос до 44 в третьем квартале.")

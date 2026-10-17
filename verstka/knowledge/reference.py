@@ -22,6 +22,7 @@ from verstka.knowledge.text import figures, tokens
 
 MIN_SHARED = 2  # content words a statement shares with its source fragment (or one figure and one word)
 SMALL_INT = 10
+FIT_FRAGMENTS = 5  # the fragments a statement is matched against when a correction is weighed
 DERIVED_FRAGMENTS = 1  # the statement's top fragments whose figures may give its share, change or ratio  # «три филиала» in a document is «3 филиала» on a slide: integers up to this are not checked
 
 
@@ -127,7 +128,7 @@ class KbReference:
         sec: list[str] = []
         for f in frags:
             if labels:
-                out.append(f"[{self.label(f)}]\n{f.text}")
+                out.append(f"[{self.label(f)}]\n{_as_table(f) if f.table else f.text}")
                 continue
             if f.doc != doc:
                 doc, sec = f.doc, []
@@ -135,7 +136,7 @@ class KbReference:
             if f.section and f.section != sec:
                 sec = f.section
                 out.append(f"## {f.section[-1]}" + (f" (стр. {f.page})" if f.page else ""))
-            out.append(f.text)
+            out.append(_as_table(f) if f.table else f.text)
         return "\n\n".join(out).strip()
 
     def full_texts(self) -> list[str]:
@@ -167,29 +168,64 @@ class KbReference:
                     vals.add(v)
         out: set[str] = set()
         xs = sorted(vals)
+
+        def add(x: float) -> None:
+            out.add(str(round(abs(x))))
+            out.add(f"{round(abs(x), 1):g}")
+
+        # a share of the fragment's total (its largest figure: «610 из 1 240 — 49,2 %» of the clients' 1 240)
+        if xs:
+            top = xs[-1]
+            for a in xs[:-1]:
+                add(a / top * 100)
+        # a change or a ratio — only of a pair one of which the statement names («с 301 до 412 — +37 %»): of two figures
+        # it does not name it could be any pair of a table (live 17.10: «инвестиции вырастут на 28 %» — two cells of
+        # different rows, while the real total grew by 35 %)
+        named = set()
+        for n in figures(statement):
+            try:
+                named.add(float(n))
+            except ValueError:
+                pass
         for a in xs:
             for b in xs:
-                if a == b:
+                if a == b or not ({a, b} & named):
                     continue
                 for x in (a / b * 100, (a - b) / b * 100, a / b):
-                    out.add(str(round(abs(x))))
-                    out.add(f"{round(abs(x), 1):g}")
+                    add(x)
         return out
 
     def unsupported(self, statement: str, given: str = "") -> set[str]:
         """The figures of `statement` that no document of the base states (nor the person's own request `given`), nor
         the arithmetic of its own fragments gives (a share, a change, a ratio)."""
         known = self.all_figures() | figures(given)
+        ratios = _ratios(statement)
         out = set()
-        for n in figures(statement):
+        for n in figures(_RATIO_RE.sub(" ", statement)):
             if n in known:
                 continue
             if re.fullmatch(r"\d+", n) and int(n) <= SMALL_INT:
                 continue
             out.add(n)
-        if out and re.search(r"%|процент|раз(?:а)?(?![а-яё])", statement):
+        # «в 2,4 раза», «вдвое»: a ratio is the arithmetic of the statement's own fragment, never a figure met elsewhere
+        # in the base (live: «доля дата-центров — 50 %, вдвое больше, чем в 2025 году», while 2025 was 50 % too)
+        out |= ratios - figures(given)
+        if out and (ratios or re.search(r"%|процент", statement)):
             out -= self._derived(statement)
         return out
+
+    def misses(self, statement: str, k: int = FIT_FRAGMENTS) -> int:
+        """How many of the statement's figures its best-fitting fragment does not state (the fragment's document title
+        counts: «Итоги третьего квартала 2026» dates its paragraphs) — 0: one fragment states them all. A fact check's
+        correction that misses more than the statement it corrects is no correction («подключение за 1 день» of the
+        strategy → «за 5 дней» of another paragraph)."""
+        want = figures(statement)
+        if not want:
+            return 0
+        best = len(want)
+        for f, _ in self.search.top(statement, k):
+            best = min(best, len(want - figures(f.text) - figures(self.title_of(f.doc))))
+        return best
 
     def source_of(self, statement: str) -> Optional[KbSource]:
         hits = self.search.top(statement, 3)
@@ -210,6 +246,34 @@ class KbReference:
         f = best[0]
         d = self.docs.get(f.doc) or {}
         return KbSource(doc=f.doc, title=self.title_of(f.doc), name=str(d.get("name") or ""), url=d.get("url"), place=f.place(), fragment=f.id, text=f.text)
+
+
+_WORD_RATIO = {"вдвое": "2", "втрое": "3", "вчетверо": "4", "впятеро": "5", "вдесятеро": "10", "два": "2", "две": "2",
+               "три": "3", "четыре": "4", "пять": "5", "полтора": "1.5", "полторы": "1.5", "десять": "10"}
+_RATIO_RE = re.compile(r"(?<![а-яё\d])(?:(вдвое|втрое|вчетверо|впятеро|вдесятеро)|в\s+(\d+(?:[.,]\d+)?|два|две|три|четыре|пять|полтора|"
+                       r"полторы|десять)\s+раз(?:а)?)(?![а-яё])", re.I)
+
+
+def _ratios(statement: str) -> set[str]:
+    """The ratios a statement states, normalised as `figures` («в 2,4 раза» → «2.4», «вдвое» → «2»)."""
+    out: set[str] = set()
+    for m in _RATIO_RE.finditer(statement or ""):
+        w = (m.group(1) or m.group(2) or "").lower()
+        out |= {_WORD_RATIO[w]} if w in _WORD_RATIO else figures(w)
+    return out
+
+
+def _as_table(f) -> str:
+    """A table fragment («Таблица «…»:» + «A | B» rows) as a Markdown table under its caption: the writer reads it as
+    a table (and writes it as a table or a chart), not as lines of text."""
+    lines = [ln for ln in f.text.splitlines() if ln.strip()]
+    if len(lines) < 3:
+        return f.text
+    cap, rows = lines[0], [[c.strip() for c in ln.split(" | ")] for ln in lines[1:]]
+    w = max(len(r) for r in rows)
+    rows = [r + [""] * (w - len(r)) for r in rows]
+    md = ["| " + " | ".join(rows[0]) + " |", "|" + "---|" * w] + ["| " + " | ".join(r) + " |" for r in rows[1:]]
+    return cap + "\n" + "\n".join(md)
 
 
 def sources_line(sources: list[KbSource], limit: int = 4) -> str:

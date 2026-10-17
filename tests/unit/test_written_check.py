@@ -283,6 +283,16 @@ def test_a_headline_date_goes_with_its_own_event():
     assert s.takeaway is None
 
 
+def test_a_row_of_the_slides_table_never_becomes_its_headline():
+    s = _slide(K.table, "Малый бизнес — 49,2% клиентской базы платформы",
+               table=TableData(columns=["Сегмент", "Клиенты", "Доля"], rows=[["Малый бизнес", "610", "49,2 %"], ["Средний бизнес", "420", "33,9 %"]]))
+    text = ("Клиенты платформы по сегментам на конец квартала.\n\n| Сегмент | Клиенты | Доля |\n|---|---|---|\n"
+            "| Малый бизнес | 610 | 49,2 % |\n| Средний бизнес | 420 | 33,9 % |\n")
+    W.check_slide(s, text, title="Клиенты по сегментам", topic="Итоги квартала")
+    assert "|" not in s.headline
+    assert not any("|" in b for b in s.content.bullets)
+
+
 def test_a_summary_headline_with_the_slides_years_stays():
     s = _slide(K.cards, "1942–1944: Ключевые события Второй мировой войны", items=[
         SlideItem(title="19 ноября 1942", text="Красная армия начала контрнаступление под Сталинградом."),

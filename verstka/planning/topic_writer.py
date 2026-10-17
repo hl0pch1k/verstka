@@ -489,7 +489,7 @@ def cover_facts(plan: TopicPlan, slides: list[TopicSlide]) -> list[dict]:
             k = max(range(len(slides)), key=lambda j: len(fs & _stems(texts[j]))) if slides else None
         if k is None:
             continue
-        slides[k].points.append(H.strip_end(fact) + ".")
+        slides[k].points.append(_sentence(fact))
         texts[k] = slide_text(slides[k])
         put.append({"slide": k + 2, "fact": fact})
     return put
@@ -715,11 +715,16 @@ def render_slide(n: int, s: TopicSlide, title: str) -> list[str]:
         if s.formula_note:
             out.append(_sentence(s.formula_note))
     if s.table and s.table.rows:
+        # a table is a block of its own (a blank line before and after it): glued to a list above it, its rows were read
+        # as the list's lines — «| Малый бизнес | 610 | 49,2 % |» became a slide's headline (qa5 06 s4, s12)
         width = max(len(s.table.header), max(len(r) for r in s.table.rows))
+        cell = lambda c: " ".join(str(c or "").replace("|", "/").split()) or " "  # noqa: E731
         head = (s.table.header + [""] * width)[:width]
-        out.append("| " + " | ".join(h or " " for h in head) + " |")
+        out.append("")
+        out.append("| " + " | ".join(cell(h) for h in head) + " |")
         out.append("|" + "---|" * width)
-        out += ["| " + " | ".join((r + [""] * width)[:width]) + " |" for r in s.table.rows]
+        out += ["| " + " | ".join(cell(c) for c in (r + [""] * width)[:width]) + " |" for r in s.table.rows]
+        out.append("")
     if s.steps:
         out += [f"{i}. {_sentence(st)}" for i, st in enumerate(s.steps, 1)]
     c = s.chart
@@ -747,7 +752,7 @@ def render_text(plan: TopicPlan, slides: list[TopicSlide]) -> str:
         out.append(f"Подзаголовок: «{H.strip_end(plan.subtitle)}».")
     for k, (ps, s) in enumerate(zip(plan.slides, slides), 2):
         out += render_slide(k, s, ps.title)
-    return "\n".join(out) + "\n"
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip() + "\n"
 
 
 # ------------------------------------------------------------------ the phase
@@ -823,6 +828,159 @@ def kb_plan_mode(brief: Brief, mode: WriterMode) -> WriterMode:
         return mode
     topic = head or (brief.title_hint or "") or items[0]
     return WriterMode("topic", topic=topic, theses=[], private_hint=mode.private_hint, language=mode.language, reason="kb_plan", plan=items[:MAX_CONTENT])
+
+
+_FINAL_TITLE_RE = re.compile(r"(?<![а-яё])(?:вывод|итог|резюме|заключени|просим|просьб|решени|предлагаем|предложени|запрос|что\s+дальше|следующ\w+\s+шаг)", re.I)
+_PICTURE_ASK_RE = re.compile(r"(?<![а-яё])(?:картинк|фото|изображен|иллюстрац)", re.I)
+KB_REPEAT = 0.6  # a point that says this much of an earlier slide's statement is a repetition (knowledge base mode)
+
+
+def kb_final(plan: TopicPlan) -> bool:
+    """The deck from the person's documents ends with its conclusion and what is asked / what comes next: a plan whose
+    last slide is not one gets it (its facts — the documents', the slide writer reads its fragments). Returns whether
+    the slide was added."""
+    if not plan.slides:
+        return False
+    last = plan.slides[-1]
+    if _FINAL_TITLE_RE.search(last.title or ""):
+        # «Инвестиции и выводы»: the topic keeps its slide (and its facts), the conclusion gets its own
+        parts = [x.strip() for x in re.split(r"\s+(?:и|&)\s+|\s*[,;:]\s*", last.title or "") if x.strip()]
+        rest = [x for x in parts if not _FINAL_TITLE_RE.search(x)]
+        if len(parts) < 2 or not rest:
+            return False
+        last.title = H.cap_first(" и ".join(rest))
+    plan.slides.append(PlannedSlide(title="Выводы и что предлагаем", form="list",
+                                    goal="the deck's main conclusion from the facts of the slides before, and what the documents say is "
+                                         "planned, asked for or comes next — only what the fragments state, no new figures"))
+    return True
+
+
+_CLOSING_RE = re.compile(r"(?<![а-яё])(?:план\w*|предлага\w*|предлож\w*|прос\w*|запрос\w*|утверд\w*|одобр\w*|риск\w*|цел[ьи]\w*|"
+                     r"нанять|наним\w*|запуст\w*|выйти|выход\w*|следующ\w*|дальше|решени\w*)", re.I)
+FINAL_CONCLUSIONS = 3
+FINAL_POINTS = 5
+
+
+def _figs(text: str) -> set[str]:
+    from verstka.knowledge.text import figures
+
+    return figures(text)
+
+
+def _body(s: TopicSlide) -> str:
+    """What a slide states besides its takeaway: its title, lead, points, dates, figures, table and chart."""
+    parts = [s.title, s.lead, *s.points, *s.steps, *(f"{e.when} {e.what}" for e in s.timeline), *(f"{n.value} {n.label}" for n in s.numbers)]
+    if s.table:
+        parts += [*s.table.header, *(" ".join(r) for r in s.table.rows)]
+    if s.chart:
+        parts += [s.chart.caption, *(f"{r.label} {r.value:g}" for r in s.chart.rows)]
+    return " ".join(x for x in parts if x)
+
+
+KB_RETELL = 0.4
+
+
+def _statements(s: TopicSlide) -> list[str]:
+    """A slide's statements one by one: its lead, points, steps, dated events, key figures and table rows."""
+    out = [s.lead, *s.points, *s.steps, *(f"{e.when} {e.what}" for e in s.timeline), *(f"{n.value} {n.label}" for n in s.numbers)]
+    if s.table:
+        out += [" ".join([*s.table.header, *r]) for r in s.table.rows]
+    return [x for x in out if x]
+
+
+def _restates(point: str, lead: str) -> bool:
+    """A point that gives again the lead's own figures in fewer words («Целевой показатель по выручке — 2,4 млрд ₽ в
+    год» under «К концу 2027 года … 3 000 клиентов и 2,4 млрд ₽ выручки в год»)."""
+    figs = {f for f in _figs(point) if not re.fullmatch(r"(?:19|20)\d{2}", f)}
+    return bool(lead) and bool(figs) and figs <= _figs(lead) and _overlap(point, lead) >= KB_RETELL
+
+
+def kb_tidy(slides: list[TopicSlide]) -> list[dict]:
+    """A deck written from the person's documents, tidied: a point that repeats a statement of an earlier slide or the
+    lead of any other slide goes (the fact lives where it is the lead: «1 240 клиентов» four times, «14 → 5 дней» three
+    times — qa5 06; «Казахстан — запуск в 1 кв. 2027» on «Планы» and on «Зарубежные рынки» — qa5 kb); a takeaway that
+    repeats the lead, or that brings the figures of another slide its own slide does not state («…целевых 3 000
+    клиентов и 2,4 млрд ₽», three slides in a row), goes; a «timeline» whose dates repeat or are bare years («2026 —
+    Открыт офис…», «2026 — Планируется…») becomes points (its first «date» was set as a hero «2026 г» — qa5 10 s11).
+    The closing slide (conclusion / what is asked) states the deck's conclusions and its asks, plans and risks — not a
+    new fact («30 менеджеров» under «Выводы и что просим»). Returns what changed."""
+    done: list[dict] = []
+    seen: list[str] = []
+    leads = [s.lead for s in slides]
+    final = len(slides) - 1 if slides and _FINAL_TITLE_RE.search(slides[-1].title or "") else -1
+    for i, s in enumerate(slides):
+        k = i + 2
+        whens = [" ".join((e.when or "").split()).lower() for e in s.timeline]
+        if s.timeline and (len(set(whens)) < len(whens) or sum(bool(re.fullmatch(r"(?:в\s+)?\d{4}(?:\s*г\.?|\s*год\w*)?", w)) for w in whens) >= 2):
+            s.points = s.points + [_sentence(f"{e.when} — {e.what}") for e in s.timeline if e.what]
+            done.append({"slide": k, "kind": "timeline_to_points", "text": "; ".join(whens)})
+            s.timeline = []
+        others = [x for j, x in enumerate(leads) if j != i and x]
+        keep: list[str] = []
+        for pt in s.points:
+            if (any(_overlap(pt, x) >= KB_REPEAT for x in seen + others) or any(_overlap(pt, x) >= KB_REPEAT for x in keep + [s.lead])
+                    or _restates(pt, s.lead)):
+                done.append({"slide": k, "kind": "repeat", "text": pt})
+                continue
+            keep.append(pt)
+        s.points = keep
+        if s.takeaway and i != final:
+            own = _figs(_body(s))
+            foreign = {f for f in _figs(s.takeaway) - own if not re.fullmatch(r"(?:19|20)\d{2}", f)}  # a year names the time, no fact
+            # a figure of another slide's statement that the takeaway retells («…до 50 сотрудников» is no «50 % бюджета»)
+            told = [t for j, x in enumerate(slides) if j != i for t in _statements(x)]
+            elsewhere = {f for f in foreign if any(f in _figs(t) and _overlap(s.takeaway, t) >= KB_RETELL for t in told)}
+            if (s.lead and _overlap(s.takeaway, s.lead) >= KB_REPEAT) or elsewhere:
+                done.append({"slide": k, "kind": "repeat_takeaway", "text": s.takeaway})
+                s.takeaway = ""
+        seen += [x for x in [s.lead, *s.points, s.takeaway] if x]
+    if final > 0:
+        done += _kb_closing(slides, final)
+    return done
+
+
+def _kb_closing(slides: list[TopicSlide], final: int) -> list[dict]:
+    """The closing slide: the deck's conclusions (the takeaways of the slides before it, spread over the deck) and its
+    own points that ask, plan or warn; a point with a new figure that does neither goes."""
+    s = slides[final]
+    done: list[dict] = []
+    said = " ".join(_body(x) + " " + (x.takeaway or "") for x in slides[:final])
+    own: list[str] = []
+    for pt in s.points:
+        if _CLOSING_RE.search(pt) or not (_figs(pt) - _figs(said)):
+            own.append(pt)
+        else:
+            done.append({"slide": final + 2, "kind": "closing_new_fact", "text": pt})
+    outs = [x.takeaway for x in slides[:final] if x.takeaway]
+    picks: list[str] = []
+    if outs:
+        want = min(FINAL_CONCLUSIONS, len(outs), max(0, FINAL_POINTS - len(own)))
+        idx = sorted({round(j * (len(outs) - 1) / max(1, want - 1)) for j in range(want)}) if want > 1 else ([0] if want else [])
+        for j in idx:
+            t = _sentence(outs[j])
+            if not any(_overlap(t, x) >= KB_REPEAT for x in picks + own + [s.lead, s.takeaway] if x):
+                picks.append(t)
+    if picks:
+        done.append({"slide": final + 2, "kind": "closing_conclusions", "text": " | ".join(picks)})
+    s.points = (picks + own)[:FINAL_POINTS]
+    return done
+
+
+def kb_weigh_fixes(slides: list[TopicSlide], issues: list[FactIssue], kb: Any, res: Any = None) -> list[FactIssue]:
+    """A deck from the person's documents: the fact check's correction stays only when the documents back it at least as
+    well as the statement it corrects — one fragment states the figures of the correction no worse (live, qa5 kb: «за
+    1 день» of the strategy corrected to «за 5 дней» of the report; «в четвёртом квартале 2026 … 450 млн ₽» to «в
+    первом квартале 2027 …»). A drop (no fix) and a fix of wording only stay."""
+    said = {x["id"]: x["text"] for x in statements(slides)}
+    keep: list[FactIssue] = []
+    for it in issues:
+        before, fix = said.get(it.id.strip()), (it.fix or "").strip()
+        if before and fix and kb.misses(fix) > kb.misses(before):
+            if res is not None:
+                res.warnings.append(f"topic_fact_check: the correction of {it.id} is not in the documents — kept as written")
+            continue
+        keep.append(it)
+    return keep
 
 
 def kb_figure_check(slides: list[TopicSlide], kb: Any, given: str = "") -> list[dict]:
@@ -1047,6 +1205,14 @@ def write_topic_deck(
         emit("не получилось составить план — соберу каркас по теме.")
         return finish("failed", "plan")
     plan.title = plan.title or _subject_title(subject)
+    if kb is not None:
+        # the person's documents: the deck ends with its conclusion and request; no stock pictures of business people
+        # beside their figures unless the request asks for pictures (qa5 06, 10)
+        if mode.reason != "kb_data" and kb_final(plan):  # (a data deck's knowledge part: the data story has its summary)
+            res.edits.append({"slide": len(plan.slides) + 1, "kind": "final_added", "text": plan.slides[-1].title})
+        if not _PICTURE_ASK_RE.search(mode.topic):
+            for ps in plan.slides:
+                ps.picture = False
     pics = [i for i, s in enumerate(plan.slides) if s.picture and s.form in PICTURE_FORMS][:MAX_PICTURES]
     for i, s in enumerate(plan.slides):
         s.picture = i in pics
@@ -1103,8 +1269,12 @@ def write_topic_deck(
     if put:
         res.edits.extend({"slide": p["slide"], "kind": "must_fact", "text": p["fact"]} for p in put)
 
-    # 4b. the knowledge base: every figure of the deck must be in its documents (or in the person's request)
+    # 4b. the knowledge base: every figure of the deck must be in its documents (or in the person's request); a fact
+    # said once in the deck; a «timeline» of one vague year is a list
     if kb is not None:
+        tidied = kb_tidy(slides)
+        if tidied:
+            res.edits.extend(tidied)
         gone = kb_figure_check(slides, kb, given=" ".join([mode.topic, *mode.theses, *plan_items]))
         res.removed.extend(gone)
         if gone:
@@ -1148,6 +1318,8 @@ def write_topic_deck(
         with ThreadPoolExecutor(max_workers=max(1, min(int(limit), len(batches)))) as ex:
             issues = [it for found in ex.map(check_one, batches) for it in found]
         skipped: list[dict] = []
+        if kb is not None:
+            issues = kb_weigh_fixes(slides, issues, kb, res)
         changed = apply_fixes(slides, issues, skipped)
         if skipped:
             res.warnings.append(f"topic_fact_check: {len(skipped)} correction(s) about another statement not applied: " + "; ".join(x["id"] for x in skipped[:6]))

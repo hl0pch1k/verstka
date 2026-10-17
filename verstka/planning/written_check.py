@@ -1113,6 +1113,8 @@ def _check_headline(r: _Run) -> None:
         for i, (sn, sd) in enumerate(zip(src.sentences, src.dates)):
             if not want.within(sd) or (figs and not any(any(_same_value(v, x) for x in _values(sn)) for v in figs)):
                 continue
+            if sn.lstrip().startswith("|"):
+                continue  # a row of the slide's table is no headline
             cands.append((coverage(h, sn), i))
         shown = [*s.content.bullets, *s.content.paragraphs, *(f"{it.title} {it.text}" for it in s.content.items)]
         ok = []
@@ -1131,7 +1133,7 @@ def _check_headline(r: _Run) -> None:
         new = H.strip_end(src.title or "")
         # G4-2: the sentence the rejected headline told goes back onto the slide, as its first body line
         k = _event_sentence(h, src)
-        if k is not None:
+        if k is not None and not src.sentences[k].lstrip().startswith("|"):
             from verstka.planning.clauses import fit
 
             back = _fit_line(src.sentences[k], r)

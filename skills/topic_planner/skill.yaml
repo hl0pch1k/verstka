@@ -1,5 +1,5 @@
 name: topic_planner
-version: 1.2.0
+version: 1.2.1
 role: llm
 description: >
   Writer mode, step 1 (verstka/planning/topic_writer.py): a request like «Сделай презентацию про вторую мировую войну»
@@ -17,3 +17,4 @@ changelog:
   - "1.0.0: writer mode v2 (2026-10-08): the owner — «насыщенную, полную и готовую презентацию… чтобы ничего не упустить, самые важные и нужные факты». The v1 writer (one call over a Wikipedia cut) left out 9 May 1945 and every formula of «интегралы»"
   - "1.1.0: formulas as typeset LaTeX, each with its explanation in words; math and technical topics are decks of formulas, worked examples and their explanation (2026-10-08)"
   - "1.2.0: the person's knowledge base as the only source of facts (`source: kb`) and the person's plan followed item by item (`plan_items`) (2026-10-17)"
+  - "1.2.1: knowledge base mode — every figure on one slide, tables as tables or charts, the closing conclusion and request, no pictures unless asked, timelines only with own dates (qa5, 2026-10-17)"

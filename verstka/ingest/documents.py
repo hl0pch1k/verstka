@@ -793,7 +793,11 @@ def _respace(lines: list[_Line], plain: str) -> None:
             spaced = " ".join(plain[a:b + 1].split())
             new_cells.append((x0, x1, spaced))
             cursor = at + len(ct)
-        ln.cells = new_cells
+        # a currency sign drawn from another font after the stop that follows it («млн :₽» → «млн ₽:»)
+        ln.cells = [(a, b, _SIGN_AFTER_STOP_RE.sub(r" \2\1", t)) for a, b, t in new_cells]
+
+
+_SIGN_AFTER_STOP_RE = re.compile(r"\s([:;,.])([₽$€£¥])(?=\s|$)")
 
 
 def _norm_running(t: str) -> str:

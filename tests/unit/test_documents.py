@@ -52,6 +52,12 @@ def test_the_pdf_reads_like_the_docx_it_was_saved_from():
     assert a == b
 
 
+def test_a_currency_sign_drawn_after_its_stop_goes_back_before_it():
+    doc = read_document("strategiya-2027.pdf", (FIX / "kb" / "strategiya-2027.pdf").read_bytes())
+    texts = [b.text for b in doc.blocks]
+    assert "Инвестиции по годам, млн ₽:" in texts and not any(":₽" in t for t in texts)
+
+
 def test_merged_cells_are_filled_and_a_one_cell_frame_is_a_paragraph():
     body = [p("Отчёт", "1"), table([["Регион", "Месяц", "Продажи"], ["Москва", "Янв", "10"], ["", "Фев", "12"], ["", "Мар", "15"]], merge_first_col=True),
             table([["Важно: данные предварительные"]])]
