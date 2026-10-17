@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import random
+
 import pytest
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -11,16 +13,21 @@ from pptx.util import Emu, Pt
 
 from verstka.rendering.charts import (
     MIN_PLOT,
+    SCATTER_ASPECT,
     SERIES_CONTRAST,
+    TREND_SERIES,
     _nice_scale,
     _scatter_range,
     add_chart,
     bounded_cap,
     chart_palette,
+    delta_e,
+    ellipsize,
     fit_categories,
     is_time_axis,
     legible_color,
     min_frame_height,
+    pearson,
     period_levels,
     short_years,
     thin_picks,
@@ -196,19 +203,21 @@ def _bars12(box: Bbox, labels_on: bool = True):
 
 
 @pytest.mark.parametrize("h_pt", [120, 150, 190, 260, 340])
-def test_twelve_horizontal_rows_never_have_text_over_text(h_pt):
+def test_twelve_horizontal_rows_keep_every_name_and_never_have_text_over_text(h_pt):
     s, gf, cs = _bars12(_frame(0.88, h_pt))
     ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
-    plot_h = float(ml.find(f"{C}h").get("val")) * gf.height / 12700
-    pitch = plot_h / len(REG)
+    pitch = float(ml.find(f"{C}h").get("val")) * gf.height / 12700 / len(REG)
     labels = _cat_cache(cs)
     size = int(cs.find(f".//{C}catAx/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100
-    shown = [i for i, t in enumerate(labels) if t]
-    gaps = [(b - a) * pitch for a, b in zip(shown, shown[1:])]
-    # the labels shown stand a line of type apart (a label of two lines two): none over another
-    assert shown[0] == 0 and all(g >= size * 1.15 for g in gaps), (h_pt, size, round(pitch, 1), gaps)
+    assert all(labels) and len(labels) == len(REG)  # a name is never blanked (an unnamed row cannot be read)
+    assert all(lab.startswith(name[: max(3, len(lab) - 1)].rstrip("…")) for lab, name in zip(labels, REG))  # (cut at the most with an ellipsis)
+    if gf.verstka_rows_fit:
+        assert pitch * 0.95 >= size * 1.15, (h_pt, size, round(pitch, 1))  # the rows hold their names: none over another
+    else:
+        assert h_pt < 190 and gf.verstka_min_height > h_pt  # a frame too short says so, and says what it needs
+    assert gf.verstka_rows_fit == (h_pt >= 190)
     if h_pt >= 260:
-        assert len(shown) == len(REG)  # room enough: every row named
+        assert size >= 10.5 and labels == REG  # room enough: the labels at the chart's own size, whole
 
 
 def test_a_tall_enough_frame_names_every_row_and_keeps_the_bars_readable():
@@ -310,3 +319,110 @@ def test_the_group_name_stands_in_front_of_the_legend():
     # no title asked: no box, the legend is the legend as before
     s, gf, cs = _chart(spec, _frame(0.88, 260))
     assert gf.verstka_legend_title is None and cs.find(f".//{C}legend/{C}layout") is None
+
+
+# ---------------------------------------------------------------------------------------------- round 3 (second live QA)
+
+WIDE_FACE = ChartStyleSpec(series_colors=["0077FF", "00D3E6", "005EFF", "FF6C6C", "0563C1"], font_family="Montserrat", font_size_pt=7.0)  # (not measured: a wider stand-in)
+
+
+def test_a_narrow_slot_thins_a_time_axis_at_a_size_under_the_floor_before_it_turns():
+    # 21 months in a 24.7 pt slot, a face wider than the stand-in measures: «янв» does not fit one slot at the floor
+    # (10.8 pt), so the labels were turned; a size a little under the floor (a thinned label owns its slot in LibreOffice)
+    # keeps them straight
+    cats = MONTHS
+    got = fit_categories(cats, "Montserrat", [10.8], 24.7, 40.0, ordered=True)
+    assert got.mode == "turn" and not got.fits  # (without the smaller sizes)
+    from verstka.rendering.charts import _soft_sizes
+
+    soft = _soft_sizes(10.8, [10.8])
+    assert soft and all(8.0 <= x < 10.8 for x in soft)
+    got = fit_categories(cats, "Montserrat", [10.8], 24.7, 40.0, ordered=True, soft_sizes=soft)
+    assert got.mode == "thin" and got.fits and got.size < 10.8 and got.keep >= 2 and got.lines <= 2
+    kept = [i for i, t in enumerate(got.labels) if t]
+    assert kept[0] == 0 and kept[-1] == len(cats) - 1
+    # on the chart: straight, thinned, the first and the last kept, its words inside the slot at the size it was set in
+    s, gf, cs = _chart(_line(), _frame(0.63, 170), style=WIDE_FACE)
+    ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
+    slot = float(ml.find(f"{C}w").get("val")) * gf.width / 12700 / len(MONTHS)
+    assert slot < 26 and _rot(cs) == "0"
+    shown = [i for i, t in enumerate(_cat_cache(cs)) if t]
+    assert shown[0] == 0 and shown[-1] == len(MONTHS) - 1 and 4 <= len(shown) < len(MONTHS)
+    assert int(cs.find(f".//{C}catAx/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100 < 10.8
+
+
+def test_every_horizontal_row_keeps_its_name_even_in_a_frame_too_short_for_the_rows():
+    s, gf, cs = _bars12(_frame(0.88, 110))
+    labels = _cat_cache(cs)
+    assert all(labels) and not gf.verstka_rows_fit and gf.verstka_min_height > 110
+    # a name too long for one line is cut with an ellipsis, never dropped
+    assert ellipsize("Электроэнергетика и электротехника", "Play", 8.1, 120.0).endswith("…") and ellipsize("Юриспруденция", "Play", 8.1, 400.0) == "Юриспруденция"
+    assert text_width_pt(ellipsize("Электроэнергетика и электротехника", "Play", 8.1, 120.0), "Play", 8.1) <= 120.0
+    # the chart sized by its own minimum holds every row
+    need = gf.verstka_min_height
+    s, gf, cs = _bars12(_frame(0.88, need + 2))
+    assert gf.verstka_rows_fit and all(_cat_cache(cs))
+
+
+def test_series_of_a_one_colour_template_differ_by_more_than_the_shade():
+    # Blueprint: one teal in the template. Its shades that stand off the ground at 3:1 sit close together: the hues round it
+    for bg in ("FFFFFF", "0B1220", "F5F1E8"):
+        pal = chart_palette(["2F8AA5"], bg, 4, extra=[], floor=SERIES_CONTRAST)
+        assert len(set(pal)) == 4 and pal[0] == "2F8AA5" or bg != "FFFFFF"
+        assert all(contrast_ratio(c, bg) >= SERIES_CONTRAST for c in pal), (bg, pal)
+        assert min(delta_e(a, b) for i, a in enumerate(pal) for b in pal[i + 1 :]) >= 20, (bg, pal)
+    one = ChartStyleSpec(series_colors=["2F8AA5"], font_family="Play", font_size_pt=7.0)
+    spec = ChartSpec(type="stacked_bar", categories=["a", "b", "c"], series=[InlineSeries(name="x", values=[3, 2, 4]), InlineSeries(name="y", values=[2, 3, 1]), InlineSeries(name="z", values=[1, 1, 2])], unit="чел.")
+    cs = _chart(spec, _frame(0.88, 260), style=one)[2]
+    fills = [ser.find(f"{C}spPr/{A}solidFill/{A}srgbClr").get("val") for ser in cs.iter(f"{C}ser")]
+    assert len(set(fills)) == 3 and min(delta_e(a, b) for i, a in enumerate(fills) for b in fills[i + 1 :]) >= 20 and all(contrast_ratio(f, "FFFFFF") >= 3.0 for f in fills)
+
+
+def _cloud(n, slope, noise, seed=1, off=0.0):
+    rnd = random.Random(seed)
+    xs = [rnd.uniform(1, 25) for _ in range(n)]
+    return xs, [40 + x * slope + off + rnd.gauss(0, noise) for x in xs]
+
+
+def test_a_scatter_keeps_a_near_square_plot_and_draws_its_trend_when_the_points_lean():
+    assert pearson([1, 2, 3, 4], [2, 4, 6, 8.5]) > 0.99 and pearson([1, 2], [1, 2]) is None and pearson([1, 1, 1], [1, 2, 3]) is None
+    xs, ys = _cloud(40, 1.9, 6.0)
+    one = ChartSpec(type="scatter", xy=[XYSeries(name="Клиенты", x=xs, y=ys)], x_title="Подготовка, ч/нед.", y_title="Балл")
+    s, gf, cs = _chart(one, _frame(0.88, 260))
+    ser = cs.find(f".//{C}scatterChart/{C}ser")
+    tl = ser.find(f"{C}trendline")
+    assert tl is not None and tl.find(f"{C}trendlineType").get("val") == "linear" and tl.find(f"{C}dispEq").get("val") == "0" and tl.find(f"{C}dispRSqr").get("val") == "0"
+    names = [c.tag.split("}")[1] for c in ser]
+    assert names.index("trendline") < names.index("xVal")  # (schema order)
+    # a wide, short frame: the plot narrows to the near-square shape and stands in the middle, the Y title beside it
+    ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
+    pw, ph = float(ml.find(f"{C}w").get("val")) * gf.width, float(ml.find(f"{C}h").get("val")) * gf.height
+    assert pw <= ph * SCATTER_ASPECT * 1.02 and float(ml.find(f"{C}x").get("val")) > 0.12
+    y_axis = next(a for a in cs.findall(f".//{C}valAx") if a.find(f"{C}axPos").get("val") == "l")
+    title = y_axis.find(f"{C}title/{C}layout/{C}manualLayout")
+    assert float(title.find(f"{C}x").get("val")) > 0.05 and float(title.find(f"{C}x").get("val")) < float(ml.find(f"{C}x").get("val"))
+    # a cloud without a lean has no line
+    nx, ny = _cloud(40, 0.0, 12.0, seed=3)
+    flat = ChartSpec(type="scatter", xy=[XYSeries(name="Клиенты", x=nx, y=ny)])
+    assert abs(pearson(nx, ny)) < 0.5 and not list(_chart(flat, _frame(0.88, 260))[2].iter(f"{C}trendline"))
+    # a scatter of several groups: one trend line over all the points, on a series that draws nothing and has no legend entry
+    groups = [XYSeries(name=n, x=_cloud(30, 1.9, 7.0, seed=i, off=o)[0], y=_cloud(30, 1.9, 7.0, seed=i, off=o)[1]) for i, (n, o) in enumerate((("Технический", 0.0), ("Естественнонаучный", 6.0), ("Гуманитарный", -4.0)))]
+    s, gf, cs = _chart(ChartSpec(type="scatter", xy=groups, x_title="Подготовка, ч/нед.", y_title="Балл"), _frame(0.88, 300))
+    sers = cs.findall(f".//{C}scatterChart/{C}ser")
+    assert len(sers) == 4 and sers[0].find(f"{C}tx//{C}v").text == TREND_SERIES  # (first: LibreOffice drops series that precede a longer one)
+    assert len(sers[0].findall(f"{C}xVal//{C}pt")) == 90 and sers[0].find(f"{C}marker/{C}symbol").get("val") == "none" and sers[0].find(f"{C}trendline") is not None
+    assert all(sr.find(f"{C}trendline") is None and sr.find(f"{C}marker/{C}symbol").get("val") == "circle" for sr in sers[1:])
+    deleted = {int(le.find(f"{C}idx").get("val")) for le in cs.findall(f".//{C}legend/{C}legendEntry") if le.find(f"{C}delete").get("val") == "1"}
+    assert deleted == {0, 4}  # (the helper's entry and, where a renderer lists it apart, its trend line's)
+    # the plot's lean is the headline's slope: the line is the renderer's fit, no figure of ours
+    assert 90 == sum(len(sr.findall(f"{C}xVal//{C}pt")) for sr in sers[1:])
+
+
+def test_a_scatter_frame_is_sized_for_a_near_square_plot():
+    fs = 12.0
+    assert min_frame_height("scatter", 30, fs, x_title=True) > min_frame_height("line", 21, fs, label_lines=2, x_title=True) * 0.8  # a plot of ≥ 12 lines of type
+    assert min_frame_height("scatter", 30, fs, x_title=True) >= 12 * fs + 4 * fs
+    xs, ys = _cloud(40, 1.9, 6.0)
+    spec = ChartSpec(type="scatter", xy=[XYSeries(name="a", x=xs, y=ys)], x_title="x", y_title="y")
+    gf = _chart(spec, _frame(0.88, 400))[1]
+    assert gf.verstka_min_height == pytest.approx(min_frame_height("scatter", 1, gf.verstka_font_pt, x_title=True))

@@ -21,7 +21,7 @@ import html
 import math
 from typing import Optional
 
-from verstka.rendering.charts import SEAM_PT, TITLE_LINE, label_on, thin_picks
+from verstka.rendering.charts import SCATTER_ASPECT, SEAM_PT, TITLE_LINE, TREND_SERIES, label_on, thin_picks
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.schemas.common import contrast_ratio
 from verstka.schemas.deck_ir import IRAxisScale, IRChart, IRChartSeries, IRPointLabel
@@ -194,8 +194,10 @@ def _cat_shown(cats: list[str], slot: float, size: float) -> set[int]:
     return set(thin_picks(len(cats), step)) if step > 1 else set(range(len(cats)))
 
 
-def _legend_rows(parts: list, items: list[tuple[str, str, bool]], width: float, y_bottom: float, size: float, muted: str) -> None:
-    """A bottom legend, wrapped into centred rows; items = (name, colour, hollow)."""
+def _legend_rows(parts: list, items: list[tuple[str, str, bool]], width: float, y_bottom: float, size: float, muted: str, x0: float = 0.0) -> None:
+    """A bottom legend, wrapped into centred rows; items = (name, colour, hollow). `x0`: the legend begins there (a title
+    of its group stands in front of it)."""
+    width = max(width - x0, 1.0)
     rows: list[list] = [[]]
     used = 0.0
     for it in items:
@@ -207,7 +209,7 @@ def _legend_rows(parts: list, items: list[tuple[str, str, bool]], width: float, 
         used += w
     for r, row in enumerate(rows):
         total = sum(w for _, w in row)
-        lx = max(0.0, (width - total) / 2)
+        lx = x0 if x0 > 0 else max(0.0, (width - total) / 2)  # (behind its group's title the entries start where the title ends)
         ly = y_bottom - (len(rows) - 1 - r) * size * 1.5
         for (name, col, hollow), w in row:
             fill = "none" if hollow else f"#{col}"
@@ -338,9 +340,17 @@ def _circle(x: float, y: float, r: float, fill: str, alpha: Optional[float] = No
 # ---------------------------------------------------------------------------------------------- the chart
 
 
-def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], text_hex: str = "222222", font: str = "Play, Arial, sans-serif", font_px: float = 12.0, ground: Optional[str] = None) -> str:
+def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], text_hex: str = "222222", font: str = "Play, Arial, sans-serif", font_px: float = 12.0, ground: Optional[str] = None, legend_left: float = 0.0, trend: bool = False) -> str:
+    """`trend`: the one series of a scatter has a trend line of its own (the chart part says so; the renderer fits it).
+    `legend_left`: where the bottom legend may begin (pt from the left): a title of the legend's group stands before it
+    on its row (the slide's text box «Chart legend title»), the entries centre in what is left."""
     colors = [c for c in (colors or []) if c] or ["0077FF"]
     series = chart.series or []
+    # a scatter's trend line rides on a series of its own that draws nothing: not a group, not a legend entry
+    helper = next((s for s in series if chart.type == "scatter" and (s.name or "") == TREND_SERIES), None)
+    if helper is not None:
+        series = [s for s in series if s is not helper]
+    trend_series = helper if helper is not None else (series[0] if (trend and chart.type == "scatter" and len(series) == 1) else None)
     cats = chart.categories or []
     n_cat = max(len(cats), max((len(s.values) for s in series), default=0))
     muted = chart.axis_color or text_hex
@@ -381,7 +391,7 @@ def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], te
     elif chart.type in ("line", "area"):
         body = _lines(chart, series, cats, n_cat, w_in, h_in, top, colors, text_hex, muted, font_px, labels, vmin, vmax, geo)
     elif chart.type == "scatter":
-        body = _scatter(chart, series, w_in, h_in, top, colors, muted, base_rule, font_px, labels, geo)
+        body = _scatter(chart, series, w_in, h_in, top, colors, muted, base_rule, font_px, labels, geo, trend_series, text_hex)
     else:
         body = _columns(chart, series, cats, n_cat, w_in, h_in, top, colors, muted, base_rule, font_px, labels, vmin, vmax, geo)
     if inset_l:
@@ -392,7 +402,7 @@ def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], te
         parts += body
     _axis_titles(parts, left_t, bottom_t, geo, inset_l, inset_b, width, h_in, muted, font_px)
     if legend_names:
-        _legend_rows(parts, [(s.name, _series_color(chart, s, k, colors), s.outline_only) for k, s in enumerate(series)], width, height - font_px * 0.7, font_px, muted)
+        _legend_rows(parts, [(s.name, _series_color(chart, s, k, colors), s.outline_only) for k, s in enumerate(series)], width, height - font_px * 0.7, font_px, muted, legend_left)
     parts.append("</svg>")
     return "".join(parts)
 
@@ -414,7 +424,7 @@ def _axis_titles(parts: list, left_t: Optional[str], bottom_t: Optional[str], ge
     if left_t:
         size = _title_size(left_t, ph, font_px)
         half = min(_width(left_t, size), h_in) / 2
-        cx = size * TITLE_LINE / 2
+        cx = size * TITLE_LINE / 2 + geo.get("title_x0", 0.0)  # (a narrowed scatter's plot: its title stands beside it)
         cy = min(max(top + ph / 2, half), max(half, h_in - half))
         parts.append(f'<text x="{cx:.1f}" y="{cy:.1f}" transform="rotate(-90 {cx:.1f} {cy:.1f})" font-size="{size:.1f}" fill="#{muted}" text-anchor="middle" dominant-baseline="middle">{html.escape(left_t)}</text>')
     if bottom_t:
@@ -674,7 +684,7 @@ def _num(t: str) -> Optional[float]:
         return None
 
 
-def _scatter(chart, series, width, height, top, colors, muted, base_rule, font_px, labels, geo) -> list:
+def _scatter(chart, series, width, height, top, colors, muted, base_rule, font_px, labels, geo, trend=None, text_hex: str = "222222") -> list:
     """Points only, no lines: translucent ringed markers on two quiet value axes on the PPTX's round ticks — Y with
     gridlines, X on a hairline baseline; the highlighted point larger, in the accent, on top, with its value beside it."""
     parts: list = []
@@ -695,6 +705,9 @@ def _scatter(chart, series, width, height, top, colors, muted, base_rule, font_p
     pad_b = font_px * TITLE_LINE + font_px * 0.6
     pw = max(width - left - right, width * 0.3)
     ph = max(height - pad_t - pad_b, height * 0.3)
+    if pw > ph * SCATTER_ASPECT:  # as the PPTX: a plot of a near-square shape stands in the middle of its frame
+        geo["title_x0"] = (pw - ph * SCATTER_ASPECT) / 2
+        left, pw = left + geo["title_x0"], ph * SCATTER_ASPECT
     x_of = lambda v: left + pw * (v - x_lo) / ((x_hi - x_lo) or 1.0)  # noqa: E731
     y_of = lambda v: pad_t + ph * (y_hi - v) / ((y_hi - y_lo) or 1.0)  # noqa: E731
     geo["plot"] = (left, pad_t, pw, ph)
@@ -713,6 +726,20 @@ def _scatter(chart, series, width, height, top, colors, muted, base_rule, font_p
             marks.append((1, _circle(x_of(x), y_of(y), (s.point_sizes.get(j) or s.marker_size or 7.0) / 2, s.point_colors.get(j, col), None, s.marker_line, 1.5)))
         else:
             marks.append((0, _circle(x_of(x), y_of(y), r, col, s.marker_alpha, s.marker_line, 0.75)))
+    if trend is not None:
+        # the least-squares line through all the points the trend series holds, over the data's own reach, dashed
+        t_xs = trend.x_values or cat_x
+        tx = [x for x, y in zip(t_xs, trend.values) if x is not None and y is not None]
+        ty = [y for x, y in zip(t_xs, trend.values) if x is not None and y is not None]
+        n = len(tx)
+        if n >= 3 and max(tx) > min(tx):
+            mx, my = sum(tx) / n, sum(ty) / n
+            sxx = sum((x - mx) ** 2 for x in tx)
+            slope = sum((x - mx) * (y - my) for x, y in zip(tx, ty)) / sxx
+            xa, xb = min(tx), max(tx)
+            ya, yb = my + slope * (xa - mx), my + slope * (xb - mx)
+            tcol = _series_color(chart, series[0], 0, colors) if len(series) == 1 else text_hex
+            marks.append((0, f'<line x1="{x_of(xa):.1f}" y1="{y_of(ya):.1f}" x2="{x_of(xb):.1f}" y2="{y_of(yb):.1f}" stroke="#{tcol}" stroke-width="1.5" stroke-dasharray="5 3"/>'))
     parts += [m for _, m in sorted(marks, key=lambda m: m[0])]
     for k, j, x, y in pts:
         s = series[k]

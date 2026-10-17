@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import html
+import math
 import re
 from pathlib import Path
 from typing import Optional
@@ -83,6 +84,88 @@ def _runs_html(p, slide_w: int, default_color: str, default_font: str) -> str:
     return "".join(out)
 
 
+_NS = {
+    "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+}
+
+
+def _crop_css(crop) -> str:
+    """The visible part of a picture (`a:srcRect` as fractions l, t, r, b of the image) stretched over its frame as
+    PowerPoint does: the image drawn larger than the frame and shifted, never the whole of it fitted in (a hard edge
+    across a cropped cover). Empty when nothing is cropped."""
+    if not crop:
+        return ""
+    l, t, r, b = crop
+    if min(crop) < 0 or max(crop) <= 1e-6 or l + r >= 0.99 or t + b >= 0.99:
+        return ""
+    px = l / (l + r) * 100 if (l + r) > 1e-9 else 0.0
+    py = t / (t + b) * 100 if (t + b) > 1e-9 else 0.0
+    return f";background-size:{100 / (1 - l - r):.3f}% {100 / (1 - t - b):.3f}%;background-position:{px:.3f}% {py:.3f}%;background-repeat:no-repeat"
+
+
+def _layout_pic_crop(pkg: PptxPackage, source_part: str, image_part: str) -> Optional[tuple[float, float, float, float]]:
+    """The crop (`a:srcRect`) of a layout's or master's picture of `image_part`, as fractions l, t, r, b."""
+    try:
+        root = pkg.xml(source_part)
+        for pic in root.iterfind(".//p:pic", _NS):
+            blip = pic.find("p:blipFill/a:blip", _NS)
+            rid = blip.get(f"{{{_NS['r']}}}embed") if blip is not None else None
+            if not rid or pkg.target_of(source_part, rid) != image_part:
+                continue
+            rect = pic.find("p:blipFill/a:srcRect", _NS)
+            if rect is None:
+                return None
+            vals = tuple(int(rect.get(k) or 0) / 100000.0 for k in ("l", "t", "r", "b"))
+            return vals if any(vals) else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _slide_facts(pkg: PptxPackage, slide_part: Optional[str], slide_w: int) -> dict[str, dict]:
+    """What the IR does not carry, read from the slide's own XML per shape id: the drop shadow (CSS `box-shadow`) and, for
+    a chart, whether its series has a trend line."""
+    out: dict[str, dict] = {}
+    if not slide_part:
+        return out
+    try:
+        root = pkg.xml(slide_part)
+    except Exception:  # noqa: BLE001
+        return out
+    for sp in list(root.iterfind(".//p:sp", _NS)) + list(root.iterfind(".//p:graphicFrame", _NS)):
+        c_nv = sp.find("p:nvSpPr/p:cNvPr", _NS)
+        if c_nv is None:
+            c_nv = sp.find("p:nvGraphicFramePr/p:cNvPr", _NS)
+        if c_nv is None:
+            continue
+        info: dict = {}
+        sh = sp.find("p:spPr/a:effectLst/a:outerShdw", _NS)
+        if sh is not None:
+            clr = sh.find("a:srgbClr", _NS)
+            if clr is not None and clr.get("val"):
+                alpha = clr.find("a:alpha", _NS)
+                a = int(alpha.get("val")) / 100000.0 if alpha is not None else 1.0
+                ang = math.radians(int(sh.get("dir") or 0) / 60000.0)
+                dist, blur = int(sh.get("dist") or 0), int(sh.get("blurRad") or 0)
+                cq = lambda v: f"{v / max(slide_w, 1) * 100:.3f}cqw"  # noqa: E731
+                info["shadow"] = f"{cq(dist * math.cos(ang))} {cq(dist * math.sin(ang))} {cq(blur)} {_rgba(clr.get('val'), a)}"
+        chart = sp.find(".//c:chart", _NS)
+        if chart is not None:
+            rid = chart.get(f"{{{_NS['r']}}}id")
+            part = pkg.target_of(slide_part, rid) if rid else None
+            if part and pkg.exists(part):
+                try:
+                    info["trend"] = pkg.xml(part).find(".//c:trendline", _NS) is not None
+                except Exception:  # noqa: BLE001
+                    pass
+        if info:
+            out[c_nv.get("id")] = info
+    return out
+
+
 def _rgba(hex_: str, alpha: float) -> str:
     """`#RRGGBB` at `alpha` as CSS (a translucent swatch keeps the tint PowerPoint composites over the slide)."""
     if alpha >= 0.999 or len(hex_) != 6:
@@ -122,8 +205,10 @@ def _text_html(e: IRElement, slide_w: int, default_color: str, default_font: str
     return f'<div class="tx" style="justify-content:{vpos};{_inset_css(e, slide_w)}{nowrap}">{"".join(inner)}</div>'
 
 
-def _shape_css(e: IRElement, slide_w: int, slide_h: int) -> str:
+def _shape_css(e: IRElement, slide_w: int, slide_h: int, shadow: Optional[str] = None) -> str:
     css = []
+    if shadow:
+        css.append(f"box-shadow:{shadow}")
     if e.fill_hex:
         css.append(f"background:{_rgba(e.fill_hex, e.fill_alpha)}")
     if e.line_hex:
@@ -155,7 +240,8 @@ def _number_columns(rows: list[list[str]]) -> list[bool]:
     return out
 
 
-def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, cache: dict, manifest: TemplateManifest, default_font: str) -> str:
+def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, cache: dict, manifest: TemplateManifest, default_font: str, facts: Optional[dict] = None) -> str:
+    info = (facts or {}).get(str(e.id), {})
     f = e.bbox_frac
     style = f"left:{_pct(f.x)};top:{_pct(f.y)};width:{_pct(f.w)};height:{_pct(f.h)};z-index:{e.z}"
     bg = slide.background_hex or ("000000" if slide.family.value == "dark" else "FFFFFF")
@@ -168,10 +254,16 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
             return ""
         if e.formula:  # a formula: its picture as drawn (its box is the picture's own), read aloud as its text
             return f'<div class="el pic {cls}" role="img" aria-label="{html.escape(e.formula, quote=True)}" style="{style};background-size:100% 100%"></div>'
-        return f'<div class="el pic {cls}" style="{style}"></div>'
+        return f'<div class="el pic {cls}" style="{style}{_crop_css(e.crop)}"></div>'
     if e.type == "chart" and e.chart:
         colors = manifest.components.chart_style.series_colors or manifest.tokens.accents()
-        svg = chart_svg(e.chart, e.bbox.w / EMU_PER_PT, e.bbox.h / EMU_PER_PT, colors, text_hex=text_default, font=f"'{default_font}', Play, Arial, sans-serif", font_px=max(manifest.components.chart_style.font_size_pt, 9), ground=bg)
+        # the slide's text box «Chart legend title» (the group the legend's series belong to) stands at the head of the
+        # legend's row: the legend begins after it
+        legend_left = 0.0
+        for t in slide.elements:
+            if t.name == "Chart legend title" and e.bbox.x - 1 <= t.bbox.x <= e.bbox.x + e.bbox.w and e.bbox.y + 0.6 * e.bbox.h <= t.bbox.y <= e.bbox.y + e.bbox.h:
+                legend_left = max(legend_left, (t.bbox.x + t.bbox.w - e.bbox.x) / EMU_PER_PT)
+        svg = chart_svg(e.chart, e.bbox.w / EMU_PER_PT, e.bbox.h / EMU_PER_PT, colors, text_hex=text_default, font=f"'{default_font}', Play, Arial, sans-serif", font_px=max(manifest.components.chart_style.font_size_pt, 9), ground=bg, legend_left=legend_left, trend=bool(info.get("trend")))
         return f'<div class="el" style="{style}">{svg}</div>'
     if e.type == "table" and e.table and e.table.rows:
         ts = manifest.components.table_style
@@ -181,7 +273,7 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
         body = "".join("<tr>" + "".join(f'<td{" class=n" if num[j] else ""}>{html.escape(c)}</td>' for j, c in enumerate(r)) + "</tr>" for r in rows[1:])
         return f'<div class="el" style="{style}"><table style="font-size:{_size_css(ts.font_size_pt, ir.slide_w)};color:#{ts.body_text_hex or text_default}"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
     if e.type in ("text", "shape"):
-        box = _shape_css(e, ir.slide_w, ir.slide_h)
+        box = _shape_css(e, ir.slide_w, ir.slide_h, info.get("shadow"))
         inner = _text_html(e, ir.slide_w, text_default, default_font) if e.has_text else ""
         return f'<div class="el txt" style="{style};{box}">{inner}</div>'
     if e.type == "connector":
@@ -202,6 +294,7 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
         if c.source.startswith("layout:") or c.source.startswith("master:"):
             chrome_by_layout.setdefault(c.source.split(":", 1)[1], []).append(c)
     slides_html = []
+    slide_parts = list(pkg.slide_parts)
     for s in ir.slides:
         bg = s.background_hex or ("000000" if s.family.value == "dark" else "FFFFFF")
         parts = [f'<section class="slide" id="s{s.index}" style="background:#{bg}" data-index="{s.index}">']
@@ -217,9 +310,12 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
             if c.kind == "pic" and c.image_part:
                 cls = _image_class(pkg, c.image_part, cache)
                 if cls:
-                    parts.append(f'<div class="el chrome pic contain {cls}" style="left:{_pct(c.bbox.x)};top:{_pct(c.bbox.y)};width:{_pct(c.bbox.w)};height:{_pct(c.bbox.h)}"></div>')
+                    crop = _layout_pic_crop(pkg, c.source.split(":", 1)[1], c.image_part) if ":" in c.source else None
+                    css = _crop_css(crop)
+                    parts.append(f'<div class="el chrome pic{"" if css else " contain"} {cls}" style="left:{_pct(c.bbox.x)};top:{_pct(c.bbox.y)};width:{_pct(c.bbox.w)};height:{_pct(c.bbox.h)}{css}"></div>')
+        facts = _slide_facts(pkg, slide_parts[s.index - 1] if 0 < s.index <= len(slide_parts) else None, ir.slide_w)
         for e in sorted(s.elements, key=lambda e: e.z):
-            parts.append(_element_html(e, s, ir, pkg, cache, manifest, default_font))
+            parts.append(_element_html(e, s, ir, pkg, cache, manifest, default_font, facts))
         if s.notes:
             parts.append(f'<aside class="notes" hidden>{html.escape(s.notes)}</aside>')
         parts.append(f'<div class="num">{s.index} / {ir.n_slides}</div></section>')
