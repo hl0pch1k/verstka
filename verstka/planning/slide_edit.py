@@ -271,12 +271,22 @@ def _words_of(s: OutlineSlide) -> tuple:
     return (s.headline, s.subtitle, s.takeaway, tuple(c.bullets), tuple(c.paragraphs), tuple((it.title, it.text) for it in c.items))
 
 
+def data_context(s: OutlineSlide) -> str:
+    """The prose notes of the slide's data file (`SlideData.context`: «Опрос NPS во II квартале 2025 и 2026 года не
+    проводился…» of «Итоги квартала.txt»), empty when the file has none or the deck predates the field."""
+    d = s.data
+    return " ".join(str(getattr(d, "context", None) or "").split()) if d is not None else ""
+
+
 def keep_data(old: OutlineSlide, new: OutlineSlide) -> OutlineSlide:
     """A redesigned slide made from a data file stays the data layer's: its chart, table or figures, their source and
     `data` (for «Почему так» and the data checks) are kept. The designer's words stay only where every number in them
     is the data's (`verstka/data/story.data_text_ok` — the same rule the audit applies): the headline — one of the
     slide's facts; the subtitle, lines, cards and the caption — a fact or a value the slide shows. A line that fails is
-    dropped; a headline or a caption that fails (or a caption the designer left out) keeps the old one."""
+    dropped; a headline or a caption that fails (or a caption the designer left out) keeps the old one. A number of the
+    file's own notes (`data_context`: «во II квартале 2025 и 2026 года») counts as the data's in the words beside the
+    figures; the headline stays one of the slide's facts."""
+    from verstka.data.headline import numbers_in
     from verstka.data.story import data_text_ok, slide_values
 
     out = new.model_copy(deep=True)
@@ -288,7 +298,7 @@ def keep_data(old: OutlineSlide, new: OutlineSlide) -> OutlineSlide:
     out.content.chart2 = c.chart2.model_copy(deep=True) if c.chart2 is not None else None
     out.content.table = c.table.model_copy(deep=True) if c.table is not None else None
     out.content.numbers = [n.model_copy() for n in c.numbers]
-    values = slide_values(old)
+    values = slide_values(old) + numbers_in(data_context(old))
 
     def ok(text: Optional[str]) -> bool:
         return not (text or "").strip() or data_text_ok(text or "", old, values=values)
@@ -388,6 +398,8 @@ def redesign_slide(
     if unit is None:
         text = _slide_text(old)
         chart_ids = [sid for ch in (old.content.chart, old.content.chart2) if ch is not None for sid in ch.series_ids if sid in ctx.series]
+        if data_context(old):
+            text += f"\nИз файла «{old.data.file}»: {data_context(old)}"  # the file's prose notes: the slide's source too
         unit = A._Unit(key=f"edit{index}", title=old.headline, text=text, series_ids=chart_ids, fact_ids=A._facts_in(ctx, text))
     # the deck's own order for the designer's context (the neighbours' titles), whatever the brief's order was
     neighbours = [unit if i == index else A._Unit(key=f"s{i}", title=s.headline) for i, s in enumerate(outline.slides, 1)]
@@ -438,6 +450,14 @@ def redesign_slide(
                 "(\"takeaway\"), the subtitle or the lines. Every number you write is one of this slide's own figures, as in "
                 "your previous design."
             )
+            notes = data_context(old)
+            if notes:
+                # the file's own words explain what the figures do not (why a quarter has no value): a «почему…» is
+                # answered from them, never made up
+                note += (
+                    f"\n- The data file's own notes (the source's words, the only explanation you may give): «{notes}». "
+                    "When the person asks why or asks to explain, take the reason from these notes; numbers from them count as the data's."
+                )
         fields = edit_targets(request) if old.data is not None else None
 
         def data_attempt(issues: str) -> tuple[OutlineSlide, Optional[OutlineSlide], list[str]]:

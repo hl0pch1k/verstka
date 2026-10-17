@@ -414,3 +414,60 @@ def test_the_reply_never_says_unavailable_when_the_model_answered():
     with pytest.raises(ValueError) as e:
         redesign_slide(outline, 2, brief, None, note="- fix it", skills=SkillsRegistry.load(), providers=_designer({"kind": "bullets", "headline": ""}))
     assert str(e.value) != "model_unavailable" and "модель ответила" in str(e.value)
+
+
+# ------------------------------------------------------------------ the data file's own notes in a text edit
+
+
+NOTES = ("Опрос NPS во II квартале 2025 и 2026 года не проводился: в эти месяцы команда переходила на новую систему "
+         "опросов. Сравнение NPS — с последним измеренным кварталом.")
+
+
+def _context_outline(context=NOTES) -> DeckOutline:
+    o = _data_outline()
+    o.slides[1].data = o.slides[1].data.model_copy(update={"context": context})
+    return o
+
+
+def test_the_designer_reads_the_files_notes_for_a_why():
+    """«добавь в подпись, почему нет данных»: the file's own explanation (SlideData.context) reaches the designer, and
+    its numbers («2025», «2026» — and any figure the notes give) pass the data's number rule in the caption."""
+    from verstka.planning.slide_edit import redesign_slide
+    from verstka.providers.mock import MockProvider
+    from verstka.providers.registry import ProviderLimits, ProviderRegistry
+    from verstka.skills_registry.registry import SkillsRegistry
+
+    seen: list[str] = []
+    old = _context_outline()
+    tk = old.slides[1].takeaway + ". Опрос во II квартале 2025 и 2026 года не проводился: команда переходила на новую систему опросов"
+
+    def script(messages):
+        if "presentation designer" in messages[0].content:
+            seen.append(messages[-1].content)
+            # the stub answers only when it was given the reason, as the live model can only then
+            reason = "переходила на новую систему опросов" in messages[-1].content
+            return {"kind": "chart", "headline": old.slides[1].headline, "takeaway": tk if reason else old.slides[1].takeaway}
+        return {"facts": [], "series": [], "tables": []}
+
+    p = MockProvider(script, model="qwen38-27b-fp8")
+    reg = ProviderRegistry(roles={"llm": p, "vlm": p}, limits=ProviderLimits(max_concurrency=2, time_budget_s=60))
+    r = redesign_slide(old, 2, parse_brief_text(BRIEF), None, request="добавь в подпись, почему нет данных", skills=SkillsRegistry.load(), providers=reg)
+    s = r.outline.slides[1]
+    assert seen and NOTES in seen[0]
+    assert s.takeaway == tk.rstrip("."), s.takeaway
+    assert s.content.chart is not None and s.data.context == NOTES
+
+
+def test_a_number_of_the_files_notes_counts_as_the_datas():
+    from verstka.planning.slide_edit import keep_data
+
+    old = _context_outline("В III квартале опрошено 1 240 клиентов.")
+    new = old.slides[1].model_copy(deep=True)
+    new.takeaway = "NPS вырос до 52; опрошено 1 240 клиентов"
+    assert keep_data(old.slides[1], new).takeaway == new.takeaway  # 1 240 is the file's own figure
+    new.takeaway = "NPS вырос до 52; опрошено 1 500 клиентов"
+    assert keep_data(old.slides[1], new).takeaway == old.slides[1].takeaway  # 1 500 is nobody's
+    bare = _data_outline().slides[1]  # a deck without the notes: the old rule
+    new = bare.model_copy(deep=True)
+    new.takeaway = "NPS вырос до 52; опрошено 1 240 клиентов"
+    assert keep_data(bare, new).takeaway == bare.takeaway
