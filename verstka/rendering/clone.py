@@ -6230,10 +6230,11 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         # Классика's 24 and 40 — is no size of the template, `size_not_in_scale`)
         steps_below = [s for s in snap_sizes if 0.5 * size0 - 0.05 <= s < size - 0.05]
         size = max(smaller) if smaller else (max(steps_below) if steps_below else _snap_display(size * 0.92, snap_sizes))
-    if kind == PatternKind.title and h1 and size < min(0.6 * target, h1) - 0.05:
-        # a cover whose title the sample's room holds only at a fraction of its size (a closing slide's word «СПАСИБО»
-        # between the stripes of its picture, a long title at 18 pt where the deck's slide headings stand at 36): it
-        # does not read as a cover — the next sample, or a composed cover
+    if kind == PatternKind.title and ctx.pattern.kind == PatternKind.thanks and h1 and size < min(0.6 * target, 0.75 * h1) - 0.05:
+        # a cover set on a closing slide's sample whose room was cut for one word («СПАСИБО» between the stripes of its
+        # picture) holds a deck's title only at a fraction of its size and under ¾ of the slide headings (18 pt where
+        # they stand at 36; VK WorkSpace's 144 pt closing word set at 32 pt still reads as a cover): the next sample, or
+        # a composed cover. A cover sample keeps its own verdict: a long title stepped down in it is still the cover.
         raise SampleRefused(f"the heading had to shrink to {size:g} pt (the deck sets {max(target, h1):g} pt)")
     if kind == PatternKind.title:
         st.cover_size, st.cover_bold = size, bold
