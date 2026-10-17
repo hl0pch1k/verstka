@@ -1437,6 +1437,32 @@ def delete_dataset(did: str) -> dict:
     return {"deleted": store.delete_dataset(did)}
 
 
+class GoalsRequest(BaseModel):
+    brief: str = ""
+    dataset_ids: list[str] = Field(default_factory=list)
+    use_models: bool = True  # «Модель пишет тексты слайдов»: off — только разбор правил
+
+
+@app.post("/api/goals")
+def read_brief_goals(req: GoalsRequest) -> dict:
+    """«Цели из текста»: цели брифа над приложенными файлами — понятые моделью и проверенные кодом, без модели — разбором
+    правил; у каждой подпись для человека, у предложений без ответа в данных — причина (verstka/data/intent.py). Ответ
+    модели кешируется по тексту и файлам: сборка с тем же текстом и файлами её не зовёт снова."""
+    from verstka.data.intent import read_goals
+
+    tables, profiles = [], []
+    for did in req.dataset_ids[:_MAX_DATA_TABLES]:
+        loaded = store.read_dataset(did) if SAFE_ID_RE.fullmatch(did or "") else None
+        if loaded is None:
+            raise HTTPException(404, "Одного из файлов с данными больше нет на сервере — приложите его снова")
+        tables.append(loaded[0])
+        profiles.append(loaded[1])
+    use = req.use_models and models_configured()
+    res = read_goals(req.brief, tables, profiles, req.dataset_ids[:len(tables)], skills=skills() if use else None,
+                     providers=providers() if use else None)
+    return res.payload()
+
+
 # ---------------------------------------------------------------------------- routes: brandbooks (вторая ступень)
 
 _BRAND_STEPS = ("open", "palette", "fonts", "logos", "rules")  # шаги разбора (web: dataRules.ts BRAND_STEPS) и «compare»
