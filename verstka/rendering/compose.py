@@ -1033,6 +1033,8 @@ class Composer:
             self.o = self.o.model_copy(update={"content": c.model_copy(update={"bullets": [b for b in c.bullets if not bare_chart_figure(b, values)]})})
             self.warnings.append("lines repeating a figure of the chart dropped")
         self._unsay_conclusion()
+        self._no_lead = False
+        area_in = area
         area = self._reserve_notes(area)
         n0 = len(self.cv.tree)
         o0, w0 = self.o, list(self.warnings)
@@ -1042,6 +1044,34 @@ class Composer:
         self._lines_aloud = False  # the lines under the block go to the speaker notes from the start (the dense pass)
         self._area = area
         self._compose_body(comp, area)
+        if self._overflows(n0, area) and getattr(self, "_take_lead", False):
+            # the compact variant's conclusion line over a block that holds under it only set denser — its text under
+            # the template's body size, six figures crowded to 16 pt over 9 pt labels (Forestbird compact): the
+            # conclusion takes its strip under the block (or the free room beside the template's art) as in the other
+            # variants, and the block keeps the template's sizes; the line stays when the block needs the dense pass
+            # all the same
+            saved = (self._notes, self._floor_y, self._aside, area)
+            self._undo(n0)
+            self.o, self.warnings = o0, list(w0)
+            self._restore_notes(notes0)
+            self._no_lead = True
+            a2 = self._reserve_notes(area_in)
+            self._area = a2
+            self._compose_body(comp, a2)
+            if not self._take_lead and self._notes and self._notes[1] is not None and not self._overflows(n0, a2) and self._conclusion_spot(n0) is not None:
+                area = a2
+                body_w = self.warnings[len(w0):]
+                w0 = list(w0) + ["the conclusion set under the block, not over it: the block keeps the template's sizes"]
+                self.warnings = list(w0) + body_w
+            else:
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
+                self._no_lead = False
+                self._notes, self._floor_y, self._aside, area = saved
+                self._take_lead = True
+                self._area = area
+                self._compose_body(comp, area)
         kept_dense = False
         if self._overflows(n0, area) and getattr(self.o, "verbatim", False):
             # the author's lines stay on the slide when a denser setting holds them at the template's own small size
@@ -1721,6 +1751,8 @@ class Composer:
         if not plan["paras"]:
             return
         cap = getattr(self, "_under_cap", None)
+        if cap and not getattr(self, "_dense", False):
+            cap = max(cap, k.text_floor)  # running lines keep the body size over a table in small print (the dense pass aside)
         size = max((r.size for col in plan["paras"] for p in col for r in p.runs), default=0.0)
         if cap and size > cap + 0.05:
             # the lines under a table read after it, never louder than it: a table stepped down to keep its conclusion
@@ -1781,9 +1813,14 @@ class Composer:
             return None
         w = plan["main"].w
         floor = self._dense_floor()
+        dense = getattr(self, "_dense", False)
         if sizes is None:
-            sizes = list(dict.fromkeys([k.body, k.small_text] + [x for x in reversed(k.sizes) if floor - 0.05 <= x < k.small_text - 0.05]))
+            # (under the small size only in the dense pass: an ordinary pass keeps the lines at the body size or sends
+            # the slide to the dense pass, which says so)
+            sizes = list(dict.fromkeys([k.body, k.small_text] + ([x for x in reversed(k.sizes) if floor - 0.05 <= x < k.small_text - 0.05] if dense else [])))
         cap = getattr(self, "_under_cap", None)
+        if cap and not dense:
+            cap = max(cap, k.text_floor)
         if cap:
             sizes = [x for x in sizes if x <= cap + 0.05] or [cap]  # never louder than the table over them
         for size in sizes:
@@ -2034,16 +2071,10 @@ class Composer:
             self.warnings.append("тезисы не помещаются в карточки: набраны списком")
             self.bullets(area, [i.title or i.text for i in items], as_list=True)
             return
-        if forced and not getattr(self, "_dense", False):
-            # still no fit: the dense sizes (below the small size, down to 1.7 % of the slide height)
-            self._dense = True
-            try:
-                got = pick(cols, rows, True)
-            finally:
-                self._dense = False
-            if not forced_of[(cols, rows, True)]:
-                cw, pad, inner_w, chosen = got
-                forced = False
+        # (still no fit: the cards keep the template's sizes and run past the area — the composer's dense pass sets
+        # them again below the body size and says so; a dense setting chosen here, inside an ordinary pass, set the
+        # words of four cards at 12.5 pt under a 14 pt body with no word of it — Forestbird s9 — and kept the
+        # composer from its other ways out: the conclusion under the block, the lines said aloud)
         if n == 4 and cols == 4 and chosen[1] < k.body:
             # four cards that only fit in small type read better as a 2×2 block
             cw2, pad2, inner2, chosen2 = pick(2, 2)
@@ -3405,7 +3436,7 @@ class Composer:
         # the compact variant says its conclusion first: a bold line over the content (a chart's text column leads
         # with it instead), no strip at the foot
         self._take_lead = (
-            self.strategy == "compact" and bool((self.o.takeaway or "").strip()) and not self._aside
+            self.strategy == "compact" and not getattr(self, "_no_lead", False) and bool((self.o.takeaway or "").strip()) and not self._aside
             and getattr(self, "_comp", None) not in (None, "chart", "chart_text", "chart_pair")
         )
         foot = squash(self.o.footnote)
@@ -4421,12 +4452,19 @@ class Composer:
         colour, its figures in the accent), a computed figure of the series under it, then the lines — set dense (a
         short gap between them) at the largest size at which the column fits the height. A hairline at its right
         edge sets it apart from the chart. Returns the height it took."""
+        paras, hh, _ = self._text_column_plan(box, lead, figure, texts)
+        self.cv.text(Bbox(x=box.x, y=box.y, w=box.w, h=hh), paras, name="Chart note")
+        return hh
+
+    def _text_column_plan(self, box: Bbox, lead: Optional[str], figure: Optional[tuple[str, str]], texts: list[str]) -> tuple[list[Para], int, bool]:
+        """`_text_column`'s paragraphs, their height and whether they fit the column at one of its settings."""
         k = self.kit
         colors = k.colors
         lead = (lead[:1].upper() + lead[1:]) if lead else None
         if lead and lead.endswith(".") and not lead.endswith("..") and not ABBR_END_RE.search(lead):
             lead = lead[:-1]
         best = None
+        fits = False
         for lead_size, size in ((k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.body, k.body), (k.body, k.small_text)):
             paras: list[Para] = []
             if lead:
@@ -4441,10 +4479,10 @@ class Composer:
             hh = self.h(paras, box.w)
             best = (paras, hh)
             if hh <= box.h and self.fits_width(texts + ([lead] if lead else []), size, True, box.w - _emu(size * 1.1)):
+                fits = True
                 break
         paras, hh = best
-        self.cv.text(Bbox(x=box.x, y=box.y, w=box.w, h=hh), paras, name="Chart note")
-        return hh
+        return paras, hh, fits
 
     def _chart_split(self, area: Bbox) -> float:
         """The share of the width the visual variant's callout column takes beside a chart."""
@@ -4485,6 +4523,20 @@ class Composer:
             else:
                 self.warnings.append("диаграмма во всю ширину: рядом с колонкой текста ей не хватило бы ширины")
             return
+        if aside and self.strategy == "compact" and not (need_w and area.w - col_w0 - gap < need_w):
+            if not self._text_column_plan(Bbox(x=area.x, y=area.y, w=col_w0, h=area.h), take, takeaway, side_texts)[2]:
+                # a conclusion too long for the column beside the chart at every size (live, Forestbird: eight departments
+                # with their shares in one sentence ran past the column into the source line): it takes its strip under
+                # the chart, as the other variants set it; the column keeps the lines, else the chart the whole width
+                area = self._takeaway_to_strip(area)
+                tall_h = int(area.h * 0.92)
+                aside = False
+                self.warnings.append("the conclusion set under the chart: too long for the column beside it")
+                if not side_texts and takeaway is None:
+                    err = self._chart_block(Bbox(x=area.x, y=area.y, w=area.w, h=tall_h), spec, prominent=False, center=True)
+                    if err is not None:
+                        self._chart_failed(n0, area, err)
+                    return
         if self.strategy == "compact" and (side_texts or aside or takeaway is not None) and not (need_w and area.w - col_w0 - gap < need_w):
             # mirrored: the text column at the left, the chart at the right over the full height
             col_w = col_w0
@@ -4529,20 +4581,7 @@ class Composer:
         show_side = bool(side_texts) or (takeaway is not None and self.strategy != "structured")
         if show_side and need_w and int(area.w * 0.64) < need_w and not side_texts:
             show_side = False  # a computed callout is optional: the chart keeps its width
-        chart_w = int(area.w * (0.64 if show_side else 1.0))
-        # (a chart of a data file takes the area's height: its plot is what the slide is for — live QA, H1)
-        tall = show_side or kind in ("bar", "stacked_bar") or pie or self.o.data is not None
-        chart_h = tall_h if tall else min(int(area.h * 0.82), int(area.w * 0.42))
-        self._pie_mirror = self.strategy == "compact" and pie and not show_side
-        err = self._chart_block(Bbox(x=area.x, y=area.y, w=chart_w, h=chart_h), spec, prominent=False, center=not show_side)
-        self._pie_mirror = False
-        self._hole_large = False
-        if err is not None:
-            self._chart_failed(n0, area, err)
-            return
-        if not show_side:
-            return
-        x = area.x + chart_w + gap
+        x = area.x + int(area.w * 0.64) + gap
         w = area.x + area.w - x
 
         def column(size: Optional[float]) -> list[Para]:
@@ -4568,10 +4607,35 @@ class Composer:
                 paras.append(self.P(t, ts, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent))
             return paras
 
+        col_sizes = [None, *[x_ for x_ in k.steps_down(k.lead, k.body) if x_ < k.lead - 0.05], k.small_text]
+        if show_side and aside and not any(self.h(column(sz), int(w * self.WORD_ROOM)) <= area.h for sz in col_sizes):
+            # the slide's conclusion too long for the column beside the chart at every size: its strip under the chart
+            # (as `_text_column`'s compact twin above); the column keeps the lines, else the chart takes the width
+            area = self._takeaway_to_strip(area)
+            tall_h = int(area.h * 0.92)
+            aside, takeaway = False, None
+            show_side = bool(side_texts)
+            self.warnings.append("the conclusion set under the chart: too long for the column beside it")
+        chart_w = int(area.w * (0.64 if show_side else 1.0))
+        # (a chart of a data file takes the area's height: its plot is what the slide is for — live QA, H1)
+        tall = show_side or kind in ("bar", "stacked_bar") or pie or self.o.data is not None
+        chart_h = tall_h if tall else min(int(area.h * 0.82), int(area.w * 0.42))
+        self._pie_mirror = self.strategy == "compact" and pie and not show_side
+        err = self._chart_block(Bbox(x=area.x, y=area.y, w=chart_w, h=chart_h), spec, prominent=False, center=not show_side)
+        self._pie_mirror = False
+        self._hole_large = False
+        if err is not None:
+            self._chart_failed(n0, area, err)
+            return
+        if not show_side:
+            return
+        x = area.x + chart_w + gap
+        w = area.x + area.w - x
+
         # the column steps down the template's scale until it fits beside the chart, measured a little narrower than it
         # is: the renderer sets a line a little wider than measured, and a column clipped to the area ran under the
         # conclusion's strip
-        for size in [None, *[x for x in k.steps_down(k.lead, k.body) if x < k.lead - 0.05], k.small_text]:
+        for size in col_sizes:
             paras = column(size)
             hh = self.h(paras, int(w * self.WORD_ROOM))
             if hh <= area.h:

@@ -261,3 +261,68 @@ def test_a_chart_shown_as_a_table_keeps_ten_rows_with_totals():
     # every category is counted: the rows shown and «Прочие» add up to the whole
     shown = sum(float(r[-1].replace("\u00a0", "").replace(" ", "").replace(",", ".")) for r in tbl.rows[:-1])
     assert shown == pytest.approx(total)
+
+
+
+def test_six_figures_under_a_compact_conclusion_keep_their_sizes(env):
+    """Composer residual (Forestbird compact): six figures under the compact variant's conclusion line held only set
+    dense — 17 pt figures over 11 pt labels — while the slide had a free room for the conclusion beside the template's
+    art at its foot. The conclusion takes that room instead; every figure keeps 1.6 times its label, every label the
+    template's body size."""
+    from verstka.rendering.compose import Composer
+
+    deck, manifest, _ = env
+    W_, H_ = manifest.slide_size.w, manifest.slide_size.h
+    prs = Presentation(str(deck))
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    labels = ["Принято на 1 курс, +6% к 2025", "Средний балл ЕГЭ, +1,2 к 2025", "Трудоустроено выпускников, +3 п.п. к 2025",
+              "Индекс удовлетворённости студентов, +4 п. к 2025", "Объём НИОКР, +12% к 2025", "Отчислено студентов, −8% к 2025"]
+    values = ["2 425 чел.", "74,1", "87%", "78", "1 305 млн ₽", "412 чел."]
+    o = OutlineSlide(id="k6", kind=PatternKind.stat_row, headline="Принято на 1 курс — на 6% больше, отчислено студентов — на 8% меньше",
+                     content=SlideContent(numbers=[NumberCallout(value=v, label=lb) for v, lb in zip(values, labels)]),
+                     takeaway="Принято на 1 курс — 2 425 чел. (+6%), отчислено студентов — 412 чел. (−8%). Сравнение с 2025",
+                     footnote="Источник: итоги года")
+    c = Composer(slide, Kit(manifest, W_, H_, "FFFFFF"), o, DeckOutline(title="T", strategy="compact", slides=[o]), "compact", manifest)
+    area = Bbox(x=int(0.04 * W_), y=int(0.22 * H_), w=int(0.92 * W_), h=int(0.40 * H_))
+    c.foot_room = Bbox(x=area.x, y=area.y2, w=int(0.6 * W_), h=int(0.18 * H_))  # free room beside the art under the area
+    c.compose("stat_row", area)
+    figs = [sh for sh in slide.shapes if sh.name.startswith("Figure")]
+    labs = [sh for sh in slide.shapes if sh.name.startswith("Label")]
+    assert len(figs) == len(labs) == 6
+    for f, lab in zip(figs, labs):
+        assert _digit_size(f) >= FIG_RATIO * max(_sizes(lab)) - 0.3, (f.text_frame.text, _digit_size(f), max(_sizes(lab)))
+        assert min(_sizes(lab)) >= body_floor(manifest) - 0.05, (lab.text_frame.text, _sizes(lab))
+    assert any(sh.name.startswith("Conclusion") for sh in slide.shapes), "the conclusion stays on the slide"
+    assert not any("dense" in w for w in c.warnings), c.warnings
+
+
+
+@pytest.mark.parametrize("strategy", ["compact", "visual"])
+def test_a_conclusion_too_long_for_the_column_beside_a_chart_takes_its_strip(env, strategy):
+    """Live Forestbird: a conclusion naming eight departments with their shares (one sentence of 300 characters) was
+    set in the column beside the doughnut and ran past it into the source line. It takes its strip under the chart."""
+    from verstka.rendering.compose import Composer
+
+    deck, manifest, _ = env
+    W_, H_ = manifest.slide_size.w, manifest.slide_size.h
+    cats = ["Кафедра искусственного интеллекта", "Кафедра электроэнергетики", "Кафедра материаловедения", "Кафедра кибербезопасности",
+            "Кафедра робототехники и мехатроники", "Остальные 13"]
+    spec = ChartSpec(type="doughnut", categories=cats, unit="%", series=[InlineSeries(name="Доля", values=[10.9, 9.1, 7.9, 7.4, 7.0, 57.7])])
+    take = ("Кафедра искусственного интеллекта — 11%, Кафедра электроэнергетики — 9,1%, Кафедра материаловедения — 7,9%, "
+            "Кафедра кибербезопасности — 7,4%, Кафедра робототехники и мехатроники — 7%, Остальные 13 (в том числе Кафедра "
+            "возобновляемых источников энергии, Кафедра технологий машиностроения, Кафедра физики и Кафедра программной "
+            "инженерии и другие) — 58%")
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Кафедра искусственного интеллекта получает 11% бюджета НИОКР",
+                     content=SlideContent(chart=spec), takeaway=take, footnote="Источник: Бюджет НИОКР.csv")
+    prs = Presentation(str(deck))
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    c = Composer(slide, Kit(manifest, W_, H_, "FFFFFF"), o, DeckOutline(title="T", strategy=strategy, slides=[o]), strategy, manifest)
+    area = Bbox(x=int(0.04 * W_), y=int(0.22 * H_), w=int(0.72 * W_), h=int(0.36 * H_))  # beside the template's art
+    c.compose("chart_text", area)
+    assert any("too long for the column beside it" in w for w in c.warnings), c.warnings
+    side = [sh for sh in slide.shapes if sh.name.startswith(("Chart note", "Takeaway"))]
+    assert not any(take[:30] in sh.text_frame.text for sh in side), "the conclusion is not squeezed into the side column"
+    # under the chart inside the area — or, with no room left under it, said aloud (the speaker notes), never past the area
+    concl = [sh for sh in slide.shapes if sh.name.startswith("Conclusion") and sh.has_text_frame]
+    assert all(sh.top + sh.height <= area.y2 + int(0.01 * H_) for sh in concl)
+    assert concl or take[:30] in (c.o.notes or ""), c.warnings

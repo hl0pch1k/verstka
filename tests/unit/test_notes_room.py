@@ -147,8 +147,10 @@ def test_a_table_of_the_deck_is_never_set_at_another_tables_dense_size(env, stra
 @pytest.mark.parametrize("strategy", ["structured", "compact", "visual"])
 def test_the_lines_under_a_table_are_never_larger_than_the_table(env, strategy):
     """MyBrand s9: the table stepped from 22.5 to 17.5 pt to keep its conclusion, the lines under it stayed at 22.5 pt —
-    the hierarchy inverted. The lines under a table are never set larger than the table; a dense setting stays only
-    where it brings the lines onto the slide (VK Tech compact s2: a ten-row table at 8 pt for lines that left anyway)."""
+    the hierarchy inverted. The lines under a table are never set larger than the table — nor, outside the dense pass,
+    under the template's body size (running text keeps the body size: the lines follow a table in small print down to
+    it, not below); a dense setting stays only where it brings the lines onto the slide (VK Tech compact s2: a ten-row
+    table at 8 pt for lines that left anyway)."""
     deck, manifest, ws = env
     _small_under_floor(manifest, manifest.slide_size.h / EMU_PER_PT)
     from verstka.rendering.compose import Kit
@@ -160,7 +162,9 @@ def test_the_lines_under_a_table_are_never_larger_than_the_table(env, strategy):
     size = _table_size(slide)
     lines = [sh for sh in slide.shapes if sh.has_text_frame and sh.name.startswith("Note")]
     sizes = {r.font.size.pt for sh in lines for p in sh.text_frame.paragraphs for r in p.runs if r.font.size is not None and r.text.strip()}
-    assert not sizes or max(sizes) <= size + 0.05, (sizes, size, warnings)
+    dense = any("dense" in w for w in warnings)
+    assert not sizes or max(sizes) <= max(size, 0.0 if dense else kit.text_floor) + 0.05, (sizes, size, warnings)
+    assert not sizes or dense or min(sizes) >= kit.text_floor - 0.05, (sizes, warnings)
     aloud = "• " in (o.notes or "")
     assert not aloud or size >= kit.small - 0.05, (size, warnings)  # said aloud anyway: the table keeps its size
 
