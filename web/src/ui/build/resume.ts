@@ -72,6 +72,8 @@ export function requestOf(g: GenerationMeta): GenerateRequest {
     // вторая ступень: «Собрать ещё раз» — с теми же данными и брендбуком (generation.json)
     ...(g.dataset_ids?.length ? { dataset_ids: g.dataset_ids } : {}),
     ...(g.brandbook_id ? { brandbook_id: g.brandbook_id, brand_priority: g.brand_priority ?? "brand" } : {}),
+    // база знаний: «Собрать ещё раз» — по тем же документам
+    ...(g.knowledge_id ? { knowledge_id: g.knowledge_id } : {}),
   };
 }
 

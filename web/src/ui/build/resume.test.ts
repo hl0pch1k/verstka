@@ -250,3 +250,8 @@ test("вторая ступень: колода с брендбуком свёр
   assert.equal(buildTopic({ generation: "g1", template: "t1" }, own, [])?.data, 2);
   assert.equal("data" in (buildTopic({ generation: "g1", template: "t1" }, { gid: "g1", request: REQ, expected: 5 }, []) ?? {}), false);
 });
+
+test("«Собрать ещё раз» — по той же базе знаний", () => {
+  assert.equal(requestOf(meta("g1", { knowledge_id: "kb1" })).knowledge_id, "kb1");
+  assert.equal("knowledge_id" in requestOf(meta("g1", {})), false);
+});
