@@ -25,10 +25,10 @@ const SELECT = {
 function DevRow({ t, h, open, onToggle, children }: { t: string; h: string; open: boolean; onToggle(): void; children: ReactNode }) {
   return (
     <li className="df-fx">
-      <button type="button" aria-expanded={open} onClick={onToggle}
+      <button type="button" className="df-dr" aria-expanded={open} onClick={onToggle}
         style={{ display: "flex", alignItems: "center", gap: 16, width: "100%", height: 48, padding: 0, border: 0, background: "none", textAlign: "left", cursor: "pointer" }}>
         <span style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220" }}>{t}</span>
-        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{h}</span>
+        <span className="df-drh" style={{ marginLeft: "auto", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{h}</span>
         <Icon name="chevron-down" size={18} className={cls("df-chev", open && "df-chev-up")} />
       </button>
       <Collapse open={open}><div style={{ paddingBottom: 16 }}>{children}</div></Collapse>
@@ -109,7 +109,7 @@ function Compare({ g, v }: { g: Generation; v: Variant }) {
   const rows = res ? diffRows(res, strategyTitle) : null;
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="df-cmp" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <select aria-label="Другой запуск" value={gid} onChange={(e) => setGid(e.target.value)} style={{ ...SELECT, flex: 1 }}>
           <option value="">Выберите запуск…</option>
           {done.map((x) => <option key={x.id} value={x.id}>{fmtWhen(x.created_at)} · {x.title || templateLabel(x.template_id, x.template_file)}{x.id === g.id ? " · этот" : ""}</option>)}

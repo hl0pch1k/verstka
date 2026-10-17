@@ -172,7 +172,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
             <span style={{ fontSize: 12, fontWeight: 600, lineHeight: "16px", color: "#5A6272" }}>из 100</span>
           </span>
         </div>
-        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+        <div className="dq-sumt" style={{ position: "relative", flex: 1, minWidth: 0 }}>
           <h3 className="dd-h">{bindShort(sum.head)}</h3>
           {/* строка счёта — стопка (q-sumt): колонка в узкой раскладке у́же на `sumHpd` (замер кнопок справа); в одну строку,
               как на доске; где места меньше (итог исправления рядом, настоящие числа, тесная колода) — переносится, но не
@@ -196,7 +196,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
             </div>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
+        <div className="dq-sumb" style={{ display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
           {fix.undo && (
             <>
               <p className="dlq-st p2-in" role="status"><Icon name="check-circle" size={20} />{fix.status}</p>
@@ -235,12 +235,12 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
           <div key={`${filter}|${v.strategy}|${variantRev(v)}|${k}`}>
             {groups.map((gr, gi) => (
               <section key={gr.slide} className={cls("dd-box p2-in", gr.current && "dq-grp-on")} aria-label={gr.aria} aria-current={gr.current || undefined} style={{ marginTop: 16, animationDelay: `${gi * 40}ms` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, height: 48 }}>
+                <div className="dq-gh" style={{ display: "flex", alignItems: "center", gap: 16, height: 48 }}>
                   <span style={{ display: "block", width: 80, height: 45, flex: "none" }}>
                     {gr.slide ? <Shot src={gr.img} alt="" style={{ width: 80, height: 45, borderRadius: 12, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" }} />
                       : <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 80, height: 45, borderRadius: 12, background: "#F3F4F1", color: "#2563EB" }}><Icon name="layers" size={20} /></span>}
                   </span>
-                  <h3 style={{ minWidth: 0, margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <h3 className="dq-gt" style={{ minWidth: 0, margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {gr.label}<span style={{ fontFamily: "'Manrope',system-ui,sans-serif", fontSize: 15, fontWeight: 500, letterSpacing: 0, color: "#5A6272" }}>{gr.sub}</span>
                   </h3>
                   <span className="dq-gcnt" style={{ marginLeft: "auto", flex: "none", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{gr.count}</span>
@@ -283,7 +283,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
         <div style={{ minWidth: 0 }}>
           {eye && <EyeBox eye={eye} open={!!open.eye} onToggle={() => toggle("eye")} />}
           {(minors.length > 0 || fixed.length > 0 || audit.summary.checks_run.length > 0) && (
-            <section className="dd-box p2-in" aria-label="Подробности проверки" style={{ marginTop: eye ? 24 : 0, padding: "0 24px", animationDelay: "360ms" }}>
+            <section className="dd-box dq-more p2-in" aria-label="Подробности проверки" style={{ marginTop: eye ? 24 : 0, padding: "0 24px", animationDelay: "360ms" }}>
               {minors.length > 0 && (
                 <Acc id="dq-acc-notes" icon="note" title="Мелкие заметки" n={minors.length} open={!!open.notes} onToggle={() => toggle("notes")} first>
                   {minors.map((r, i) => <Row key={i} {...r} />)}

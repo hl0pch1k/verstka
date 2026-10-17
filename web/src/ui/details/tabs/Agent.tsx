@@ -44,10 +44,10 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
     <div id="dd-panel-agent" className="dd-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-agent" tabIndex={0}>
       <div className="dd-g">
         <section key={v.strategy} className="dd-box p2-in" aria-labelledby="da-h-log" style={{ animationDelay: "240ms" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 40 }}>
+          <div className="da-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 40 }}>
             <h3 id="da-h-log" className="dd-h" style={{ flex: "none", whiteSpace: "nowrap" }}>Как работал агент</h3>
             {/* сайт: в тесной колоде с помощником подпись сокращается многоточием, заголовок не переносится */}
-            <span className="dd-cap" title={agentCap(v)} style={{ minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{agentCap(v)}</span>
+            <span className="dd-cap da-cap" title={agentCap(v)} style={{ minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{agentCap(v)}</span>
           </div>
           {hasEvents ? (
             <ol className="da-tl">
@@ -96,8 +96,8 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
           )}
         </section>
 
-        <section className="dd-box p2-in" aria-labelledby="da-h-ed" style={{ position: "sticky", top: 0, animationDelay: "280ms" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, height: 40 }}>
+        <section className="dd-box da-eds p2-in" aria-labelledby="da-h-ed" style={{ position: "sticky", top: 0, animationDelay: "280ms" }}>
+          <div className="da-edh" style={{ display: "flex", alignItems: "center", gap: 8, height: 40 }}>
             <h3 id="da-h-ed" className="dd-h">Ваши правки</h3>
             <span className="da-cnt">{ed.active}</span>
             <button type="button" className="p2-ob dla-ob" onClick={un.undo} disabled={!ed.canUndo || un.busy || !!un.off} aria-busy={un.arc || undefined}

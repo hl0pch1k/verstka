@@ -97,7 +97,7 @@ function NavTitle({ cap, title }: { cap: string; title: string }) {
   return (
     <>
       <span className={cls("dd-cap", c.cls)}>{c.text}</span>
-      <h3 className={cls("dd-h", t.cls)} title={t.text} style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.text}</h3>
+      <h3 className={cls("dd-h dw-nt", t.cls)} title={t.text} style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.text}</h3>
     </>
   );
 }
@@ -210,7 +210,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
         <div style={{ minWidth: 0 }}>
           <section className="dd-box p2-in" aria-labelledby="dw-h-build" style={{ animationDelay: "40ms" }}>
             <h3 id="dw-h-build" className="dd-h">Как собран слайд</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 40px minmax(0, 1fr)", alignItems: "center", rowGap: 8, marginTop: 16 }}>
+            <div className="dw-build" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 40px minmax(0, 1fr)", alignItems: "center", rowGap: 8, marginTop: 16 }}>
               {w.sample ? <Shot src={w.sample.src} alt={w.sample.label} style={FRAME} />
                 : <span className="dw-wf" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 16, textAlign: "center" }}>
                   <Tx tx="w-cap" as="span" wrap="span" f style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{w.frame}</Tx>
@@ -248,7 +248,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
           {w.alts.length > 0 && (
             <section className="dd-box p2-in" aria-labelledby="dw-h-alt" style={{ marginTop: 24, animationDelay: "80ms" }}>
               <h3 id="dw-h-alt" className="dd-h">Другие подходящие макеты</h3>
-              <ul style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, margin: "16px 0 0", padding: 0, listStyle: "none" }}>
+              <ul className="dw-alts" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, margin: "16px 0 0", padding: 0, listStyle: "none" }}>
                 {w.alts.map((a) => (
                   <li key={a.key}>
                     <Shot src={a.src} alt={a.label} style={FRAME} />

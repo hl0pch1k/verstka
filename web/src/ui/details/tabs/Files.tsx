@@ -256,11 +256,11 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
           <ul style={{ display: "flex", flexDirection: "column", gap: 16, margin: "16px 0 0", padding: 0, listStyle: "none" }}>
             {files.map((f) => (
               <li key={f.key} className={cls("df-row", f.cur && "df-row-on")} aria-current={f.cur || undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 64, padding: "0 12px 0 16px", borderRadius: 16 }}>
-                <div style={{ minWidth: 0 }}>
+                <div className="df-ft" style={{ minWidth: 0 }}>
                   <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
                     <span className="df-t" title={f.title}>{f.title}</span>{f.score !== null && <span className="df-score" title={f.tip}>{f.score}</span>}{f.cur && <span className="df-now hp-wo">на экране</span>}
                   </p>
-                  <p title={f.file} style={{ margin: 0, fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.file}</p>
+                  <p className="df-fn" title={f.file} style={{ margin: 0, fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.file}</p>
                 </div>
                 <div style={{ display: "flex", gap: 8, flex: "none" }}>
                   {f.pptx && <a className="p2-ob" href={f.pptx} download={`${f.base}.pptx`} aria-label={f.aPpt} style={{ height: 40, padding: "0 16px" }}>PowerPoint</a>}
@@ -283,7 +283,7 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
             <div className="df-hd"><h2 id="df-h3" className="df-h">Время по этапам</h2><span className="df-badge" title={stages.title}>{stages.total}</span></div>
             <ul style={{ display: "flex", flexDirection: "column", gap: 12, margin: "16px 0 0", padding: 0, listStyle: "none" }}>
               {stages.rows.map((s) => (
-                <li key={s.name} title={s.tip} style={{ display: "grid", gridTemplateColumns: "216px minmax(0, 1fr) 48px", alignItems: "center", gap: 16, height: 24 }}>
+                <li key={s.name} className="df-st" title={s.tip} style={{ display: "grid", gridTemplateColumns: "216px minmax(0, 1fr) 48px", alignItems: "center", gap: 16, height: 24 }}>
                   <span style={{ minWidth: 0, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</span>
                   <span className="df-track" aria-hidden="true"><span className="df-fill" style={{ width: s.w }} /></span>
                   <span style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{s.v}</span>
@@ -332,9 +332,9 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
 
         <section className="p2-in" style={{ gridColumn: "1 / -1", borderRadius: 24, background: "#FFFFFF", animationDelay: "480ms" }}>
           <button type="button" className="df-coll" aria-expanded={dev} aria-controls="df-dev" onClick={() => setDev(!dev)}>
-            <span style={{ flex: "none", fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220" }}>Для разработчиков</span>
-            <span style={{ minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>JSON плана и проверки · навыки и агенты · журнал агента · сравнение запусков</span>
-            <span style={{ flex: 1, minWidth: 0 }} />
+            <span className="df-ct" style={{ flex: "none", fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220" }}>Для разработчиков</span>
+            <span className="df-cd" style={{ minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>JSON плана и проверки · навыки и агенты · журнал агента · сравнение запусков</span>
+            <span className="df-csp" style={{ flex: 1, minWidth: 0 }} />
             <span className="df-cc" aria-hidden="true"><Icon name="chevron-down" size={18} className={cls("df-chev", dev && "df-chev-up")} /></span>
           </button>
           {dev && <FilesDev g={g} v={v} />}

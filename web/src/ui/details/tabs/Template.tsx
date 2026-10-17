@@ -109,8 +109,8 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
                   <span className="p2-cover" style={{ height: "auto" }}>
                     <Shot src={l.img} alt="" style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: 16, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" }} />
                   </span>
-                  <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, height: 20, marginTop: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.kind}</span>
+                  <span className="dtp-lr" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, height: 20, marginTop: 8 }}>
+                    <span className="dtp-lk" style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.kind}</span>
                     <span style={{ flex: "none", fontSize: 12, fontWeight: 600, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}><span className="dtp-lsw">слайд{"\u00A0"}</span>{l.n}</span>
                   </span>
                 </button>

@@ -82,15 +82,15 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
         {p && (
           <section className="dpt-layer" role="dialog" aria-modal="true" aria-labelledby="dpt-title" aria-describedby="dpt-desc" tabIndex={-1} onKeyDown={onKey} style={{ outline: "none" }}>
             <div className="dpt-fx" style={{ display: "flex", flexDirection: "column", height: 532 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
+              <div className="dpt-hd" style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
                 <h2 key={`t${p.n}`} id="dpt-title" className="dpt-title p2-in" style={{ animationDelay: "120ms" }}>{p.title}</h2>
-                <p key={`d${p.n}`} id="dpt-desc" className="p2-in" title={p.desc} style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", animationDelay: "160ms" }}>{p.desc}</p>
-                <span style={{ flex: 1, minWidth: 0 }} />
+                <p key={`d${p.n}`} id="dpt-desc" className="p2-in dpt-desc" title={p.desc} style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", animationDelay: "160ms" }}>{p.desc}</p>
+                <span className="dpt-sp" style={{ flex: 1, minWidth: 0 }} />
                 <button type="button" className="p2-rbl p2-in" onClick={close} aria-label="Закрыть" title="Закрыть (Esc)" style={{ flex: "none", animationDelay: "200ms" }}><Icon name="x" size={18} /></button>
               </div>
 
               <div key={p.n} className="dpt-g" style={{ display: "grid", gridTemplateColumns: "576px 296px minmax(0, 1fr)", gap: 32, height: 388, marginTop: 24 }}>
-                <div style={{ minWidth: 0 }}>
+                <div className="dpt-mapc" style={{ minWidth: 0 }}>
                   <figure className="dpt-map p2-in" style={{ animationDelay: "160ms" }}>
                     <Shot src={p.img} fallback={p.fallback} alt={p.alt} loading="eager" style={{ width: "100%", aspectRatio: aspect }} />
                     {map && p.frames.length > 0 && (
@@ -103,7 +103,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                       </span>
                     )}
                   </figure>
-                  <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 16, height: 40, marginTop: 16, animationDelay: "200ms" }}>
+                  <div className="p2-in dpt-mrow" style={{ display: "flex", alignItems: "center", gap: 16, height: 40, marginTop: 16, animationDelay: "200ms" }}>
                     {p.frames.length > 0 && (
                       <button type="button" className="p2-gb" onClick={() => setMap(!map)} aria-pressed={map} style={{ marginLeft: -16 }}>
                         <Icon name={map ? "eye-off" : "eye"} size={18} /><span>{map ? "Скрыть разметку" : "Показать разметку"}</span>
@@ -112,7 +112,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+                <div className="dpt-boxes" style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
                   <section className="dpt-box p2-in" title="Насколько чистая структура у образца и насколько он пригоден для новых слайдов" style={{ animationDelay: "200ms" }}>
                     <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
                       <h3 className="dpt-bt">Качество образца</h3>
@@ -138,7 +138,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                   )}
                   <section className="dpt-box p2-in" style={{ animationDelay: "280ms" }}>
                     <h3 className="dpt-bt">Декор</h3>
-                    <p style={{ margin: "4px 0 0", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{p.decor}</p>
+                    <p className="dpt-decor" style={{ margin: "4px 0 0", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{p.decor}</p>
                   </section>
                 </div>
 
@@ -146,7 +146,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                     не делят opacity и не спорят (анимация перебивала гашение, и «места» вспыхивали, пока слой ещё входит); рамка
                     обрезки (`.dpt-plw`) входит вместе с содержимым, как и прежде. Пока помощник открыт, недоигранный вход стоит
                     на месте — видимость только падает */}
-                <div className="hp-wo" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+                <div className="hp-wo dpt-plc" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
                   <section className="p2-in dpt-plw" aria-labelledby="dpt-pl" onAnimationEnd={(e) => { if (e.target === e.currentTarget) setEntering(false); }} style={{ display: "flex", flexDirection: "column", flex: "1 1 0%", minWidth: 0, minHeight: 0, animationDelay: "240ms", animationPlayState: ui.helper && entering ? "paused" : "running" }}>
                     <h3 id="dpt-pl" className="dpt-h3">{p.placesH}</h3>
                     <p className="dpt-legend">{LEGEND.map(([c, t]) => <span key={t}><span className="dpt-dot" style={{ background: c }} />{t}</span>)}</p>
@@ -168,7 +168,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                 </div>
               </div>
 
-              <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, marginTop: 16, animationDelay: "280ms" }}>
+              <div className="p2-in dpt-ft" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, marginTop: 16, animationDelay: "280ms" }}>
                 <p style={{ margin: "0 auto 0 0", fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: "#0B1220" }}>
                   {p.n} <span style={{ color: "#5A6272" }}>/ {m?.n_slides ?? ""}</span>
                 </p>

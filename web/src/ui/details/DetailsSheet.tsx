@@ -222,8 +222,8 @@ export function DetailsSheet() {
                 </button>
               ))}
             </div>
-            <span style={{ flex: 1, minWidth: 0 }} />
-            <div style={{ position: "relative", flex: "none" }}>
+            <span className="dd-sp" style={{ flex: 1, minWidth: 0 }} />
+            <div className="dd-varw" style={{ position: "relative", flex: "none" }}>
               <button type="button" aria-haspopup="menu" aria-expanded={menu} aria-label={`Вариант оформления: ${strategyTitle(v.strategy)}${score === null ? "" : `, оценка ${Math.round(score)}`}`}
                 onClick={() => setMenu(!menu)} className="p2-ob dd-var" style={{ height: 40, padding: "0 16px 0 24px" }}>
                 <span className="dd-var-n">{strategyTitle(v.strategy)}</span>
