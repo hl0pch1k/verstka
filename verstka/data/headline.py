@@ -279,6 +279,9 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     else:
         v = verb("grow" if c["delta"] > 0 else "fall", g)
         head = f"{subj} {v} на {fmt_pct(change.value)}% {when}"
+    if c.get("spike_note"):
+        lab, _, _ = c["spike_note"]  # тренд и всплеск рядом: «Выручка выросла на 34% за 9 недель, всплеск — нед. 48»
+        head += f", всплеск — {lab}"
     return " ".join(head.split()) + gap_txt, c.get("caption")
 
 

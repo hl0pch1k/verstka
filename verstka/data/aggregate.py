@@ -69,6 +69,48 @@ _TARGET_NAME = re.compile(r"(?:^|[^а-яё])(?:цел[ьи]|целев|норм�
 # счёт, которым взвешивают средние: чеки, заказы, ответы, анкеты, визиты, сессии, звонки, обращения, клиенты
 _WEIGHT_NAME = re.compile(r"чек(?:ов|и)\b|заказ|ответ(?:ов|ы|ивших)|анкет|респондент|опрошен|визит|сессий|сессии|звонк|"
                           r"обращени|покупател|транзакц|поездок|посещени|отзыв", re.I)
+_PER_UNIT = re.compile(r"/\s*(?:\d+[\s\u00a0]*)?([a-zа-яё][a-zа-яё.·²³]*)", re.I)
+
+
+def per_unit_denominator(unit: str) -> Optional[str]:
+    """Знаменатель удельной величины: «л/100 км» → «км», «₽/кВт·ч» → «квт·ч», «руб./чел.» → «чел»; нет «/» — None."""
+    m = _PER_UNIT.search(unit or "")
+    return m.group(1).lower().rstrip(".") if m else None
+
+
+def den_matches(den: str, unit: str, name: str) -> bool:
+    """Колонка несёт знаменатель удельной величины: единица («км») или имя («Пробег, км», «Потреблено, кВт·ч»)."""
+    u = (unit or "").lower().rstrip(".")
+    return u == den or u.endswith(" " + den) or bool(re.search(rf"(?:^|[\s,(]){re.escape(den)}(?:$|[\s,).])",
+                                                                  (name or "").lower()))
+
+
+# колонка статуса строки: «Факт» / «Прогноз» / «План» / «Оценка» — не факт всё, кроме факта
+_STATUS = {"факт": "fact", "фактически": "fact", "fact": "fact", "actual": "fact", "actuals": "fact",
+           "прогноз": "forecast", "прогн.": "forecast", "forecast": "forecast", "план": "plan", "plan": "plan",
+           "оценка": "estimate", "оценочно": "estimate", "estimate": "estimate", "ожидание": "estimate",
+           "ожид.": "estimate", "ожидаемое": "estimate", "предварительно": "estimate", "предв.": "estimate"}
+
+
+def _status_of(v: Any) -> Optional[str]:
+    if not isinstance(v, str):
+        return None
+    return _STATUS.get(" ".join(v.lower().split()))
+
+
+def status_column(table: Table) -> Optional[int]:
+    """Колонка статуса строк: все значения — «факт», «прогноз», «план», «оценка» (и их английские пары), есть и факт, и
+    не факт. Её строки «не факт» — прогноз: в рост, «за N месяцев» и итоги не входят."""
+    for j in range(len(table.columns)):
+        vals = [r[j] for r in table.rows if j < len(r) and r[j] not in (None, "")]
+        if len(vals) < 2 or not all(_status_of(v) is not None for v in vals):
+            continue
+        kinds = {_status_of(v) for v in vals}
+        if "fact" in kinds and len(kinds) >= 2:
+            return j
+    return None
+
+
 # «Оценка» одна — это балл («Оценка удовлетворённости»), прогноз — только с периодом («Оценка 2026», «2026 (оценка)»)
 _FORECAST_NAME = re.compile(r"^(?:прогноз|ожид(?:ание|аемое|\.)?|forecast|fc)(?:[^а-яёa-z]|$)", re.I)
 _CUMUL = re.compile(r"нараста|накоплен|с начала года|с начала периода|ytd|cumulative|running total", re.I)
@@ -154,7 +196,8 @@ class Data:
                 self.measures = []
         self.codes = {j for j, c in enumerate(cols) if c.role in ("dimension", "text") and self._code_like(j)}
         self.dims = [j for j, c in enumerate(cols)
-                     if c.role == "dimension" and c.type in ("category", "boolean") and j not in self.codes]
+                     if c.role == "dimension" and c.type in ("category", "boolean") and j not in self.codes
+                     and j != self.status_col]  # «Тип: Факт/Прогноз» — пометка строк, а не признак для сравнения
         # коды ответа HTTP («Код ответа»: 404, 500) — категории, а не номера строк
         self.status_cols = {j for j, c in enumerate(cols) if c.role == "id" and self._status_like(j)}
         self.label = self._label_col()
@@ -166,13 +209,17 @@ class Data:
 
     # ── строки и колонки
     def _forecast_rows(self) -> set[int]:
+        """Строки-прогнозы: период-прогноз в колонке времени («2026П», «2026 (прогноз)») или колонка статуса
+        («Тип», «Статус»: Факт / Прогноз / План / Оценка) — всё, что не «факт», не факт."""
+        self.status_col: Optional[int] = status_column(self.table)
+        out: set[int] = set()
+        if self.status_col is not None:
+            out = {i for i, r in enumerate(self.table.rows)
+                   if self.status_col < len(r) and _status_of(r[self.status_col]) not in (None, "fact")}
         ax = self.profile.time_axis
-        if ax is None:
-            return set()
-        tj = next((j for j, c in enumerate(self.profile.columns) if c.name == ax.column), None)
-        if tj is None:
-            return set()
-        out = {i for i, r in enumerate(self.table.rows) if tj < len(r) and forecast_period(r[tj]) is not None}
+        tj = next((j for j, c in enumerate(self.profile.columns) if ax is not None and c.name == ax.column), None)
+        if tj is not None:
+            out |= {i for i, r in enumerate(self.table.rows) if tj < len(r) and forecast_period(r[tj]) is not None}
         return out if len(out) < len(self.table.rows) else set()
 
     def _running_sum(self, a: Measure, b: Measure) -> bool:
@@ -432,7 +479,17 @@ class Data:
                     and all(float(v).is_integer() and v >= 0 for v in x.present)
                     and (_WEIGHT_NAME.search(x.name) or is_counter(x.name))]
         for m in self.measures:
-            if m.additive or m.stock or m.change or not counters:
+            if m.additive or m.stock or m.change:
+                continue
+            den = per_unit_denominator(m.unit_text or "")
+            if den is not None:
+                # расход «л/100 км» — на километр: вес — колонка километров («Пробег, км»), а не рейсы; нет её — без веса
+                w = next((x for x in self.measures if x is not m and x.additive and not x.change
+                          and den_matches(den, x.unit_text or "", x.name)), None)
+                if w is not None:
+                    out[m.name] = w
+                continue
+            if not counters:
                 continue
             hm = {stem(w) for w in stems_of(m.name)}
             same = [c for c in counters if hm & {stem(w) for w in stems_of(c.name)}]

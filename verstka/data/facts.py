@@ -124,8 +124,11 @@ def _ptime(d: Data, tv: TimeView, mode: str, frm: Optional[str] = None, to: Opti
         # длинный формат: итог по категориям — сумма (у остатка — последнее значение каждой категории, сложенное)
         agg, by = ("sum_last_by" if agg == "last" else "sum"), _col_of(d, tv.dim)
     ax = d.profile.time_axis
+    w = d.weight_of(m) if m.j >= 0 and agg == "mean" and by is None and not cols else None
+    if w is not None:
+        agg = "wmean"  # уровень с весом (расход на км, средний чек): период — среднее взвешенное, как на графике
     return {"op": "series", "time": d.time_col, "freq": tv.freq, "week_src": tv.source_freq == "week",
-            "ax_start": ax.start if ax is not None else None,
+            "ax_start": ax.start if ax is not None else None, "w": w.j if w is not None else None,
             "col": m.j if m.j >= 0 else None, "cols": [x.j for x in cols] if cols else None, "agg": agg,
             "by": by, "cat": (_col_of(d, tv.dim), cat) if cat is not None else None, "skip": _skip_t(d, m),
             "scale": m.scale if m.j >= 0 else 1.0, "mode": mode, "from": frm, "to": to, "kind": kind}
@@ -402,10 +405,13 @@ def _dynamics(d: Data) -> FactSet:
                f"{upper_first(count_words(len(missing), pw[0], pw[1], pw[2]))} без значения: {names}. "
                f"На графике — разрывы, а не ноль.", prov=_ptime(d, tv, "missing", frm=tv.periods[0], to=tv.periods[-1]))
     spike = _spike(d, tv, vals, idx, hi, m, unit, pw, fs) if m.additive and not fs.ctx.get("typo_periods") else None
-    if spike:
-        # всплеск — главное в ряду: его дата и во сколько раз он выше обычного
+    spike_cap = ""
+    if spike and not fs.ctx.get("spike_note"):
+        # всплеск на ровном ряду — главное: его дата и во сколько раз он выше обычного
         fs.ctx["caption"] = _short([spike] + ([fc_txt] if fc_txt else []))
         return fs
+    if spike:
+        spike_cap = spike  # ряд растёт или падает и без всплеска: тренд — в заголовке, всплеск — рядом
     lag = _LAG.get(tv.freq)
     base_i = None
     yoy = False
@@ -420,10 +426,10 @@ def _dynamics(d: Data) -> FactSet:
         # месяцы без года (климат, сезонность): декабрь к январю — не изменение; вывод — максимум и минимум года
         _seasonal(d, tv, vals, idx, hi, lo, unit, fs)
         return fs
-    if base_i == F and not yoy and len(idx) >= 6 and not level \
+    if base_i == F and not yoy and len(idx) >= 6 and not level and not spike_cap \
             and _noisy(d, tv, vals, idx, unit, level, m, pw, fs, small=_small_ends(vals, idx)):
         return fs  # счёт с малыми концами (3 → 0): средние первых и последних периодов, а не «−100%»
-    if base_i == F and not yoy and len(idx) >= 6 and _noisy(d, tv, vals, idx, unit, level, m, pw, fs):
+    if base_i == F and not yoy and len(idx) >= 6 and not spike_cap and _noisy(d, tv, vals, idx, unit, level, m, pw, fs):
         # тренд не выражен (|t| < 2): концы ряда — шум; сравнение средних первых и последних периодов или размах
         return fs
     caption: list[str] = []
@@ -513,13 +519,15 @@ def _dynamics(d: Data) -> FactSet:
     fast = _fastest(d, tv, m, fs)
     if fast:
         caption.insert(0, fast)  # цель «кто растёт быстрее всех»: ответ — первым, рост целого — за ним
+    if spike_cap:
+        caption.insert(min(1, len(caption)), spike_cap)
     if typo_txt:
         caption.insert(0, typo_txt)
     if fc_txt:
         caption.insert(min(1, len(caption)), fc_txt)  # прогноз — сразу после главного: подпись короткая
     gap_cap = ""
     if missing:
-        gap_cap = (f"За {join_and([period_text(p) for p in missing[:3]])}{' и другие' if len(missing) > 3 else ''} данных "
+        gap_cap = (f"За {join_and([period_acc(p) for p in missing[:3]])}{' и другие' if len(missing) > 3 else ''} данных "
                    f"нет — на графике разрывы, а не ноль.")
         caption.append(gap_cap)
     if tv.resampled and tv.note:
@@ -527,7 +535,7 @@ def _dynamics(d: Data) -> FactSet:
     if tv.per_week:
         # недели в месяцы: на графике и в выводе — среднее за неделю, и это сказано первым
         caption.insert(0, f"{PERIOD_WORDS[tv.freq][5]} — в среднем за неделю.")
-    fs.ctx["caption"] = _short(caption, must=(gap_cap,) if gap_cap else ())
+    fs.ctx["caption"] = _short(caption, must=tuple(x for x in (spike_cap, gap_cap) if x))
     return fs
 
 
@@ -659,7 +667,8 @@ def _forecast_note(d: Data, tv: TimeView, m: Measure, unit: Optional[str], fs: F
     pts: list[tuple[str, float, int, int]] = []  # (период, значение, строка, колонка)
     if d.forecast_rows and d.time_col is not None and m.j >= 0:
         for i in sorted(d.forecast_rows):
-            pp = period_parts(forecast_period(d.cell(i, d.time_col)) or "")
+            # период — из пометки «2026П» или, при колонке статуса («Тип: Прогноз»), сам период строки
+            pp = period_parts(forecast_period(d.cell(i, d.time_col)) or str(d.cell(i, d.time_col) or ""))
             v = _num_cell(d.cell(i, m.j))
             if pp is not None and v is not None:
                 pts.append((period_iso(pp[0], pp[1]), v, i, m.j))
@@ -746,17 +755,34 @@ def _latin(name: str) -> bool:
     return bool(re.search(r"[a-z]{3,}", name or ""))
 
 
-def _trend_t(idx: list[int], ys: list[float]) -> float:
-    """t-статистика наклона линейного тренда (МНК по номерам периодов); ряд без разброса вокруг прямой — бесконечность."""
-    x = np.array(idx, dtype=float)
-    y = np.array(ys, dtype=float)
-    sxx = float(((x - x.mean()) ** 2).sum())
-    if len(x) < 3 or sxx <= 0:
+def _mann_kendall(ys: list[float]) -> float:
+    """z-статистика Манна — Кендалла: знаки всех пар «позже − раньше». Один всплеск меняет её на пару пар, а не на
+    весь наклон, как в МНК (у продаж с «чёрной пятницей» t = 1,9, а S = 41 из 45). |z| ≥ 1,96 — тренд выражен."""
+    n = len(ys)
+    if n < 3:
         return math.inf
-    b = float(((x - x.mean()) * (y - y.mean())).sum()) / sxx
-    resid = y - (y.mean() + b * (x - x.mean()))
-    se = math.sqrt(float((resid ** 2).sum()) / (len(x) - 2) / sxx)
-    return b / se if se > 0 else math.inf
+    s_ = sum((ys[j] > ys[i]) - (ys[j] < ys[i]) for i in range(n) for j in range(i + 1, n))
+    var = n * (n - 1) * (2 * n + 5) / 18
+    if s_ == 0:
+        return 0.0
+    return (s_ - (1 if s_ > 0 else -1)) / math.sqrt(var)
+
+
+def _theil_sen(idx: list[int], ys: list[float]) -> tuple[float, float]:
+    """Наклон Тейла — Сена (медиана наклонов всех пар) и сдвиг: прямая, которую не тянет один выброс."""
+    slopes = [(ys[j] - ys[i]) / (idx[j] - idx[i]) for i in range(len(idx)) for j in range(i + 1, len(idx))
+              if idx[j] != idx[i]]
+    b = _median(slopes) if slopes else 0.0
+    a = _median([y - b * x for x, y in zip(idx, ys)])
+    return b, a
+
+
+def _robust_sd(xs: list[float]) -> float:
+    """Разброс по медиане абсолютных отклонений (×1,4826 — как σ у нормального): выброс его не раздувает."""
+    if not xs:
+        return 0.0
+    med = _median(xs)
+    return 1.4826 * _median([abs(x - med) for x in xs])
 
 
 def _median(xs: list[float]) -> float:
@@ -765,22 +791,41 @@ def _median(xs: list[float]) -> float:
     return ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) / 2
 
 
+_SPIKE_Z = 5.0  # всплеск: остаток от прямой Тейла — Сена больше пяти устойчивых σ
+
+
+def _spike_at(idx: list[int], ys: list[float]) -> Optional[int]:
+    """Номер (в `idx`) единственного всплеска: остаток от устойчивой прямой больше 5·σ по MAD и значение выше медианы
+    хотя бы на 30% — а не правило «втрое выше» (недельный всплеск «чёрной пятницы» — 1,9× медианы при σ ≈ 8%)."""
+    if len(ys) < 6:
+        return None
+    b, a = _theil_sen(idx, ys)
+    resid = [y - (a + b * x) for x, y in zip(idx, ys)]
+    sd = _robust_sd(resid)
+    med = _median(ys)
+    if med <= 0:
+        return None
+    sd = max(sd, 0.01 * abs(med))
+    big = [k for k, r in enumerate(resid) if r >= _SPIKE_Z * sd and ys[k] >= 1.3 * med]
+    if len(big) != 1:
+        return None  # ни одного — нет всплеска; много — это другой уровень ряда, а не всплеск
+    return big[0]
+
+
 def _spike(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], hi: int, m: Measure,
            unit: Optional[str], pw: tuple, fs: FactSet) -> Optional[str]:
-    """Всплеск внутри ряда: значение втрое и больше выше медианы и вдвое выше обоих соседей (ошибки 5xx 8 сентября —
-    9 640 при обычных 1 800–2 200). Главное в ряду — он и его дата, а не первые дни против последних (всплеск
-    попадает в одно из средних и делает из шума «рост»). Возвращает строку подписи."""
-    if len(idx) < 6 or not (idx[0] < hi < idx[-1]):
+    """Всплеск внутри ряда: одно значение далеко над устойчивой прямой ряда (ошибки 5xx 8 сентября — 9 640 при
+    обычных 1 800–2 200; «чёрная пятница» — 6 640 при 3 400–4 000). Если без него ряд ровный — главное в ряду он и его
+    дата; если ряд растёт или падает — вывод о тренде, а всплеск назван рядом. Возвращает строку подписи."""
+    ys = [float(vals[i]) for i in idx]  # type: ignore[arg-type]
+    k_ = _spike_at(idx, ys)
+    if k_ is None or not (0 < k_ < len(idx) - 1):
         return None
-    med = _median([float(vals[i]) for i in idx])  # type: ignore[arg-type]
-    v = float(vals[hi])  # type: ignore[arg-type]
-    near = [float(vals[j]) for j in (hi - 1, hi + 1) if vals[j] is not None]  # type: ignore[arg-type]
-    if med <= 0 or v < 3 * med or not near or any(v < 2 * x for x in near):
-        return None
-    if med < 5 and all(float(vals[i]).is_integer() for i in idx):  # type: ignore[arg-type]
+    hi = idx[k_]
+    med = _median(ys)
+    v = ys[k_]
+    if med < 5 and all(float(y).is_integer() for y in ys):
         return None  # счёт 1 → 4 — не всплеск, а малые числа
-    if sum(1 for i in idx if float(vals[i]) >= 3 * med) > 2:  # type: ignore[arg-type]
-        return None  # много «всплесков» — это не всплеск, а другой уровень ряда
     r = round(v / med, 1)
     rng = dict(frm=tv.periods[idx[0]], to=tv.periods[idx[-1]])
     pm = {**_ptime(d, tv, "median", **rng), "tol": 0.051 if abs(med) < 100 else 0.51}
@@ -788,13 +833,21 @@ def _spike(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], h
            unit, f"Медиана ряда: половина значений ниже, половина выше. {_by(m)}", prov=pm)
     fs.add("spike", r, "max", f"в {fmt_num(r, 1)} {times_word(r)} выше медианы", "раз",
            f"{upper_first(period_text(tv.periods[hi]))}: {fmt_value(v, unit)} против медианы {fmt_value(med, unit)}.",
-           prov={"op": "ratio", "a": _ptime(d, tv, "max", **rng), "b": pm, "tol": 0.051})
+           prov={"op": "ratio", "a": _ptime(d, tv, "at", to=tv.periods[hi]), "b": pm, "tol": 0.051})
     n = len(idx)
     fs.add("points", n, "count", count_words(n, pw[0], pw[1], pw[2]), None, "Значений в ряду.",
            prov=_ptime(d, tv, "count", **rng))
+    fs.add("spike_value", v, "max", f"{tv.labels[hi]}: {fmt_value(v, unit)}", unit, f"Всплеск. {_by(m)}",
+           prov=_ptime(d, tv, "at", to=tv.periods[hi]))
+    fs.ctx["labels"].append(tv.labels[hi])
+    rest = [y for k, y in enumerate(ys) if k != k_]
+    if abs(_mann_kendall(rest)) >= 1.96:
+        # без всплеска ряд растёт или падает: вывод — тренд, всплеск назван рядом с ним
+        fs.ctx["spike_note"] = (tv.labels[hi], v, r)
+        return (f"Всплеск — {period_text(tv.periods[hi])}: {fmt_value(v, unit)}, в {fmt_num(r, 1)} {times_word(r)} выше "
+                f"медианы.")
     fs.ctx["peak"] = ("всплеск", v, tv.labels[hi])
     fs.ctx["spike"] = r
-    fs.ctx["labels"].append(tv.labels[hi])
     return (f"{upper_first(period_text(tv.periods[hi]))} — {fmt_value(v, unit)}, медиана за "
             f"{count_words(n, pw[0], pw[1], pw[2])} — {fmt_value(med, unit)}.")
 
@@ -813,7 +866,9 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
     в пределах шума. Дни — целыми неделями (k = 7): у будней и выходных разный уровень, три дня с вторника против трёх
     с субботы — не изменение. `small` — концы ряда малы (счёт 3 → 0): средние и при выраженном тренде."""
     ys = [float(vals[i]) for i in idx]  # type: ignore[arg-type]
-    t = _trend_t(idx, ys)
+    if max(ys) - min(ys) <= 1e-9 * max(1.0, abs(max(ys))):
+        return False  # ряд постоянный: «держится на уровне», а не «без тренда»
+    t = _mann_kendall(ys) * 2 / 1.96  # в единицах прежнего порога: |t| ≥ 2 — тренд выражен (|z| ≥ 1,96)
     if abs(t) >= 2 and not small:
         return False
     k = max(3, len(idx) // 6)
@@ -837,8 +892,10 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
     fs.add("k", k, "count", count_words(k, pw[0], pw[1], pw[2]), None, "Сколько периодов в каждом среднем.",
            prov={"op": "count", "what": "value", "value": k})
     gauge = _gauge(m, unit)
-    # разница средних в пределах шума (две стандартные ошибки разности) — тренда нет
-    sd = float(np.std(ys, ddof=1)) if len(ys) > 2 else 0.0
+    # разница средних в пределах шума (две стандартные ошибки разности) — тренда нет; разброс — по MAD остатков от
+    # прямой Тейла — Сена, его не раздувает один всплеск
+    b_ts, a_ts = _theil_sen(idx, ys)
+    sd = _robust_sd([y - (a_ts + b_ts * x) for x, y in zip(idx, ys)]) if len(ys) > 2 else 0.0
     noise = 2 * sd * math.sqrt(2 / k)
     if level or gauge or m1 <= 0:
         delta = m2 - m1
@@ -884,7 +941,8 @@ def _seasonal(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int]
     mean = sum(float(vals[i]) for i in idx) / len(idx)  # type: ignore[arg-type]
     fs.add("mean", round(mean, 1) if abs(mean) < 100 else round(mean), "median", f"В среднем — {fmt_value(mean, unit)}",
            unit, "Среднее по всем периодам.", prov={**_ptime(d, tv, "mean", frm=tv.periods[idx[0]],
-                                                              to=tv.periods[idx[-1]]), "tol": 0.051})
+                                                              to=tv.periods[idx[-1]]),
+                                                    "tol": 0.051 if abs(mean) < 100 else 0.51})  # целое — до 0,5
     fs.ctx["caption"] = _short([f"В среднем — {fmt_value(mean, unit)}."])
 
 
@@ -1046,7 +1104,7 @@ def _dynamics_hourly(d: Data, tv: TimeView, vals: list[Optional[float]], idx: li
            prov=_ptime(d, tv, "max", **rng))
     fs.add("mean", round(mean, 1) if abs(mean) < 100 else round(mean), "median", f"В среднем — {fmt_value(mean, unit)}",
            unit, f"Среднее за час по {count_words(len(idx), 'часу', 'часам', 'часам')}. {_by(m)}",
-           prov=_ptime(d, tv, "mean", **rng))
+           prov={**_ptime(d, tv, "mean", **rng), "tol": 0.051 if abs(mean) < 100 else 0.51})
     fs.ctx["caption"] = _short([f"Пик — {when}.", f"{_range_text(tv.periods[idx[0]], tv.periods[idx[-1]])}."])
     return True
 
@@ -1233,7 +1291,7 @@ def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
     for name, v, per in fs.ctx.get("peaks", [])[:1]:
         must.append(f"{name}: максимум {fmt_value(v, unit)} {period_in(per)}, затем ниже.")
     if tv.missing:
-        must.append(f"За {join_and([period_text(p) for p in tv.missing[:3]])} данных нет.")  # разрыв виден на графике
+        must.append(f"За {join_and([period_acc(p) for p in tv.missing[:3]])} данных нет.")  # разрыв виден на графике
     fs.ctx["caption"] = _short(caption + must, must=tuple(must))
     return True
 
@@ -1292,9 +1350,10 @@ def _period_metric(d: Data, m: Measure) -> Optional[Phrase]:
     if not (re.fullmatch(r"(?:19|20)\d\d", name) or period_str(name) is not None):
         return None
     noun = _data_noun(d)
-    if noun is None:
-        return None
     per = f"{name} год" if re.fullmatch(r"(?:19|20)\d\d", name) else name
+    if noun is None:  # таблица без названия: «больше половины всего за 2025 год», а не «больше половины 2025»
+        w = f"всего за {per}"
+        return Phrase(w, w, w, w, w, w, "n", sure=False)
     lo = noun.low
     return Phrase(f"{lo.nom} за {per}", f"{lo.gen} за {per}", f"{lo.dat} за {per}", f"{lo.gen_pl} за {per}",
                   f"{lo.dat_pl} за {per}", f"{lo.nom_pl} за {per}", noun.gender)
@@ -1435,8 +1494,9 @@ def _wording(d: Data, cv: CatView, m: Optional[Measure]) -> str:
     unit = (m.unit_text or "").strip().lower()
     if _TEMP.search(m.name) or _TEMP.search(unit) or _TEMP.search(title):
         return "temp"
-    # цена и тариф — «дороже/дешевле всего» (по названию, единице «₽/…» или названию файла)
-    if not m.additive and (_PRICE.search(m.name) or unit.startswith(("₽/", "руб")) or _PRICE.search(title)):
+    # цена и тариф — «дороже/дешевле всего» только по имени или единице самой величины («Тариф, ₽/кВт·ч», «₽/мес.»),
+    # а не по названию файла: «Абоненты тарифов» — счёт абонентов, не цена
+    if not m.additive and (_PRICE.search(m.name) or unit.startswith(("₽/", "руб/", "руб./", "$/", "€/"))):
         return "price"
     # меньше — лучше: задержка, время, пинг, отклик — «дольше/медленнее всего» у первого, «быстрее всего» у лучшего
     # только у длительностей (единица времени): «Доля опозданий, %» — не время
@@ -2158,7 +2218,7 @@ def _distribution(d: Data) -> FactSet:
         # скошенное распределение: середину честнее показывает медиана, а не среднее
         fs.add("mean", round(mean, 1) if abs(mean) < 100 else round(mean), "median", f"Среднее — {fmt_value(mean, unit)}",
                unit, f"Среднее арифметическое; медиана — {fmt_value(med, unit)}: крупные значения тянут среднее вверх.",
-               prov={**pd, "stat": "mean"})
+               prov={**pd, "stat": "mean", "tol": 0.051 if abs(mean) < 100 else 0.51})
         fs.ctx.update(skewed=True, mean_text=fmt_value(mean, unit))
         caption = [f"Медиана — {med_txt}, среднее — {fmt_value(mean, unit)}."]
     sides = []

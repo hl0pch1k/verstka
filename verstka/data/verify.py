@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Optional, Sequence
 
+from verstka.data.aggregate import den_matches, per_unit_denominator, status_column
 from verstka.data.parse import forecast_period, iso_ord, period_parts, quantity, season_name, season_ord
 from verstka.data.words import fmt_num, is_participle, stem, stems_of
 from verstka.schemas.data import HeadlineFact, Table
@@ -111,7 +112,13 @@ _W_NAME = re.compile(r"чек(?:ов|и)\b|заказ(?:ов|ы)\b|ответ(?:
 
 
 def _weight_col(raw: "_Raw", col: int) -> Optional[int]:
-    """Колонка-вес рядом с уровнем: имя счёта и одни целые неотрицательные числа (своя проверка, не расчёта)."""
+    """Колонка-вес рядом с уровнем: имя счёта и одни целые неотрицательные числа (своя проверка, не расчёта). Удельная
+    величина («л/100 км») взвешивается только колонкой своего знаменателя («Пробег, км»), а не счётом рейсов."""
+    units = list(raw.t.units or [])
+    den = per_unit_denominator(units[col] if col < len(units) and units[col] else "")
+    if den is not None:
+        return next((j for j, name in enumerate(raw.t.columns) if j != col
+                     and den_matches(den, units[j] if j < len(units) and units[j] else "", name)), None)
     for j, name in enumerate(raw.t.columns):
         if j == col or not _W_NAME.search(name or "") or _W_NAME.search(raw.t.columns[col] or ""):
             continue
@@ -132,6 +139,13 @@ def _forecast_in(raw: "_Raw", p: dict) -> Optional[str]:
             v = raw.cell(i, tj)
             if isinstance(v, str) and forecast_period(v) is not None:
                 return v.strip()
+        sj = status_column(raw.t)  # колонка статуса «Факт / Прогноз»: строка «Прогноз» — не факт
+        if sj is not None:
+            for i in raw.rows:
+                st = raw.cell(i, sj)
+                if isinstance(st, str) and " ".join(st.lower().split()) not in ("факт", "фактически", "fact", "actual",
+                                                                                "actuals"):
+                    return f"{_text(raw.cell(i, tj))} ({st.strip().lower()})"
     for j in p.get("cols") or []:
         name = raw.t.columns[j] if 0 <= j < len(raw.t.columns) else ""
         if name and forecast_period(name) is not None:
@@ -249,7 +263,12 @@ def _series(raw: _Raw, p: dict) -> dict[int, float]:
         by.setdefault(k, []).append((i, v))
     for k, xs in by.items():
         xs.sort()
-        if how == "sum_last_by":
+        if how == "wmean" and p.get("w") is not None:
+            # среднее взвешенное за период: Σ(вес·значение)/Σвес своим счётом по сырым строкам
+            ws = [(raw.num(i, p["w"]) or 0.0, v) for i, v in xs]
+            tw = sum(w for w, _ in ws)
+            out[k] = sum(w * v for w, v in ws) / tw if tw else _agg([v for _, v in xs], "mean")
+        elif how == "sum_last_by":
             last: dict[str, float] = {}
             for i, v in xs:
                 last[raw.text(i, p["by"])] = v

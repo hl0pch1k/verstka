@@ -313,6 +313,8 @@ def _numeric_column(vals: list[Any], distinct: list[str], counts: Counter, q_sam
 # ======================================================================================================== таблица из строк
 
 _YEARISH = re.compile(r"(?:19|20)\d\d(?:\s*(?:г\.?|год))?")
+# год с единицей в шапке: «2024, ГВт·ч», «2025 (тыс. чел.)» — имя колонки-года, а не число «2 024 ГВт·ч»
+_YEAR_UNIT = re.compile(r"(?:19|20)\d\d(?:\s*(?:г\.?|год))?\s*(?:,\s*[^\d\s,][^,]{0,24}|\(\s*[^\d()][^()]{0,24}\))")
 
 
 def _kind(v: Any) -> str:
@@ -323,7 +325,7 @@ def _kind(v: Any) -> str:
         return "num"
     if _is_num(v):
         return "year" if float(v).is_integer() and 1900 <= v <= 2100 else "num"
-    if _YEARISH.fullmatch(v):
+    if _YEARISH.fullmatch(v) or _YEAR_UNIT.fullmatch(v.strip()):
         return "year"
     if _quantity(v, strict=True) is not None:
         return "num"

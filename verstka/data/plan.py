@@ -630,7 +630,7 @@ def _with_forecast(d: Data, tv, cats: list[str], series: list[InlineSeries],
         m = tv.measure
         pts = []
         for i in sorted(d.forecast_rows):
-            pp = period_parts(forecast_period(d.cell(i, d.time_col)) or "")
+            pp = period_parts(forecast_period(d.cell(i, d.time_col)) or str(d.cell(i, d.time_col) or ""))
             v = _num_cell(d.cell(i, m.j)) if m.j >= 0 else None
             if pp is not None and v is not None:
                 pts.append((period_iso(pp[0], pp[1]), v / (m.scale or 1.0)))
