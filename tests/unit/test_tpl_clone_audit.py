@@ -334,7 +334,10 @@ def test_audit_leaves_the_template_own_layers_alone():
     """Must NOT flag: VK Tech short structured (every slide), the Blue_Curve heading inside its band, the MyBrand
     cover title on its layout's gradient picture."""
     vk = _audit("vktech_short.pptx", "manifest_cbbe3aa6a21d23ce.json.gz")
-    assert _serious(vk) == [] and vk.summary.score == 100
+    # (the fixture was built before the readable threshold of chart labels: its charts' 9 pt labels on the 405 pt slide
+    # are under 10 pt — `chart_text_small` rightly says so; nothing else is flagged)
+    assert [i for i in _serious(vk) if i.check_id != "chart_text_small"] == []
+    assert all(i.details.get("size", 0) >= 9.0 for i in _serious(vk, "chart_text_small"))
     bc = _audit("bluecurve_inband_s2_s3.pptx", "manifest_bluecurve_inband.json.gz")
     assert _serious(bc, "contrast_low") == [] and _serious(bc, "content_over_art") == []
     mb = _audit("mybrand_short_s1.pptx", "manifest_a4d0f0fa139a4368.json.gz")

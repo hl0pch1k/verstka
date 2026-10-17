@@ -104,6 +104,9 @@ class IRChart(BaseModel):
     y_title: Optional[str] = None
     value_scale: Optional[IRAxisScale] = None  # the value axis (a scatter: Y)
     x_scale: Optional[IRAxisScale] = None  # a scatter's X axis
+    # the smallest size its labels are set at (pt): the category axis, a shown value axis, the legend, the series' value
+    # labels — None where none says its size
+    label_pt: Optional[float] = None
 
 
 class IRTableCell(BaseModel):

@@ -246,7 +246,12 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
     grouping = find(chart_el, "c:grouping")
     gap = _val(chart_el, "c:gapWidth")
     overlap = _val(chart_el, "c:overlap")
+    label_sizes = [_text_style(cat_ax)[2] if cat_ax is not None else None, _text_style(val_ax)[2] if has_val_axis else None,
+                   _text_style(find(root, ".//c:legend"))[2] if has_legend else None]
+    label_sizes += [s_.label_size_pt for s_ in series if s_.labels_shown is not False]
+    label_sizes = [x for x in label_sizes if x]
     return IRChart(
+        label_pt=min(label_sizes) if label_sizes else None,
         type=ctype, categories=categories, series=series, has_data_labels=has_labels, has_legend=has_legend, has_value_axis=has_val_axis,
         colors=colors, number_format=nf.get("formatCode") if nf is not None else None, title=title,
         series_labels=any(e.get("val") in ("1", "true") for e in plot.iter(q("c:showSerName"))),

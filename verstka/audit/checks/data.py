@@ -156,6 +156,14 @@ def _elements(s: IRSlide) -> list[IRElement]:
     return list(s.elements)
 
 
+def _typography(ctx: AuditContext):
+    """The template's typography (None for a bare manifest)."""
+    try:
+        return ctx.manifest.tokens.typography
+    except AttributeError:
+        return None
+
+
 def _charts(s: IRSlide) -> list[IRElement]:
     return [e for e in _elements(s) if e.chart is not None]
 
@@ -769,9 +777,14 @@ def chart_labels_missing(ctx: AuditContext) -> list[Issue]:
         cats = [str(c) for c in prep.categories]
         if len(cats) < 2 or is_time_axis(cats):
             continue
+        # (a line's points and a histogram's bins are in order: the renderer shows every k-th of their labels rather than
+        # turn them or set them under the readable size — `charts.fit_categories`)
+        planned = getattr(osl.content.chart, "type", None) if osl.content.chart is not None else None
+        if planned in ("line", "area", "histogram"):
+            continue
         for e in _charts(s):
             c = e.chart
-            if c.type in ("pie", "doughnut", "scatter") or len(c.categories) != len(cats):
+            if c.type in ("pie", "doughnut", "scatter", "line", "area") or len(c.categories) != len(cats):
                 continue
             blank = sum(1 for x in c.categories if not str(x).strip())
             if blank:
@@ -779,6 +792,41 @@ def chart_labels_missing(ctx: AuditContext) -> list[Issue]:
                     CHART_LABELS_MISSING, s.index, f"У {blank} из {len(cats)} категорий диаграммы «{osl.data.file}» нет подписи",
                     suggestion="Подпишите все категории: дайте диаграмме больше высоты, оставьте топ и «Прочие» или покажите таблицей.", **_bboxes([e]),
                 ))
+    return out
+
+
+CHART_TEXT_SMALL = CheckSpec(
+    id="chart_text_small",
+    title="Подписи графика мельче читаемого",
+    severity="warn",
+    category="template",
+    description="Подписи категорий, значений, осей и легенды графика не мельче порога читаемости: 2,4 % высоты слайда "
+                "или ¾ основного кегля шаблона (не больше 2,6 % высоты). Мелкие подписи — признак тесной рамки: "
+                "её дают выше, а подписи прореживают или переносят, но не уменьшают.",
+)
+
+
+@check(CHART_TEXT_SMALL)
+def chart_text_small(ctx: AuditContext) -> list[Issue]:
+    from verstka.rendering.charts import ROW_NAMES_GIVE, readable_pt, template_body_pt
+
+    out = []
+    typo = _typography(ctx)
+    floor = readable_pt(ctx.ir.slide_h / 12700.0, template_body_pt(typo))
+    for s in ctx.ir.slides:
+        if not s.outline_id:
+            continue  # (a slide the engine did not set — the template's own sample chart — is the template's design)
+        for e in _elements(s):
+            c = e.chart
+            # (the row names of horizontal bars may give a little while frames are cut for smaller labels: ROW_NAMES_GIVE)
+            least = math.floor(floor * ROW_NAMES_GIVE * 2 + 1e-6) / 2 if c is not None and c.type == "bar" else floor
+            if c is None or c.label_pt is None or c.label_pt >= least - 0.3:
+                continue
+            out.append(ctx.new_issue(
+                CHART_TEXT_SMALL, s.index, f"Подписи графика набраны {c.label_pt:g} pt — мельче читаемого ({floor:g} pt на этом слайде)",
+                suggestion="Дайте графику рамку выше и шире; подписи прореживают или переносят, а не уменьшают.",
+                details={"size": c.label_pt, "floor": floor}, **_bboxes([e]),
+            ))
     return out
 
 
@@ -794,11 +842,12 @@ CHART_ROWS_DONT_FIT = CheckSpec(
 
 @check(CHART_ROWS_DONT_FIT)
 def chart_rows_dont_fit(ctx: AuditContext) -> list[Issue]:
-    from verstka.rendering.charts import min_frame_height
+    from verstka.rendering.charts import min_frame_height, readable_pt, template_body_pt
 
     out = []
     hpt = ctx.ir.slide_h / 12700.0
-    fs = max(8.0, 0.02 * hpt)  # (the least size a chart sets its labels at: 2 % of the slide's height)
+    typo = _typography(ctx)
+    fs = readable_pt(hpt, template_body_pt(typo))  # (the least size a chart sets its labels at: the readable threshold)
     for s, osl in _data_slides(ctx):
         for e in _charts(s):
             c = e.chart
