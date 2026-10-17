@@ -295,9 +295,11 @@ def _marks_trouble(slide, oslide: OutlineSlide, marks: list, chrome: set, manife
 
 
 def readable_floor(manifest: TemplateManifest) -> float:
-    """The least size of running text on a slide set on a template sample: the template's body size (a step under
-    it at most), never under 2.4 % of the slide height — VK Tech's 9 pt card text on a 5.6-inch slide does not read
-    from the back of the room, and a deck of composed slides at 11 pt shows it beside them."""
+    """The least size of running text on a slide set on a template sample: the template's body size (`body_floor`).
+    VK Tech's 9 pt is its own body — the size of the running text on 7 of its 12 slides with running text (its card
+    samples), the most frequent size of its scale — so its 9 pt cards stay, though the composer sets 11 pt there (its
+    body is never under 2.7 % of the slide height); a floor of 2.7 % for every template would turn down ЛЦТ's own
+    14 pt cards as well."""
     # (qa4 L3: the template's body size itself — a step under it set the cards of VK Tech at 7 pt and ЛЦТ's at 12 pt
     # beside 14 pt composed slides; the floor is the same for the composer and the audit, `body_floor`)
     return body_floor(manifest)
