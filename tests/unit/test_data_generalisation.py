@@ -327,9 +327,11 @@ def test_science_set_end_to_end():
     assert plans[3].options[0].title == "Ранжированные горизонтальные столбцы по институтам"
     tree = chart_spec_of(plans[3], tables[3], option=2, part=2)
     assert tree.columns[0] == "Институт" and tree.rows[-1][0] == "Итого"
-    # «Приём»: части из профиля (`part_columns`), «Всего» — не ряд, группа шапки — подпись оси и слова причины
+    # «Приём»: части из профиля (`part_columns`), «Всего» — не ряд; ось — по величине («Приём», чел.), группа шапки —
+    # заголовок легенды и слова причины (раунд 8, H4)
     stack = chart_spec_of(plans[1], tables[1])
-    assert [x.name for x in stack.series] == ["Бюджет", "Платное", "Целевое"] and stack.y_title == "Форма обучения"
+    assert [x.name for x in stack.series] == ["Бюджет", "Платное", "Целевое"] and stack.legend_title == "Форма обучения"
+    assert stack.y_title == "Приём" and stack.unit == "чел."
     assert plans[1].options[2].title == "Кольцевая диаграмма по формам обучения"
     assert "3 формы обучения (Бюджет, Платное, Целевое)" in plans[1].task.reasons[0]
     # «Итоги года»: единицы строк, люди сравниваются с людьми
@@ -370,7 +372,8 @@ def test_part_columns_and_column_groups_from_the_reader():
     assert d.group_name == "Форма обучения"
     p = _plan(t)
     spec = chart_spec_of(p, t)
-    assert [x.name for x in spec.series] == ["Бюджет", "Платное", "Целевое"] and spec.y_title == "Форма обучения"
+    assert [x.name for x in spec.series] == ["Бюджет", "Платное", "Целевое"] and spec.legend_title == "Форма обучения"
+    assert spec.y_title != "Форма обучения"
     assert "3 формы обучения" in p.task.reasons[0]
 
 

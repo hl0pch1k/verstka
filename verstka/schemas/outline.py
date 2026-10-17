@@ -99,6 +99,9 @@ class ChartSpec(BaseModel):
     # и область проходят через пропуск (span); слой данных ставит True, когда в ряду есть None. Столбцы — всегда пусто.
     x_title: SkipJsonSchema[Optional[str]] = None
     y_title: SkipJsonSchema[Optional[str]] = None
+    # группа рядов составных и сгруппированных столбцов («Форма обучения») — заголовок легенды; ось значений названа по
+    # величине («Приём, чел.»)
+    legend_title: SkipJsonSchema[Optional[str]] = None
     gaps: SkipJsonSchema[bool] = False
     source: SkipJsonSchema[Optional[str]] = None
     xy: SkipJsonSchema[list[XYSeries]] = Field(default_factory=list)

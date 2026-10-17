@@ -63,6 +63,7 @@ _METRIC_WORD = re.compile(r"выручк|расход|доход|прибыл|п
                           r"итог|всего|план|факт|(?:^|\s)рост|изменени|балл|рейтинг|индекс|ставк|курс|тариф|вес(?:\s|$)|"
                           r"объ[её]м|площад|длительн|время|минимум|максимум|медиан|мин\.|макс\.|затрат|бюджет|"
                           r"конверси|охват|населени|штук|ед\.", re.I)
+MAX_DISCRETE_BINS = 15  # значений не больше — гистограмма по значениям, а не по интервалам
 _COUNT_NAME = re.compile(r"^(?:число|количество|кол-во|частота|сколько|человек|учеников|студентов|семей|случаев)", re.I)
 _TARGET_NAME = re.compile(r"(?:^|[^а-яё])(?:цел[ьи]|целев|норматив|норма|target|таргет|kpi|ориентир)", re.I)
 _CUMUL = re.compile(r"нараста|накоплен|с начала года|с начала периода|ytd|cumulative|running total", re.I)
@@ -913,8 +914,27 @@ class Data:
         inl = np.array([v for i, v in enumerate(m.values) if v is not None and i not in out_rows], dtype=float)
         if inl.size < 2:
             inl = x
-        bins = histogram_bins(inl, m.unit_text)
-        if outliers and inl.size:
+        uniq = np.unique(inl)
+        if 3 <= uniq.size <= MAX_DISCRETE_BINS:
+            # значений мало (размеры стипендий, оценки, размеры одежды): столбец на каждое значение — без пустых
+            # интервалов между ними
+            bins = Bins(edges=[float(v) for v in uniq], counts=[int((inl == v).sum()) for v in uniq],
+                        labels=[fmt_num(float(v)) for v in uniq],
+                        width=float(np.diff(uniq).min()) if uniq.size > 1 else 1.0, discrete=True)
+        else:
+            bins = histogram_bins(inl, m.unit_text)
+        if outliers and inl.size and bins.discrete:
+            hi = [v for v in outliers if v > float(inl.max())]
+            lo = [v for v in outliers if v < float(inl.min())]
+            if hi:  # выбросы — одним крайним столбцом «от X» (все значения больше обычных)
+                bins.counts.append(len(hi))
+                bins.labels.append(f"от {fmt_num(min(hi))}")
+                bins.open_from = float(inl.max())
+            if lo:
+                bins.counts.insert(0, len(lo))
+                bins.labels.insert(0, f"до {fmt_num(max(lo))}")
+                bins.open_to = float(inl.min())
+        elif outliers and inl.size:
             # выбросы — на графике, в крайних столбцах: «больше 180» считает все значения больше 180, а не только обычные
             hi = [v for v in outliers if v > float(inl.max())]
             lo = [v for v in outliers if v < float(inl.min())]

@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
-from verstka.data.plan import NotBuilt, chart_spec_of, goal_notes, plan_datasets, slide_data_of
+from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
 from verstka.data.words import count_words, file_title, fmt_signed, fmt_value, stems_of, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
@@ -330,7 +330,7 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
         rationale=_rationale(plan),
         alternatives=_alternatives(plan),
         notes=_notes(plan) if part == 1 else "",
-        data=slide_data_of(plan, part).model_copy(update={"prepared": prepared_of(body, caption)}),
+        data=slide_data_of(plan, part, table).model_copy(update={"prepared": prepared_of(body, caption)}),
     )
     if not data_text_ok(slide.headline, slide):
         # the story says what the audit accepts: a headline whose number the data checks would refuse gives way to the
@@ -667,6 +667,10 @@ def build_data_story(
                 break
         if not built:
             continue
+        # что о данных этого слайда говорят другие файлы колоды («Итоги квартала.txt» — о пропуске NPS)
+        ctx = file_context(t, p, tables)
+        built = [s.model_copy(update={"data": s.data.model_copy(update={"context": ctx})}) if s.data is not None else s
+                 for s in built]
         if len(built) < p.slides:
             for s in built:
                 if s.data is not None:

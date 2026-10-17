@@ -310,6 +310,10 @@ class SlideData(BaseModel):
     part: tuple[int, int] = (1, 1)
     # значения слайда из файла (для аудита данных); None — колоды, собранные до этого поля
     prepared: Optional[PreparedValues] = None
+    # что сам файл говорит о своих данных: текст вокруг таблицы (до ~600 знаков, без строки-заголовка и сносок вроде
+    # «Источник:») — «Опрос NPS во II квартале не проводился…»; None — файл без такого текста. Числа из него в подписи
+    # проходят то же правило, что и остальные
+    context: Optional[str] = None
 
     @model_validator(mode="after")
     def _label_by_nature(self) -> "SlideData":

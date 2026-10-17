@@ -266,6 +266,8 @@ export interface ChartSpec {
   split?: boolean;
   /** Вторая ступень: подписи осей, пропуски — разрывы линии, строка источника, точки рассеяния. */
   x_title?: string | null; y_title?: string | null; gaps?: boolean; source?: string | null; xy?: XYSeries[];
+  /** Группа рядов составных и сгруппированных столбцов («Форма обучения») — заголовок легенды. */
+  legend_title?: string | null;
   /** Вид выбран нарочно (выбранный вариант слоя данных, «Пересобрать слайд так»): столбцы с длинными подписями остаются
    *  столбцами, а не поворачиваются в полосы. */
   kind_locked?: boolean;
@@ -713,6 +715,8 @@ export interface SlideData {
   headline_facts: HeadlineFact[]; plain_headline: string; aggregation: string | null;
   /** Часть k из n: датасет на нескольких слайдах. */
   part: [number, number];
+  /** Что сам файл говорит о своих данных (текст вокруг таблицы, до ~600 знаков); null — такого текста нет. */
+  context?: string | null;
 }
 /** Карточка файла в панели «Данные» (POST /api/datasets). */
 export interface DatasetSummary {

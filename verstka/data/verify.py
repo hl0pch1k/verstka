@@ -26,7 +26,7 @@ from verstka.data.parse import iso_ord, period_parts, quantity, season_name, sea
 from verstka.data.words import fmt_num, stem, stems_of
 from verstka.schemas.data import HeadlineFact, Table
 
-__all__ = ["Verdict", "verify", "numbers_ok"]
+__all__ = ["Verdict", "verify", "numbers_ok", "claims_problem"]
 
 
 @dataclass
@@ -296,6 +296,11 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
                 raise _Fail(f"«{keys[0]}» — не наибольшее значение")
             if rank == "min" and pool and any(v > min(pool.values()) + 1e-9 * max(1.0, abs(v)) for v in vals):
                 raise _Fail(f"«{keys[0]}» — не наименьшее значение")
+            if rank in ("max", "min") and pool:
+                # ничья: с тем же значением есть ещё категории, а названы не все
+                tied = [k for k, v in pool.items() if k not in keys and abs(v - vals[0]) <= 1e-9 * max(1.0, abs(v))]
+                if tied:
+                    raise _Fail(f"ничья: у «{keys[0]}» и «{tied[0]}» одно значение, а названа одна")
             return vals[0], ex
         num = sum(agg[k] for k in keys)
         if p.get("total_row") is not None:
@@ -626,8 +631,11 @@ def _stem_eq(a: str, b: str) -> bool:
 
 # ── проверка плана ────────────────────────────────────────────────────────────────────────────────────────────────
 def verify(table: Table, facts: Sequence[HeadlineFact], prov: dict[str, dict], headline: str,
-           caption: Optional[str], labels: Sequence[str] = (), title: str = "") -> Verdict:
-    """Пересчитывает каждый факт по сырым строкам и проверяет, что числа заголовка и подписи — подтверждённые."""
+           caption: Optional[str], labels: Sequence[str] = (), title: str = "",
+           bins: Optional[dict] = None) -> Verdict:
+    """Пересчитывает каждый факт по сырым строкам и проверяет, что числа заголовка и подписи — подтверждённые, а
+    утверждения (кто впереди, кто растёт быстрее всех, «во всех N», «в K из N», ничьи, «лучше», цель, столбцы
+    гистограммы) — правда по тем же строкам. `bins` — столбцы гистограммы слайда (подписи, счёт, открытые края)."""
     v = Verdict()
     for f in facts:
         p = prov.get(f.id)
@@ -665,4 +673,143 @@ def verify(table: Table, facts: Sequence[HeadlineFact], prov: dict[str, dict], h
             why = next((v.failed[f.id] for f in facts if f.id in v.failed and _shown_as(bad_cap[0], f.value)),
                        f"число {fmt_num(bad_cap[0])} не подтверждено строками файла")
             v.reasons.append(f"Подпись не подтвердилась проверкой: {why}")
+    # утверждения, не только числа
+    ok = {f.id: f for f in facts if f.id in v.ok}
+    if v.headline_ok:
+        why_h = claims_problem(headline, ok, prov, table, title)
+        if why_h:
+            v.headline_ok = False
+            v.reasons.append(f"Вывод не подтвердился проверкой: {why_h}")
+    if caption and v.caption_ok:
+        why_c = claims_problem(caption, ok, prov, table, title, caption=True) or \
+            (_bins_problem(table, bins) if bins else None)
+        if why_c:
+            v.caption_ok = False
+            v.reasons.append(f"Подпись не подтвердилась проверкой: {why_c}")
+    elif bins:
+        why_b = _bins_problem(table, bins)
+        if why_b:
+            v.caption_ok = False
+            v.reasons.append(f"Подпись не подтвердилась проверкой: {why_b}")
     return v
+
+
+# ── утверждения ───────────────────────────────────────────────────────────────────────────────────────────────────
+_LEAD_HEAD = re.compile(
+    r"^(?:(?:Больше|Выше|Дольше|Медленнее|Дороже|Теплее)\s+всего\s+—\s+(?P<a>.+?):\s"
+    r"|(?P<b>.+?)\s+(?:впереди|лидирует|лидируют|—\s+первое\s+место|даёт|дают|приносит|приносят)\b"
+    r"|(?P<c>[^—:]+?)\s+—\s+(?:\d|почти|больше|половин|треть|четверть|две\s+трети))")
+_GROW = re.compile(r"раст(?:ёт|ет|ут)\s+быстрее\s+всех|быстрее\s+всех\s+раст(?:ёт|ет|ут)")
+_ALL_N = re.compile(r"во\s+всех\s+(\d+)")
+_K_OF_N = re.compile(r"(?:^|\s)в\s+(\d+)\s+из\s+(\d+)")
+_BETTER = re.compile(r"лучше\s+всех|лучш(?:ий|ая|ее|ие)\b|лидиру|впереди", re.I)
+# меньше — лучше: ошибки, брак, отток, задержки, время, ставки и цены, преступность, расход
+_LOWER_BETTER = re.compile(r"ошиб|брак|дефект|отток|жалоб|задерж|опозда|просроч|врем[яе]|длительн|минут|пинг|"
+                           r"ставк|цен[аы]|тариф|стоимост|преступн|дтп|авари|расход|потер|убыт|выброс|примес", re.I)
+
+
+def _names(text: str) -> list[str]:
+    """«Лицей № 2 и Гимназия № 1» → два имени; «Москва» → одно."""
+    return [x.strip(" «»\"") for x in re.split(r"\s+и\s+|,\s*", text.strip()) if x.strip(" «»\"")]
+
+
+def _keys_of(p: Optional[dict]) -> list[str]:
+    return [str(k) for k in (p or {}).get("keys", [])]
+
+
+def _same_name(a: str, b: str) -> bool:
+    a, b = " ".join(a.lower().split()), " ".join(b.lower().split())
+    return a == b
+
+
+def claims_problem(text: str, ok: dict[str, HeadlineFact], prov: dict[str, dict], table: Table,
+                   title: str = "", caption: bool = False) -> Optional[str]:
+    """Что в утверждениях текста неправда по подтверждённым фактам (их происхождению): None — всё сходится. Кто
+    впереди — по заголовку (подпись начинается с ориентиров и итогов, а не с лидера)."""
+    t = " ".join((text or "").replace("\u00a0", " ").split())
+    if not t:
+        return None
+    # кто впереди: названный первым — ключ подтверждённого лидера (наибольшее значение по строкам файла)
+    lead = next((ok[k] for k in ("leader_share", "leader_value") if k in ok and _keys_of(prov.get(k))), None)
+    m = None if caption else _LEAD_HEAD.match(t)
+    if m is not None and m.group("c") is not None and "leader_share" not in ok:
+        m = None  # «X — 31%…» — лидер доли; без доли «X — 5» — не утверждение о первенстве
+    if lead is not None and m is not None:
+        said = m.group("a") or m.group("b") or m.group("c") or ""
+        keys = _keys_of(prov.get(lead.id))
+        names = _names(said)
+        if names and not any(_same_name(n, k) for n in names for k in keys) and not \
+                any(_same_name(said, k) for k in keys):
+            return f"впереди назван «{said}», а по строкам файла — «{keys[0]}»"
+        if len(keys) > 1 and len(names) < len(keys):
+            return f"ничья: у «{' и '.join(keys)}» одно значение, а назван один"
+    # кто растёт быстрее всех: фраза стоит при том, кто растёт (не после последнего в списке)
+    g = _GROW.search(t)
+    if g is not None:
+        gm = ok.get("growth_max")
+        keys = _keys_of(prov.get("growth_max")) if gm is not None else []
+        if not keys:
+            return "«растёт быстрее всех» — нечем подтвердить: нет проверенного роста"
+        subj = _grow_subject(t, g)
+        if subj is None or not any(_same_name(subj, k) for k in keys):
+            return f"«быстрее всех» стоит при «{subj or '?'}», а быстрее всех растёт «{keys[0]}»"
+    # «во всех N» и «в K из N» — счёт, а не только числа
+    counts = [f for f in ok.values() if f.kind == "count"]
+    for m_ in _ALL_N.finditer(t):
+        n = float(m_.group(1))
+        pre = t[:m_.start()].lower()
+        part = next((f for f in ok.values() if f.id in ("up", "moved", "below_target") ), None)
+        tot = next((f for f in ok.values() if f.id in ("periods", "of")), None)
+        if part is None or tot is None or abs(tot.value - n) > 1e-9:
+            return f"«во всех {int(n)}» — нечем подтвердить"
+        want = 0 if ("выше цели" in pre and part.id == "below_target") else n
+        if part.id == "below_target" and "ниже цели" in pre:
+            want = n
+        if abs(part.value - want) > 1e-9:
+            return f"«во всех {int(n)}» — по строкам файла {fmt_num(part.value)} из {fmt_num(n)}"
+    for m_ in _K_OF_N.finditer(t):
+        k, n = float(m_.group(1)), float(m_.group(2))
+        if not any(abs(f.value - k) < 1e-9 for f in counts) or not any(abs(f.value - n) < 1e-9 for f in counts):
+            return f"«в {int(k)} из {int(n)}» — нечем подтвердить"
+    # «лучше», «впереди» — не у величины, где меньше — лучше
+    if _BETTER.search(t):
+        cols = [str(prov.get(f.id, {}).get("col_name") or "") for f in ok.values() if f.id in ("leader_value",
+                                                                                             "leader_share")]
+        if any(_LOWER_BETTER.search(c) for c in cols if c) or (not any(cols) and _LOWER_BETTER.search(title or "")):
+            return "«впереди» или «лучше» у величины, где меньше — лучше"
+    return None
+
+
+def _grow_subject(t: str, g: "re.Match[str]") -> Optional[str]:
+    """Кто «растёт быстрее всех» по строению фразы: «X впереди и растёт…» → X; «…, X растёт быстрее всех» → X;
+    «…, быстрее всех растёт X» → X; «…, Y — 980 ₽ и растёт быстрее всех» → Y (ближайший перед)."""
+    after = t[g.end():]
+    if g.group(0).startswith("быстрее"):
+        m = re.match(r"\s+([^,.;:]+)", after)
+        return m.group(1).strip() if m else None
+    before = t[:g.start()].rstrip()
+    chunk = re.split(r",\s+(?=[^,]*$)", before)[-1] if "," in before else before
+    chunk = re.sub(r"\s+и$", "", chunk).strip()
+    m = re.match(r"^(.+?)(?:\s+впереди\b.*|\s+—\s+.*|\s+(?:даёт|дают|приносит|приносят)\b.*|:.*)?$", chunk)
+    return m.group(1).strip() if m else chunk
+
+
+def _bins_problem(table: Table, b: dict) -> Optional[str]:
+    """Столбцы гистограммы — по сырым значениям: открытый «больше X» считает все значения больше X (и выбросы),
+    «меньше X» — все меньше X, сумма столбцов — все значения."""
+    raw = _Raw(table, b.get("skip", ()))
+    xs = [v for v in (raw.num(i, b["col"], b.get("scale", 1.0)) for i in raw.rows) if v is not None]
+    counts, labels = list(b["counts"]), list(b["labels"])
+    if b.get("weighted"):
+        return None  # частотная таблица: столбцы — сами строки файла
+    if abs(sum(counts) - len(xs)) > 0:
+        return f"на гистограмме {fmt_num(sum(counts))} значений, а в файле — {fmt_num(len(xs))}"
+    if b.get("open_from") is not None:
+        n = sum(1 for v in xs if v > b["open_from"] + 1e-9)
+        if counts[-1] != n:
+            return f"столбец «{labels[-1]}» — {fmt_num(counts[-1])}, а значений больше {fmt_num(b['open_from'])} — {n}"
+    if b.get("open_to") is not None:
+        n = sum(1 for v in xs if v < b["open_to"] - 1e-9)
+        if counts[0] != n:
+            return f"столбец «{labels[0]}» — {fmt_num(counts[0])}, а значений меньше {fmt_num(b['open_to'])} — {n}"
+    return None

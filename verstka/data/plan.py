@@ -24,6 +24,7 @@ from verstka.data.goals import Goal, goal_match, goals_of, stems_of
 from verstka.data.words import stem_in
 from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
+from verstka.data.parse import split_unit
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, _infeasible_reason, decide_task, task_scores
 from verstka.data.verify import numbers_ok, verify
@@ -32,7 +33,7 @@ from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_
 from verstka.schemas.data import NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption
 from verstka.schemas.outline import ChartSpec, InlineSeries, NumberCallout, TableData, XYSeries
 
-__all__ = ["plan_dataset", "plan_datasets", "assign_goals", "goal_notes", "chart_spec_of", "slides_of", "slide_data_of", "data_of",
+__all__ = ["plan_dataset", "plan_datasets", "assign_goals", "goal_notes", "file_context", "chart_spec_of", "slides_of", "slide_data_of", "data_of",
            "SlideBody", "NotBuilt"]
 
 
@@ -125,7 +126,8 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     # самопроверка: каждое число заголовка и подписи пересчитано по сырым строкам файла; не подтвердилось — тема
     # вместо вывода и подпись только из подтверждённого, причина — в «Почему так»
     labels = _check_labels(fs, d, title)
-    verdict = verify(table, fs.facts, fs.prov, "" if headline == plain else headline, caption, labels, title)
+    verdict = verify(table, fs.facts, fs.prov, "" if headline == plain else headline, caption, labels, title,
+                     bins=_bins_claim(d, task))
     if not verdict.headline_ok:
         headline = plain
         facts = [f for f in fs.facts if f.id in verdict.ok]
@@ -158,6 +160,17 @@ def _freq_note(goal: Optional[str], d: Data, task: str) -> Optional[str]:
     elif tv.freq == "week" and _FREQ_ASK[m.group(1)] == "month":
         why = ": месяцы в ряду неполные или их мало — по неделям ряд честнее и подробнее"
     return f"Цель просит «по {m.group(1)}», ряд показан {_FREQ_SHOWN.get(tv.freq, tv.freq)}{why}."
+
+
+def _bins_claim(d: Data, task: str) -> Optional[dict]:
+    """Столбцы гистограммы слайда — для проверки по сырым значениям (открытые «больше X» и «меньше X» — все значения
+    за X, выбросы тоже)."""
+    if task != "distribution" or d.dist is None:
+        return None
+    dv, b = d.dist, d.dist.bins
+    return {"col": dv.measure.j, "counts": list(b.counts), "labels": list(b.labels), "open_from": b.open_from,
+            "open_to": b.open_to, "skip": sorted(set(d.totals) | set(d.benchmarks)), "scale": dv.measure.scale,
+            "weighted": d.freq_table is not None}
 
 
 def _check_labels(fs: FactSet, d: Data, title: str) -> list[str]:
@@ -470,10 +483,11 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
     elif len(series) == 1 or tv.dim:
         y_title = yname
     else:
-        y_title = d.group_name or _series_title(d)
+        y_title = _series_title(d)  # ось — по величине; группа рядов из шапки — заголовок легенды
     return ChartSpec(type=kind, categories=list(tv.labels), series=series, unit=None if tv.split else unit,
                      highlight_index=last if kind in ("line", "column", "area") and len(series) == 1 else None,
-                     x_title=tv.axis_title, y_title=y_title, gaps=tv.gaps, source=src, split=tv.split)
+                     x_title=tv.axis_title, y_title=y_title, gaps=tv.gaps, source=src, split=tv.split,
+                     legend_title=d.group_name if len(series) > 1 and not tv.dim else None)
 
 
 def _series_title(d: Data) -> str:
@@ -552,9 +566,11 @@ def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:
         vals = cv.values if x is m else cv.extra.get(x.name, [])
         # пропуск — пустое место, а не ноль (месяцы, которых ещё не было)
         series.append(InlineSeries(name=names.get(x.name, x.name), values=list(vals), unit=unit))
-    # подпись оси значений — группа частей из шапки («Форма обучения»), единица дописывается движком
+    # ось значений — по величине («Приём», единицу «чел.» дописывает движок); группа частей из шапки («Форма
+    # обучения») — заголовок легенды, а не оси
     return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit, x_title=cv.dim,
-                     y_title=d.group_name or unit or "Значение", source=src)
+                     y_title=_series_title(d) if _series_title(d) != "Значение" else (unit or "Значение"),
+                     legend_title=d.group_name, source=src)
 
 
 def _parts_doughnut(d: Data, src: str) -> Union[ChartSpec, NotBuilt]:
@@ -767,7 +783,114 @@ def _spec_relationship(d: Data, opt: VizOption, src: str, part: int, plan: Datas
 
 
 # ── «Почему так» ──────────────────────────────────────────────────────────────────────────────────────────────────────
-def slide_data_of(plan: DatasetPlan, part: int = 1) -> SlideData:
+_CONTEXT_MAX = 600
+_FOOTNOTE = re.compile(r"^(?:источник|примечани|сноска|\*|составлено|подготовлено|данные\s+(?:на|по\s+состоянию))", re.I)
+_EXPLAINS = re.compile(r"не\s+проводил|не\s+измеря|нет\s+данных|без\s+данных|не\s+собира|пропуск|не\s+учитыв|"
+                       r"переход|изменил[аи]?сь\s+методик|по\s+новой\s+методик|сравнени[ея]|потому\s+что|из-за", re.I)
+
+
+_PERIOD_WORD = re.compile(r"^(?:месяц|квартал|год|недел|ден|дн[яеи]|час|период|дат|значени|данн|итог|показател|"
+                          r"изменени|доля|дол|(?:i{1,3}|iv|v)$|по$|за$|в$)", re.I)
+
+
+def _subject_stems(table: Optional[Table], plan: Optional[DatasetPlan]) -> list[str]:
+    """Основы предмета датасета: главное слово названия файла и величин («NPS», «выручк»), без слов периода."""
+    if plan is None:
+        return []
+    from verstka.data.words import head_word
+
+    names = [file_title(plan.profile.file, plan.profile.sheet)] + list(plan.profile.metrics)
+    out: list[str] = []
+    for n in names:
+        h = head_word(split_unit(n)[0] or n) or ""
+        for w in [h] + ([n] if re.fullmatch(r"[A-Za-z]{2,6}", n.strip()) else []):
+            w = w.strip().lower()
+            if len(w) >= 2 and not _PERIOD_WORD.match(w):
+                out.append(w if re.fullmatch(r"[a-z]{2,6}", w) else (stems_of(w) or [w])[0])
+    return list(dict.fromkeys(out))
+
+
+def _cross_context(table: Optional[Table], plan: Optional[DatasetPlan], others: Sequence[Table]) -> list[str]:
+    """Предложения из текста других файлов, которые называют предмет этого датасета («Опрос NPS во II квартале не
+    проводился» — для «NPS по кварталам.csv»), с названием файла; объяснения пропусков — первыми."""
+    stems = _subject_stems(table, plan)
+    if not stems:
+        return []
+    out: list[tuple[int, int, str]] = []
+    for k, o in enumerate(others):
+        if o is table or not (getattr(o, "notes", "") or "").strip() or getattr(o, "file", None) == getattr(table, "file",
+                                                                                                          None):
+            continue
+        text = " ".join(o.notes.split())
+        for i, sent in enumerate(re.split(r"(?<=[.!?…])\s+(?=[А-ЯЁA-Z«])", text)):
+            low = sent.lower()
+            words = re.findall(r"[а-яёa-z]{2,}", low)
+            hit = any((re.fullmatch(r"[a-z]{2,6}", st) and re.search(rf"(?<![a-z]){st}(?![a-z])", low))
+                      or (not re.fullmatch(r"[a-z]{2,6}", st) and any(w.startswith(st) for w in words)) for st in stems)
+            if hit and not _FOOTNOTE.match(sent) and not sent.startswith("|"):
+                out.append((0 if _EXPLAINS.search(sent) else 1, k * 1000 + i, f"«{o.file}»: {sent}"))
+    return [x for _, _, x in sorted(out)]
+
+
+def file_context(table: Optional[Table], plan: Optional[DatasetPlan] = None,
+                 others: Sequence[Table] = ()) -> Optional[str]:
+    """Что файл говорит о своих данных: абзацы текста вокруг таблицы (`Table.notes`) без строки-заголовка и сносок
+    («Источник:», «Подготовлено…»), до ~600 знаков. Первыми — объяснения пропусков и сравнений («Опрос NPS во II
+    квартале не проводился…»), потом абзацы о величинах таблицы; порядок — как в файле. `others` — другие файлы
+    колоды: их предложения о предмете этого датасета идут следом, с названием файла («Итоги квартала.txt»: …)."""
+    own = _own_context(table, plan)
+    cross = _cross_context(table, plan, others) if others else []
+    if not cross:
+        return own
+    parts = [own] if own else []
+    size = len(own or "")
+    for c in cross:
+        if size + len(c) + 1 > _CONTEXT_MAX:
+            continue
+        parts.append(c)
+        size += len(c) + 1
+    return " ".join(parts) or None
+
+
+def _own_context(table: Optional[Table], plan: Optional[DatasetPlan] = None) -> Optional[str]:
+    notes = (getattr(table, "notes", "") or "").strip()
+    if not notes:
+        return None
+    paras = [" ".join(x.split()) for x in re.split(r"\n\s*\n", notes) if x.strip()]
+    if paras and "\n" not in notes.split("\n\n", 1)[0].strip() and not re.search(r"[.!?…]$", paras[0]):
+        paras = paras[1:]  # строка-заголовок («Итоги III квартала 2026 года — VK Cloud»)
+    paras = [x for x in paras if not _FOOTNOTE.match(x) and not x.startswith("|")]
+    if not paras:
+        return None
+    words = []
+    if plan is not None:
+        words = [c.name.lower() for c in plan.profile.columns] + [c.lower() for c in getattr(table, "columns", [])]
+        for r in getattr(table, "rows", [])[:30]:
+            if r and isinstance(r[0], str):
+                words.append(r[0].lower())
+    words = [w for w in words if len(w) >= 3]
+
+    def score(x: str) -> int:
+        low = x.lower()
+        return (2 if _EXPLAINS.search(x) else 0) + (1 if any(w in low for w in words) else 0)
+
+    order = sorted(range(len(paras)), key=lambda k: (-score(paras[k]), k))
+    keep: list[int] = []
+    size = 0
+    for k in order:
+        if size + len(paras[k]) + 1 > _CONTEXT_MAX:
+            continue
+        keep.append(k)
+        size += len(paras[k]) + 1
+    if not keep:
+        first = paras[order[0]]
+        cut = first[:_CONTEXT_MAX]
+        dot = cut.rfind(". ")
+        return (cut[: dot + 1] if dot > 100 else cut.rstrip() + "…") or None
+    return " ".join(paras[k] for k in sorted(keep))
+
+
+def slide_data_of(plan: DatasetPlan, part: int = 1, table: Optional[Table] = None) -> SlideData:
     """Данные слайда для «Почему так» (`part` — номер слайда датасета, с 1, как у `chart_spec_of`): профиль кратко,
     задача, варианты, факты заголовка. У справочника и карточек выбросы не показываются: крупнейшие клиенты в списке —
     это данные, а не проблема."""
@@ -786,4 +909,5 @@ def slide_data_of(plan: DatasetPlan, part: int = 1) -> SlideData:
         outliers=outliers, task=plan.task, options=list(plan.options), chosen=plan.chosen,
         headline_facts=list(plan.headline_facts), plain_headline=plan.plain_headline,
         aggregation=opt.aggregation if opt else None, part=(min(max(1, part), total), total),
+        context=file_context(table, plan),
     )

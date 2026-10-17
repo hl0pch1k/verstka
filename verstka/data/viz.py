@@ -337,7 +337,8 @@ def _distribution(d: Data) -> list[_Cand]:
     n = dv.n
     vals = count_words(n, "значение", "значения", "значений")
     out: list[_Cand] = []
-    flat = dv.bins.n < 5 and d.freq_table is None  # почти одно значение: интервалов нет
+    # почти одно значение: интервалов нет (столбцы по значениям — не «почти одно», если значений от трёх)
+    flat = dv.bins.n < 5 and not dv.bins.discrete and d.freq_table is None
     h = _Cand("histogram", 0.9, title="Гистограмма", aggregation=dv.note)
     if d.freq_table is not None:
         # готовая частотная таблица: столбец на каждое значение — сколько раз оно встретилось

@@ -1304,7 +1304,7 @@ def _constant(d: Data, cv: CatView) -> FactSet:
     dp = phrase(cv.dim)
     fs.add("constant", v, "total", f"У всех — {fmt_value(v, unit)}", unit,
            f"Все {n} значений колонки «{m.name if m else 'Число строк'}» равны {fmt_value(v, unit)}.",
-           prov=_pcat(d, m, cv.dim, [cv.labels[0]], rank="max"))
+           prov=_pcat(d, m, cv.dim, list(cv.labels), rank="max"))  # все — с одним, наибольшим, значением
     fs.add("count", n, "count", count_words(n, "категория", "категории", "категорий"), None, "Категорий в данных.",
            prov={"op": "count", "what": "groups", "by": _col_of(d, cv.dim), "skip": _skip(d)})
     fs.ctx.update(constant=True, unit_short=unit, labels=[],
@@ -1635,7 +1635,7 @@ def _distribution(d: Data) -> FactSet:
            "Наименьшее значение колонки.", prov={**pd, "stat": "min"})
     fs.add("max_value", float(x.max()), "max", f"Больше всего — {fmt_value(float(x.max()), unit)}", unit,
            "Наибольшее значение колонки.", prov={**pd, "stat": "max"})
-    if dv.bins.n < 5:
+    if (dv.bins.n < 5 and not dv.bins.discrete) or np.unique(x).size < 3:
         # почти одно и то же значение: форма распределения пустая, вывод — само значение
         fs.ctx["constant"] = "all" if float(x.min()) == float(x.max()) else "almost"
         fs.ctx["caption"] = (f"{upper_first(count_words(n, *ent_forms))}: значения от {fmt_value(float(x.min()), unit)} до "
@@ -1712,7 +1712,8 @@ def _distribution(d: Data) -> FactSet:
             fs.add("open_bin", n_bin, "count", f"«{b_.labels[-1]}» — {n_bin}", None,
                    f"Значений больше {fmt_num(b_.open_from)} — все, вместе с выбросами.",
                    prov={**pd, "stat": "beyond", "thr": b_.open_from, "side": "gt"})
-            where = f"на графике они в столбце «{b_.labels[-1]}» (там всего {n_bin})"
+            where = (f"на графике они в столбце «{b_.labels[-1]}» (там всего {n_bin})" if n_bin != k else
+                     f"на графике — отдельный столбец «{b_.labels[-1]}»")
         elif side == "low" and b_.open_to is not None and b_.labels:
             where = f"на графике они в столбце «{b_.labels[0]}»"
         else:

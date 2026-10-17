@@ -339,3 +339,64 @@ def test_goal_about_no_file_goes_to_the_deck_context():
     st = build_data_story(Brief(text=brief), [a, b])
     ctx = [x for s in st.outline.slides if s.id.startswith("context") for x in s.content.bullets]
     assert any("погода на Марсе" in x or "погода на марсе" in x.lower() for x in ctx), ctx
+
+
+# ── H4/H5: ось — по величине, группа рядов — в легенде; гистограмма по значениям ────────────────────────────────────
+def test_stacked_axis_is_the_measure_and_group_is_the_legend():
+    from pathlib import Path
+
+    from verstka.data.readers import read_file
+
+    t = read_file(Path(__file__).resolve().parents[2] / "examples" / "data-science-2026" / "Приём по направлениям.xlsx")[0]
+    p = _plan(t)
+    for k, o in enumerate(p.options):
+        if o.kind.startswith(("stacked", "grouped")):
+            s = chart_spec_of(p, t, option=k)
+            assert s.legend_title == "Форма обучения" and s.y_title != "Форма обучения" and s.unit == "чел.", s
+
+
+def test_few_distinct_values_get_a_bar_each():
+    sizes = [2590] * 40 + [3090] * 8 + [4120] * 25 + [6500] * 9 + [8000] * 12 + [10000] * 6 + [55000] * 3
+    t = _t("Стипендии.csv", [["Студент", "Размер, руб."]] + [[f"С-{k}", v] for k, v in enumerate(sizes)])
+    p = _plan(t)
+    s = chart_spec_of(p, t)
+    assert s.type == "histogram" and 0.0 not in s.series[0].values and sum(s.series[0].values) == len(sizes)
+    assert s.categories[:3] == ["2 590".replace(" ", NB), "3 090".replace(" ", NB), "4 120".replace(" ", NB)]
+    assert s.categories[-1].startswith("от ") and s.series[0].values[-1] == 3
+
+
+# ── контекст файла на слайде данных ────────────────────────────────────────────────────────────────────────────────
+def test_slide_carries_what_its_file_says():
+    from pathlib import Path
+
+    from verstka.data.plan import slide_data_of
+    from verstka.data.readers import read_file
+
+    root = Path(__file__).resolve().parents[2] / "examples" / "data-sales-2026"
+    t = read_file(root / "Итоги квартала.txt")[0]
+    c = slide_data_of(plan_datasets([t], "")[0], 1, t).context
+    assert c and "Опрос NPS во II квартале 2025 и 2026 года не проводился" in c and len(c) <= 600
+    assert "Итоги III квартала 2026 года — VK Cloud" not in c and "Подготовлено" not in c and "|" not in c
+    t = read_file(root / "NPS по кварталам.csv")[0]
+    assert slide_data_of(plan_datasets([t], "")[0], 1, t).context is None  # в CSV текста вокруг таблицы нет
+
+
+def test_context_links_notes_across_files():
+    """«Итоги квартала.txt» объясняет пропуск NPS — это предложение доходит и до слайда из «NPS по кварталам.csv», с
+    названием файла-источника; в колоде — на самом слайде (`SlideData.context`)."""
+    from pathlib import Path
+
+    from verstka.data.plan import file_context
+    from verstka.data.readers import read_file
+    from verstka.data.story import build_data_story
+    from verstka.schemas.outline import Brief
+
+    root = Path(__file__).resolve().parents[2] / "examples" / "data-sales-2026"
+    tables = [read_file(root / f)[0] for f in ("NPS по кварталам.csv", "Итоги квартала.txt")]
+    plans = plan_datasets(tables, "")
+    c = file_context(tables[0], plans[0], tables)
+    assert c and c.startswith("«Итоги квартала.txt»: Опрос NPS во II квартале 2025 и 2026 года не проводился")
+    assert len(c) <= 600
+    st = build_data_story(Brief(text=""), tables)
+    nps = next(s for s in st.outline.slides if s.data is not None and s.data.file == "NPS по кварталам.csv")
+    assert "не проводился" in (nps.data.context or "") and "«Итоги квартала.txt»" in nps.data.context

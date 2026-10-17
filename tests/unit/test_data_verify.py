@@ -86,6 +86,23 @@ def test_corpora_never_downgraded_and_every_fact_verified():
     assert not bad, bad[:5]
 
 
+def test_conv2_never_downgraded_numbers_and_claims():
+    """40 таблиц второй проверки сходимости (с целью и без): ни числа, ни утверждения не понижены."""
+    import tests.unit.test_data_factcheck as tf
+
+    bad = []
+    for key, files, brief0 in tf.corpus_conv2():
+        tables = [read_bytes(n, x)[0] for n, x in files]
+        for brief in ("", brief0):
+            for t, p in zip(tables, plan_datasets(tables, brief)):
+                if any(DOWN in r or "Подпись не подтвердилась" in r for r in p.task.reasons):
+                    bad.append((key, brief, p.task.reasons))
+                fs, v = _recheck(t, p)
+                if v.failed:
+                    bad.append((key, brief, v.failed))
+    assert not bad, bad[:5]
+
+
 def test_random_families_never_downgraded():
     import tests.unit.test_data_factcheck as tf
 
@@ -167,3 +184,98 @@ def test_plan_falls_back_to_plain_headline_and_factual_caption(monkeypatch):
     assert any(r.startswith(DOWN) for r in sd.task.reasons)
     # в факты заголовка — только подтверждённые
     assert {f.id for f in p.headline_facts} <= {f.id for f in fs.facts}
+
+
+# ── утверждения, не только числа (раунд 8) ────────────────────────────────────────────────────────────────────────
+def _facts(name: str, rows: list[list], task: str = "comparison"):
+    t = _t(name, rows)
+    d = Data(t, profile_table(t), compare=task == "comparison")
+    fs = facts_for(task, d)
+    return t, fs
+
+
+CHECKS = [["Магазин", "Средний чек, ₽", "Рост за год, %"], ["Арбат", 1540, "12,4"], ["Тверская", 1290, "5,1"],
+          ["Марьино", 980, "3,2"], ["Бутово", 1050, "4,0"]]
+
+
+def test_growth_clause_on_the_wrong_item_is_caught():
+    """F1: «…, Марьино — 980 ₽ и растёт быстрее всех» — числа верны, утверждение — нет."""
+    t, fs = _facts("Средний чек.csv", CHECKS)
+    good = "Арбат впереди и растёт быстрее всех: 1 540 ₽, Марьино — 980 ₽"
+    bad = "Арбат впереди: 1 540 ₽, Марьино — 980 ₽ и растёт быстрее всех"
+    assert verify(t, fs.facts, fs.prov, good, None, ["Арбат", "Марьино"]).headline_ok
+    v = verify(t, fs.facts, fs.prov, bad, None, ["Арбат", "Марьино"])
+    assert not v.headline_ok and "быстрее всех" in v.reasons[0] and "Марьино" in v.reasons[0]
+
+
+def test_wrong_leader_and_single_name_in_a_tie_are_caught():
+    t, fs = _facts("Средний чек.csv", CHECKS)
+    v = verify(t, fs.facts, fs.prov, "Тверская впереди: 1 540 ₽, Марьино — 980 ₽", None, ["Тверская", "Марьино"])
+    assert not v.headline_ok and "впереди назван «Тверская»" in v.reasons[0]
+    rows = [["Школа", "Средний балл ЕГЭ"], ["Лицей № 2", "78,4"], ["Гимназия № 1", "78,4"], ["Школа № 15", "71,9"]]
+    t, fs = _facts("Рейтинг школ.csv", rows)
+    labs = ["Лицей № 2", "Гимназия № 1", "Школа № 15"]
+    assert verify(t, fs.facts, fs.prov, "Лицей № 2 и Гимназия № 1 впереди: 78,4, Школа № 15 — 71,9", None,
+                  labs).headline_ok
+    v = verify(t, fs.facts, fs.prov, "Лицей № 2 впереди: 78,4, Школа № 15 — 71,9", None, labs)
+    assert not v.headline_ok and "ничья" in v.reasons[0]
+
+
+def test_all_n_and_target_claims_are_counted():
+    months = ["Январь", "Февраль", "Март", "Апрель"]
+    rows = [["Месяц", "2024", "2025"], ["Январь", 300, 310], ["Февраль", 300, 290], ["Март", 300, 320],
+            ["Апрель", 300, 330]]
+    t = _t("Перевозки, тыс. чел.csv", rows)
+    d = Data(t, profile_table(t))
+    fs = facts_for("dynamics", d)
+    assert fs.get("up") is not None and fs.get("up").value == 3
+    v = verify(t, fs.facts, fs.prov, "2025 к 2024: +4% за январь–апрель, выше во всех 4 месяцах", None,
+               ["2024", "2025"] + months)
+    assert not v.headline_ok and "во всех 4" in v.reasons[0]
+    sla = [81.4, 79.8, 83.2, 77.5, 84.0, 85.3]
+    rows = [["Неделя", "SLA, %", "Цель, %"]] + [[f"{1 + 7 * k:02d}.06.2026", str(x).replace(".", ","), "80"]
+                                               for k, x in enumerate(sla[:4])] + [["29.06.2026", "84", "80"]]
+    t = _t("SLA.csv", rows)
+    d = Data(t, profile_table(t))
+    fs = facts_for("dynamics", d)
+    if fs.get("below_target") is not None:
+        n = int(fs.get("periods").value)
+        v = verify(t, fs.facts, fs.prov, f"SLA: выше цели 80% во всех {n} неделях, в конце — 84%", None, ["SLA"])
+        assert not v.headline_ok
+
+
+def test_better_for_a_lower_is_better_measure_is_caught():
+    rows = [["Регион", "Ошибок, шт."], ["Москва", 120], ["Казань", 40], ["Омск", 30]]
+    t, fs = _facts("Ошибки по регионам.csv", rows)
+    v = verify(t, fs.facts, fs.prov, "Москва впереди: 120 шт., Омск — 30 шт.", None, ["Москва", "Омск"])
+    assert not v.headline_ok and "меньше — лучше" in v.reasons[0]
+
+
+def test_histogram_open_bin_claim_is_checked():
+    """A1: столбец «больше X» считает все значения за X — иначе подпись о выбросах неправда."""
+    import random as _r
+
+    rnd = _r.Random(5)
+    vals = [round(rnd.gammavariate(2.0, 25.0)) for _ in range(300)] + [900, 1200, 1500]
+    t = _t("Время ответа.csv", [["Обращение", "Минут до ответа"]] + [[f"T-{k}", x] for k, x in enumerate(vals)])
+    p = plan_dataset(profile_table(t), t)
+    b = plan_mod._bins_claim(data_of(p, t), p.task.task)
+    assert b is not None and not any("не подтвердил" in r for r in p.task.reasons)
+    inliers_only = {**b, "counts": b["counts"][:-1] + [b["counts"][-1] - 3]}  # как было: выбросов в столбце нет
+    fs = facts_for("distribution", data_of(p, t))
+    v = verify(t, fs.facts, fs.prov, "", p.caption, plan_mod._check_labels(fs, data_of(p, t), ""), bins=inliers_only)
+    assert not v.caption_ok and "на гистограмме" in v.reasons[-1] or "столбец" in v.reasons[-1]
+
+
+def test_plan_drops_a_false_claim_with_the_reason(monkeypatch):
+    t = _t("Средний чек.csv", CHECKS)
+    real = plan_mod.compose
+
+    def wrong(task, fs):
+        head, cap = real(task, fs)
+        return "Арбат впереди: 1 540 ₽, Марьино — 980 ₽ и растёт быстрее всех", cap
+
+    monkeypatch.setattr(plan_mod, "compose", wrong)
+    p = plan_dataset(profile_table(t), t)
+    assert p.headline == p.plain_headline
+    assert any(r.startswith(DOWN) and "быстрее всех" in r for r in slide_data_of(p).task.reasons)

@@ -222,6 +222,7 @@ class Bins:
     width: float
     open_from: Optional[float] = None  # последний интервал «больше X» (все значения больше X, выбросы тоже)
     open_to: Optional[float] = None  # первый интервал «меньше X» — только выбросы снизу
+    discrete: bool = False  # столбец на каждое значение (значений мало: размеры стипендий, оценки) — пустых нет
 
     @property
     def n(self) -> int:
@@ -263,6 +264,11 @@ class DistView:
     def note(self) -> str:
         u = self.measure.unit_text
         w = fmt_num(self.bins.width) + (f" {u}" if u else "")
+        if self.bins.discrete:
+            s = f"столбец на каждое значение ({count_words(self.bins.n, 'столбец', 'столбца', 'столбцов')})"
+            if self.outliers:
+                s += f"; {count_words(len(self.outliers), 'выброс', 'выброса', 'выбросов')} — в крайнем столбце"
+            return s
         s = f"{count_words(self.bins.n, 'интервал', 'интервала', 'интервалов')} по {w}"
         if self.bins.open_from is not None:
             s += f", последний — «больше {fmt_num(self.bins.open_from)}»"
