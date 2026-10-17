@@ -40,7 +40,9 @@ def _slide_ir(k: int, s) -> IRSlide:
         if ch.type == "scatter":
             series = [IRChartSeries(name=x.name, values=list(x.y), x_values=list(x.x)) for x in ch.xy]
         els.append(IRElement(id=f"{k}-c", type="chart", bbox=BOX, bbox_frac=FRAC, chart=IRChart(
-            type=kind, categories=list(ch.categories), series=series, x_title=ch.x_title, y_title=ch.y_title)))
+            type=kind, categories=list(ch.categories), series=series, x_title=ch.x_title,
+            # the engine writes the unit on the value axis («Выручка, млн ₽»)
+            y_title=f"{ch.y_title}, {ch.unit}" if ch.unit and ch.y_title and ch.type != "scatter" else ch.y_title)))
     if c.table is not None:
         els.append(IRElement(id=f"{k}-t", type="table", bbox=BOX, bbox_frac=FRAC, table=IRTable(rows=[list(c.table.columns)] + [list(r) for r in c.table.rows])))
     for j, n in enumerate(c.numbers):
@@ -304,3 +306,86 @@ def test_a_label_digit_and_a_data_year_are_no_figures():
     kpi = next(s for s in o.slides if s.data is not None and s.data.file == "Итоги года.txt")
     assert bad_numbers("Принято на 1 курс: +7%", kpi) == [7.0]
     assert _issues(o) == []
+
+
+# ── live QA (U1): what the data checks missed ───────────────────────────────────────────────────────────────────────
+def test_a_histogram_whose_bins_miss_values_is_caught(outline):
+    s = _slide(outline, "Время ответа поддержки.csv")
+    assert not run_checks(_ctx(outline), only={"chart_values_mismatch"})[0]
+    # the bins built from the inliers only (the outliers «marked apart», nowhere on the chart)
+    s.data.prepared.series[0][1][-1] -= 3
+    s.content.chart.series[0].values[-1] -= 3
+    issues, _ = run_checks(_ctx(outline), only={"chart_values_mismatch"})
+    assert len(issues) == 1 and "509 значений из 512" in issues[0].message and issues[0].severity == "error"
+    # unless the slide says they are not drawn
+    s.takeaway = "Медиана — 54 минуты. 3 обращения — больше 10 часов: на графике не показаны."
+    assert not run_checks(_ctx(outline), only={"chart_values_mismatch"})[0]
+
+
+def test_the_unit_is_on_the_value_axis_itself(outline):
+    s = _slide(outline, "Выручка по месяцам.csv")
+    ctx = _ctx(outline)
+    k = outline.slides.index(s)
+    chart = next(e.chart for e in ctx.ir.slides[k].elements if e.chart)
+    chart.y_title = "Выручка"  # the headline says «423 млн ₽» — the axis does not
+    issues, _ = run_checks(ctx, only={"chart_no_units"})
+    assert len(issues) == 1 and "нет единицы" in issues[0].message and "млн ₽" in issues[0].message
+    chart.title = "млн ₽"  # the chart's own unit caption above the plot names it
+    assert not run_checks(ctx, only={"chart_no_units"})[0]
+
+
+def test_a_value_axis_named_by_a_kind_of_category_is_caught(outline):
+    ctx = _ctx(outline)
+    k = outline.slides.index(_slide(outline, "Регионы.xlsx"))
+    chart = next(e.chart for e in ctx.ir.slides[k].elements if e.chart)
+    assert not run_checks(ctx, only={"chart_axis_title_wrong"})[0]
+    for wrong in ("Регион, млн ₽", "Форма обучения, чел."):
+        chart.y_title = wrong
+        issues, _ = run_checks(ctx, only={"chart_axis_title_wrong"})
+        assert len(issues) == 1 and issues[0].severity == "error" and wrong in issues[0].message
+
+
+def test_the_science_stacked_chart_names_its_axis_by_the_legend():
+    """The live QA's H4: «Форма обучения, чел.» on the value axis — the legend's word. Until the data layer names the
+    measure, the check says so."""
+    root = Path(__file__).resolve().parents[2] / "examples" / "data-science-2026"
+    tables = [t for p in sorted(root.iterdir()) if p.suffix in (".csv", ".xlsx", ".json", ".txt") for t in read_file(p)]
+    o = build_data_story("Итоги университета за 2026 год. Покажи приём по формам обучения.", tables).outline
+    s = next(x for x in o.slides if x.data is not None and x.data.file == "Приём по направлениям.xlsx")
+    issues, _ = run_checks(_ctx(o), only={"chart_axis_title_wrong"})
+    wrong = s.content.chart.y_title.split(",")[0].strip().lower().startswith(("форм", "тип", "вид"))
+    assert bool(issues) is wrong
+
+
+def test_a_data_conclusion_pushed_to_the_notes_is_an_error(outline):
+    s = _slide(outline, "Клиенты.xlsx")
+    ctx = _ctx(outline)
+    k = outline.slides.index(s)
+    ctx.ir.slides[k].notes = s.takeaway or ""
+    issues, _ = run_checks(ctx, only={"content_in_notes"})
+    mine = [i for i in issues if i.slide == k + 1 and i.details.get("line") == "takeaway"]
+    assert len(mine) == 1 and mine[0].severity == "error" and "только в заметках" in mine[0].message
+    ctx.ir.slides[k].elements.append(_text("cap", s.takeaway, "Caption"))
+    issues, _ = run_checks(ctx, only={"content_in_notes"})
+    assert not [i for i in issues if i.slide == k + 1 and i.details.get("line") == "takeaway"]
+
+
+def test_a_promised_count_the_slide_does_not_keep():
+    from verstka.audit.checks.integrity import promised_count
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, SlideItem
+
+    assert promised_count("Программа из 4 модулей ведёт от SQL к ML-пайплайнам") == 4
+    assert promised_count("Три шага к запуску") == 3 and promised_count("из четырёх последовательных модулей") == 4
+    assert promised_count("Выручка за 4 месяца") is None and promised_count("Топ-10 клиентов дают 38%") is None
+
+    def deck(n_items: int):
+        items = [SlideItem(title=f"Модуль {k}", text=t) for k, t in enumerate(["Основы SQL", "Потоковая обработка", "Хранилища", "ML-пайплайны"][:n_items], 1)]
+        return DeckOutline(title="x", slides=[OutlineSlide(id="m", kind="process", headline="Программа из 4 модулей ведёт от SQL к ML", content=SlideContent(items=items))])
+
+    for n, bad in ((3, True), (4, False)):
+        o = deck(n)
+        ir = DeckIR(source="x.pptx", slide_w=12192000, slide_h=6858000, slides=[IRSlide(index=1, elements=[_text("h", o.slides[0].headline, "Title")], outline_id="m")])
+        issues, _ = run_checks(AuditContext(ir=ir, manifest=TemplateManifest.model_construct(template_id="t"), outline=o), only={"promised_count_mismatch"})
+        assert bool(issues) is bad
+        if bad:
+            assert issues[0].severity == "error" and "обещает 4, а на слайде 3" in issues[0].message

@@ -322,6 +322,17 @@ CONTENT_IN_NOTES = CheckSpec(
     ),
 )
 
+PROMISED_COUNT = CheckSpec(
+    id="promised_count_mismatch",
+    title="Заголовок обещает больше или меньше пунктов, чем на слайде",
+    severity="error",
+    category="integrity",
+    description=(
+        "Заголовок или подзаголовок называет число пунктов («Программа из 4 модулей», «Три шага к запуску», «5 причин»), "
+        "а в списке слайда — пунктах, шагах, карточках, строках таблицы — их другое число: пункт потерян или лишний."
+    ),
+)
+
 TIMELINE_ORDER = CheckSpec(
     id="timeline_order",
     title="Даты на таймлайне идут не по порядку",
@@ -418,7 +429,60 @@ def content_in_notes(ctx: AuditContext) -> list[Issue]:
             # another sample of the template (or the slide composed) may hold it: the autofix ladder tries them, the
             # change kept only when the slide gets better (Классика's cover lost its goal and its footnote to the notes;
             # its other cover holds both)
-            out.append(ctx.new_issue(CONTENT_IN_NOTES, s.index, f"{_KIND_RU[kind]} «{text[:50]}{'…' if len(text) > 50 else ''}» {where}", details={"line": kind, "text": text, "in_notes": said}, autofix=fix("rematch", "перевыбрать макет, чтобы строка встала на слайд", outline_id=s.outline_id)))
+            # a data slide's conclusion under its chart («Остальные 230 клиентов — 62%») is what the chart says: off the
+            # slide, it is an error, not a warning
+            sev = {"severity": "error"} if (osl.data is not None and kind == "takeaway") else {}
+            out.append(ctx.new_issue(CONTENT_IN_NOTES, s.index, f"{_KIND_RU[kind]} «{text[:50]}{'…' if len(text) > 50 else ''}» {where}", details={"line": kind, "text": text, "in_notes": said}, autofix=fix("rematch", "перевыбрать макет, чтобы строка встала на слайд", outline_id=s.outline_id), **sev))
+    return out
+
+
+_COUNT_WORDS = {
+    "два": 2, "две": 2, "двух": 2, "три": 3, "трёх": 3, "трех": 3, "четыре": 4, "четырёх": 4, "четырех": 4, "пять": 5,
+    "пяти": 5, "шесть": 6, "шести": 6, "семь": 7, "семи": 7, "восемь": 8, "восьми": 8, "девять": 9, "девяти": 9,
+    "десять": 10, "десяти": 10,
+}
+# what a slide lists (never time: «за 4 месяца», «3 года»)
+_ITEM_NOUNS = (r"модул|шаг|этап|причин|принцип|блок|ступен|пункт|урок|задач|вопрос|фактор|преимуществ|риск|правил|"
+               r"компонент|раздел|функци|возможност|сценари|инструмент|метрик|критери|вывод|иде[йияю]|совет|тренд|"
+               r"направлени|продукт|решени|кейс|трек|роль|ролей|отличи|ошибк|ошибок|групп")
+_PROMISE_RE = re.compile(
+    r"(?<![\w,.])(\d{1,2}|" + "|".join(_COUNT_WORDS) + r")\s+(?:[а-яё-]+(?:ых|их|ые|ие|ми)\s+)?(?:" + _ITEM_NOUNS + r")[а-яё]*",
+    re.I,
+)
+
+
+def promised_count(text: str) -> Optional[int]:
+    """The number of items a headline promises («Программа из 4 модулей» — 4), or None."""
+    m = _PROMISE_RE.search(text or "")
+    if not m:
+        return None
+    w = m.group(1).lower()
+    n = int(w) if w.isdigit() else _COUNT_WORDS.get(w)
+    return n if n is not None and 2 <= n <= 12 else None
+
+
+@check(PROMISED_COUNT)
+def promised_count_mismatch(ctx: AuditContext) -> list[Issue]:
+    out: list[Issue] = []
+    for s in ctx.ir.slides:
+        osl = _outline_slide(ctx, s)
+        if osl is None or re.search(r"\(продолжение\)", osl.headline or ""):
+            continue
+        kind = osl.kind.value if hasattr(osl.kind, "value") else str(osl.kind)
+        if kind in ("title", "section", "thanks", "agenda"):
+            continue
+        n = promised_count(osl.headline) or promised_count(osl.subtitle or "")
+        if n is None:
+            continue
+        c = osl.content
+        counts = [len(x) for x in (c.items, c.bullets, c.numbers, c.columns, c.table.rows if c.table is not None else []) if x]
+        if not counts or n in counts:
+            continue
+        have = max(counts)
+        out.append(ctx.new_issue(
+            PROMISED_COUNT, s.index, f"Заголовок обещает {n}, а на слайде {have}: «{(osl.headline or '')[:60]}»",
+            suggestion="Верните потерянный пункт на слайд или поправьте число в заголовке.", details={"promised": n, "shown": have},
+        ))
     return out
 
 

@@ -60,7 +60,17 @@ CHART_NO_UNITS = CheckSpec(
     severity="warn",
     category="content",
     description="У графика, столбцов, полос и гистограммы подписаны обе оси: категорий («Месяц») и значений с единицей "
-                "(«Выручка, млн ₽»); у рассеяния — обе оси. У круговой и кольцевой осей нет — хватает подписей долей.",
+                "(«Выручка, млн ₽») — единица на самой оси, а не только в заголовке слайда; у рассеяния — обе оси. У "
+                "круговой и кольцевой осей нет — хватает подписей долей.",
+)
+CHART_AXIS_TITLE_WRONG = CheckSpec(
+    id="chart_axis_title_wrong",
+    title="Ось значений подписана не тем, что на ней отложено",
+    severity="error",
+    category="content",
+    description="Ось значений называет величину («Принято, чел.», «Выручка, млн ₽»), а не то, чем различаются категории или "
+                "ряды: колонку-измерение файла («Регион», «Месяц») или вид группы («Форма обучения», «Тип клиента») — это "
+                "подпись легенды или оси категорий.",
 )
 CHART_NO_SOURCE = CheckSpec(
     id="chart_no_source",
@@ -252,10 +262,16 @@ def _same(a: Optional[float], b: Optional[float]) -> bool:
 
 def _same_labels(want: list[str], have: list[str]) -> bool:
     """The chart's category labels are the data's: a label the renderer left out to thin a long axis (every other
-    month) or shortened («янв 2025» under «янв») still stands for its category."""
+    month) or shortened («янв 2025» under «янв», «янв ’25») still stands for its category."""
     if len(want) != len(have):
         return False
-    return all(not h or h == w or h.lower() in w.lower() or w.lower() in h.lower() for w, h in zip(want, have))
+
+    def norm(x: str) -> str:
+        # «’25» / «'25» — the year said short: the same year as «2025» of the data
+        return re.sub(r"[’'‘`]\s?(\d{2})\b", r"20\1", _norm(x)).lower()
+
+    pairs = [(norm(w), norm(h)) for w, h in zip(want, have)]
+    return all(not h or h == w or h in w or w in h for w, h in pairs)
 
 
 def _series_found(name: str, values: list[Optional[float]], cats: list[str], charts: list[IRChart]) -> Optional[str]:
@@ -331,6 +347,31 @@ def _chart_problem(prep, s: IRSlide) -> Optional[str]:
         if why is not None:
             return (f"ряд «{name}»: " if name and len(prep.series) > 1 else "") + why
     return None
+
+
+_ROWS_RE = re.compile(r"(\d[\d\s\u00a0\u202f]*)\s+строк")
+
+
+def _bins_problem(osl: OutlineSlide, prep) -> Optional[str]:
+    """A histogram counts every value of its column: its bins add up to the file's values (an open bin «больше 180»
+    holds the outliers too) — unless the slide says some are not drawn."""
+    spec = osl.content.chart
+    if spec is None or spec.type != "histogram" or not prep.series:
+        return None
+    m = _ROWS_RE.search(osl.data.profile_line or "")
+    if not m:
+        return None
+    rows = int(re.sub(r"\D", "", m.group(1)))
+    metrics = [c for c in osl.data.columns if str(getattr(c.role, "value", c.role)) == "metric"]
+    col = next((c for c in metrics if spec.x_title and _norm(spec.x_title).lower().startswith(_norm(c.name).lower())), metrics[0] if len(metrics) == 1 else None)
+    n = rows - (col.missing if col is not None else 0)
+    shown = sum(v for v in prep.series[0][1] if v is not None)
+    if n <= 0 or abs(shown - n) < 0.5:
+        return None
+    said = " ".join(x for x in (osl.takeaway or "", *prep.texts) if x).lower()
+    if re.search(r"не\s+показан|не\s+вошл|не\s+отображ", said):
+        return None
+    return f"в столбцах гистограммы {_num(shown)} значений из {_num(n)}: {_num(n - shown)} не попали ни в один столбец"
 
 
 def _cell_numbers(text: str) -> list[float]:
@@ -414,7 +455,7 @@ def chart_values_mismatch(ctx: AuditContext) -> list[Issue]:
         why = None
         els: list[IRElement] = []
         if prep.series or prep.points:
-            why, els = _chart_problem(prep, s), _charts(s)
+            why, els = _chart_problem(prep, s) or _bins_problem(osl, prep), _charts(s)
         elif prep.rows:
             why, els = _table_problem(prep, s), _tables(s)
         elif prep.numbers:
@@ -448,6 +489,52 @@ def chart_no_units(ctx: AuditContext) -> list[Issue]:
                 out.append(ctx.new_issue(
                     CHART_NO_UNITS, s.index, f"У диаграммы «{osl.data.file}» нет подписи {' и '.join(missing)}",
                     suggestion="Подпишите ось значений с единицей («Выручка, млн ₽») и ось категорий.", **_bboxes([e]),
+                ))
+            elif spec.unit and not _unit_in(spec.unit, c.y_title) and not _unit_in(spec.unit, c.title):
+                # the unit on the axis itself (or the chart's own unit caption above it) — a headline that says «423 млн ₽»
+                # does not name the axis
+                out.append(ctx.new_issue(
+                    CHART_NO_UNITS, s.index, f"На оси значений диаграммы «{osl.data.file}» нет единицы: «{_norm(c.y_title)}» без «{spec.unit}»",
+                    suggestion=f"Подпишите ось значений с единицей: «{_norm(c.y_title)}, {spec.unit}».", **_bboxes([e]),
+                ))
+    return out
+
+
+def _unit_in(unit: str, title: Optional[str]) -> bool:
+    """The unit is named in the title («Выручка, млн ₽» — «млн ₽»; «Принято, человек» — «чел.»)."""
+    t, u = _norm(title).lower(), _norm(unit).lower()
+    if not t or not u:
+        return False
+    if u in t:
+        return True
+    stem = re.sub(r"[.\s]+$", "", u)
+    return len(stem) >= 2 and re.search(r"(?<![а-яёa-z])" + re.escape(stem), t) is not None
+
+
+# a kind of a category, not a quantity: what the legend or the category axis names («Форма обучения», «Тип клиента»)
+_KIND_WORD_RE = re.compile(r"^(?:форм[аы]|тип|вид|категори|групп|сегмент|класс|статус|способ|направлени|канал|регион|город|"
+                           r"филиал|отрасл|профил|институт|кафедр|подразделени|отдел|продукт|тариф)\w*\b", re.I)
+
+
+@check(CHART_AXIS_TITLE_WRONG)
+def chart_axis_title_wrong(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        spec = osl.content.chart
+        if spec is None or spec.type in ("pie", "doughnut", "scatter"):
+            continue
+        not_measures = {_norm(c.name).lower() for c in osl.data.columns if str(getattr(c.role, "value", c.role)) != "metric"}
+        for e in _charts(s):
+            c = e.chart
+            if c.type in ("pie", "doughnut", "scatter") or not c.y_title:
+                continue
+            name = _norm(c.y_title.split(",")[0]).lower()
+            if name in not_measures or _KIND_WORD_RE.match(name):
+                out.append(ctx.new_issue(
+                    CHART_AXIS_TITLE_WRONG, s.index,
+                    f"Ось значений диаграммы «{osl.data.file}» подписана «{_norm(c.y_title)}» — так называются категории или "
+                    f"ряды, а на оси — величина",
+                    suggestion="Подпишите ось тем, что отложено: «Принято, чел.», «Выручка, млн ₽».", **_bboxes([e]),
                 ))
     return out
 
