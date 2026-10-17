@@ -237,11 +237,12 @@ def _rank(plan: DatasetPlan) -> int:
     return _TASK_RANK.get(plan.task.task, 7)
 
 
-def story_order(plans: Sequence[DatasetPlan], brief_text: str = "") -> list[int]:
+def story_order(plans: Sequence[DatasetPlan], brief_text: str = "", goals: Optional[Sequence[Any]] = None) -> list[int]:
     """Indexes of `plans` in the story's order: the datasets the text's goals name (in the goals' order), then by task
     — dynamics, comparison, shares, distribution, relationship, the quality of the data, reference. A KPI dataset is
-    the key-figures slide and stands first (it is not a goal's)."""
-    goals = goals_of(brief_text or "")
+    the key-figures slide and stands first (it is not a goal's). `goals`: goals understood elsewhere (the model,
+    `verstka/data/intent.py`) instead of parsing the text."""
+    goals = list(goals) if goals is not None else goals_of(brief_text or "")
     keyed = []
     for k, p in enumerate(plans):
         at = _goal_at(p, brief_text, goals)
@@ -675,9 +676,12 @@ def build_data_story(
     progress: Optional[ProgressFn] = None,
     slide_count: Optional[int] = None,
     deadline: Optional[float] = None,
+    goals: Optional[Sequence[Any]] = None,
 ) -> DataStory:
     """The data deck (see the module's doc). `manifest` is accepted for the contract but never read: the story is the
-    same on every template. `slide_count`: the person's slide count (the brief's when None)."""
+    same on every template. `slide_count`: the person's slide count (the brief's when None). `goals`: the brief's goals
+    understood elsewhere (`verstka.data.goals.Goal`, e.g. by the model in `verstka/data/intent.py`) — used instead of
+    parsing the brief for the plans and the story's order."""
     t0 = time.monotonic()
     if isinstance(brief, str):
         brief = Brief(text=brief)
@@ -685,9 +689,9 @@ def build_data_story(
     tables = list(tables)
     voice = _Voice(progress)
     voice.say(f"Изучаю данные: {count_words(len(tables), 'таблица', 'таблицы', 'таблиц')}", 0.02, log_it=False)
-    plans = list(plans) if plans is not None else plan_datasets(tables, brief_text, profiles)
+    plans = list(plans) if plans is not None else plan_datasets(tables, brief_text, profiles, goals=goals)
     ids = list(dataset_ids) if dataset_ids is not None else [p.profile.table_id for p in plans]
-    order = story_order(plans, brief_text)
+    order = story_order(plans, brief_text, goals=goals)
     files = [{"id": i, "file": t.file, "sheet": t.sheet, "sha256": _table_sha(t)} for i, t in zip(ids, tables)]
     notes = [{"file": t.file, "text": " ".join(t.notes.split())[:1500]} for t in tables if (t.notes or "").strip()]
     story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids, notes=notes, brief_text=brief_text)

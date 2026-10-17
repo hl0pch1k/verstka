@@ -93,14 +93,38 @@ def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
     return decision.model_copy(update={"reasons": reasons + [note]})
 
 
+# цели, понятые снаружи (модель, `verstka/data/intent.py`): их величина, отрицания и вопрос — по фразе цели, чтобы
+# `data_of` по плану видел ту же величину, что и план (последние, без роста памяти)
+_GIVEN: dict[str, Goal] = {}
+_GIVEN_MAX = 256
+
+
+def _remember(goals: Sequence[Goal]) -> None:
+    for g in goals:
+        if g.phrase and (g.head or g.metric or g.negate or g.ask):
+            _GIVEN.pop(g.phrase, None)
+            _GIVEN[g.phrase] = g
+    while len(_GIVEN) > _GIVEN_MAX:
+        _GIVEN.pop(next(iter(_GIVEN)))
+
+
 def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], compare: bool = False) -> Data:
     """`Data` глазами цели: предмет — основы её слов, величина — главное слово, уточнения и отрицания
-    («по цене с НДС» → «цен», уточнение «ндс»; «без НДС» — отрицание)."""
+    («по цене с НДС» → «цен», уточнение «ндс»; «без НДС» — отрицание). Цель, понятая снаружи (с величиной и вопросом),
+    задаёт их сама; разбор фразы — запасной путь."""
     if not phrase:
         return Data(table, profile, compare=compare)
     metric, head, negate = goal_focus(phrase)
+    ask = goal_ask(phrase)
+    given = _GIVEN.get(phrase)
+    if given is not None:
+        metric = list(given.metric) or metric
+        head = given.head or head
+        negate = list(given.negate) or negate
+        ask = given.ask if given.ask in ("fastest", "total", "mean", "margin", "min") or \
+            (given.ask or "").startswith(("above:", "below:")) else ask
     return Data(table, profile, subject=tuple(stems_of(phrase)), compare=compare, head=head, negate=tuple(negate),
-                qualifiers=tuple(x for x in metric if x != head), ask=goal_ask(phrase))
+                qualifiers=tuple(x for x in metric if x != head), ask=ask)
 
 
 def data_of(plan: DatasetPlan, table: Table) -> Data:
@@ -114,9 +138,10 @@ def _source(p: DatasetProfile) -> str:
 
 def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence[Goal]] = None,
                  assigned: bool = False) -> DatasetPlan:
-    """Задача, варианты, заголовок-вывод и факты одного датасета. `goals` — цели из текста; к датасету относятся только
-    те, что о нём (предмет совпал с файлом, колонками или значениями) или без предмета. `assigned=True` — цели уже
-    распределены по датасетам (`plan_datasets`), повторно их не фильтруем."""
+    """Задача, варианты, заголовок-вывод и факты одного датасета. `goals` — цели (из текста брифа или понятые моделью,
+    `verstka/data/intent.py`); к датасету относятся только те, что о нём (предмет совпал с файлом, колонками или
+    значениями) или без предмета. `assigned=True` — цели уже распределены по датасетам (`plan_datasets`), повторно их
+    не фильтруем."""
     d0 = Data(table, profile)
     rel = list(goals or []) if assigned else _relevant(goals or [], d0)
     first = decide_task(Data(table, profile, subject=tuple(s for g in rel for s in g.subject)), rel)
@@ -379,10 +404,17 @@ def goal_notes(brief_text: str, plans: Sequence[DatasetPlan]) -> list[str]:
 
 
 def plan_datasets(tables: Sequence[Table], brief_text: str = "",
-                  profiles: Optional[Sequence[DatasetProfile]] = None) -> list[DatasetPlan]:
-    """Планы всех датасетов; цели из текста — каждая своему датасету."""
+                  profiles: Optional[Sequence[DatasetProfile]] = None,
+                  goals: Optional[Sequence[Goal]] = None) -> list[DatasetPlan]:
+    """Планы всех датасетов; цели из текста — каждая своему датасету. `goals` — цели, понятые снаружи (модель,
+    `verstka/data/intent.py`): тогда текст брифа не разбирается, а цели распределяются по датасетам так же; их
+    величина, отрицания и вопрос (`head`, `metric`, `negate`, `ask`) задают колонку вместо разбора фразы."""
     profs = list(profiles) if profiles is not None else [profile_table(t) for t in tables]
-    goals = goals_of(brief_text)
+    if goals is not None:
+        goals = list(goals)
+        _remember(goals)
+    else:
+        goals = goals_of(brief_text)
     datas = [Data(t, p) for t, p in zip(tables, profs)]
     per = assign_goals(goals, datas)
     return [plan_dataset(p, t, g, assigned=True) for t, p, g in zip(tables, profs, per)]
