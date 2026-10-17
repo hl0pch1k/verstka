@@ -111,12 +111,12 @@ export function PhoneResult(p: PhoneResultProps) {
       </div>
       <div className="mr-bar">
         {d.pptx ? (
-          <a className="p2-cta" href={d.pptx} download={`${d.fileBase}.pptx`} title={d.pptxTitle}>
+          <a className="p2-cta p2-cta-flat" href={d.pptx} download={`${d.fileBase}.pptx`} title={d.pptxTitle}>
             <Icon name="download" size={20} />
             <span>Скачать PowerPoint</span>
           </a>
         ) : (
-          <button type="button" className="p2-cta" disabled title="Файл PowerPoint ещё не готов">
+          <button type="button" className="p2-cta p2-cta-flat" disabled title="Файл PowerPoint ещё не готов">
             <Icon name="download" size={20} />
             <span>Скачать PowerPoint</span>
           </button>

@@ -1,6 +1,6 @@
 /* Основа «Слоёв». Базовый блок стилей эталона — docs/design/sloi/boards/V2.dc.html, <helmet><style>: от body{margin:0}
  * до блока узкого окна (его место заняла колода стопкой — styles/stack.css), иконка-слои p2-lic, мягкий край p2-fade,
- * логотип (p2-brand, p2-bars, p2-lbar*) и подсказка-печать (p2-taw, p2-tph, p2-caret). Перенесено дословно, классы не
+ * логотип (p2-brand, p2-bars, p2-lbar*) и подсказка-печать (p2-taw, p2-tph; курсора у неё нет — замечание владельца 18.10). Перенесено дословно, классы не
  * переименованы. */
 body{margin:0}
 a{color:#0A0F1F}a:hover{color:#1E40AF}
@@ -51,6 +51,9 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
 .p2-cta:hover{transform:translateY(-2px)}
 .p2-cta:hover::after{opacity:1}
 .p2-cta:active{transform:scale(.98)}
+/* «Скачать PowerPoint» на результате — без тени под кнопкой (замечание владельца 18.10, скрин 12): колонка справа
+   прокручивается с мягким краем, и тень резалась её краем серым пятном */
+.p2-cta-flat::after{display:none}
 .p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
 .p2-ob:hover{transform:translateY(-2px)}
 .p2-ob:active{transform:scale(.98)}
@@ -173,7 +176,10 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
 @keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
 /* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
 .p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
-.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+/* все три полоски — всегда на своём слое и с transform (у первой — нулевой): иначе при наведении две сдвигаемые уходят
+   на слой, а первая рисуется по-старому, и при дробной высоте строки (логотип в zoom 1.25) она «прыгает» по высоте —
+   замечание владельца 18.10, скрин 9 */
+.p2-lbar{display:block;height:4px;border-radius:999px;transform:translateX(0);will-change:transform;backface-visibility:hidden;transition:transform 240ms var(--ease)}
 .p2-lbar1{width:28px;background:#BFD6FF}
 .p2-lbar2{width:20px;background:#2563EB}
 .p2-lbar3{width:12px;background:#0B1220}
@@ -186,9 +192,6 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
    телефонах: 2 px, выше строчных букв, серая как текст подсказки; пока печатает — горит, в паузах — мигает */
 .p2-taw{position:relative;display:flex;flex:1;min-height:0;margin-top:8px}
 .p2-tph{position:absolute;left:0;top:0;right:0;pointer-events:none;font-size:16px;font-weight:500;line-height:24px;color:#5A6272;white-space:pre-wrap}
-.p2-caret{display:inline-block;width:2px;height:22px;margin-left:3px;vertical-align:-5px;border-radius:1px;background:#5A6272}
-.p2-caret-blink{animation:p2-blink 1000ms steps(1) infinite}
-@keyframes p2-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
 
 /* Страница: фон и шрифт — как у .p2-root на досках (Manrope, 15/24, #0B1220 на #F3F4F1) */
 body{background:#F3F4F1;color:#0B1220;font-family:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:24px}

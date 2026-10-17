@@ -53,8 +53,13 @@
 .gh-list{flex:1;min-height:0;margin:24px -8px 0;padding:0 8px 8px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(11,18,32,.14) transparent}
 .gh-group + .gh-group{margin-top:24px}
 .gh-day{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;height:40px;margin:0 -8px;padding:0 8px;background:#E9F1FF;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220}
+/* мягкий край прокрутки (замечание владельца 18.10, скрин 11): снизу список растворяется маской (p2-fade, только
+   нижний край — сверху стоит закреплённая строка дня), сверху карточки уходят под строку дня через её градиентный хвост
+   16 px — ровно зазор между строкой и карточками, так что в покое хвост ни на что не ложится */
+.gh-list.p2-fade{-webkit-mask-image:linear-gradient(to bottom,#000 0,#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,#000 0,#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.gh-day::after{content:"";position:absolute;left:0;right:0;top:100%;height:16px;background:linear-gradient(to bottom,#E9F1FF,rgba(233,241,255,0));pointer-events:none}
 .gh-dayn{font-family:'Manrope',sans-serif;font-size:13px;font-weight:500;line-height:20px;letter-spacing:0;color:#5A6272}
-.gh-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px 16px;margin:8px 0 0;padding:0;list-style:none}
+.gh-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px 16px;margin:16px 0 0;padding:0;list-style:none}
 .gh-cover{height:auto;aspect-ratio:16 / 9}
 .gh-img{position:absolute;inset:0;display:block;width:100%;height:100%;aspect-ratio:16 / 9;object-fit:cover;border-radius:16px;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
 .gh-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:#FFFFFF}

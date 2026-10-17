@@ -131,7 +131,7 @@ export const TW_FIRST_MS = 500;
 /** Поле очистили — печать продолжается через 400 мс (V2 `twWake()`). */
 export const TW_WAKE_MS = 400;
 
-/** Один тик V2 `twTick`: печать 45 мс на знак → держим 3000 мс (курсор мигает) → стирание 25 мс на знак → пауза
+/** Один тик V2 `twTick`: печать 45 мс на знак → держим 3000 мс → стирание 25 мс на знак → пауза
  *  400 мс → следующая фраза. Возвращает новое место и через сколько следующий тик. */
 export function twStep(s: Tw, list: string[] = TW): { s: Tw; ms: number } {
   const len = list[s.i].length;
@@ -155,8 +155,12 @@ export const twText = (s: Tw, list: string[] = TW) => `Например: ${list[
 export const READY_HINT = `Например: ${SAMPLE_BRIEF.split("\n")[0]}`;
 /** Текст подсказки пустого поля: агент пишет текст — печатающаяся тема (`twText`); не пишет — готовый текст (`READY_HINT`). */
 export const hintText = (s: Tw, writer: boolean, list: string[] = TW) => (writer ? twText(s, list) : READY_HINT);
-/** Курсор мигает, пока фраза стоит (держим) и в паузе; пока печатает и стирает — горит. */
-export const twBlink = (s: Tw) => s.mode === "hold" || s.mode === "pause";
+/** Печать остановлена (пользователь нажал на поле): фраза, что печаталась или стиралась, встаёт целиком и больше не
+ *  меняется; в паузе между фразами — следующая. Курсора у подсказки нет (замечание владельца 18.10, скрин 10). */
+export function twFreeze(s: Tw, list: string[] = TW): Tw {
+  const i = s.mode === "pause" ? (s.i + 1) % list.length : s.i;
+  return { i, n: list[i].length, mode: "hold", k: 0 };
+}
 
 // ── строки поля
 /** «1 551 знак» — тысячи через пробел (V2 `chars`). */

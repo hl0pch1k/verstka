@@ -193,7 +193,7 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
             </button>
             <button type="button" className="p2-rbl" onClick={onNew} aria-label="Новая презентация" title="Новая презентация"><Icon name="plus" size={18} /></button>
             {d.pptx && (
-              <a className="p2-cta" href={d.pptx} download={`${d.fileBase}.pptx`} aria-label="Скачать PowerPoint" title={d.pptxTitle} style={{ marginLeft: 8 }}>
+              <a className="p2-cta p2-cta-flat" href={d.pptx} download={`${d.fileBase}.pptx`} aria-label="Скачать PowerPoint" title={d.pptxTitle} style={{ marginLeft: 8 }}>
                 <Icon name="download" size={20} />
                 <span>{short ? "PowerPoint" : "Скачать PowerPoint"}</span>
               </a>

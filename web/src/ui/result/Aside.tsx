@@ -98,7 +98,7 @@ export function Aside({ d, onVariant, onEditText, open, id, className, enter = t
         }))} />
     )}
     {d.pptx && (
-      <a className="p2-cta" href={d.pptx} download={`${d.fileBase}.pptx`} title={d.pptxTitle} style={{ width: "100%", marginTop: 24 }}>
+      <a className="p2-cta p2-cta-flat" href={d.pptx} download={`${d.fileBase}.pptx`} title={d.pptxTitle} style={{ width: "100%", marginTop: 24 }}>
         <Icon name="download" size={20} />
         <span>Скачать PowerPoint</span>
       </a>

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, SAMPLE_BRIEF } from "../../lib/createForm";
 import { docReadLine } from "./textRules";
-import { charsLabel, clipLine, hintText, READY_HINT, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, writerOn, type Tw } from "./textRules";
+import { charsLabel, clipLine, hintText, READY_HINT, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twFreeze, twStep, twText, writerOn, type Tw } from "./textRules";
 
 /** Сервер пишет текст по теме (`health.writer`) — и без него. */
 const W = { writer: true };
@@ -78,9 +78,8 @@ const run = (s: Tw, n: number) => {
   }
   return out;
 };
-test("подсказка: сначала фраза целиком держится 3000 мс с мигающим курсором, потом стирается по 25 мс", () => {
+test("подсказка: сначала фраза целиком держится 3000 мс, потом стирается по 25 мс", () => {
   assert.equal(twText(TW0), `Например: ${TW[0]}`);
-  assert.equal(twBlink(TW0), true);
   const steps = run(TW0, 5);
   // пять тиков по 500 мс в «держим» (плюс 500 мс, с которыми фраза дописалась) — 3000 мс
   assert.deepEqual(steps.map((x) => x.ms), [500, 500, 500, 500, 500]);
@@ -88,7 +87,8 @@ test("подсказка: сначала фраза целиком держит�
   const erase = twStep(steps[4].s);
   assert.equal(erase.ms, 25);
   assert.equal(erase.s.n, TW[0].length - 1);
-  assert.equal(twBlink(erase.s), false);
+  // нажали на поле посреди стирания — фраза встаёт целиком и держится
+  assert.deepEqual(twFreeze(erase.s), { i: 0, n: TW[0].length, mode: "hold", k: 0 });
 });
 test("подсказка: стёрта — пауза 400 мс, затем следующая фраза печатается по 45 мс на знак", () => {
   let s: Tw = { i: 0, n: 1, mode: "erase", k: 0 };
@@ -96,7 +96,8 @@ test("подсказка: стёрта — пауза 400 мс, затем сл�
   assert.equal(r.s.n, 0);
   assert.equal(r.s.mode, "pause");
   assert.equal(r.ms, 400);
-  assert.equal(twBlink(r.s), true);
+  // нажали в паузе — встаёт следующая фраза целиком
+  assert.deepEqual(twFreeze(r.s), { i: 1, n: TW[1].length, mode: "hold", k: 0 });
   r = twStep(r.s);
   assert.equal(r.s.i, 1);
   assert.equal(r.s.n, 1);

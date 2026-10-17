@@ -266,7 +266,7 @@ export function HistoryLayer() {
         <button type="button" className="p2-rbl" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 
-      <div ref={listRef} className="gh-list">
+      <div ref={listRef} className="gh-list p2-fade">
         {view?.groups.length === 0 && !listErr && (
           <p className="p2-ls" style={{ ...lsDelay(200), margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>
             Здесь появятся презентации, которые вы соберёте.
