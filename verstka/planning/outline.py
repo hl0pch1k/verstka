@@ -1280,6 +1280,38 @@ def plan_outline(
     target: Optional[int] = None,
     raw: Optional[list] = None,
 ) -> tuple[DeckOutline, list[str]]:
+    """`_plan_outline` (the planner, its docstring) with the meaning passes after it (planning/meaning.py): no ask to
+    the designer on a slide, tables with a conclusion counted from their cells, figures that say what they are, a
+    deck that ends on its ask."""
+    try:
+        from verstka.planning.directives import picture_asks_as_notes
+
+        pictured = picture_asks_as_notes(brief.text)
+        if pictured != brief.text:
+            brief = brief.model_copy(update={"text": pictured})  # «Добавь картинку …»: the picture's place, not a line
+    except Exception:  # noqa: BLE001 - the brief as written
+        log.warning("picture asks not read", exc_info=True)
+    o, warnings = _plan_outline(brief, manifest, strategy, facts, skills, providers, target, raw)
+    try:
+        from verstka.planning.meaning import finish_deck
+
+        o, said = finish_deck(o, brief.text, author_order=False)
+        warnings = list(warnings) + said
+    except Exception:  # noqa: BLE001 - the plan as planned
+        log.warning("meaning passes failed", exc_info=True)
+    return o, warnings
+
+
+def _plan_outline(
+    brief: Brief,
+    manifest: TemplateManifest,
+    strategy: Strategy,
+    facts: FactsExtraction,
+    skills: Optional[SkillsRegistry] = None,
+    providers: Optional[ProviderRegistry] = None,
+    target: Optional[int] = None,
+    raw: Optional[list] = None,
+) -> tuple[DeckOutline, list[str]]:
     """The deck's plan: the outline_planner skill's, grounded in the brief (grounding.ground_outline: no figure,
     unit, name, placeholder or slide the brief does not support) and trimmed to at most `target` slides — never padded
     to it; the rules' plan (basic_outline) when there is no model, the model fails, or nothing it planned is grounded.

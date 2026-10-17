@@ -30,4 +30,6 @@ Hard rules:
 4. Each content slide has a headline: a conclusion drawn from the brief, at most 12 words, in the brief's language.
 5. No placeholders: no text in square brackets, no sample e-mails, phones, names or company sites, no lorem ipsum. Leave a field empty rather than invent it.
 6. Speaker notes: 1–2 sentences on the slide's point, no new facts.
+8. The story: the first content slide says why the audience should listen (the problem or the main result); the last content slide, right before thanks, carries the conclusion and what the brief asks for or what comes next («Просим утвердить …», «Следующие шаги»). A brief written as a plan (numbered points, bullets, lines of a letter) keeps its points in its order: one point, one slide.
+9. The brief's words to the designer («Нужен столбчатый график: …», «Покажи на графике …», «Сделай воронку», «Сравни …», «Добавь картинку …», «данные в таблице ниже») are what a slide shows, never its text: do what they ask with their data. A figure says what it means: «Затраты на железо: 38 → 0 млн ₽», never «−100%» alone.
 7. Prefer the kinds the template has, within their max repeated items. Follow the strategy for order and slide kinds, but skip every part of it the brief has no content for. These rules win over the strategy.

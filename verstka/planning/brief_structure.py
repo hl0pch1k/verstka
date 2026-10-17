@@ -102,8 +102,8 @@ _NOT_VERBS = {
 
 def _is_verb(word: str) -> bool:
     w = word.lower().strip(",.;:«»\"")
-    if len(w) <= 4 or w in _NOT_VERBS:
-        return False
+    if len(w) <= 4 or w in _NOT_VERBS or w.endswith("сть"):
+        return False  # («задолженность», «скорость», «стоимость»: nouns, never an infinitive)
     if H._VERB_END_RE.search(w) or w in _FUTURE_VERBS or w in _PAST_VERBS:
         return True
     # an infinitive («увеличить»), a past form in «-ил» / «-ял» («снизил», «потерял»)
@@ -432,13 +432,14 @@ def photo_request(sentence: str) -> Optional[str]:
 
 # ------------------------------------------------------------------ slide-level requests
 
-_CHART_NOUN_RE = re.compile(r"(диаграмм\w*|график(?:а|ов|и|ом)?\b|гистограмм\w*|\bcharts?\b)", re.I)
+_CHART_NOUN_RE = re.compile(r"(диаграмм\w*|график(?:а|ов|и|ом|е|ах|ам|у)?\b|гистограмм\w*|воронк\w*|\bcharts?\b|\bfunnel\b)", re.I)
 _CHART_ASK_RE = re.compile(
     r"\b(нуж(?:ен|на|ны|но)|покажи|покажите|сделай|добавь|построй|отобрази|визуализируй|изобрази|помести|используй|размести|"
     r"представь|приведи)\b|на\s+диаграмм|на\s+график|в\s+виде\s+(?:диаграмм|график)",
     re.I,
 )
 _TYPE_WORDS: list[tuple[str, ChartKind]] = [
+    (r"воронк|funnel", "bar"),  # a funnel: its stages as horizontal bars, largest first
     (r"кольцев", "doughnut"),
     (r"кругов|pie\b", "pie"),
     (r"горизонтальн", "bar"),
@@ -556,6 +557,13 @@ def _subject(text_before: str) -> tuple[str, bool]:
     # the clause ends at a sentence mark, a colon, a dash or «, а» / «, и»; a bare comma does not end it («долю
     # расходов на продукты, упаковку и списания»)
     cut = max((t.rfind(b) + len(b) for b in _CLAUSE_BOUNDS if t.rfind(b) != -1), default=0)
+    # «… снизилась с 96 до 61 млн рублей, средний срок оплаты сократился»: a comma after a figure closes its clause —
+    # the next figure measures what follows it
+    figs = list(_NUM_RE.finditer(t, cut))
+    if figs:
+        comma = t.find(", ", figs[-1].end())
+        if comma != -1:
+            cut = comma + 2
     ws = t[cut:].split()
     # «Из общей площади 180 м² тренировочный зал займет …»: a circumstance with a figure of its own at the head of the
     # clause is not what is measured — the subject follows that figure and its unit
@@ -739,6 +747,17 @@ def _schedule(m: re.Match, sentence: str) -> bool:
     return unit.startswith(("час", "ч")) or bool(_SCHEDULE_RE.search(head))
 
 
+_TIME_UNITS = (("дн", r"дн(?:ей|я)|день"), ("ч", r"час(?:ов|а)?"), ("мин", r"минут[аы]?"), ("мес.", r"месяц(?:ев|а)?"), ("нед.", r"недел[ьиюя]"), ("лет", r"лет|год(?:а)?"))
+
+
+def _time_unit(after: str) -> Optional[str]:
+    """«… с 48 до 37 дней»: the time word right after a change is its unit («дн»), never lost from the figure."""
+    for short, rx in _TIME_UNITS:
+        if re.match(rf"\s*(?:{rx})(?![а-яё])", after or "", re.I):
+            return short
+    return None
+
+
 def _pairs_of(sentence: str) -> list[Series]:
     """«поднять средний чек с 300 до 330 рублей» → Средний чек: Сейчас 300, Цель 330; «прибыль достигнет 254 795
     рублей против нынешних 120 000» → Сейчас 120 000, Прогноз 254 795."""
@@ -749,7 +768,7 @@ def _pairs_of(sentence: str) -> list[Series]:
         name, acc = _subject(sentence[: m.start()])
         if not name:
             continue
-        unit = _unit(m.group("ub") or m.group("ua"))
+        unit = _unit(m.group("ub") or m.group("ua")) or _time_unit(sentence[m.end():])
         cats = _pair_categories(sentence)
         out.append(Series(id="", name=_label(name, acc), categories=cats, values=[_num(m.group("a")), _num(m.group("b"))], unit=unit, source_span=sentence[:200]))
     for m in _VERSUS_RE.finditer(sentence):
@@ -879,13 +898,88 @@ def _chain(sentence: str, min_items: int = 3) -> Optional[tuple[str, Series]]:
     return (lead or prefix), Series(id="", name="", categories=cats, values=values, unit=unit, source_span=sentence[:200])
 
 
+_COUNT_CHUNK_RE = re.compile(rf"^(?:(?:из\s+них|и|а|ещё|еще)\s+)?(?P<num>{_NUM})\s+(?P<label>[а-яёa-z][а-яёa-z\s-]{{2,60}})$", re.I)
+_FROM_CHUNK_RE = re.compile(rf"^из\s+(?P<n0>{_NUM})\s+(?P<l0>[а-яё]+)\s+(?P<num>{_NUM})\s+(?P<label>[а-яё][а-яё\s-]{{2,60}})$", re.I)
+
+
+def _participle_label(word: str) -> str:
+    """«установивших» → «Установившие» (the genitive plural of a participle back in the nominative)."""
+    w = word.strip()
+    if re.search(r"(?:вш|ющ|ящ|ш)их$", w, re.I):
+        w = w[:-2] + "ие"
+    return H.cap_first(w)
+
+
+def _count_series(sentence: str) -> Optional[Series]:
+    """«Из 412 000 установивших 298 000 прошли регистрацию, 176 000 подключили рабочую почту, 64 000 оформили
+    подписку» → Установившие 412 000, Прошли регистрацию 298 000, …: counts said figure first, three at least."""
+    body = H.strip_end(sentence)
+    split = H.label_split(body)
+    if split and re.search(r"\d", split[1]):
+        body = split[1]  # «На 2027 год нужно нанять 280 человек: 160 инженеров, …» — the lead is the total, not a part
+    parts = [p.strip() for p in re.split(r",\s+|;\s+|\s+и\s+(?=\d)", body) if p.strip()]
+    cats: list[str] = []
+    vals: list[float] = []
+    for k, p in enumerate(parts):
+        m0 = _FROM_CHUNK_RE.match(p) if k == 0 else None
+        if m0:
+            cats.append(_participle_label(m0.group("l0")))
+            vals.append(_num(m0.group("n0")))
+            p = f"{m0.group('num')} {m0.group('label')}"
+        m = _COUNT_CHUNK_RE.match(p)
+        if not m or len(m.group("label").split()) > 5:
+            return None
+        lab = re.sub(r"^(?:человек|чел\.?|штук|шт\.?)\s+", "", m.group("label").strip(), flags=re.I)
+        if re.fullmatch(r"[а-яё]{4,}ов", lab, re.I):
+            # «160 инженеров» → «Инженеры» (a counted noun back in the nominative plural)
+            lab = lab[:-2] + ("и" if re.search(r"[кгхжшчщ]$", lab[:-2], re.I) else "ы")
+        cats.append(H.cap_first(lab))
+        vals.append(_num(m.group("num")))
+    if len(vals) < 3 or len({c.lower() for c in cats}) < len(cats):
+        return None
+    return Series(id="", name="", categories=cats, values=vals, unit=None, source_span=sentence[:200])
+
+
+_PERIOD_NAMES = {"неделям": "неделя", "месяцам": "месяц", "дням": "день", "кварталам": "квартал", "годам": "год"}
+
+
+def _period_series(sentence: str, period: Optional[str]) -> Optional[Series]:
+    """«Каждую неделю больше: 61 000, 88 000, 117 000, 146 000» under an ask «по неделям» → «1-я неделя» … «4-я
+    неделя»: a row of bare figures after a colon, by the period the ask names (or the sentence: «каждую неделю»)."""
+    split = H.label_split(H.strip_end(sentence))
+    if not split:
+        return None
+    lead, rest = split
+    if re.search(r"[а-яёa-z]", re.sub(r"\b(?:и|тыс\.?|млн|млрд|руб\w*|₽|%)\b", "", rest, flags=re.I)):
+        return None
+    nums = [m for m in _NUM_RE.finditer(rest)]
+    if len(nums) < 3:
+        return None
+    if period is None:
+        m = re.search(r"кажд\w+\s+(недел|месяц|д[её]н|квартал|год)", lead, re.I)
+        period = {"недел": "неделям", "месяц": "месяцам", "ден": "дням", "дён": "дням", "квартал": "кварталам", "год": "годам"}.get(m.group(1).lower()) if m else None
+    if period is None:
+        return None
+    noun = _PERIOD_NAMES[period.lower()]
+    suffix = "я" if noun == "неделя" else "й"
+    cats = [f"{i}-{suffix} {noun}" for i in range(1, len(nums) + 1)]
+    unit = _unit(nums[-1].group("unit"))
+    return Series(id="", name=_name_from_lead(lead), categories=cats, values=[_num(m.group("num")) for m in nums], unit=unit, source_span=sentence[:200])
+
+
 def _name_from_lead(lead: str) -> str:
     """«Ежемесячные расходы:» → «Ежемесячные расходы»; «Общий бюджет запуска — 180 000 рублей:» → «Общий бюджет запуска»;
     «Нужна круговая диаграмма структуры выручки» → «Структура выручки»."""
     t = H.strip_end(lead)
     m = _CHART_NOUN_RE.search(t)
-    if m:
+    if m and re.match(r"воронк|funnel", m.group(0), re.I):
+        t = "Воронка " + t[m.end() :].strip()  # «Сделай воронку заказов» → «Воронка заказов»: the funnel is its name
+    elif m:
         t = t[m.end() :].strip()
+    else:
+        cm = re.match(r"^(?:(?:потом|затем|дальше|также|и|а)\s+)?(?:сравни|сравните|покажи|покажите)\s+(?P<w>.+)$", t, re.I)
+        if cm:
+            t = _nominative(cm.group("w"))  # «Сравни скорость сборки» → «Скорость сборки»
     t = re.split(rf"\s+[—–-]\s+(?={_NUM})|\s+(?:в|на)\s+(?={_NUM})", t)[0]
     um = _LEAD_UNIT_RE.search(t)
     if um:
@@ -1021,10 +1115,24 @@ def _markdown_tables(block_text: str) -> list[TableData]:
 _FUNCTION_GRAPH_RE = re.compile(r"график\w*\s+(?:\S+\s+){0,2}?функци|график\w*\s+(?:y|f|g)\s*[=(]|график\w*\s+(?:параболы|гиперболы|синуса|косинуса|экспоненты|прямой)", re.I)
 
 
+_COMPARE_ASK_RE = re.compile(r"^(?:(?:потом|затем|дальше|также|и|а)\s+)?(?:сравни|сравните|compare)\b(?P<what>[^:]{0,80}):\s*(?P<data>.+)$", re.I)
+
+
 def _chart_requests(sentence: str) -> list[ChartRequest]:
     m = _CHART_NOUN_RE.search(sentence)
     if not m:
+        # «Сравни скорость сборки: в Подольске 3,1 часа на заказ, в Казани 2,4 часа» — a comparison asked with its
+        # figures: a column chart of them (an ask without two figures of its own compares in words)
+        cm = _COMPARE_ASK_RE.match((sentence or "").strip())
+        if cm and len(numbers_of(cm.group("data"))) >= 2:
+            what = cm.group("what").strip(" ,—–-") or H.strip_end(cm.group("data"))
+            return [ChartRequest(type="column", what=H.strip_end(_nominative(what)))]
         return []
+    funnel = bool(re.match(r"воронк|funnel", m.group(0), re.I))
+    if funnel and re.search(r"→|->", sentence):
+        return []  # «Нужна воронка: 1 000 обращений → 500 записей → …»: its steps are drawn as the flow they are written
+    if re.search(r"на\s+(?:этом\s+)?график\w*\s+(?:видн|показан|заметн|отражен|хорошо\s+видн)", sentence, re.I):
+        return []  # «На графике видно рост»: the speaker's words about a chart, not an ask for one
     if _FUNCTION_GRAPH_RE.search(sentence) and not _CHART_ASK_RE.search(sentence[: m.start()]):
         return []  # «ограниченной графиком функции f(x)»: the graph of a function in a sentence of mathematics, no chart
     low = sentence.lower()
@@ -1045,6 +1153,7 @@ def _chart_requests(sentence: str) -> list[ChartRequest]:
         what = re.sub(r"\s+(?:на|в\s+виде)\s*$", "", what.strip(), flags=re.I)
     else:
         what = after
+    what = re.sub(r"^(?:нуж(?:ен|на|ны|но)|надо|сделай(?:те)?|построй(?:те)?|добавь(?:те)?)\s*$", "", what.strip(" ,"), flags=re.I)
     what_main, _, data = what.partition(":")
     parts = [p.strip(" .") for p in data.split(";") if p.strip(" .")] if count > 1 and data else []
     if count > 1 and len(parts) != count and data and not re.search(r"\d", data):
@@ -1058,6 +1167,8 @@ def _chart_requests(sentence: str) -> list[ChartRequest]:
     whats = parts if len(parts) == count else [H.strip_end(main)] * count
     if ctype is None:
         ctype = next((t for pat, t in _IMPLIED_TYPES if re.search(pat, " ".join(whats).lower())), None)
+    if funnel:
+        whats = [("воронка " + w.strip()).strip() if "воронк" not in w.lower() else w for w in whats]
     return [ChartRequest(type=ctype, what=H.strip_end(w)) for w in whats]
 
 
@@ -1065,6 +1176,9 @@ def _fit(req: ChartRequest, s: Series, block_numbers: list[float]) -> int:
     n = len(s.values)
     t = req.type
     score = 0
+    if "воронк" in (req.what or "").lower():
+        # a funnel: its stages only shrink («поступило 51 000, собрано 49 300, …»)
+        return 3 if n >= 3 and all(a > b for a, b in zip(s.values, s.values[1:])) else -5
     if t in ("pie", "doughnut"):
         if n >= 3 and all(v >= 0 for v in s.values):
             score += 2
@@ -1110,6 +1224,21 @@ def _link_requests(block: _Block, reg: _Registry, inline: dict[int, str], block_
             req.series_ids = [inline[k]]
             taken.add(inline[k])
     free = [k for k, r in enumerate(spec.charts) if not r.series_ids]
+    for k in list(free):
+        # «покажи на графике план и факт»: two series of the slide named by the ask, side by side (same categories)
+        parts = re.split(r"\s+и\s+|\s*,\s*", H.strip_end(spec.charts[k].what or ""))
+        if len(parts) != 2:
+            continue
+        hits = []
+        for part in parts:
+            ps = _stems(part)
+            cand = [sid for sid in block.series if sid not in taken and reg.get(sid) is not None and ps and ps <= _stems(reg.get(sid).name)]
+            if len(cand) == 1:
+                hits.append(cand[0])
+        if len(hits) == 2 and hits[0] != hits[1] and [c.lower() for c in reg.get(hits[0]).categories] == [c.lower() for c in reg.get(hits[1]).categories]:
+            spec.charts[k].series_ids = hits
+            taken.update(hits)
+            free.remove(k)
     scored: list[tuple[int, int, str]] = []
     for k in free:
         req = spec.charts[k]
@@ -1179,6 +1308,22 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
     inline: dict[int, str] = {}
     starts: list[tuple[int, tuple[str, float]]] = []  # «начиная с текущих 900 000»: (request index, first point)
     prev: Optional[str] = None
+    if spec is not None:
+        # a slide that asks for a chart («Сделай воронку», «Покажи на графике по неделям») gets the counts its text
+        # gives in its own words as data: «Из 412 000 установивших 298 000 прошли регистрацию, 176 000 …», «Каждую
+        # неделю больше: 61 000, 88 000, 117 000, 146 000»
+        asks = [r for x in sentences for r in _chart_requests(x)]
+        if asks:
+            period = next((m.group(1) for r in asks for m in [re.search(r"по\s+(неделям|месяцам|дням|кварталам|годам)", r.what, re.I)] if m), None)
+            for x in sentences:
+                if _chart_requests(x) and ":" not in x:
+                    continue
+                ser = _count_series(x) or _period_series(x, period)
+                if ser is None or any(sorted(reg.get(sid).values) == sorted(ser.values) for sid in block.series if reg.get(sid) is not None):
+                    continue
+                sid = reg.add_series(ser)
+                block.series.append(sid)
+                block.covered.extend(ser.values)
     in_note = False  # inside a bracketed note of several sentences («[Место под изображение: … . На изображении — ….]»)
     k = 0
     while k < len(sentences):

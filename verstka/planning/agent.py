@@ -6281,6 +6281,66 @@ def run_agent(
     manifest: Optional[TemplateManifest],
     strategies: list[Strategy],
     *,
+    structure: Optional[BriefStructure] = None,
+    written: bool = False,
+    progress: Optional[EventFn] = None,
+    **kw: Any,
+) -> Optional[AgentResult]:
+    """The planning agent (`_run_agent`, its docstring) with the meaning passes of the final polish around it: a plan
+    written in any form — a numbered list, bullets, the lines of a letter — is read as the slides it asks for, one
+    item a slide in the author's order (planning/plan_form.py); every planned deck then goes through
+    planning/meaning.py (no ask to the designer on a slide, a deck that ends on its conclusion and ask, figures that
+    say what they mean, tables with a conclusion counted from their cells)."""
+    plan_note: Optional[str] = None
+    if structure is None and not written and brief.text:
+        from verstka.planning.directives import picture_asks_as_notes
+        from verstka.planning.plan_form import as_slides
+
+        pictured = picture_asks_as_notes(brief.text)
+        if pictured != brief.text:
+            brief = brief.model_copy(update={"text": pictured})  # «Добавь картинку …»: the picture's place, not a line
+
+        plan = as_slides(brief.text)
+        if plan is not None:
+            upd: dict[str, Any] = {"text": plan.text}
+            if plan.audience and not brief.audience:
+                upd["audience"] = plan.audience
+            brief = brief.model_copy(update=upd)
+            form = {"numbered": "нумерованный список", "bullets": "список", "letter": "письмо"}.get(plan.form, plan.form)
+            plan_note = (f"Аналитик: план написан как {form} — {ru_count(len(plan.items), 'пункт', 'пункта', 'пунктов')}, "
+                         f"каждый пункт — свой слайд, в том же порядке; указания дизайнеру («покажи на графике», «сделай воронку») — форма слайда, не его текст.")
+            if progress is not None:
+                try:
+                    progress({"type": "agent", "step": "analyst", "message": plan_note, "slide": None, "variant": None})
+                except Exception:  # noqa: BLE001 - the event is a courtesy
+                    pass
+    res = _run_agent(brief, manifest, strategies, structure=structure, written=written, progress=progress, **kw)
+    if res is None:
+        return res
+    from verstka.planning.meaning import finish_deck
+
+    dictated = bool(res.structure is not None and res.structure.specs)
+    for name, o in list(res.outlines.items()):
+        try:
+            o2, said = finish_deck(o, brief.text, author_order=dictated)
+        except Exception:  # noqa: BLE001 - the plan as the agent made it
+            log.warning("meaning passes failed on %s", name, exc_info=True)
+            continue
+        if plan_note:
+            o2.agent_log = [plan_note, *o2.agent_log]
+        res.outlines[name] = o2
+        res.warnings.setdefault(name, []).extend(said)
+    if plan_note:
+        for name in res.warnings:
+            res.warnings[name] = [f"plan_form: the brief's plan read as dictated slides", *res.warnings[name]]
+    return res
+
+
+def _run_agent(
+    brief: Brief,
+    manifest: Optional[TemplateManifest],
+    strategies: list[Strategy],
+    *,
     facts: FactsSource = None,
     skills: Any = None,
     providers: Any = None,

@@ -416,6 +416,10 @@ def read_parts(text: str) -> list[Part]:
         if not lines[i].strip():
             flush()
         else:
+            # a table written right under its lead line («Результаты по каналам:» / «| Канал | …») is a block of its
+            # own, as with a blank line between them
+            if block and lines[i].lstrip().startswith("|") != block[-1].lstrip().startswith("|"):
+                flush()
             block.append(lines[i])
         i += 1
     flush()
@@ -891,6 +895,14 @@ def designer_ask(sentence: str) -> Optional[str]:
     kind = instruction_kind(sentence)
     if kind == "rule" and not speaks_of_the_deck(sentence):
         return None
+    if kind == "rule":
+        # «Сравни с рынком: по данным hh.ru, у инженеров 47 дней»: the ask carries the slide's own words — the sentence
+        # stays, its ask is taken off at the end (planning/directives.py)
+        from verstka.planning.directives import split_directive
+
+        ask, rest = split_directive(sentence)
+        if ask is not None and rest and re.search(r"\d", rest):
+            return None
     return kind
 
 
@@ -1024,7 +1036,7 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
             r.used.update(contacts)
     elif _AGENDA_RE.match(r.title) and (r.of("list") or len(paras) >= 2) and not rich:
         r.role = "agenda"
-    elif not first and not derived and (not parts or (len(parts) == 1 and paras and len(rest) == 1 and words(rest[0]) <= 14 and not _VALUE_RE.search(rest[0]))):
+    elif not first and not derived and not any(k in r.asks for k in ("chart", "table", "formula")) and (not parts or (len(parts) == 1 and paras and len(rest) == 1 and words(rest[0]) <= 14 and not _VALUE_RE.search(rest[0]))):
         # a title over one short line (or none): a divider of the deck's parts — never a line that states a figure («За
         # год волонтёры собрали 48 тонн мусора» is the slide's point, shown as its content)
         r.role = "section"
