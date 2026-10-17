@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from verstka.data.aggregate import MAX_SLIDES, RATE_GOAL, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import FactSet, facts_for
-from verstka.data.goals import Goal, goal_focus, goal_match, goals_of, stems_of
+from verstka.data.goals import Goal, goal_ask, goal_focus, goal_match, goals_of, stems_of
 from verstka.data.words import stem_in
 from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
@@ -79,6 +79,9 @@ def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
     shown = m is not None and any(stem_in(x, w) for x in [head] + [y for y in metric if len(y) >= 3]
                                   for w in stems_of(m.name))
     title = any(stem_in(head, w) for w in stems_of(file_title(d.profile.file, d.profile.sheet)))
+    focus = d.time.focus if decision.task == "dynamics" and d.time is not None else None
+    if focus and any(stem_in(x, w) for x in [head] + [y for y in metric if len(y) >= 4] for w in stems_of(focus)):
+        return decision  # цель назвала строку («облачной платформы»): ряд — по ней
     if shown or (title and not d.head_in_columns):
         return decision
     if d.head_in_columns:
@@ -97,7 +100,7 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
         return Data(table, profile, compare=compare)
     metric, head, negate = goal_focus(phrase)
     return Data(table, profile, subject=tuple(stems_of(phrase)), compare=compare, head=head, negate=tuple(negate),
-                qualifiers=tuple(x for x in metric if x != head))
+                qualifiers=tuple(x for x in metric if x != head), ask=goal_ask(phrase))
 
 
 def data_of(plan: DatasetPlan, table: Table) -> Data:
@@ -139,9 +142,20 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     data_task = max(base, key=lambda k: base[k])
     raised = decision.goal is not None and base[data_task] > base[task]
     options = rank_options(task, d, [g for g in rel if base.get(g.task, 0) >= FEASIBLE or g.task == task], raised)
+    th_goal = None
+    if d.ask is None:
+        # порог цели («какие серверы загружены выше 80%») — ответ и тогда, когда сравнивать категории нечем
+        th_goal = next((g for g in rel if (goal_ask(g.phrase) or "").startswith(("above:", "below:"))), None)
+        if th_goal is not None:
+            d.ask = goal_ask(th_goal.phrase)
     fs = facts_for(task, d)
     headline, caption = compose(task, fs)
     plain = fs.ctx.get("plain") or title
+    if th_goal is not None and fs.ctx.get("threshold"):
+        side, thr = fs.ctx["threshold"][:2]
+        rs = [r for r in decision.reasons if not (r.startswith(f"Цель «{th_goal.phrase}»") and "не подходит" in r)]
+        rs.append(f"Цель «{th_goal.phrase}»: показано, кто {'выше' if side == 'above' else 'ниже'} {thr}.")
+        decision = decision.model_copy(update={"reasons": rs})
     message = None
     if not profile.typable and options and options[0].kind == "table":
         message = f"Не для графика: {profile.untypable_reason or 'данные не складываются в график'} — показываю таблицей"
@@ -500,6 +514,9 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
         vals = [(lab, v) for lab, v in zip(tv.labels, tv.main.values) if v is not None]
         return [NumberCallout(value=fmt_value(v, unit), label=lab) for lab, v in vals[-3:]]
     series = [InlineSeries(name=s.name, values=list(s.values), unit=s.unit) for s in tv.series]
+    cats = list(tv.labels)
+    if (d.forecasts or d.forecast_rows) and not tv.split and opt.kind not in ("table", "kpi_cards"):
+        cats, series = _with_forecast(d, tv, cats, series, joined=opt.kind in ("line", "area"))
     typo = [m for m in d.measures if d.typo_rows.get(m.name)]
     if typo and len(series) == 1:
         # опечатка убрана из ряда — это сказано в легенде: «Продажи (без выброса: июль 2025)»
@@ -520,10 +537,71 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
         y_title = yname
     else:
         y_title = _series_title(d)  # ось — по величине; группа рядов из шапки — заголовок легенды
-    return ChartSpec(type=kind, categories=list(tv.labels), series=series, unit=None if tv.split else unit,
+    return ChartSpec(type=kind, categories=cats, series=series, unit=None if tv.split else unit,
                      highlight_index=last if kind in ("line", "column", "area") and len(series) == 1 else None,
                      x_title=tv.axis_title, y_title=y_title, gaps=tv.gaps, source=src, split=tv.split,
                      legend_title=d.group_name if len(series) > 1 and not tv.dim else None)
+
+
+def _with_forecast(d: Data, tv, cats: list[str], series: list[InlineSeries],
+                   joined: bool = True) -> tuple[list[str], list[InlineSeries]]:
+    """Прогноз — отдельным рядом «… (прогноз)»: колонки-прогнозы — на той же оси, строки-прогнозы («2026П») — ось
+    продолжается их периодами, ряд факта там пустой; у линии прогноз начинается с последнего факта (продолжение
+    линии), у столбцов — нет (второй столбец того же года — повтор факта)."""
+    from verstka.data.parse import forecast_period, period_iso, period_parts
+    from verstka.data.timeaxis import time_view
+    from verstka.data.units import _num as _num_cell
+    from verstka.data.words import period_label
+
+    periods = list(tv.periods)
+    out = list(series)
+    if tv.from_columns and series:
+        # колонки-годы и колонка «2026 (прогноз)»: ось продолжается периодом прогноза, ряд — «… (прогноз)» от
+        # последнего факта (строка, названная целью, — её прогноз)
+        rows = tv.only_rows or d.rows_idx
+        pts = []
+        for fm in d.forecasts:
+            pp = period_parts(forecast_period(fm.name.strip()) or "")
+            xs = [float(fm.values[i]) for i in rows if fm.values[i] is not None]  # type: ignore[arg-type]
+            if pp is not None and xs and pp[0] == tv.freq:
+                pts.append((period_iso(pp[0], pp[1]), sum(xs) if tv.how == "sum" else sum(xs) / len(xs)))
+        pts = [x for x in sorted(pts) if x[0] not in periods]
+        if pts:
+            last = max((k for k, v in enumerate(series[0].values) if v is not None), default=None)
+            n0 = len(periods)
+            cats = cats + [period_label(p_, tv.freq) for p_, _ in pts]
+            out = [x.model_copy(update={"values": list(x.values) + [None] * len(pts)}) for x in out]
+            vals: list[Optional[float]] = [None] * n0 + [v for _, v in pts]
+            if last is not None and joined:
+                vals[last] = series[0].values[last]
+            out.append(InlineSeries(name=f"{series[0].name} (прогноз)", values=vals, unit=series[0].unit))
+        return cats, out
+    for fm in d.forecasts:
+        tvf = time_view(d, fm)
+        if tvf is None:
+            continue
+        by = dict(zip(tvf.periods, tvf.main.values))
+        name = fm.name if "прогноз" in fm.name.lower() else f"{fm.name} (прогноз)"
+        out.append(InlineSeries(name=name, values=[by.get(p_) for p_ in periods], unit=series[0].unit if series else None))
+    if d.forecast_rows and d.time_col is not None and series:
+        m = tv.measure
+        pts = []
+        for i in sorted(d.forecast_rows):
+            pp = period_parts(forecast_period(d.cell(i, d.time_col)) or "")
+            v = _num_cell(d.cell(i, m.j)) if m.j >= 0 else None
+            if pp is not None and v is not None:
+                pts.append((period_iso(pp[0], pp[1]), v / (m.scale or 1.0)))
+        pts = [x for x in sorted(pts) if x[0] not in periods]
+        if pts:
+            last = max((k for k, v in enumerate(series[0].values) if v is not None), default=None)
+            n0 = len(periods)
+            cats = cats + [period_label(p_, tv.freq) for p_, _ in pts]
+            out = [x.model_copy(update={"values": list(x.values) + [None] * len(pts)}) for x in out]
+            fvals: list[Optional[float]] = [None] * n0 + [v for _, v in pts]
+            if last is not None and joined:
+                fvals[last] = series[0].values[last]
+            out.append(InlineSeries(name=f"{series[0].name} (прогноз)", values=fvals, unit=series[0].unit))
+    return cats, out
 
 
 def _series_title(d: Data) -> str:
@@ -585,7 +663,35 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
         same = [x for x in cv.extra_measures if not x.change][:1]  # взаимосвязь по строкам — обе метрики
         return _cats_spec(cv, opt.kind, src, unit=unit, extra=[(x.name, cv.extra[x.name]) for x in same])
     kind = opt.kind if opt.kind in ("bar", "column") else "bar"
-    return _cats_spec(cv, kind, src, unit=unit)
+    spec = _cats_spec(cv, kind, src, unit=unit)
+    focus = _headline_focus(plan) or _worst_miss(d, cv, plan)
+    if focus is not None and focus in cv.labels and spec.highlight_index is not None:
+        # заголовок называет того, кто растёт быстрее всех: акцент — у него (лидер по величине виден и так — он
+        # самый длинный столбец), а не у другого столбца
+        spec.highlight_index = cv.labels.index(focus)
+    return spec
+
+
+def _worst_miss(d: Data, cv: CatView, plan: DatasetPlan) -> Optional[str]:
+    """Заголовок о промахах мимо цели строки («Ниже цели SLA — 2 из 7: CDN и Почта для бизнеса»): акцент — у
+    самого далёкого от своей цели, а не у лидера."""
+    f = next((x for x in plan.headline_facts if x.id == "miss_0"), None)
+    if f is None or d.row_target is None or not re.match(r"^(?:Ниже|Выше) ", plan.headline or ""):
+        return None
+    nm = f.text.rsplit(" — ", 1)[0].strip()
+    return nm if nm in plan.headline else None
+
+
+def _headline_focus(plan: DatasetPlan) -> Optional[str]:
+    """Категория, о которой заголовок говорит сверх лидера: «Москва даёт 41% выручки, Казань растёт быстрее всех» →
+    «Казань» (по подтверждённому факту «growth_max», а не по разбору фразы)."""
+    if "быстрее всех" not in (plan.headline or ""):
+        return None
+    f = next((x for x in plan.headline_facts if x.id == "growth_max"), None)
+    if f is None:
+        return None
+    nm = f.text.rsplit(":", 1)[0].strip()
+    return nm if nm and nm in plan.headline else None
 
 
 def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:

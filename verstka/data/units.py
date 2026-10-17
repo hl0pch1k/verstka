@@ -21,11 +21,13 @@ from verstka.schemas.data import ColumnProfile
 if TYPE_CHECKING:
     from verstka.data.aggregate import Data
 
-_CHANGE = re.compile(r"изменени|(?:^|[^а-яё])(?:при)?рост|динамик|разниц|отклонени|к прошл|г/г|yoy|дельта|δ", re.I)
+# «Доля неудачных изменений» (DORA) — доля событий-изменений, а не изменение величины: «изменений» не в счёт
+_CHANGE = re.compile(r"изменени[еяю](?![а-яё])|(?:^|[^а-яё])(?:при)?рост|динамик|разниц|отклонени|к прошл|г/г|yoy|дельта|δ",
+                     re.I)
 _LEVEL = re.compile(
     r"nps|csat|индекс|средн|рейтинг|оценк|балл|очк[иоа]|конверси|(?<!\d)(?<!\d\s)курс(?:ы|а|ов)?(?![а-яё])|цен[аы]|"
     r"(?:^|[^а-яё])ставк|температур|доля|коэффициент|уровень|процент|медиан|время|срок|скорост|длительн|возраст|удовлетвор|загрузк|"
-    r"маржа|маржин|рентабельн|плотност|(?:^|[^а-яё])чек|урожайн|на\s+душу|на\s+(?:1|одного|одну|человека|жителя|сотрудника)\b|"
+    r"маржа|маржин|рентабельн|плотност|(?:^|[^а-яё])чек(?!ов|и\b)|урожайн|на\s+душу|на\s+(?:1|одного|одну|человека|жителя|сотрудника)\b|"
     r"(?:^|\s)за\s+(?:м²|м2|кв|кг|шт|ед|единиц|час|1\b)",
     re.I,
 )
@@ -220,6 +222,10 @@ def additivity(name: str, unit: Optional[str], mtype: str, title: str = "", sums
     return False, f"нет признака, что «{base}» складывается"
 
 
+_FRACTION_NAME = re.compile(r"конверси|(?:^|[^а-яё])дол[яи](?:[^а-яё]|$)|(?:^|[^a-z])(?:ctr|cr|rate|ratio|share|churn)"
+                            r"(?:[^a-z]|$)|удержани|retention|отток|открываем|кликабельн|вовлечённ|вовлеченн", re.I)
+
+
 def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     cells = [d.cell(i, j) for i in range(len(d.table.rows))]
     units = set()
@@ -227,7 +233,7 @@ def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     raw: list[Optional[float]] = []
     row_units: list[Optional[str]] = []
     for i, v in enumerate(cells):
-        if i in d.totals or i in d.benchmarks:
+        if i in d.totals or i in d.benchmarks or i in getattr(d, "forecast_rows", ()):
             vals.append(None)
             raw.append(None)
             row_units.append(None)
@@ -272,10 +278,18 @@ def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
         unit = f"{'трлн' if scale == 1e12 else 'млрд'} {unit}"
         vals = [None if v is None else v / scale for v in vals]
         raw = [None if v is None else v / scale for v in raw]
+    # доля в долях единицы (конверсия 0,058, CTR 0.031, отток 0.04) — в процентах: «5,8%», а не «0,058»; проверка
+    # пересчитывает с тем же множителем (значение / 0,01)
+    mtype = c.type
+    if not unit and not mixed and present and _FRACTION_NAME.search(lname) and all(0 <= v <= 1 for v in present) \
+            and max(present) < 1 and not all(float(v).is_integer() for v in present):
+        scale, unit, mtype = 0.01, "%", "percent"
+        vals = [None if v is None else v / scale for v in vals]
+        raw = [None if v is None else v / scale for v in raw]
     # остаток (число клиентов на конец месяца) — только если остаток и есть главное слово названия («Клиентов»,
     # «Активные клиенты»); «Выручка от клиентов» — поток денег, деньги остатком не бывают
     head = name if is_counter(name) else head_word(name)
     stock = c.type != "money" and bool(_STOCK.search(head)) and not level
-    return Measure(j=j, name=name, unit=unit, type=c.type, values=vals, change=change, level=level and not change,
+    return Measure(j=j, name=name, unit=unit, type=mtype, values=vals, change=change, level=level and not change,
                    stock=stock, mixed=mixed, time_unit=tu, raw=raw, row_units=row_units, basis=why, scale=scale)
 

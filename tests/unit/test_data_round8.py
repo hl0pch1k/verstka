@@ -273,7 +273,7 @@ def test_rates_and_wording():
     qs = ["I кв. 2024", "II кв. 2024", "III кв. 2024", "IV кв. 2024", "I кв. 2025", "II кв. 2025", "III кв. 2025"]
     vs = ["812,4", "945,1", "1 021,7", "1 388,2", "768,9", "902,3", "984,6"]
     t = _t("Ввод жилья.csv", [["Период", "Ввод жилья, тыс. м²"]] + [[q, v] for q, v in zip(qs, vs)])
-    assert _sp(_plan(t).headline).endswith("к III кварталу 2024")
+    assert _sp(_plan(t).headline).endswith("чем в III квартале 2024")
     t = _t("Active users 2026.csv", [["Month", "Active users, тыс."]] + [[f"{m} 2026", v] for m, v in
                                                                         zip(["January", "February", "March", "April"],
                                                                             [184.2, 191.5, 203.8, 236.7])])

@@ -15,7 +15,8 @@ from typing import Optional, Sequence
 from verstka.data.facts import FactSet
 from verstka.data.words import (
     PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_pct_any, fmt_signed, fmt_value,
-    fraction_words, is_event_name, is_period_name, is_plural_value, lower_first, number_word, phrase, plural, round_pct, times_word,
+    fraction_words, is_event_name, is_period_name, is_plural_value, join_and, lower_first, number_word, phrase, plural, round_pct,
+    times_word,
     upper_first, verb,
 )
 from verstka.schemas.data import HeadlineFact, TaskKind
@@ -103,6 +104,11 @@ def _strongest(fs: FactSet) -> Optional[str]:
 
 
 # ── шаблоны заголовка ─────────────────────────────────────────────────────────────────────────────────────────────────
+def _cap(head: str) -> str:
+    """Заглавная в начале — кроме имени-кода латиницей («node-05», «eth0», «srv-12»): его пишут как в файле."""
+    return head if re.match(r"^[a-z][a-z0-9_.]*[-_]?\d", head) else upper_first(head)
+
+
 def compose(task: TaskKind, fs: FactSet) -> tuple[str, Optional[str]]:
     """Заголовок-вывод и подпись-пояснение из фактов задачи. Факты задают и слова (ctx: лидер, период, сущность) —
     шаблон только расставляет их по-русски."""
@@ -114,13 +120,13 @@ def compose(task: TaskKind, fs: FactSet) -> tuple[str, Optional[str]]:
     head = head.strip()
     if head.endswith(".") and not re.search(r"(?:^|\s)(?:п|п\.п|чел|шт|тыс|руб|дн|мин|кв|млн|млрд|ч|г)\.$", head):
         head = head[:-1]  # точку после сокращения («+6 п.») не трогаем
-    head = upper_first(head)
+    head = _cap(head)
     labels = _labels(fs)
     if not headline_ok(head, fs.facts, labels) or head == fs.ctx.get("plain"):
         # страховка: число не из фактов или вышла тема — вывод из самого сильного факта, и только потом тема
         alt = _strongest(fs)
         if alt and headline_ok(alt, fs.facts, labels):
-            head = upper_first(alt)
+            head = _cap(alt)
         elif not headline_ok(head, fs.facts, labels):
             head = fs.ctx.get("plain") or head
     if caption:
@@ -168,6 +174,11 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
                 c.get("caption"))
     if c.get("comp_time"):
         return _dynamics_parts(fs)
+    if c.get("fastest") and _f(fs, "growth_max") is not None:
+        # цель «кто растёт быстрее всех»: ответ на неё, а не рост целого (он — в подписи)
+        nm, gm = c["fastest"], _f(fs, "growth_max")
+        gpl = "pl" if is_plural_value(nm) else "m"
+        return f"{nm} {verb('grow', gpl, past=False)} быстрее всех: {fmt_signed(gm.value, '%')}", c.get("caption")
     if c.get("dim_level"):
         moved, of, lv = _f(fs, "moved"), _f(fs, "of"), _f(fs, "leader_value")
         gen1, genp = c["dim_forms"]
@@ -213,6 +224,10 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     if c.get("peak") and last is not None:
         # уровень с пиком внутри ряда: пик — главное
         what, v, per = c["peak"]
+        sp = _f(fs, "spike")
+        if c.get("spike") and sp is not None:  # «Число ошибок 5xx: всплеск 9 640 (8 сен 2026) — в 5,2 раза выше медианы»
+            return (f"{subj}: {what} {fmt_value(v, u)} ({per}) — в {fmt_num(sp.value, 1)} {times_word(sp.value)} выше "
+                    f"медианы" + gap_txt), c.get("caption")
         return f"{subj}: {what} {fmt_value(v, u)} ({per}), к концу — {fmt_value(last.value, u)}" + gap_txt, \
             c.get("caption")
     if c.get("noisy"):
@@ -238,18 +253,26 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     if change is None:
         return c.get("plain", subj), c.get("caption")
     when = c.get("when", "")
+    than = c.get("than")  # год к году: «на 17% больше, чем во II квартале 2025», а не «к II кварталу 2025»
+    more = "больше" if c.get("delta", 0) >= 0 else "меньше"
     if ratio is not None:
         r = ratio.value
-        head = f"{subj} {verb('grow', g)} в {fmt_num(r, 1)} {times_word(r)} {when}"
+        head = f"{subj} — в {fmt_num(r, 1)} {times_word(r)} больше, {than}" if than else \
+            f"{subj} {verb('grow', g)} в {fmt_num(r, 1)} {times_word(r)} {when}"
     elif c.get("abs_change") and last is not None:
         if abs(c["delta"]) < 1e-9:
             head = hold()
+        elif than:
+            head = (f"{subj} — {fmt_value(last.value, c.get('unit_short'))}, на "
+                    f"{fmt_value(change.value, c.get('unit_short'))} {more}, {than}")
         else:
             v = verb("grow" if c["delta"] > 0 else "fall", g)
             head = (f"{subj} {v} на {fmt_value(change.value, c.get('unit_short'))} {when}, до "
                     f"{fmt_value(last.value, c.get('unit_short'))}")
     elif abs(change.value) < 1 and last is not None:
         head = hold()
+    elif than:
+        head = f"{subj}{':' if re.search(r'[a-z]{3,}', subj) else ' —'} на {fmt_pct(change.value)}% {more}, {than}"
     elif re.search(r"[a-z]{3,}", subj):
         # латиница («Active users»): род неизвестен — без глагола
         head = f"{subj}: {fmt_signed(change.value if c['delta'] > 0 else -change.value, '%')} {when}"
@@ -348,23 +371,26 @@ def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
     if any(is_period_name(nm) or is_event_name(nm) or (phrase(nm) is not None and not phrase(nm).sure
                                                        and re.search(r"[а-яё]", nm, re.I)) for nm in names[:2]):
         # ряды-номера («Неделя 1», «Неделя 2»): подлежащим их не делают — через двоеточие
+        whens = c.get("whens")
         for k, name in enumerate(names[:2]):
             kind, v = c[f"s{k}"]
-            parts.append(f"{name if k == 0 else _mid(name)}: {_signed_move(kind, v, unit)}"
-                         + (f" {c.get('when', '')}" if k == 0 else ""))
+            when = whens[k] if whens else (c.get("when", "") if k == 0 else "")
+            parts.append(f"{name if k == 0 else _mid(name)}: {_signed_move(kind, v, unit)} {when}".strip())
         return ", ".join(p_.strip() for p_ in parts), c.get("caption")
     for k, name in enumerate(names[:2]):
         kind, v = c[f"s{k}"]
         up, how = _move(kind, v, unit)
         p = phrase(name)
         g: Gender = p.gender if p is not None else "m"
+        whens = c.get("whens")
+        w_ = whens[k] if whens else (c.get("when", "") if k == 0 else "")
         if k == 0:
             up0 = up
-            parts.append(f"{name} {verb('grow' if up else 'fall', g)} {how} {c.get('when', '')}".strip())
+            parts.append(f"{name} {verb('grow' if up else 'fall', g)} {how} {w_}".strip())
         elif up == up0:
-            parts.append(f"{_mid(name)} — {how}")
+            parts.append(f"{_mid(name)} — {how} {w_}".strip())
         else:
-            parts.append(f"а {_mid(name)} {verb('grow' if up else 'fall', g)} {how}")
+            parts.append(f"а {_mid(name)} {verb('grow' if up else 'fall', g)} {how} {w_}".strip())
     return ", ".join(parts), c.get("caption")
 
 
@@ -391,6 +417,32 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             return f"{upper_first(c['metric_gen'])} нет ни в одном из {fmt_num(k)} {c['dim_gen']}", c.get("caption")
         return (f"У всех {count_words(k, *c['dim_forms'])} одно значение: {fmt_value(v.value, c.get('unit_short'))}",
                 c.get("caption"))
+    th = _threshold_head(fs)
+    if th:
+        return th, c.get("caption")
+    tot, sh = _f(fs, "total"), _f(fs, "leader_share")
+    if c.get("ask_total") and tot is not None:
+        # «сколько всего отгрузили»: итог — первым, лидер — за ним
+        u = c.get("unit_short")
+        head = f"Всего — {fmt_value(tot.value, u)}"
+        if sh is not None:
+            head += f", больше всего — {c['leader']}: {fmt_pct(sh.value)}%"
+        return head, c.get("caption")
+    om, lv0, lo0 = _f(fs, "overall_mean"), _f(fs, "leader_value"), _f(fs, "last_value")
+    if c.get("overall_mean") and om is not None and c.get("metric") is not None:
+        # «какой средний NPS по всем продуктам»: среднее и размах, а не лидер
+        u = c.get("unit_short")
+        head = f"{c['metric'].nom} в среднем — {fmt_value(om.value, u)}"
+        if lv0 is not None and lo0 is not None and c.get("last_label"):
+            head += (f": от {fmt_value(lo0.value, u)} ({c['last_label']}) до {fmt_value(lv0.value, u)} "
+                     f"({c['leader']})")
+        return head, c.get("caption")
+    if c.get("misses") and c["misses"][2] and _f(fs, "below_target") is not None and _f(fs, "of") is not None:
+        # у каждой строки своя цель, и кто-то до неё не дотянул: это и вывод («Ниже цели SLA — 2 из 7: CDN и Почта»)
+        side, tg, miss = c["misses"]
+        k, n = int(_f(fs, "below_target").value), int(_f(fs, "of").value)
+        names = join_and(miss[:3]) + (" и другие" if k > 3 else "")
+        return f"{side} {tg} — {k} из {n}: {names}", c.get("caption")
     leader = c["leader"]
     pl = "pl" if c.get("lead_plural") or is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
@@ -420,8 +472,8 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             head = (f"{c['first_name']}: больше всего — {leader} ({fmt_value(lv.value, u)}), "
                     f"{_mid(c['second_name'])}: {c['second_leader']} ({fmt_value(second.value, u)})")
         elif top_w:
-            head = f"{top_w} — {leader}: {fmt_value(lv.value, u)}" + (f" ({c['matrix_note']})" if c.get("matrix_note")
-                                                                       else "")
+            note = c.get("matrix_note") or c.get("stat_name")  # «(сумма Пн–Вс)», «(p50)»
+            head = f"{top_w} — {leader}: {fmt_value(lv.value, u)}" + (f" ({note})" if note else "")
             if last is not None and c.get("last_label"):
                 head += f", {low_w} — {c['last_label']}: {fmt_value(last.value, u)}"
         else:
@@ -431,8 +483,8 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             # изменение («Δ к 2024, %») — со знаком: «+12,6%», «−3,4%»
             val = (lambda v_: ("+" if v_ > 0 else "−" if v_ < 0 else "") + fmt_value(abs(v_), u)) if c.get("signed") \
                 else (lambda v_: fmt_value(v_, u))
-            head = f"{leader} впереди{fast}{by}: {val(lv.value)}" + (
-                f" ({c['matrix_note']})" if c.get("matrix_note") else "")
+            note = c.get("matrix_note") or c.get("stat_name")
+            head = f"{leader} впереди{fast}{by}: {val(lv.value)}" + (f" ({note})" if note else "")
             if fast:
                 grow_leader = None
             if last is not None and c.get("last_label"):
@@ -527,8 +579,26 @@ def _distribution(fs: FactSet) -> tuple[str, Optional[str]]:
     return head, c.get("caption")
 
 
+def _threshold_head(fs: FactSet) -> Optional[str]:
+    """«Выше 80% — 2 сервера из 8: node-05 и node-03»; никого — «Выше 80% — ни одного из 8»."""
+    c = fs.ctx
+    k_, n_ = _f(fs, "over"), _f(fs, "over_of")
+    if not c.get("threshold") or k_ is None or n_ is None:
+        return None
+    side, thr, names, forms = c["threshold"]
+    word = "Выше" if side == "above" else "Ниже"
+    k, n = int(k_.value), int(n_.value)
+    if not k:
+        return f"{word} {thr} — ни одного из {n}"
+    who = count_words(k, *forms) if forms else str(k)
+    return f"{word} {thr} — {who} из {n}: {join_and(names[:3])}" + (" и другие" if k > 3 else "")
+
+
 def _reference(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
+    th = _threshold_head(fs)
+    if th:
+        return th, c.get("caption")
     top = _f(fs, "top_share")
     n_top = _f(fs, "top_n")
     m: Optional[Phrase] = c.get("metric")
@@ -574,6 +644,17 @@ def _reference(fs: FactSet) -> tuple[str, Optional[str]]:
 
 def _kpi(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
+    if c.get("kpi_targets") and _f(fs, "targets_met") is not None and _f(fs, "targets") is not None:
+        # показатели с целями: сколько выполнено и что нет («Выполнены 2 цели из 4: выручка и отток; MAU и NPS — нет»)
+        k, n, met, miss = c["kpi_targets"]
+        if k == n:
+            return f"Все {count_words(n, 'цель', 'цели', 'целей')} выполнены", c.get("caption")
+        if k == 0:
+            return f"Ни одна из {n} целей не выполнена", c.get("caption")
+        done = "Выполнена" if plural(k, 1, 2, 3) == 1 else "Выполнены"
+        head = f"{done} {count_words(k, 'цель', 'цели', 'целей')} из {n}: {join_and(met)}"
+        tail = f"; {join_and(miss)} — {c.get('kpi_miss_word', 'ниже цели')}"
+        return (head + tail if miss and len(head + tail) <= 90 else head), c.get("caption")
     a, b = _f(fs, "kpi_a"), _f(fs, "kpi_b")
     a_name: str = c.get("a_name", "")
     if a is not None and b is not None:

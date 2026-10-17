@@ -25,7 +25,7 @@ from typing import Any, Optional
 import numpy as np
 
 from verstka.data.kpi import _kpi_view
-from verstka.data.parse import is_total_label, season_name, split_unit
+from verstka.data.parse import forecast_period, is_total_label, season_name, split_unit
 from verstka.data.reference import _ref_view, describe_dropped
 from verstka.data.timeaxis import columns_time_view, resample_freq, time_view
 from verstka.data.units import (
@@ -66,9 +66,16 @@ _METRIC_WORD = re.compile(r"выручк|расход|доход|прибыл|п
 MAX_DISCRETE_BINS = 15  # значений не больше — гистограмма по значениям, а не по интервалам
 _COUNT_NAME = re.compile(r"^(?:число|количество|кол-во|частота|сколько|человек|учеников|студентов|семей|случаев)", re.I)
 _TARGET_NAME = re.compile(r"(?:^|[^а-яё])(?:цел[ьи]|целев|норматив|норма|target|таргет|kpi|ориентир)", re.I)
+# счёт, которым взвешивают средние: чеки, заказы, ответы, анкеты, визиты, сессии, звонки, обращения, клиенты
+_WEIGHT_NAME = re.compile(r"чек(?:ов|и)\b|заказ|ответ(?:ов|ы|ивших)|анкет|респондент|опрошен|визит|сессий|сессии|звонк|"
+                          r"обращени|покупател|транзакц|поездок|посещени|отзыв", re.I)
+# «Оценка» одна — это балл («Оценка удовлетворённости»), прогноз — только с периодом («Оценка 2026», «2026 (оценка)»)
+_FORECAST_NAME = re.compile(r"^(?:прогноз|ожид(?:ание|аемое|\.)?|forecast|fc)(?:[^а-яёa-z]|$)", re.I)
 _CUMUL = re.compile(r"нараста|накоплен|с начала года|с начала периода|ytd|cumulative|running total", re.I)
 # «Прочее», «Другие», «Остальное» — строка-остаток: в конце списка и никогда не лидер
-_OTHER = re.compile(r"^(?:прочее|прочие|другое|другие|остальное|остальные|иное|иные|прочее\s+\S+|другие\s+\S+)$", re.I)
+# «Прочее», «Прочие партнёры (214)», «Другое (12)», «Остальные клиенты» — остаток, а не категория
+_OTHER = re.compile(r"^(?:прочее|прочие|прочая|прочий|другое|другие|остальное|остальные|иное|иные|others?|other)\b.*$",
+                    re.I)
 
 
 def is_other_label(label: str) -> bool:
@@ -96,7 +103,8 @@ class Data:
     """Датасет для анализа: таблица, профиль, метрики, подписи и подготовленные виды (лениво)."""
 
     def __init__(self, table: Table, profile: DatasetProfile, subject: tuple[str, ...] = (), compare: bool = False,
-                 head: Optional[str] = None, negate: tuple[str, ...] = (), qualifiers: tuple[str, ...] = ()):
+                 head: Optional[str] = None, negate: tuple[str, ...] = (), qualifiers: tuple[str, ...] = (),
+                 ask: Optional[str] = None):
         self.table = table
         self.profile = profile
         self.subject = subject
@@ -104,6 +112,7 @@ class Data:
         self.head = head
         self.negate = negate
         self.qualifiers = qualifiers
+        self.ask = ask  # «кто растёт быстрее всех» → "fastest": темп каждой категории, а не рост целого
         # сравнение категорий: главная метрика — колонка-итог («Итого за год»), если она есть, а не первая часть
         self.compare = compare
         cols = profile.columns
@@ -112,10 +121,17 @@ class Data:
         self.totals: set[int] = self._total_rows()
         # строки-ориентиры («Среднее по стране», «Норматив»): не категория — не лидер, не последний, не доля
         self.benchmarks: dict[int, str] = self._benchmark_rows()
-        self.rows_idx = [i for i in range(len(table.rows)) if i not in self.totals and i not in self.benchmarks]
+        # строки-прогнозы («2026П», «2026 (прогноз)»): не факт — в вывод и рост не входят, на графике — отдельным рядом
+        self.forecast_rows: set[int] = self._forecast_rows()
+        self.rows_idx = [i for i in range(len(table.rows))
+                         if i not in self.totals and i not in self.benchmarks and i not in self.forecast_rows]
         self.n = len(self.rows_idx)
         self.measures: list[Measure] = [build_measure(self, j, c) for j, c in enumerate(cols) if c.role == "metric"]
         self.measures = [m for m in self.measures if m.present]
+        # колонки-прогнозы («Прогноз», «Прогноз 2026», «2026 (прогноз)», «Оценка»): не факт — ни в рядах, ни в выводе
+        self.forecasts: list[Measure] = [m for m in self.measures if _FORECAST_NAME.match(m.name.strip())
+                                         or forecast_period(m.name.strip()) is not None]
+        self.measures = [m for m in self.measures if m not in self.forecasts]
         # нарастающий итог («Нарастающим итогом», «С начала года») — не второй ряд и не слагаемое: последнее значение
         # равно сумме за период; в рядах и долях его нет, итог — в подписи
         self.cumulative: list[tuple[Measure, Measure]] = []
@@ -149,6 +165,16 @@ class Data:
                              None)
 
     # ── строки и колонки
+    def _forecast_rows(self) -> set[int]:
+        ax = self.profile.time_axis
+        if ax is None:
+            return set()
+        tj = next((j for j, c in enumerate(self.profile.columns) if c.name == ax.column), None)
+        if tj is None:
+            return set()
+        out = {i for i, r in enumerate(self.table.rows) if tj < len(r) and forecast_period(r[tj]) is not None}
+        return out if len(out) < len(self.table.rows) else set()
+
     def _running_sum(self, a: Measure, b: Measure) -> bool:
         """b — нарастающий итог a: по строкам подряд b = a₁ + … + aₖ (с точностью до округления записи), строк ≥ 3."""
         if (a.unit or "") != (b.unit or "") or a.change or b.change:
@@ -275,7 +301,7 @@ class Data:
             # «по цене с НДС» — не «Цена без НДС»; главного слова нет ни в одной колонке — цель колонку не выбирает
             picked = self.head_measure
             if picked is not None:
-                return self._rate_over_count(picked)
+                return self._not_target(self._rate_over_count(picked))
             if not self.head_in_columns:
                 ms_sub = ()
             else:
@@ -294,7 +320,7 @@ class Data:
                         tied.sort(key=lambda m: (m.type != "percent", m.additive, m.j))
                     else:
                         tied.sort(key=lambda m: (not (m.type == "money" and m.additive), not m.additive, m.j))
-                return self._rate_over_count(tied[0])
+                return self._not_target(self._rate_over_count(tied[0]))
         if self.compare and self.total_metric is not None:
             return self.total_metric
 
@@ -340,6 +366,27 @@ class Data:
         return None
 
     @cached_property
+    def row_target(self) -> Optional[tuple[Measure, Measure]]:
+        """(величина, цель строки): у каждой строки своя цель той же единицы («Доступность» и «Цель SLA», «Время ответа»
+        и «Норматив, мин») — порог строки, а не вторая величина: «ниже цели — 2 из 7: CDN и Почта для бизнеса».
+        Без оси времени (там — `target_pair`) и без пары «план — факт» (там — исполнение плана)."""
+        if self.time_col is not None or self.plan_fact is not None:
+            return None
+        for t_ in self.measures:
+            if not _TARGET_NAME.search(t_.name) or t_.change:
+                continue
+            cands = [x for x in self.measures if x is not t_ and not x.change and not _TARGET_NAME.search(x.name)
+                     and (x.unit or "") == (t_.unit or "") and x.type == t_.type]
+            if cands:
+                return cands[0], t_
+        return None
+
+    def _not_target(self, m: Measure) -> Measure:
+        """Цель «не уложились в SLA» называет колонку цели («Цель SLA»), а спрашивает о величине рядом с ней."""
+        rt = self.row_target
+        return rt[0] if rt is not None and rt[1] is m else m
+
+    @cached_property
     def typo_rows(self) -> dict[str, list[int]]:
         """Выбросы-опечатки: значение, отмеченное профилем, в сто и больше раз больше (или меньше) медианы остальных
         («4 520 000» среди «4 210 … 5 240»). В ряду по времени их нет — линию не сплющивает; подпись говорит о них."""
@@ -370,6 +417,30 @@ class Data:
         same = (xy.x.unit or "") == (xy.y.unit or "") and xy.x.type == xy.y.type
         years = all(re.fullmatch(r"\s*(?:19|20)\d\d\s*", m.name) for m in (xy.x, xy.y))
         return bool(years or (same and self._siblings(xy.x, xy.y)))
+
+    def weight_of(self, m: Measure) -> Optional[Measure]:
+        """Вес уровня: счёт того, из чего он средний («Средний чек» — «Чеков», NPS — «Ответов», конверсия — «Визиты»,
+        оценка — «Анкет»). Колонка-счётчик целыми; из нескольких — с общим словом в имени, потом слово ответов."""
+        if m.additive or m.stock or m.change:
+            return None
+        return self._weights.get(m.name)
+
+    @cached_property
+    def _weights(self) -> dict[str, Measure]:
+        out: dict[str, Measure] = {}
+        counters = [x for x in self.measures if x.additive and not x.change and x.present
+                    and all(float(v).is_integer() and v >= 0 for v in x.present)
+                    and (_WEIGHT_NAME.search(x.name) or is_counter(x.name))]
+        for m in self.measures:
+            if m.additive or m.stock or m.change or not counters:
+                continue
+            hm = {stem(w) for w in stems_of(m.name)}
+            same = [c for c in counters if hm & {stem(w) for w in stems_of(c.name)}]
+            resp = [c for c in counters if _WEIGHT_NAME.search(c.name)]
+            pick = same[0] if same else resp[0] if len(resp) == 1 else counters[0] if len(counters) == 1 else None
+            if pick is not None:
+                out[m.name] = pick
+        return out
 
     @cached_property
     def head_in_columns(self) -> bool:
@@ -699,6 +770,8 @@ class Data:
                 or len({m.additive for m in ms}) != 1:
             return []
         names = [(split_unit(m.name)[0] or m.name).strip() for m in ms]
+        if all(re.fullmatch(r"(?:19|20)\d\d", n) for n in names):
+            return []  # колонки-годы — ось времени, а не второй признак: годы не складывают как категории
         calendar = all(_WEEKDAY.match(n) or season_name(n) or re.fullmatch(r"(?:19|20)\d\d", n) for n in names)
         if not calendar and any(_METRIC_WORD.search(n) or len(n.split()) > 3 or re.search(r"\d", n) for n in names):
             return []
@@ -739,8 +812,9 @@ class Data:
         names = " ".join(m.name for m in ms)
         if any(stem_in(s, m.name) for s in self.subject for m in ms):
             return None
-        if re.search(r"(?:^|\s)(?:дн|недел|месяц|год|лет|квартал|предмет|колонк|столбц)", " ".join(self.subject)) \
-                or not stems_match(self.subject, names):
+        # колонки сравнивают, только когда цель называет их род («по дням недели», «по месяцам»); цель о другом
+        # («сколько всего отгрузили за полугодие») — итоги строк, а не «июнь — 19%»
+        if re.search(r"(?:^|\s)(?:дн|недел|месяц|квартал|предмет|колонк|столбц)", " ".join(self.subject)):
             return "col"
         return "row"
 
@@ -863,8 +937,17 @@ class Data:
                 return None
             if len(xs) == 1:
                 return float(xs[0])
-            # сумма без «хвоста» двоичной арифметики: 330.09999999999997 → 330.1
-            return round(float(sum(xs)), 9) if mm.additive or mm.stock else round(float(sum(xs) / len(xs)), 9)
+            if mm.additive or mm.stock:
+                # сумма без «хвоста» двоичной арифметики: 330.09999999999997 → 330.1
+                return round(float(sum(xs)), 9)
+            w = self.weight_of(mm)
+            if w is not None:
+                # уровень с весом («Средний чек» и «Чеков», NPS и «Ответов»): среднее взвешенное, не среднее средних
+                pairs = [(mm.values[i], w.values[i]) for i in idx if mm.values[i] is not None and w.values[i]]
+                tw = sum(float(b_) for _, b_ in pairs)  # type: ignore[arg-type]
+                if pairs and tw > 0:
+                    return round(sum(float(a_) * float(b_) for a_, b_ in pairs) / tw, 9)  # type: ignore[arg-type]
+            return round(float(sum(xs) / len(xs)), 9)
 
         labels = list(groups)
         values = [value_of(m, groups[g]) for g in labels]

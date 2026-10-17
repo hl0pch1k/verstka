@@ -20,7 +20,7 @@ __all__ = [
     "lower_first", "upper_first", "join_and", "fmt_exact", "each_unit", "is_participle", "verb_agree", "parts_words",
     "by_group", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
-    "period_text", "period_dative", "no_year", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
+    "period_text", "period_dative", "period_than", "no_year", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
     "stem", "stems_of", "same_stem", "stems_match", "file_title", "period_acc", "period_in", "fmt_count",
     "fmt_pct_any", "round_pct_any", "is_event_name", "count_gen", "count_dat", "is_period_name", "stem_in",
 ]
@@ -145,10 +145,21 @@ def fmt_value(x: float, unit: Optional[str], case: str = "nom") -> str:
     c = fmt_count(x, unit, case)
     if c is not None:
         return c
-    s = fmt_num(x)
+    s = fmt_num(x, _nines(x) if unit == "%" else None)
     if not unit:
         return s
     return s + unit if unit == "%" else s + NBSP + unit
+
+
+def _nines(x: float) -> Optional[int]:
+    """Процент у самой сотни («99,874%» при цели 99,9%, «99,999%»): знаков — до первой не-девятки и ещё один, иначе
+    округление прячет разницу (99,874 → «99,9» — как цель, 99,999 → «100»). Не у сотни — как обычно (None)."""
+    a = abs(x)
+    if not (99 <= a < 100) or float(x).is_integer():
+        return None
+    frac = f"{a:.6f}".split(".")[1]
+    k = next((i for i, ch in enumerate(frac) if ch != "9"), 3)
+    return min(4, k + 2)
 
 
 # ── слова ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -711,6 +722,8 @@ def is_plural_value(value: str) -> bool:
     """Подпись категории во множественном числе («Прямые продажи», «Партнёры», «Набережные Челны») — глагол во мн.:
     «дают», «растут». «Сочи», «Тольятти» — единственное."""
     t = " ".join(str(value).split()).lower()
+    # «Прочие партнёры (214)», «"Нейроны"»: число в скобках и кавычки — не слово
+    t = re.sub(r"\s*\([^)]*\)\s*$", "", t).strip(" «»\"'„“”")
     if not t:
         return False
     if " и " in t or "," in t:
@@ -882,6 +895,17 @@ def period_in(iso: str) -> str:
     if m := _ISO_W.match(iso):
         return f"на {int(m.group(2))}-й неделе {m.group(1)}"
     return period_text(iso)
+
+
+def period_than(iso: str) -> Optional[str]:
+    """База «год к году» без двусмысленности: «чем в сентябре 2025», «чем во II квартале 2025» («к II кварталу 2025»
+    читается и как «к сроку»); None — для дней, недель и лет."""
+    if m := _ISO_M.match(iso):
+        return f"чем в {_MONTHS_PREP[int(m.group(2)) - 1]}{_yr(m.group(1))}"
+    if m := _ISO_Q.match(iso):
+        q = int(m.group(2))
+        return f"чем {'во' if q == 2 else 'в'} {_ROMAN[q - 1]} квартале{_yr(m.group(1))}"
+    return None
 
 
 def period_dat_full(iso: str) -> str:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 import numpy as np
@@ -20,15 +20,15 @@ import numpy as np
 from verstka.data.aggregate import (
     NICE_MINUTES, RATE_COLUMN, TO_MINUTES, CatView, Data, KpiItem, Measure, TimeView, is_index, is_other_label,
 )
-from verstka.data.parse import is_total_label, quantity, split_unit
+from verstka.data.parse import is_total_label, period_str, quantity, split_unit
 from verstka.data.units import _num as _num_cell
 from verstka.data.words import (
     PERIOD_WORDS, Phrase, count_dat, count_gen, count_words, duration_gen, duration_text, each_unit, file_title, fmt_num, fmt_pct,
     fmt_pct_any, fmt_signed, fmt_value, head_word, is_counter, is_event_name, is_participle, is_plural_value, join_and,
     lower_first,
-    metric_phrase, no_year, period_acc, period_dat_full, period_dative, period_gen, period_in, period_text, phrase,
+    metric_phrase, no_year, period_acc, period_dat_full, period_dative, period_gen, period_than, period_in, period_text, phrase,
     round_pct,
-    round_pct_any, times_word, upper_first,
+    round_pct_any, same_stem, stems_of, times_word, upper_first,
 )
 from verstka.schemas.data import FactKind, HeadlineFact, TaskKind
 
@@ -56,8 +56,8 @@ class FactSet:
 
 # ── происхождение чисел (для самопроверки, verify.py) ────────────────────────────────────────────────────────────
 def _skip(d: Data) -> list[int]:
-    """Строки, которых нет в данных: итог и ориентиры."""
-    return sorted(set(d.totals) | set(d.benchmarks))
+    """Строки, которых нет в данных: итог, ориентиры и прогнозы."""
+    return sorted(set(d.totals) | set(d.benchmarks) | set(d.forecast_rows))
 
 
 def _skip_t(d: Data, m: Optional[Measure]) -> list[int]:
@@ -83,7 +83,11 @@ def _pcat(d: Data, m: Optional[Measure], dim: str, keys: list[str], rank: Option
         return {"op": "cat", "col": None, "rowcols": [x.j for x in d.matrix], "rowagg": agg, "by": _col_of(d, dim),
                 "keys": keys, "agg": "sum", "skip": _skip(d), "scale": m.scale, "rank": rank, "exclude": list(exclude),
                 "named": named, "col_name": m.name}
+    w = d.weight_of(m) if m is not None and agg == "mean" else None
+    if w is not None:
+        agg = "wmean"  # среднее взвешенное — тем же весом, что у графика (число чеков, ответов)
     return {"op": "cat", "col": None if m is None else m.j, "by": _col_of(d, dim), "keys": keys, "agg": agg,
+            "w": w.j if w is not None else None,
             "skip": _skip(d), "scale": m.scale if m is not None else 1.0, "rank": rank, "exclude": list(exclude),
             "named": named, "col_name": m.name if m is not None else None}
 
@@ -104,7 +108,11 @@ def _ptime(d: Data, tv: TimeView, mode: str, frm: Optional[str] = None, to: Opti
         js = list(tv.col_js)
         k = {f"{p}": i for i, p in enumerate(tv.periods)}
         out = {"op": "colseries", "cols": js, "agg": tv.how, "skip": _skip(d), "scale": tv.measure.scale,
-               "mode": "at" if mode == "at" else mode, "kind": kind}
+               "mode": "at" if mode == "at" else mode, "kind": kind,
+               # периоды факта — свои: «2025 к 2024», а не первая колонка к последней
+               "from_k": k.get(frm or "", 0), "to_k": k.get(to or "", len(js) - 1), "year_to": to}
+        if tv.only_rows:
+            out["only"] = list(tv.only_rows)  # строка, которую назвала цель: ряд — по ней одной
         if mode == "at":
             out["k"] = k.get(to or "", len(js) - 1)
         return out
@@ -161,7 +169,8 @@ def _subject_for(d: Data, m: Measure) -> tuple[str, str, Optional[Phrase]]:
         tp = _title_head(d)
         if tp is not None:
             low = base.lower()
-            if m.type == "money" and tp.gender != "pl" or low in ("значение", "величина", "показатель"):
+            if m.type == "money" and tp.gender != "pl" or low in ("значение", "величина", "показатель", "факт",
+                                                                    "фактически", "факт."):
                 p = tp
             elif m.type == "money" or low in ("сумма", "объём", "объем"):
                 p = phrase(f"Сумма {tp.low.gen_pl}") if tp.gender == "pl" else tp
@@ -241,14 +250,24 @@ def _past_end(gender: str, grow: bool) -> str:
     return {"m": "ся", "f": "ась", "n": "ось", "pl": "ись"}[gender]
 
 
-def _short(parts: list[str], limit: int = 140) -> Optional[str]:
-    """Подпись — 1–2 строки: предложения по порядку, пока помещаются в ~140 знаков (первое — всегда)."""
+_MUST_LIMIT = 160  # оговорка (пик и спад после него, пропуск) входит в подпись и сверх обычных ~140 знаков
+
+
+def _short(parts: list[str], limit: int = 140, must: tuple[str, ...] = ()) -> Optional[str]:
+    """Подпись — 1–2 строки: предложения по порядку, пока помещаются в ~140 знаков (первое — всегда). Оговорки `must`
+    (пик и спад после него, пропуск данных) — сразу после первого и до ~160 знаков: их не теряют из-за того, что они
+    вторые (заголовок «РИНЦ — в 3,4 раза» без «максимум в 2019 году, затем ниже» скрывает спад)."""
+    parts = [p for p in parts if p]
+    if must:
+        head = parts[:1]
+        keep = [p for p in parts[1:] if p in must]
+        parts = head + keep + [p for p in parts[1:] if p not in must]
     out = ""
     for p in parts:
-        if not p:
-            continue
         nxt = (out + " " + p).strip()
-        if out and len(nxt) > limit:
+        if out and len(nxt) > (_MUST_LIMIT if p in must else limit):
+            if p in must:
+                continue
             break
         out = nxt
     out = re.sub(r"(?<!\.)\.\.(?!\.)", ".", out)  # «чел..» → «чел.»
@@ -278,6 +297,17 @@ def _series_change(values: list[Optional[float]]) -> Optional[tuple[int, int, fl
     return idx[0], idx[-1], float(values[idx[0]]), float(values[idx[-1]])  # type: ignore[arg-type]
 
 
+def _goal_part(d: Data, tv: TimeView) -> Optional[Measure]:
+    """Ряд, который называет цель: ровно один из рядов-частей совпал со словами цели по основам («критичных» ↔
+    «Критичные (P1)»), а не все. Иначе None."""
+    if not d.subject or tv.dim or tv.from_columns or len(tv.series) < 2:
+        return None
+    names = {sv.name for sv in tv.series}
+    hits = [x for x in d.parallel if d.series_names.get(x.name, x.name) in names
+            and any(same_stem(s, w) for s in d.subject if len(s) >= 4 for w in stems_of(x.name))]
+    return hits[0] if len(hits) == 1 and len(names) >= 2 else None
+
+
 def _dynamics(d: Data) -> FactSet:
     fs = FactSet()
     tv = d.time
@@ -286,6 +316,13 @@ def _dynamics(d: Data) -> FactSet:
         return fs
     if tv.from_columns:
         m = tv.measure  # ось из колонок-периодов: ряд — сумма по строкам, названный по датасету
+    part = _goal_part(d, tv)
+    if part is not None:
+        # цель называет одну часть («покажите снижение критичных инцидентов» → ряд «Критичные (P1)»): вывод — о ней
+        tv1 = d.time_view(part)
+        if tv1 is not None and tv1.series and tv1.periods == tv.periods:
+            tv, m = replace(tv1, series=[tv1.series[0]]), part
+            fs.ctx["goal_part"] = part.name
     if len(tv.series) >= 2 and not tv.dim and d.composition:
         # части одного целого по времени: вывод — про целое (итог или сумма частей) и самую подвижную часть
         if _dynamics_composition(d, tv, fs):
@@ -311,6 +348,11 @@ def _dynamics(d: Data) -> FactSet:
         return fs
     subj, gender, ph = _subject_for(d, m) if tv.measure.j != -1 else subject_of("Число строк", m.type)
     subj = re.sub(r"\s*,[^,]*$", "", subj).strip() or subj
+    if tv.focus:
+        # ряд строки, названной целью: «Выручка облачной платформы», а не «Облачная платформа выросла»
+        noun, fp = _data_noun(d), phrase(tv.focus)
+        if noun is not None and fp is not None and fp.sure:
+            subj, gender, ph = f"{upper_first(noun.nom)} {fp.low.gen}", noun.gender, noun
     pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
     unit = m.unit_text if tv.measure.j != -1 else None
     # пункты — только у процентов и безразмерных индексов (NPS, балл); у денег и счёта изменение — в процентах
@@ -348,11 +390,19 @@ def _dynamics(d: Data) -> FactSet:
         fs.ctx["labels"].append(tv.labels[lo])
     typo_txt = _typos(d, tv, m, unit, fs)
     missing = [p_ for p_ in tv.missing if p_ not in fs.ctx.get("typo_periods", ())]
+    if d.forecasts or d.forecast_rows:
+        missing = [p_ for p_ in missing if p_ < pl]  # после последнего факта — прогноз, а не «нет данных»
+    fc_txt = _forecast_note(d, tv, m, unit, fs)
     if missing:
         names = ", ".join(period_text(p) for p in missing[:4]) + (" …" if len(missing) > 4 else "")
         fs.add("gaps", len(missing), "gap", f"Нет данных: {names}", None,
                f"{upper_first(count_words(len(missing), pw[0], pw[1], pw[2]))} без значения: {names}. "
                f"На графике — разрывы, а не ноль.", prov=_ptime(d, tv, "missing", frm=tv.periods[0], to=tv.periods[-1]))
+    spike = _spike(d, tv, vals, idx, hi, m, unit, pw, fs) if m.additive and not fs.ctx.get("typo_periods") else None
+    if spike:
+        # всплеск — главное в ряду: его дата и во сколько раз он выше обычного
+        fs.ctx["caption"] = _short([spike] + ([fc_txt] if fc_txt else []))
+        return fs
     lag = _LAG.get(tv.freq)
     base_i = None
     yoy = False
@@ -367,6 +417,9 @@ def _dynamics(d: Data) -> FactSet:
         # месяцы без года (климат, сезонность): декабрь к январю — не изменение; вывод — максимум и минимум года
         _seasonal(d, tv, vals, idx, hi, lo, unit, fs)
         return fs
+    if base_i == F and not yoy and len(idx) >= 6 and not level \
+            and _noisy(d, tv, vals, idx, unit, level, m, pw, fs, small=_small_ends(vals, idx)):
+        return fs  # счёт с малыми концами (3 → 0): средние первых и последних периодов, а не «−100%»
     if base_i == F and not yoy and len(idx) >= 6 and _noisy(d, tv, vals, idx, unit, level, m, pw, fs):
         # тренд не выражен (|t| < 2): концы ряда — шум; сравнение средних первых и последних периодов или размах
         return fs
@@ -404,6 +457,8 @@ def _dynamics(d: Data) -> FactSet:
                 _base_year(d, tv, pb, fs)
             fs.ctx["when"] = _yoy_when(tv.freq, pb) if yoy else (
                 f"за {count_words(sp, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период")
+            if yoy and tv.freq in ("month", "quarter"):
+                fs.ctx["than"] = period_than(pb)
             if not yoy:
                 fs.add("span", sp, "count", count_words(sp, pw[0], pw[1], pw[2]), None,
                        f"От {period_gen(pf)} до {period_gen(pl)}.", prov=_ptime(d, tv, "span", frm=pb, to=pl))
@@ -428,8 +483,11 @@ def _dynamics(d: Data) -> FactSet:
             if yoy:
                 when = _yoy_when(tv.freq, pb)
                 _base_year(d, tv, pb, fs)
+                if tv.freq in ("month", "quarter"):
+                    fs.ctx["than"] = period_than(pb)  # «на 17% больше, чем во II квартале 2025»
             else:
-                when = f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период"
+                when = (f"за {pw[0]}" if span == 1 else f"за {count_words(span, pw[0], pw[1], pw[2])}") \
+                    if tv.freq != "irregular" else "за период"
                 fs.add("span", span, "count", f"{count_words(span, pw[0], pw[1], pw[2])}", None,
                        f"От {period_gen(pf)} до {period_gen(pl)}.", prov=_ptime(d, tv, "span", frm=pf, to=pl))
             fs.ctx["when"] = when
@@ -449,18 +507,24 @@ def _dynamics(d: Data) -> FactSet:
                         f"{_range_text(pf, pl)} {lower_first(subj)} "
                         f"{'вырос' if last > first else 'снизил'}{_past_end(gender, last > first)} "
                         f"с {fmt_value(first, unit, 'gen')} до {fmt_value(last, unit, 'gen')}.")
+    fast = _fastest(d, tv, m, fs)
+    if fast:
+        caption.insert(0, fast)  # цель «кто растёт быстрее всех»: ответ — первым, рост целого — за ним
     if typo_txt:
         caption.insert(0, typo_txt)
+    if fc_txt:
+        caption.insert(min(1, len(caption)), fc_txt)  # прогноз — сразу после главного: подпись короткая
+    gap_cap = ""
     if missing:
-        caption.append(
-            f"За {join_and([period_text(p) for p in missing[:3]])}{' и другие' if len(missing) > 3 else ''} данных нет — "
-            f"на графике разрывы, а не ноль.")
+        gap_cap = (f"За {join_and([period_text(p) for p in missing[:3]])}{' и другие' if len(missing) > 3 else ''} данных "
+                   f"нет — на графике разрывы, а не ноль.")
+        caption.append(gap_cap)
     if tv.resampled and tv.note:
         caption.append(upper_first(tv.note) + ".")
     if tv.per_week:
         # недели в месяцы: на графике и в выводе — среднее за неделю, и это сказано первым
         caption.insert(0, f"{PERIOD_WORDS[tv.freq][5]} — в среднем за неделю.")
-    fs.ctx["caption"] = _short(caption)
+    fs.ctx["caption"] = _short(caption, must=(gap_cap,) if gap_cap else ())
     return fs
 
 
@@ -585,6 +649,51 @@ def _dynamics_years(d: Data, tv: TimeView, fs: FactSet) -> bool:
     return True
 
 
+def _forecast_note(d: Data, tv: TimeView, m: Measure, unit: Optional[str], fs: FactSet) -> Optional[str]:
+    """Прогноз в файле — не факт: в рост и «за N месяцев» не входит; подпись называет последний прогноз и откуда он."""
+    from verstka.data.parse import forecast_period, period_iso, period_parts
+
+    pts: list[tuple[str, float, int, int]] = []  # (период, значение, строка, колонка)
+    if d.forecast_rows and d.time_col is not None and m.j >= 0:
+        for i in sorted(d.forecast_rows):
+            pp = period_parts(forecast_period(d.cell(i, d.time_col)) or "")
+            v = _num_cell(d.cell(i, m.j))
+            if pp is not None and v is not None:
+                pts.append((period_iso(pp[0], pp[1]), v, i, m.j))
+    sums: list[tuple[str, float, dict]] = []
+    for fm in d.forecasts:
+        per = forecast_period(fm.name.strip())
+        if tv.from_columns and per is not None:
+            # колонка-прогноз рядом с колонками-годами: итог по строкам, как у фактических колонок
+            pp = period_parts(per)
+            rows = tv.only_rows or d.rows_idx  # строка, названная целью, — её прогноз, а не итог
+            xs = [float(fm.values[i]) for i in rows if fm.values[i] is not None]  # type: ignore[arg-type]
+            if pp is not None and xs:
+                add = fm.additive or tv.how == "sum"
+                pr = {"op": "colsum", "cols": [fm.j], "skip": _skip(d), "scale": fm.scale, "agg": "sum" if add else "mean"}
+                if tv.only_rows:
+                    pr["only"] = list(tv.only_rows)
+                sums.append((period_iso(pp[0], pp[1]), sum(xs) if add else sum(xs) / len(xs), pr))
+            continue
+        last = max((i for i in d.rows_idx if fm.values[i] is not None), default=None)
+        if last is None:
+            continue
+        if per is None and d.time_col is not None:
+            pp = period_parts(str(d.cell(last, d.time_col)))
+            per = period_iso(pp[0], pp[1]) if pp is not None else None
+        if per is not None and fm.values[last] is not None:
+            pts.append((per, float(fm.values[last]), last, fm.j))  # type: ignore[arg-type]
+    cands = [(p_, v_, {"op": "cell", "row": i_, "col": j_}) for p_, v_, i_, j_ in pts] + sums
+    if not cands:
+        return None
+    per, v, prov = max(cands, key=lambda t: t[0])
+    v = round(v, 1) if abs(v) < 100 else round(v)
+    fs.add("forecast", v, "total", f"Прогноз на {period_acc(per)}: {fmt_value(v, unit)}", unit,
+           "Значение-прогноз из файла: не факт, в рост не входит.", prov={**prov, "tol": 0.051 if abs(v) < 100 else 0.51})
+    fs.ctx.setdefault("labels", []).append(period_acc(per))
+    return f"Прогноз на {period_acc(per)} — {fmt_value(v, unit)}, не в выводе."
+
+
 def _typos(d: Data, tv: TimeView, m: Measure, unit: Optional[str], fs: FactSet) -> Optional[str]:
     """Опечатка в ряду (×100 к остальным): на графике пропуск, в выводе её нет — подпись называет её и почему."""
     rows = d.typo_rows.get(m.name)
@@ -647,16 +756,66 @@ def _trend_t(idx: list[int], ys: list[float]) -> float:
     return b / se if se > 0 else math.inf
 
 
+def _median(xs: list[float]) -> float:
+    ys = sorted(xs)
+    n = len(ys)
+    return ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) / 2
+
+
+def _spike(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], hi: int, m: Measure,
+           unit: Optional[str], pw: tuple, fs: FactSet) -> Optional[str]:
+    """Всплеск внутри ряда: значение втрое и больше выше медианы и вдвое выше обоих соседей (ошибки 5xx 8 сентября —
+    9 640 при обычных 1 800–2 200). Главное в ряду — он и его дата, а не первые дни против последних (всплеск
+    попадает в одно из средних и делает из шума «рост»). Возвращает строку подписи."""
+    if len(idx) < 6 or not (idx[0] < hi < idx[-1]):
+        return None
+    med = _median([float(vals[i]) for i in idx])  # type: ignore[arg-type]
+    v = float(vals[hi])  # type: ignore[arg-type]
+    near = [float(vals[j]) for j in (hi - 1, hi + 1) if vals[j] is not None]  # type: ignore[arg-type]
+    if med <= 0 or v < 3 * med or not near or any(v < 2 * x for x in near):
+        return None
+    if med < 5 and all(float(vals[i]).is_integer() for i in idx):  # type: ignore[arg-type]
+        return None  # счёт 1 → 4 — не всплеск, а малые числа
+    if sum(1 for i in idx if float(vals[i]) >= 3 * med) > 2:  # type: ignore[arg-type]
+        return None  # много «всплесков» — это не всплеск, а другой уровень ряда
+    r = round(v / med, 1)
+    rng = dict(frm=tv.periods[idx[0]], to=tv.periods[idx[-1]])
+    pm = {**_ptime(d, tv, "median", **rng), "tol": 0.051 if abs(med) < 100 else 0.51}
+    fs.add("median", round(med, 1) if abs(med) < 100 else round(med), "median", f"Медиана — {fmt_value(med, unit)}",
+           unit, f"Медиана ряда: половина значений ниже, половина выше. {_by(m)}", prov=pm)
+    fs.add("spike", r, "max", f"в {fmt_num(r, 1)} {times_word(r)} выше медианы", "раз",
+           f"{upper_first(period_text(tv.periods[hi]))}: {fmt_value(v, unit)} против медианы {fmt_value(med, unit)}.",
+           prov={"op": "ratio", "a": _ptime(d, tv, "max", **rng), "b": pm, "tol": 0.051})
+    n = len(idx)
+    fs.add("points", n, "count", count_words(n, pw[0], pw[1], pw[2]), None, "Значений в ряду.",
+           prov=_ptime(d, tv, "count", **rng))
+    fs.ctx["peak"] = ("всплеск", v, tv.labels[hi])
+    fs.ctx["spike"] = r
+    fs.ctx["labels"].append(tv.labels[hi])
+    return (f"{upper_first(period_text(tv.periods[hi]))} — {fmt_value(v, unit)}, медиана за "
+            f"{count_words(n, pw[0], pw[1], pw[2])} — {fmt_value(med, unit)}.")
+
+
+def _small_ends(vals: list[Optional[float]], idx: list[int]) -> bool:
+    """Концы ряда малы для процентов: счёт меньше 5 или ноль на краю (критичных инцидентов 3 → 0 — не «−100%»)."""
+    a, b = float(vals[idx[0]]), float(vals[idx[-1]])  # type: ignore[arg-type]
+    counts = all(float(vals[i]).is_integer() for i in idx)  # type: ignore[arg-type]
+    return a == 0 or b == 0 or (counts and min(a, b) < 5 and max(float(vals[i]) for i in idx) < 50)  # type: ignore[arg-type]
+
+
 def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], unit: Optional[str], level: bool,
-           m: Measure, pw: tuple, fs: FactSet) -> bool:
+           m: Measure, pw: tuple, fs: FactSet, small: bool = False) -> bool:
     """Ряд без выраженного тренда (|t| < 2): первая и последняя точки — случайная пара. Вывод — средние первых и
-    последних k периодов («в среднем снизилась на 13%: последние 4 недели к первым 4») или размах, если средние почти
-    равны."""
+    последних k периодов («в среднем снизилась на 13%: последние 4 недели к первым 4») или размах, если разница средних
+    в пределах шума. Дни — целыми неделями (k = 7): у будней и выходных разный уровень, три дня с вторника против трёх
+    с субботы — не изменение. `small` — концы ряда малы (счёт 3 → 0): средние и при выраженном тренде."""
     ys = [float(vals[i]) for i in idx]  # type: ignore[arg-type]
     t = _trend_t(idx, ys)
-    if abs(t) >= 2:
+    if abs(t) >= 2 and not small:
         return False
     k = max(3, len(idx) // 6)
+    if tv.freq == "day" and len(idx) >= 14:
+        k = 7
     if 2 * k > len(idx):
         return False
     a_, b_ = idx[:k], idx[-k:]
@@ -675,10 +834,13 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
     fs.add("k", k, "count", count_words(k, pw[0], pw[1], pw[2]), None, "Сколько периодов в каждом среднем.",
            prov={"op": "count", "what": "value", "value": k})
     gauge = _gauge(m, unit)
+    # разница средних в пределах шума (две стандартные ошибки разности) — тренда нет
+    sd = float(np.std(ys, ddof=1)) if len(ys) > 2 else 0.0
+    noise = 2 * sd * math.sqrt(2 / k)
     if level or gauge or m1 <= 0:
         delta = m2 - m1
         du = ("п.п." if m.type == "percent" else "п.") if level else (unit or "")
-        flat = abs(delta) < 0.05 * max(abs(max(ys) - min(ys)), 1e-9)
+        flat = abs(delta) < 0.05 * max(abs(max(ys) - min(ys)), 1e-9) or (abs(t) < 2 and abs(delta) < noise)
         if not flat:
             fs.add("mean_change", round(abs(delta), 1), "change", f"{fmt_signed(delta, du)} в среднем", du or None,
                    f"Последние {k} к первым {k}: {fmt_value(m2, unit)} против {fmt_value(m1, unit)}. {_by(m)}",
@@ -686,7 +848,7 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
         fs.ctx["noisy"] = ("flat" if flat else "abs", delta, k, du)
     else:
         pct = (m2 / m1 - 1) * 100
-        flat = abs(pct) < 5
+        flat = abs(pct) < 5 or (abs(t) < 2 and abs(m2 - m1) < noise)
         if not flat:
             fs.add("mean_change", round_pct(abs(pct)), "change", f"{fmt_signed(round_pct(pct), '%')} в среднем", "%",
                    f"Последние {k} к первым {k}: {fmt_value(m2, unit)} против {fmt_value(m1, unit)} в среднем. {_by(m)}",
@@ -694,9 +856,15 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
         fs.ctx["noisy"] = ("flat" if flat else "pct", pct, k, "%")
     fs.ctx["k_words"] = count_words(k, pw[0], pw[1], pw[2])
     lo, hi = min(ys), max(ys)
-    fs.ctx["caption"] = _short([f"Тренд не выражен: значения колеблются от {fmt_value(lo, unit, 'gen')} до "
-                                f"{fmt_value(hi, unit, 'gen')}; в среднем первые {k} — {fmt_value(m1, unit)}, "
-                                f"последние {k} — {fmt_value(m2, unit)}."])
+    means = f"в среднем первые {k} — {fmt_value(m1, unit)}, последние {k} — {fmt_value(m2, unit)}"
+    if fs.ctx["noisy"][0] == "flat":
+        cap = f"Тренд не выражен: значения колеблются от {fmt_value(lo, unit, 'gen')} до {fmt_value(hi, unit, 'gen')}; {means}."
+    elif small and abs(t) >= 2:
+        cap = f"Значения малы, концы ряда случайны: {means}."
+    else:
+        # заголовок говорит об изменении средних — подпись не спорит с ним «трендом, которого нет»
+        cap = f"{upper_first(means)}; значения колеблются от {fmt_value(lo, unit, 'gen')} до {fmt_value(hi, unit, 'gen')}."
+    fs.ctx["caption"] = _short([cap])
     return True
 
 
@@ -723,11 +891,17 @@ def _time_structure(d: Data, tv: TimeView, fs: FactSet) -> None:
     names: list[str] = list(tv.labels)
     for p in tv.periods:
         names += [period_text(p), period_gen(p), period_acc(p), period_dat_full(p), period_in(p)]
-        for dv in (period_dative(p, with_year=True), period_dative(p)):
+        for dv in (period_dative(p, with_year=True), period_dative(p), period_than(p)):
             if dv:
                 names.append(dv)
     fs.ctx["period_labels"] = names
     fs.ctx["structure"] = [x for x in [tv.note, upper_first(tv.note or "")] + list(tv.partial_txt) if x]
+
+
+def _inner(name: str) -> str:
+    """Название части внутри фразы со строчной: «В работе» → «в работе», «Решено» → «решено»; аббревиатура и латиница —
+    как есть («SLA», «Email»)."""
+    return lower_first(name) if re.match(r"^[А-ЯЁ](?:[а-яё]|\s)", name) else name
 
 
 def _mid(name: str) -> str:
@@ -776,10 +950,26 @@ def _dynamics_composition(d: Data, tv: TimeView, fs: FactSet) -> bool:
     when = f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период"
     moves = []
     by_name = {d.series_names.get(x.name, x.name): x for x in d.parallel}
+    # «сильнее всех» у части: на длинном ряду — средние первых и последних k периодов, а не концы (у P1 3, 2, 4 … 1, 0
+    # конец 0 даёт «−100%», хотя ноль уже был и ушёл); малые базы (счёт меньше 5, меньше 5% целого) в счёт не идут
+    n_pts = sum(1 for x in tot if x is not None)
+    k = max(3, n_pts // 6) if n_pts >= 6 else 1
+    counts = all(float(v).is_integer() for sv in tv.series for v in sv.values if v is not None)
     for sv in tv.series:
         c = _series_change(sv.values)
-        if c is not None and c[2] > 0:
-            moves.append((sv.name, (c[3] / c[2] - 1) * 100, c[2], c[3], c[0], c[1], by_name.get(sv.name)))
+        if c is None:
+            continue
+        ix = [i for i, v in enumerate(sv.values) if v is not None]
+        if k > 1 and len(ix) >= 2 * k:
+            a_, b_ = ix[:k], ix[-k:]
+            a = sum(float(sv.values[i]) for i in a_) / k  # type: ignore[arg-type]
+            b = sum(float(sv.values[i]) for i in b_) / k  # type: ignore[arg-type]
+            span_ = (a_[0], a_[-1], b_[0], b_[-1])
+        else:
+            a, b, span_ = c[2], c[3], (c[0], c[0], c[1], c[1])
+        if a <= 0 or (counts and a < 5) or (first > 0 and a < 0.05 * first):
+            continue
+        moves.append((sv.name, (b / a - 1) * 100, a, b, span_, by_name.get(sv.name)))
     whole = dict(col=tm) if tm is not None else dict(cols=list(d.parallel))
     _time_structure(d, tv, fs)
     labels = [subj] + [x[0] for x in moves]
@@ -792,22 +982,39 @@ def _dynamics_composition(d: Data, tv: TimeView, fs: FactSet) -> bool:
                f"{fmt_value(last, unit)}.",
                prov=_ptime(d, tv, "change", frm=tv.periods[F], to=tv.periods[L], kind="pct", **whole))
     fs.add("last", last, "total", f"{period_text(tv.periods[L])}: {fmt_value(last, unit)}", unit,
-           f"{subj} за {period_text(tv.periods[L])}.", prov=_ptime(d, tv, "at", to=tv.periods[L], **whole))
+           f"{subj} за {period_acc(tv.periods[L])}.", prov=_ptime(d, tv, "at", to=tv.periods[L], **whole))
     fs.add("first", first, "total", f"{period_text(tv.periods[F])}: {fmt_value(first, unit)}", unit,
-           f"{subj} за {period_text(tv.periods[F])}.", prov=_ptime(d, tv, "at", to=tv.periods[F], **whole))
+           f"{subj} за {period_acc(tv.periods[F])}.", prov=_ptime(d, tv, "at", to=tv.periods[F], **whole))
     fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
            f"От {period_gen(tv.periods[F])} до {period_gen(tv.periods[L])}.",
            prov=_ptime(d, tv, "span", frm=tv.periods[F], to=tv.periods[L]))
     cap = [f"{_range_text(tv.periods[F], tv.periods[L])} {lower_first(subj)} — с {fmt_value(first, unit, 'gen')} до "
            f"{fmt_value(last, unit, 'gen')}."]
     if moves:
-        nm, mp, a, b, mf, ml, mm = max(moves, key=lambda t: (abs(t[1]), t[0]))
+        nm, mp, a, b, (f0, f1, l0, l1), mm = max(moves, key=lambda t: (abs(t[1]), t[0]))
         fs.ctx.update(mover=nm, mover_pct=mp)
+        if f0 == f1:
+            pv = _ptime(d, tv, "change", frm=tv.periods[f0], to=tv.periods[l1], kind="pct", col=mm) \
+                if mm is not None else None
+            how = f"{fmt_value(a, unit)} → {fmt_value(b, unit)}"
+            cap_how = f"с {fmt_value(a, unit, 'gen')} до {fmt_value(b, unit, 'gen')}"
+        else:
+            pv = {"op": "change2", "kind": "pct", "tol": 0.51,
+                  "base": _ptime(d, tv, "mean", frm=tv.periods[f0], to=tv.periods[f1], col=mm),
+                  "cur": _ptime(d, tv, "mean", frm=tv.periods[l0], to=tv.periods[l1], col=mm)} if mm is not None else None
+            how = f"в среднем {fmt_value(a, unit)} → {fmt_value(b, unit)}, первые {k} к последним {k}"
+            cap_how = f"в среднем с {fmt_value(a, unit, 'gen')} до {fmt_value(b, unit, 'gen')}"
+            for key, v_, f_, t_ in (("mover_first", a, f0, f1), ("mover_last", b, l0, l1)):
+                if mm is not None:
+                    fs.add(key, round(v_, 1) if abs(v_) < 100 else round(v_), "total", f"{nm}: {fmt_value(v_, unit)}",
+                           unit, f"{nm}: среднее {count_gen(k, pw[1], pw[2])}.",
+                           prov={**_ptime(d, tv, "mean", frm=tv.periods[f_], to=tv.periods[t_], col=mm),
+                                 "tol": 0.051 if abs(v_) < 100 else 0.51})
+            fs.add("mover_k", k, "count", count_words(k, pw[0], pw[1], pw[2]), None, "Периодов в каждом среднем.",
+                   prov={"op": "count", "what": "value", "value": k})
         fs.add("mover", round_pct(abs(mp)), "change", f"{nm}: {fmt_signed(round_pct(mp), '%')}", "%",
-               f"{nm}: {fmt_value(a, unit)} → {fmt_value(b, unit)} — сильнее всех частей.",
-               prov=_ptime(d, tv, "change", frm=tv.periods[mf], to=tv.periods[ml], kind="pct", col=mm)
-               if mm is not None else None)
-        cap.append(f"{nm}: с {fmt_value(a, unit, 'gen')} до {fmt_value(b, unit, 'gen')} — сильнее всех частей.")
+               f"{nm}: {how} — сильнее всех частей.", prov=pv)
+        cap.append(f"{nm}: {cap_how} — сильнее всех частей.")
     fs.ctx["caption"] = _short(cap)
     return True
 
@@ -841,6 +1048,43 @@ def _dynamics_hourly(d: Data, tv: TimeView, vals: list[Optional[float]], idx: li
     return True
 
 
+def _moved_prov(d: Data, tv: TimeView, m: Measure) -> dict:
+    """Происхождение фактов «по каждой категории первое → последнее»: проверка пересчитывает ряды категорий."""
+    return {"op": "moved", "time": d.time_col, "freq": tv.freq, "week_src": tv.source_freq == "week", "col": m.j,
+            "ax_start": d.profile.time_axis.start if d.profile.time_axis is not None else None,
+            "by": _col_of(d, tv.dim), "agg": "mean" if m.change else tv.how, "skip": _skip(d), "scale": m.scale}
+
+
+_MIN_BASE = 0.05  # база темпа: категория с первым значением меньше 5% наибольшего в «быстрее всех» не идёт
+
+
+def _fastest(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> Optional[str]:
+    """Цель «кто растёт быстрее всех» при рядах по категориям: темп каждой категории (первое значение → последнее), а
+    не рост целого. Малые базы в счёт не идут: +300% с 2 до 8 — не «быстрее всех». Возвращает строку подписи."""
+    if d.ask != "fastest" or not tv.dim:
+        return None
+    moves = [(nm, a, b) for nm, (a, b) in tv.cat_moves.items() if a > 0]
+    if len(moves) < 2:
+        return None
+    top = max(a for _, a, _ in moves)
+    moves = [x for x in moves if x[1] >= _MIN_BASE * top]
+    nm, a, b = max(moves, key=lambda t: (t[2] / t[1], t[0]))
+    pct = (b / a - 1) * 100
+    if pct <= 0 or len(moves) < 2:
+        return None
+    unit = m.unit_text
+    fs.add("growth_max", round_pct(pct), "max", f"{nm}: {fmt_signed(round_pct(pct), '%')}", "%",
+           f"Самый быстрый рост — {nm}: {fmt_value(a, unit)} → {fmt_value(b, unit)} (первое значение → последнее).",
+           prov={**_moved_prov(d, tv, m), "what": "fastest", "keys": [nm], "min_base": _MIN_BASE})
+    fs.add("fastest_first", a, "total", f"{nm}: {fmt_value(a, unit)}", unit, f"{nm} в начале.",
+           prov={**_moved_prov(d, tv, m), "what": "first_of", "keys": [nm]})
+    fs.add("fastest_last", b, "total", f"{nm}: {fmt_value(b, unit)}", unit, f"{nm} в конце.",
+           prov={**_moved_prov(d, tv, m), "what": "last_of", "keys": [nm]})
+    fs.ctx["fastest"] = nm
+    fs.ctx.setdefault("labels", []).append(nm)
+    return f"{nm}: с {fmt_value(a, unit, 'gen')} до {fmt_value(b, unit, 'gen')} — быстрее всех."
+
+
 def _dynamics_dim_level(d: Data, tv: TimeView, fs: FactSet) -> bool:
     """Уровень по категориям (средний чек по регионам): сколько категорий выросло, у кого выше всех. «Остальные N» —
     среднее по ним, в счёт не идут."""
@@ -860,9 +1104,7 @@ def _dynamics_dim_level(d: Data, tv: TimeView, fs: FactSet) -> bool:
     fs.ctx.update(dim_level=True, subject=subj, gender=gender, metric=ph, unit_short=unit, leader=lead[0],
                   labels=[x[0] for x in moves], dim_forms=forms, up=up >= down)
     shown = len(moves)
-    mv = {"op": "moved", "time": d.time_col, "freq": tv.freq, "week_src": tv.source_freq == "week", "col": m.j,
-          "ax_start": d.profile.time_axis.start if d.profile.time_axis is not None else None,
-          "by": _col_of(d, tv.dim), "agg": "mean" if m.change else tv.how, "skip": _skip(d), "scale": m.scale}
+    mv = _moved_prov(d, tv, m)
     _time_structure(d, tv, fs)
     fs.add("moved", up if up >= down else down, "count", f"{up if up >= down else down} из {shown}", None,
            f"Рост у {up}, снижение у {down} из {shown} (первое значение → последнее по каждой категории).",
@@ -875,6 +1117,9 @@ def _dynamics_dim_level(d: Data, tv: TimeView, fs: FactSet) -> bool:
     fs.add("down", down, "count", f"Снижение — {down}", None, "Категорий, где последнее значение ниже первого.",
            prov={**mv, "what": "down"})
     cap = [f"Первое значение против последнего: рост — {up}, снижение — {down} из {shown}."]
+    fast = _fastest(d, tv, m, fs)
+    if fast:
+        cap.insert(0, fast)
     if tv.others:
         fs.add("others", tv.others, "count", f"Остальные {tv.others}", None, "Категорий одной линией на графике.",
                prov={"op": "count", "what": "groups", "by": _col_of(d, tv.dim), "skip": _skip(d),
@@ -942,23 +1187,48 @@ def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
                    prov=_ptime(d, tv, "max", frm=tv.periods[F], to=tv.periods[L], col=mm))
     f0 = min(F for _, F, _, _, _ in items)
     l0 = max(L for _, _, L, _, _ in items)
-    fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
-           f"От {period_gen(tv.periods[0])} до {period_gen(tv.periods[-1])}.",
-           prov=_ptime(d, tv, "span", frm=tv.periods[f0], to=tv.periods[l0]))
+    same = len({(F, L) for _, F, L, _, _ in items}) == 1
+    F0, L0 = (items[0][1], items[0][2]) if same else (f0, l0)
+    if same:
+        fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
+               f"От {period_gen(tv.periods[0])} до {period_gen(tv.periods[-1])}.",
+               prov=_ptime(d, tv, "span", frm=tv.periods[f0], to=tv.periods[l0]))
+    else:
+        # у рядов разные сроки (когорты, факт и прогноз): у каждого — свой период и своё «за N месяцев»
+        whens = []
+        for k, (sv, F, L, first, last) in enumerate(items):
+            mm = next((x for x in d.parallel if d.series_names.get(x.name, x.name) == sv.name), tv.measure)
+            fs.add(f"span_of_{k}", L - F, "count", count_words(L - F, pw[0], pw[1], pw[2]), None,
+                   f"{sv.name}: от {period_gen(tv.periods[F])} до {period_gen(tv.periods[L])}.",
+                   prov=_ptime(d, tv, "span", frm=tv.periods[F], to=tv.periods[L], col=mm))
+            whens.append(f"за {count_words(L - F, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период")
+        fs.ctx["whens"] = whens
     _time_structure(d, tv, fs)
     p0 = phrase(names[0])
     # даты без регулярного шага («точки») — не единица времени: «за период»
     when = f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период"
-    fs.ctx.update(multi=True, names=names, labels=list(names), freq=tv.freq, unit_short=unit,
+    shown_names = list(names)
+    noun = _data_noun(d)
+    if noun is not None and re.match(r"^(?:На|В|За|С|До|По|К)\s", names[0]):
+        # ряд «На начало месяца» — не подлежащее: «Численность на начало месяца: +6%»
+        shown_names[0] = f"{upper_first(noun.nom)} {lower_first(names[0])}"
+    fs.ctx.update(multi=True, names=shown_names, labels=list(names) + shown_names, freq=tv.freq, unit_short=unit,
                   gender=p0.gender if p0 is not None else "m", when=when)
-    caption = [f"{_range_text(tv.periods[0], tv.periods[-1])}: "
-               + ", ".join(f"{_mid(sv.name)} — с {fmt_value(first, unit, 'gen')} до {fmt_value(last, unit, 'gen')}"
-                           for sv, F, L, first, last in items) + "."]
+    if same:
+        # единица — один раз, у второго числа: «Scopus — с 42 до 381 статьи» (место — оговоркам о пике и пропусках)
+        caption = [f"{_range_text(tv.periods[F0], tv.periods[L0])}: "
+                   + ", ".join(f"{_mid(sv.name)} — с {fmt_value(first, None)} до {fmt_value(last, unit, 'gen')}"
+                               for sv, F, L, first, last in items) + "."]
+    else:
+        caption = ["; ".join(f"{upper_first(sv.name) if k == 0 else _mid(sv.name)} — с {fmt_value(first, unit, 'gen')} "
+                             f"({period_text(tv.periods[F])}) до {fmt_value(last, unit, 'gen')} ({period_text(tv.periods[L])})"
+                             for k, (sv, F, L, first, last) in enumerate(items)) + "."]
+    must = []
     for name, v, per in fs.ctx.get("peaks", [])[:1]:
-        caption.append(f"{name}: максимум {fmt_value(v, unit)} {period_in(per)}, затем ниже.")
+        must.append(f"{name}: максимум {fmt_value(v, unit)} {period_in(per)}, затем ниже.")
     if tv.missing:
-        caption.append(f"За {join_and([period_text(p) for p in tv.missing[:3]])} данных нет — на графике разрывы.")
-    fs.ctx["caption"] = _short(caption)
+        must.append(f"За {join_and([period_text(p) for p in tv.missing[:3]])} данных нет.")  # разрыв виден на графике
+    fs.ctx["caption"] = _short(caption + must, must=tuple(must))
     return True
 
 
@@ -984,8 +1254,44 @@ def _growth_measure(cv: CatView) -> Optional[Measure]:
     return None
 
 
-_GENERIC = re.compile(r"^(?:сумма|количество|значение|итого|всего|число|объём|объем|величина|показатель)$", re.I)
+_GENERIC = re.compile(r"^(?:сумма|количество|значение|итого|всего|число|объём|объем|величина|показатель|факт|"
+                      r"фактически|факт\.)$", re.I)
 _REVENUE = re.compile(r"выручк|доход|продаж|прибыл|оборот", re.I)
+
+
+_NOT_A_NOUN = {"данные", "таблица", "лист", "отчёт", "отчет", "итоги", "список", "выгрузка", "сводка", "структура",
+               "распределение", "состав", "динамика", "показатели", "результаты"}
+
+
+def _data_noun(d: Data) -> Optional[Phrase]:
+    """Что измеряют в таблице — по её названию: лист или название над таблицей («Выручка по продуктам»), иначе файл
+    («Выручка по направлениям, млрд руб.» → «выручка»). Безликое («Итоги», «Таблица 2») — None."""
+    for src in (d.profile.sheet, file_title(d.profile.file)):
+        if not src or re.match(r"^(?:таблица|лист|sheet)\s*\d*$", src.strip(), re.I):
+            continue
+        title = re.sub(r"^(?:[\w-]*\d[\w-]*\s+)+", "", re.sub(r"\s*,.*$", "", src)).strip()
+        head = head_word(title)
+        if not head or head in _NOT_A_NOUN:
+            continue
+        p = phrase(head)
+        if p is not None and p.sure:
+            return p
+    return None
+
+
+def _period_metric(d: Data, m: Measure) -> Optional[Phrase]:
+    """Колонка названа периодом («2025», «II кв. 2026»): величина — по названию таблицы и период — «выручки за 2025
+    год», а не «56% 2025»."""
+    name = (split_unit(m.name)[0] or m.name).strip()
+    if not (re.fullmatch(r"(?:19|20)\d\d", name) or period_str(name) is not None):
+        return None
+    noun = _data_noun(d)
+    if noun is None:
+        return None
+    per = f"{name} год" if re.fullmatch(r"(?:19|20)\d\d", name) else name
+    lo = noun.low
+    return Phrase(f"{lo.nom} за {per}", f"{lo.gen} за {per}", f"{lo.dat} за {per}", f"{lo.gen_pl} за {per}",
+                  f"{lo.dat_pl} за {per}", f"{lo.nom_pl} за {per}", noun.gender)
 
 
 def _title_whole(d: Data) -> Optional[Phrase]:
@@ -1072,8 +1378,12 @@ _TEMP = re.compile(r"температур|°", re.I)
 _SLOW = re.compile(r"пинг|ping|отклик|latency|загрузк\w*\s+(?:страниц|сайт)|(?:^|[^a-zа-яё])p\d{2}(?:[^a-zа-яё\d]|$)", re.I)
 _LONG = re.compile(r"задержк|опоздан|ожидан|время|длительн|(?:^|[^а-яё])срок", re.I)
 _DELAY = re.compile(r"задержк|опоздан|ожидан", re.I)
+_STAT_NAME = re.compile(r"^(?:p\d{2,3}(?:[.,]\d)?|перцентиль\b.*|процентиль\b.*|медиана|среднее|минимум|максимум|"
+                        r"mean|median|avg|min|max)$", re.I)
 _WORSE = re.compile(r"ошибк|отток|брак|дефект|просроч|опоздан|брошен|жалоб|возврат|авари|дтп|примес|загрязн|концентрац|выброс|"
-                    r"расход\s+топлив|(?:^|[^а-яё])расход(?:[^а-яё]|$)", re.I)
+                    r"расход\s+топлив|(?:^|[^а-яё])расход(?:[^а-яё]|$)|"
+                    # простаивает и не используется: больше свободных мест — не «впереди», а переплата
+                    r"свободн|простаива|(?:^|[^а-яё])просто[йя]|неиспольз|незанят|пустующ", re.I)
 _RATE = re.compile(r"ставк|годовых|коэффициент|уровень|(?:^|\s)уровн|норм[аы]\s+прибыл|доходност|процентн", re.I)
 _CLOCK_LAB = re.compile(r"^\s*\d{1,2}:\d{2}\s*$")
 # порядковые группы-интервалы: «0–4», «70 и старше», «до 30», «100+» (а не «5-А», «1 курс»)
@@ -1150,7 +1460,7 @@ def _comparison(d: Data) -> FactSet:
     generic = m is not None and (_GENERIC.match(re.sub(r"\s*,.*$", "", m.name).strip()) is not None
                                  or is_total_label(m.name))
     if m is not None:
-        ph = metric_phrase(m.name, m.type)
+        ph = _period_metric(d, m) or _with_noun(d, m.name, metric_phrase(m.name, m.type), m.type == "money")
         if generic or m.j in (-3, -4):
             # «Сумма», «Итого за год», итог перекрёстной таблицы — целое по названию датасета: «выручки», «заказов»
             ph = _title_whole(d) or ph
@@ -1172,6 +1482,12 @@ def _comparison(d: Data) -> FactSet:
         # несколько величин рядом (минимум, медиана, максимум): лидер — по главной, она названа
         mp = phrase(m.name)
         fs.ctx["by_metric"] = mp.low.dat if mp is not None and mp.sure else None
+    stat = (split_unit(m.name)[0] or m.name).strip() if m is not None else ""
+    if m is not None and not fs.ctx.get("by_metric") and _STAT_NAME.match(stat) and sum(1 for x in d.measures if _STAT_NAME.match(
+            (split_unit(x.name)[0] or x.name).strip())) >= 2:
+        # «p50 · p95 · p99» рядом: какая из них показана — сказано («72 мс (p50)»), иначе число без смысла
+        fs.ctx["stat_name"] = stat
+        labels.append(stat)
     name = m.name if m is not None else "Число строк"
     shares = cv.shares
     caption = []
@@ -1274,6 +1590,53 @@ def _comparison(d: Data) -> FactSet:
                "Категорий в данных.", prov={"op": "count", "what": "groups", "by": _col_of(d, cv.dim), "skip": _skip(d)})
         caption.insert(0, f"{blab} — {fmt_value(bv, unit)}: выше — {above} из {len(real)}.")
         labels.append(blab)
+    if d.ask == "total" and m is not None and m.additive and cv.total:
+        fs.ctx["ask_total"] = True
+    if d.ask == "mean" and m is not None and not m.additive:
+        # «какой средний NPS по всем продуктам»: одно среднее по строкам файла — с весом, если он есть (NPS — по
+        # числу ответов), а не среднее средних
+        w = d.weight_of(m)
+        rows = [i for i in d.rows_idx if m.values[i] is not None and (w is None or w.values[i])]
+        if rows:
+            if w is not None:
+                avg = sum(float(m.values[i]) * float(w.values[i]) for i in rows) / sum(float(w.values[i]) for i in rows)  # type: ignore
+                pm = {"op": "wmean_all", "col": m.j, "w": w.j, "skip": _skip(d), "scale": m.scale}
+            else:
+                avg = sum(float(m.values[i]) for i in rows) / len(rows)  # type: ignore[arg-type]
+                pm = {"op": "dist", "col": m.j, "stat": "mean", "skip": _skip(d), "scale": m.scale}
+            fs.add("overall_mean", round(avg, 1) if abs(avg) < 100 else round(avg), "median",
+                   f"В среднем — {fmt_value(avg, unit)}", unit,
+                   f"Среднее по {len(rows)} строкам" + (f" с весом по колонке «{w.name}»." if w is not None else "."),
+                   prov={**pm, "tol": 0.051 if abs(avg) < 100 else 0.51})
+            fs.ctx["overall_mean"] = True
+            if w is not None:
+                caption.insert(0, f"Среднее — с весом по колонке «{w.name}», а не среднее значений строк.")
+    if d.ask == "margin" and m is not None and len(lead_ks) == 1 and len(real) >= 2:
+        # «с каким отрывом»: второй и разница с ним
+        second = max((k for k in real if k != leader_k), key=lambda k: (cv.values[k], -k))
+        sv = cv.values[second]
+        if sv is not None and lv is not None and lv > sv:
+            p_lead = _pcat(d, m, cv.dim, [cv.labels[leader_k]])
+            p_sec = _pcat(d, m, cv.dim, [cv.labels[second]])
+            gap_ = lv - sv
+            fs.add("second_value", sv, "total", f"{cv.labels[second]} — {fmt_value(sv, unit)}", unit,
+                   f"Второе место — «{cv.labels[second]}».", prov=p_sec)
+            fs.add("margin", round(gap_, 2) if abs(gap_) < 100 else round(gap_), "change",
+                   f"Отрыв — {fmt_value(gap_, unit)}", unit, f"{leader} против «{cv.labels[second]}».",
+                   prov={"op": "change2", "kind": "abs", "base": p_sec, "cur": p_lead, "tol": 0.051})
+            labels.append(cv.labels[second])
+            caption.insert(0, f"Отрыв от второго места ({cv.labels[second]} — {fmt_value(sv, unit)}) — "
+                              f"{fmt_value(gap_, unit)}.")
+    miss_txt = _row_targets(d, cv, m, unit, fs)
+    if miss_txt:
+        caption.insert(0, miss_txt)
+    if m is not None and (d.ask or "").startswith(("above:", "below:")):
+        dp = phrase(cv.dim)
+        dforms = (dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure and dp.gender != "pl" else None
+        th_txt = _threshold(d, [cv.labels[k] for k in real], [cv.values[k] for k in real], m, unit, dforms,
+                            {**_pcat(d, m, cv.dim, []), "op": "above"}, fs, _col_of(d, cv.dim))
+        if th_txt:
+            caption.insert(0, th_txt)
     pg = {"op": "count", "what": "groups", "by": _col_of(d, cv.dim), "skip": _skip(d)}
     if cv.others:
         fs.add("others", cv.others, "count", f"Остальные {cv.others}", None, "Категории, собранные в одну строку.",
@@ -1291,6 +1654,65 @@ def _comparison(d: Data) -> FactSet:
         caption.append(f"Последние {count_words(shown.merged, 'группа', 'группы', 'групп')} — одной: «{shown.labels[-1]}».")
     fs.ctx["caption"] = _short(caption)
     return fs
+
+
+_TARGET_GEN = {"цель": "цели", "целевой": "целевого", "целевое": "целевого", "целевая": "целевой", "норматив": "норматива",
+               "норма": "нормы", "target": "цели", "таргет": "таргета", "kpi": "KPI", "ориентир": "ориентира"}
+
+
+def _target_gen(name: str) -> str:
+    """«Цель SLA» → «цели SLA», «Норматив, мин» → «норматива»: после «ниже» / «выше»."""
+    base = re.sub(r"\s*,.*$", "", name).strip()
+    w = base.split(" ", 1)
+    first = _TARGET_GEN.get(w[0].lower())
+    return (first + (" " + w[1] if len(w) > 1 else "")) if first else "цели"
+
+
+def _row_targets(d: Data, cv: CatView, m: Optional[Measure], unit: Optional[str], fs: FactSet) -> Optional[str]:
+    """Цель у каждой строки («Доступность» и «Цель SLA»): сколько категорий не дотянули до своей цели и кто —
+    «Ниже цели SLA — 2 из 7: CDN и Почта для бизнеса». У «меньше — лучше» (время, ошибки) промах — выше цели.
+    Возвращает строку подписи."""
+    rt = d.row_target
+    dj = _col_of(d, cv.dim)
+    if rt is None or m is None or rt[0] is not m or dj is None:
+        return None
+    t_ = rt[1]
+    rows = [i for i in d.rows_idx if m.values[i] is not None and t_.values[i] is not None]
+    labs = [d.text(i, dj) for i in rows]
+    if len(rows) < 2 or len(set(labs)) != len(labs):
+        return None  # по строке на категорию — иначе цель строки не цель категории
+    lower = _wording(d, cv, m) in ("slow", "long", "delay", "most")
+    miss = [lab for i, lab in zip(rows, labs)
+            if (m.values[i] > t_.values[i] if lower else m.values[i] < t_.values[i])]  # type: ignore[operator]
+    n, k = len(rows), len(miss)
+    side = "Выше" if lower else "Ниже"
+    tg = _target_gen(t_.name)
+    pt = {"op": "rows_gt", "a": m.j if lower else t_.j, "b": t_.j if lower else m.j, "skip": _skip(d),
+          "keys": miss, "by": dj}
+    fs.add("below_target", k, "count", f"{side} {tg} — {k} из {n}", None,
+           f"Категорий, где «{m.name}» {'выше' if lower else 'ниже'} своей «{t_.name}»: {', '.join(miss) or 'нет'}.",
+           prov=pt)
+    fs.add("of", n, "count", count_words(n, "категория", "категории", "категорий"), None,
+           "Категорий с величиной и целью.", prov={"op": "count", "what": "rows_list", "rows": rows})
+    fs.ctx["misses"] = (side, tg, miss)
+    fs.ctx.setdefault("labels", []).extend(miss)
+    if not k:
+        return f"Цель выполнена у всех {n}."
+    # в подписи — значения промахов рядом с их целью: заголовок уже назвал, кто не дотянул
+    gap = {lab: abs(float(m.values[i]) - float(t_.values[i])) / max(abs(float(t_.values[i])), 1e-9)  # type: ignore
+           for i, lab in zip(rows, labs) if lab in miss}
+    worst = sorted(miss, key=lambda x: -gap[x])[:2]
+    parts = []
+    for q, lab in enumerate(worst):
+        i = rows[labs.index(lab)]
+        v, tv_ = float(m.values[i]), float(t_.values[i])  # type: ignore[arg-type]
+        fs.add(f"miss_{q}", v, "total", f"{lab} — {fmt_value(v, unit)}", unit, f"«{m.name}» у «{lab}».",
+               prov={"op": "cell", "row": i, "col": m.j, "scale": m.scale})
+        fs.add(f"miss_target_{q}", tv_, "total", f"цель — {fmt_value(tv_, unit)}", unit, f"«{t_.name}» у «{lab}».",
+               prov={"op": "cell", "row": i, "col": t_.j, "scale": t_.scale})
+        parts.append(f"{lab} — {fmt_value(v, unit)} при {'цели ' if q == 0 else ''}{fmt_value(tv_, unit)}")
+    fs.ctx["worst_miss"] = worst[0]
+    return "; ".join(parts) + "."
 
 
 def _constant(d: Data, cv: CatView) -> FactSet:
@@ -1341,6 +1763,23 @@ def _benchmark(d: Data, cv: CatView, m: Optional[Measure]) -> Optional[tuple[str
 
 
 # ── доли ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+def _with_noun(d: Data, name: str, p: Optional[Phrase], money: bool) -> Optional[Phrase]:
+    """Краткое причастие («Утверждено», «Исполнено») — не целое: «37% утвержденного» обрывается. Слово — из названия
+    файла («Исполнение бюджета …» → «утверждённого бюджета») или «средств» у денег («исполненных средств»)."""
+    word = re.sub(r"\s*,.*$", "", name).strip()
+    if p is None or not is_participle(word) or len(word.split()) != 1 or not p.gen.lower().endswith("ого"):
+        return p
+    title = file_title(d.profile.file, d.profile.sheet).lower()
+    base = re.sub(r"(ж|щ)денн$", r"\1дённ", p.gen.lower()[:-3])  # «утвержденн» → «утверждённ»
+    if "бюджет" in title:
+        return Phrase(f"{base}ый бюджет", f"{base}ого бюджета", f"{base}ому бюджету", f"{base}ых бюджетов",
+                      f"{base}ым бюджетам", f"{base}ые бюджеты", "m")
+    if money:
+        return Phrase(f"{base}ые средства", f"{base}ых средств", f"{base}ым средствам", f"{base}ых средств",
+                      f"{base}ым средствам", f"{base}ые средства", "pl")
+    return p
+
+
 def _whole_phrase(d: Data, parts: Optional[Measure], summed: Optional[Measure] = None) -> tuple[Optional[Phrase], bool]:
     """Целое, долю которого показывают. Доли посчитаны по колонке (`summed`) — целое называется ею и только ею
     («суммы выплат», если делили суммы, «числа выплат» — если число); колонка долей («Доля рынка») — «рынка» или
@@ -1349,7 +1788,7 @@ def _whole_phrase(d: Data, parts: Optional[Measure], summed: Optional[Measure] =
         if _GENERIC.match(re.sub(r"\s*,.*$", "", summed.name).strip()):
             return _title_whole(d) or metric_phrase(summed.name, summed.type), summed.type == "money"
         p = metric_phrase(summed.name, summed.type)
-        return p, summed.type == "money"
+        return _with_noun(d, summed.name, p, summed.type == "money"), summed.type == "money"
     money = next((m for m in d.measures if m.additive and m is not parts and m.type == "money"), None)
     other = money or next((m for m in d.measures if m.additive and m is not parts), None)
     if other is not None:
@@ -1423,9 +1862,9 @@ def _composition(d: Data) -> FactSet:
     elif cv is not None:
         lead = cv.labels[0] if cv.ranked else None
         if lead:
+            # после «Всего N:» — со строчной, как внутри фразы («решено — 7 322»), кроме имён и аббревиатур
             caption = [f"Больше всего — {lead}.", f"Всего {fmt_value(whole, unit)}: "
-                       + ", ".join(f"{lower_first(totals[k][0]) if r else totals[k][0]} — {fmt_value(totals[k][1], unit)}"
-                                   for r, k in enumerate(order)) + "."]
+                       + ", ".join(f"{_inner(totals[k][0])} — {fmt_value(totals[k][1], unit)}" for k in order) + "."]
             fs.ctx["caption"] = _short(caption)
     return fs
 
@@ -1759,6 +2198,49 @@ def _biggest(d: Data, m: Measure, ent: Optional[Phrase]) -> tuple[str, float, in
     return f"{head} — {who}: {fmt_value(o.value, m.unit_text)}.", float(o.value), o.row
 
 
+def _threshold(d: Data, labels: list[str], values: list[Optional[float]], m: Measure, unit: Optional[str],
+               forms: Optional[tuple[str, str, str]], prov_count: dict, fs: FactSet,
+               label_j: Optional[int] = None) -> Optional[str]:
+    """Цель с порогом («какие серверы загружены выше 80%»): сколько и кто за порогом — «Выше 80% — 2 сервера из 8:
+    node-05 и node-03». Возвращает строку подписи (значения названных)."""
+    ask = d.ask or ""
+    if not ask.startswith(("above:", "below:")):
+        return None
+    side, thr = ask.split(":", 1)
+    try:
+        t = float(thr)
+    except ValueError:
+        return None
+    pairs = [(lab, float(v)) for lab, v in zip(labels, values) if v is not None and lab]
+    if len(pairs) < 2:
+        return None
+    hit = [(lab, v) for lab, v in pairs if (v > t if side == "above" else v < t)]
+    hit.sort(key=lambda x: -x[1] if side == "above" else x[1])
+    n, k = len(pairs), len(hit)
+    fs.add("over", k, "count", f"{'Выше' if side == 'above' else 'Ниже'} {fmt_value(t, unit)} — {k} из {n}", None,
+           f"Строк, где «{m.name}» {'больше' if side == 'above' else 'меньше'} {fmt_value(t, unit)}: "
+           f"{', '.join(x for x, _ in hit) or 'нет'}.", prov={**prov_count, "thr": t, "v": t, "side": side})
+    fs.add("over_of", n, "count", count_words(n, *(forms or ("строка", "строки", "строк"))), None, "Строк со значением.",
+           prov={"op": "count", "what": "value", "value": n})
+    fs.add("threshold", t, "total", f"Порог — {fmt_value(t, unit)}", unit, "Порог из цели.",
+           prov={"op": "count", "what": "value", "value": t})
+    fs.ctx["threshold"] = (side, fmt_value(t, unit), [x for x, _ in hit], forms)
+    fs.ctx.setdefault("labels", []).extend(x for x, _ in hit)
+    for q, (lab, v) in enumerate(hit[:3]):
+        fs.add(f"over_{q}", v, "total", f"{lab} — {fmt_value(v, unit)}", unit, f"«{m.name}» у «{lab}».",
+               prov=_cell_of(d, lab, m, label_j))
+    return ", ".join(f"{lab} — {fmt_value(v, unit)}" for lab, v in hit[:3]) + "." if hit else None
+
+
+def _cell_of(d: Data, label: str, m: Measure, j: Optional[int] = None) -> Optional[dict]:
+    """Ячейка величины у строки с этой подписью (одна строка на подпись) — для проверки числа в подписи."""
+    j = j if j is not None else d.label if d.label is not None else (d.dims[0] if d.dims else None)
+    if j is None:
+        return None
+    rows = [i for i in d.rows_idx if d.text(i, j) == label]
+    return {"op": "cell", "row": rows[0], "col": m.j, "scale": m.scale} if len(rows) == 1 else None
+
+
 def _reference(d: Data) -> FactSet:
     fs = FactSet()
     rv = d.ref
@@ -1810,6 +2292,11 @@ def _reference(d: Data) -> FactSet:
         fs.add("leader_value", lv, "leader", f"{leader or 'Наибольшее'} — {fmt_value(lv, unit)}", unit,
                f"Наибольшее значение по колонке «{m.name}»" + (f" — у строки «{leader}»." if leader else "."),
                prov={**pd, "stat": "max"})
+        th_txt = _threshold(d, list(rv.labels), list(rv.values), m, unit, forms, {**pd, "stat": "count_side"}, fs,
+                            _col_of(d, rv.label))
+        if th_txt is not None or fs.ctx.get("threshold"):
+            fs.ctx["caption"] = _short([th_txt or ""])
+            return fs
         ties = sum(1 for v in rv.values if v is not None and abs(float(v) - lv) <= 1e-9 * max(1.0, abs(lv)))
         if ties > 1:
             # ничья наверху: «первое место» по порядку строк — неправда; сказано, сколько строк с этим значением
@@ -1900,6 +2387,55 @@ def _kpi_prov(it: KpiItem) -> Optional[dict]:
     return {**p, "tol": 0.51 if it.change_unit == "%" else 0.051}
 
 
+_KPI_TARGET = re.compile(r"^(?:цель|целевое значение|целевой уровень|план|норматив|target)(?:\s+по)?\s+(?P<x>.+)$", re.I)
+
+
+def _kpi_targets(d: Data, items: list, names: list[str], fs: FactSet) -> bool:
+    """Показатели и их цели в одной строке («MAU · Цель MAU · Выручка · Цель по выручке…»): вывод — сколько целей
+    выполнено и какие нет; у «меньше — лучше» (отток, ошибки, время) цель выполнена, когда значение не выше неё."""
+    pairs = []
+    for kt, it in enumerate(items):
+        mt = _KPI_TARGET.match(names[kt])
+        if mt is None:
+            continue
+        ws = stems_of(mt.group("x"))
+        kv_ = next((k for k, x in enumerate(items) if k != kt and not _KPI_TARGET.match(names[k])
+                    and any(same_stem(a, b) for a in ws for b in stems_of(names[k]))), None)
+        if kv_ is not None and items[kv_].prov_value and it.prov_value:
+            pairs.append((kv_, kt))
+    if len(pairs) < 2:
+        return False
+    rows = []
+    for kv_, kt in pairs:
+        v, t_ = items[kv_], items[kt]
+        lower = bool(_WORSE.search(names[kv_]) or _LOWER_KPI.search(names[kv_]))
+        ok = v.value <= t_.value if lower else v.value >= t_.value
+        rows.append((kv_, kt, lower, ok))
+    met = [names[kv_] for kv_, _, _, ok in rows if ok]
+    miss = [(kv_, kt) for kv_, kt, _, ok in rows if not ok]
+    n = len(rows)
+    pp = {"op": "pairs_met", "pairs": [{"a": items[kv_].prov_value, "b": items[kt].prov_value, "lower": lower}
+                                       for kv_, kt, lower, _ in rows]}
+    fs.add("targets_met", len(met), "count", f"Выполнено целей — {len(met)}", None,
+           f"Цели выполнены: {', '.join(met) or 'ни одна'}.", prov=pp)
+    fs.add("targets", n, "count", count_words(n, "цель", "цели", "целей"), None, "Показателей с целью рядом.",
+           prov={"op": "count", "what": "value", "value": n})
+    cap = []
+    for kv_, kt in miss[:2]:
+        v, t_ = items[kv_], items[kt]
+        cap.append(f"{names[kv_]} — {v.value_text} при цели {t_.value_text}")
+    labels = fs.ctx.setdefault("labels", [])
+    labels += [names[kv_] for kv_, _, _, _ in rows] + [_mid(names[kv_]) for kv_, _, _, _ in rows]
+    side = {lower for kv_, _, lower, ok in rows if not ok}
+    fs.ctx.update(kpi_targets=(len(met), n, [_mid(x) for x in met], [_mid(names[kv_]) for kv_, _ in miss]),
+                  kpi_miss_word="выше цели" if side == {True} else "ниже цели" if side == {False} else "не выполнены")
+    fs.ctx["caption"] = _short(["; ".join(cap) + "."] if cap else [f"Все {n} целей выполнены."])
+    return True
+
+
+_LOWER_KPI = re.compile(r"врем|задержк|длительн|стоимост\s+привлеч|cac|churn", re.I)
+
+
 def _kpi(d: Data) -> FactSet:
     fs = FactSet()
     kv = d.kpi
@@ -1947,6 +2483,8 @@ def _kpi(d: Data) -> FactSet:
                    f"{b.label}: {fmt_signed(b.change, b.change_unit or '')}", b.change_unit,
                    f"{b.label} — {b.value_text}" + (f", было {b.prev_text}" if b.prev_text else "") +
                    f": {fmt_signed(b.change, b.change_unit or '')}{since}.", prov=_kpi_prov(b))
+    if _kpi_targets(d, items, names, fs):
+        return fs
     shown = [ia] + ([ib] if ib is not None else [])
     parts = []
     for k in shown:

@@ -98,6 +98,9 @@ class TimeView:
     per_week: bool = False  # недели в месяцы или кварталы: значение периода — в среднем за неделю
     from_columns: bool = False  # ось из колонок-периодов («I кв. · II кв. · …»), значение — по всем строкам
     col_js: list[int] = field(default_factory=list)  # колонки-периоды по порядку (для самопроверки)
+    # строка, которую назвала цель («покажите рост облачной платформы»): ряд — только по ней, а не по всем строкам
+    focus: Optional[str] = None
+    only_rows: list[int] = field(default_factory=list)
 
     @property
     def points(self) -> int:

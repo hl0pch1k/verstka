@@ -17,7 +17,7 @@ from verstka.data.words import file_title, stem, stem_in, stems_match
 from verstka.data.words import stems_of as _stems_of
 from verstka.schemas.data import DatasetProfile, TaskKind, VizKind
 
-__all__ = ["Goal", "goals_of", "goal_focus", "stem", "stems_of", "stems_match", "goal_match", "GOAL_VIZ"]
+__all__ = ["Goal", "goals_of", "goal_focus", "goal_ask", "stem", "stems_of", "stems_match", "goal_match", "GOAL_VIZ"]
 
 # вид визуализации, к которому ведёт цель (подпись — как в интерфейсе)
 GOAL_VIZ: dict[TaskKind, tuple[VizKind, str]] = {
@@ -294,6 +294,28 @@ def goal_focus(phrase_: str) -> tuple[list[str], Optional[str], list[str]]:
                                                     and k + 1 < len(words)) and stem(w) not in _GENERIC_HEAD]
     head = stem(nouns[0]) if nouns else None
     return metric, head, negate
+
+
+def goal_ask(phrase: Optional[str]) -> Optional[str]:
+    """Что цель спрашивает сверх задачи: «кто растёт быстрее всех» → "fastest" (темп каждой категории, а не рост
+    целого); «какие … выше 80%» → "above:80" (кто за порогом)."""
+    low = " ".join((phrase or "").lower().split())
+    m = _GROW_Q.search(low)
+    if m and re.search(r"быстрее|сильнее", m.group(0)) and not re.search(r"сниж|пада|сокращ", m.group(0)):
+        return "fastest"
+    th = _THRESH_Q.search(low)
+    if th and (re.match(_Q_WORD + r"\b", low) or re.search(r"\b(?:покаж\w*|назов\w*|сколько)\b", low)):
+        # «какие серверы загружены выше 80%» — порог: кто за ним, а не кто первый
+        side = "below" if re.match(r"(?:ниже|меньше|менее|не\s+больше)", th.group(0)) else "above"
+        return f"{side}:{th.group(1).replace(',', '.')}"
+    if re.search(r"сколько\s+всего|сколько\s+(?:\S+\s+){0,2}?(?:за|в)\s+(?:полугоди|год|квартал|месяц)|общ(?:ий|ая|ее)\s+"
+                 r"(?:объ[её]м|сумм|итог|выручк)|итого\s+за", low):
+        return "total"  # «сколько всего отгрузили за полугодие» — итог, а не кто первый
+    if re.search(r"\bсредн\w*", low) and re.search(r"по\s+всем|в\s+целом|общ(?:ий|ее|ая)|по\s+компании", low):
+        return "mean"  # «какой средний NPS по всем продуктам» — одно среднее, а не кто впереди
+    if re.search(r"отрыв|разрыв|на\s*сколько|насколько\s+(?:опереж|впереди)", low):
+        return "margin"  # «кто победил и с каким отрывом» — отрыв первого от второго
+    return None
 
 
 def _question_goals(sent: str, at: int) -> list[Goal]:

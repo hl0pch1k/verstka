@@ -62,7 +62,7 @@ def test_revenue_by_month_dynamics_line(plans):
     assert "21 точка" in line.reasons[0] and "тренд виден сразу" in line.reasons[0]
     assert any("покажи рост выручки" in r for r in line.reasons)
     assert "21 столбцом" in p.options[1].why_not and "21 строка" in p.options[2].why_not
-    assert p.headline == "Выручка выросла на 23% к сентябрю 2025"
+    assert p.headline == "Выручка — на 23% больше, чем в сентябре 2025"  # год к году без двусмысленности «к сентябрю»
     assert p.plain_headline == "Выручка по месяцам"
     ch = next(f for f in p.headline_facts if f.id == "change")
     assert ch.value == 23 and ch.unit == "%" and "Сентябрь 2026 к сентябрю 2025: 423 млн ₽" in _sp(ch.explain)

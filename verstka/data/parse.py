@@ -23,6 +23,7 @@ from typing import Any, Optional, Union
 __all__ = [
     "word_unit_column",
     "NO_YEAR",
+    "forecast_period",
     "season_name",
     "season_ord",
     "BOOL",
@@ -622,11 +623,14 @@ def is_missing(s: Any) -> bool:
 # в целом», можно с «:», единицей через запятую («Итого, млн ₽») и «по …» / «за …». «Всего клиентов», «Итого выручка»,
 # «Всего лишь пробный» — обычные подписи.
 TOTAL_ROW = re.compile(
-    r"^(?:итого(?:\s+общ[а-яё]*)?|всего|итог|общий итог|общая сумма|total|grand total|в сумме|в целом)"
+    r"^(?:итого(?:\s+общ[а-яё]*)?|всего|итог|общий итог|общая сумма|total|grand total|в сумме|в целом|"
+    # «Все продукты», «Все регионы», «All products» — сводная строка по всем, а не ещё одна категория
+    r"все\s+(?:продукты|регионы|сервисы|филиалы|магазины|отделы|подразделения|каналы|направления|клиенты|сегменты|"
+    r"компании|команды|категории|товары|города|страны|школы|вузы|группы|площадки|тарифы)|all\s+[a-z]+)"
     r"(?:\s*[:.])?(?:\s*,\s*[^,]{1,20})?(?:\s+(?:по|за)\s.+)?$",
     re.IGNORECASE,
 )
-TOTAL_FIRST = frozenset("иИвВоОtTgG")  # первые буквы подписей итога
+TOTAL_FIRST = frozenset("иИвВоОtTgGaA")  # первые буквы подписей итога
 _TOTAL_FIRST = TOTAL_FIRST
 
 
@@ -870,13 +874,35 @@ def iso_ord(iso: str, with_time: bool = False) -> Optional[tuple[str, int]]:
     return "day", day
 
 
+_FORECAST_AFTER = re.compile(r"^(?P<p>.+?)\s*(?:\(\s*(?:прогноз|оценка|ожид\.?|план|п|f|e|fc|est)\s*\)|"
+                             r"(?<=\d)\s*(?:п|f|e)\.?|\s+(?:прогноз|оценка|ожид\.?|\(?прогн\.?\)?))$", re.I)
+_FORECAST_BEFORE = re.compile(r"^(?:прогноз|оценка|ожид\.?|ожидание|план|forecast|fc|est)\s*(?:на\s+)?(?P<p>.+)$", re.I)
+
+
+def forecast_period(s: Any) -> Optional[str]:
+    """Период-прогноз: «2026П», «2026 (прогноз)», «Прогноз 2026», «2026F», «План 2026», «III кв. 2026 (оценка)» → сам
+    период без пометки («2026»); иначе None. Прогноз — не факт: в рост и «за N месяцев» не входит."""
+    if not isinstance(s, str):
+        return None
+    t = " ".join(s.split())
+    m = _FORECAST_AFTER.match(t) or _FORECAST_BEFORE.match(t)
+    if m is None:
+        return None
+    base = m.group("p").strip(" ,")
+    return base if period_str(base) is not None or re.fullmatch(r"(?:19|20)\d\d", base) else None
+
+
 def period_parts(s: str, dayfirst: bool = True, years: bool = True,
                  with_time: bool = False) -> Optional[tuple[str, int]]:
     """Строка с датой или периодом → (зернистость, номер периода) или None. ISO из чтения разбирается сразу, остальное —
-    через `period_str` («янв 2025», «IV кв. 2025», «31.01.2025»)."""
+    через `period_str` («янв 2025», «IV кв. 2025», «31.01.2025»). Период-прогноз («2026П») — тот же период (что это
+    прогноз, отмечает `forecast_period`)."""
     r = iso_ord(s, with_time)
     if r is not None:
         return r
+    fc = forecast_period(s)
+    if fc is not None:
+        return period_parts(fc, dayfirst, True, with_time)
     iso = period_str(s, dayfirst, years)
     return None if iso is None else iso_ord(iso, with_time)
 

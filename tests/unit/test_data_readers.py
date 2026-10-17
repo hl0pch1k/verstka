@@ -735,7 +735,7 @@ def test_unit_from_the_title_row():
     # развёрнутая широкая таблица получает единицу названия (повторное ревью, M4)
     wide = "Выручка по годам, млн руб.\nРегион;2023;2024;2025\nМосква;10;12;15\nКазань;5;6;7\n"
     t = read_bytes("w.csv", wide.encode())[0]
-    assert t.columns == ["Регион", "Год", "Значение"] and t.units == [None, None, "млн ₽"]
+    assert t.columns == ["Регион", "Год", "Выручка"] and t.units == [None, None, "млн ₽"]  # имя — из названия (раунд 9)
 
 
 def test_metric_rows_carry_their_own_units():

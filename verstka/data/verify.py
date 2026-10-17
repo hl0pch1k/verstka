@@ -23,7 +23,7 @@ from datetime import date
 from typing import Any, Optional, Sequence
 
 from verstka.data.parse import iso_ord, period_parts, quantity, season_name, season_ord
-from verstka.data.words import fmt_num, stem, stems_of
+from verstka.data.words import fmt_num, is_participle, stem, stems_of
 from verstka.schemas.data import HeadlineFact, Table
 
 __all__ = ["Verdict", "verify", "numbers_ok", "claims_problem"]
@@ -42,7 +42,9 @@ class Verdict:
 
 
 # строка-остаток («Прочее», «Другие»): в сравнении её нет — ни лидер, ни последний
-_OTHER = re.compile(r"^(?:прочее|прочие|другое|другие|остальное|остальные|иное|иные|прочее\s+\S+|другие\s+\S+)$", re.I)
+# «Прочее», «Прочие партнёры (214)», «Другое (12)», «Остальные клиенты» — остаток, а не категория
+_OTHER = re.compile(r"^(?:прочее|прочие|прочая|прочий|другое|другие|остальное|остальные|иное|иные|others?|other)\b.*$",
+                    re.I)
 
 
 def is_other_label(label: str) -> bool:
@@ -100,6 +102,19 @@ class _Raw:
             if lab and v is not None:
                 out.setdefault(lab, []).append(v)
         return out
+
+
+def _wgroups(raw: "_Raw", by: int, col: int, wcol: int, scale: float = 1.0) -> dict[str, float]:
+    """Среднее взвешенное по категориям: Σ(w·x)/Σw (строки без веса или значения — мимо)."""
+    num: dict[str, float] = {}
+    den: dict[str, float] = {}
+    for i in raw.rows:
+        lab = raw.text(i, by)
+        x, w = raw.num(i, col, scale), raw.num(i, wcol)
+        if lab and x is not None and w:
+            num[lab] = num.get(lab, 0.0) + x * w
+            den[lab] = den.get(lab, 0.0) + w
+    return {k: num[k] / den[k] for k in num if den.get(k)}
 
 
 def _agg(xs: list[float], how: str) -> float:
@@ -277,12 +292,18 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         return vals[0], list(agg.values())
     if op in ("cat", "share", "neg", "above"):
         g = raw.groups(p["by"], p.get("col"), scale, p.get("rowcols") or (), p.get("rowagg", "sum"))
-        agg = {k: _agg(v, p.get("agg", "sum")) for k, v in g.items()}
+        if p.get("agg") == "wmean" and p.get("w") is not None:
+            # среднее взвешенное: Σ(вес·значение)/Σвес по строкам категории — своим счётом по сырым ячейкам
+            agg = _wgroups(raw, p["by"], p["col"], p["w"], scale)
+        else:
+            agg = {k: _agg(v, p.get("agg", "sum")) for k, v in g.items()}
         ex = list(agg.values())
         if op == "neg":
             return float(sum(1 for v in agg.values() if v < 0)), ex
         if op == "above":
-            return float(sum(1 for k, v in agg.items() if v > p["v"] and k not in p.get("exclude", ()))), ex
+            below = p.get("side") == "below"  # порог цели «ниже 30» — строго меньше
+            return float(sum(1 for k, v in agg.items() if (v < p["v"] if below else v > p["v"])
+                             and k not in p.get("exclude", ()))), ex
         keys = p["keys"]
         missing = [k for k in keys if k not in agg]
         if missing:
@@ -345,6 +366,24 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             return float(got[0]), [float(tot)]
         xs = sorted(a for a, n in pairs for _ in range(n))
         return (sum(xs) / len(xs) if st == "mean" else _pct(xs, 50)), [float(tot)]
+    if op == "wmean_all":
+        # среднее взвешенное по всем строкам: Σ(вес·значение)/Σвес — своим счётом по сырым ячейкам
+        num = den = 0.0
+        for i in raw.rows:
+            x, w = raw.num(i, p["col"], scale), raw.num(i, p["w"])
+            if x is not None and w:
+                num, den = num + x * w, den + w
+        if not den:
+            raise _Fail("нет весов")
+        return num / den, []
+    if op == "pairs_met":
+        # показатель и его цель — две ячейки; выполнена: не ниже цели (у «меньше — лучше» — не выше)
+        k = 0
+        for pr in p["pairs"]:
+            a, _ = _compute(t, pr["a"])
+            b, _ = _compute(t, pr["b"])
+            k += (a <= b) if pr.get("lower") else (a >= b)
+        return float(k), []
     if op == "rows_gt":
         pairs = [(raw.num(i, p["a"]), raw.num(i, p["b"])) for i in raw.rows]
         return float(sum(1 for a, b in pairs if a is not None and b is not None and a > b)), []
@@ -399,9 +438,13 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
                 raise _Fail("такого периода в файле нет")
             return float(int(str(p["to"])[:4])), []
         rng = [s[k] for k in ks if fk is not None and tk is not None and fk <= k <= tk]
-        if mode in ("max", "min", "mean", "count", "neg"):
+        if mode in ("max", "min", "mean", "count", "neg", "median"):
             if not rng:
                 raise _Fail("нет значений за периоды")
+            if mode == "median":
+                ys = sorted(rng)
+                h = len(ys) // 2
+                return float(ys[h] if len(ys) % 2 else (ys[h - 1] + ys[h]) / 2), rng
             v = max(rng) if mode == "max" else min(rng) if mode == "min" else len(rng) if mode == "count" else \
                 sum(1 for x in rng if x < 0) if mode == "neg" else sum(rng) / len(rng)
             return float(v), rng
@@ -420,12 +463,16 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         if mode == "neg":
             return float(sum(1 for v in vals if v < 0)), vals
         if mode == "span":
-            return float(len(vals) - 1), vals
-        return _change(vals[0], vals[-1], p["kind"]), vals + [vals[0], vals[-1]]
+            return float(p.get("to_k", len(vals) - 1) - p.get("from_k", 0)), vals
+        if mode == "year":
+            return float(int(str(p.get("year_to") or "0")[:4])), []
+        a_, b_ = vals[p.get("from_k", 0)], vals[p.get("to_k", len(vals) - 1)]
+        return _change(a_, b_, p["kind"]), vals + [a_, b_]
     if op == "moved":
         cats = sorted({raw.text(i, p["by"]) for i in raw.rows} - {""})
         up = down = n = 0
         ends = []
+        pairs: dict[str, tuple[float, float]] = {}
         for c in cats:
             s = _series(raw, {**p, "cat": (p["by"], c)})
             if len(s) >= 2:
@@ -434,6 +481,22 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
                 up += s[ks[-1]] > s[ks[0]]
                 down += s[ks[-1]] < s[ks[0]]
                 ends.append(s[ks[-1]])
+                pairs[c] = (s[ks[0]], s[ks[-1]])
+        if p.get("what") in ("first_of", "last_of"):
+            k = (p.get("keys") or ["?"])[0]
+            if k not in pairs:
+                raise _Fail(f"нет ряда «{k}»")
+            return pairs[k][0 if p["what"] == "first_of" else 1], list(pairs[k])
+        if p.get("what") == "fastest":
+            # «растёт быстрее всех»: темп каждой категории по строкам файла; названная — наибольший при той же базе
+            top = max((a for a, _ in pairs.values() if a > 0), default=0.0)
+            pool = {c: (b / a - 1) * 100 for c, (a, b) in pairs.items() if a > 0 and a >= p.get("min_base", 0) * top}
+            keys = p.get("keys", [])
+            if not pool or not keys or keys[0] not in pool:
+                raise _Fail(f"нет ряда «{keys[0] if keys else '?'}»")
+            if pool[keys[0]] < max(pool.values()) - 1e-9:
+                raise _Fail(f"«{keys[0]}» растёт не быстрее всех: {max(pool, key=pool.get)}")
+            return pool[keys[0]], list(pool.values())
         if p.get("what") == "of":
             return float(n), ends
         if p.get("what") in ("up", "down"):
@@ -457,6 +520,8 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         if st == "within":
             k = sum(1 for v in xs if v <= p["thr"] + 1e-9)
             return k / len(xs) * 100, [float(k), float(len(xs))]
+        if st == "count_side":  # строго за порогом цели: «выше 80%» — больше 80, «ниже 30» — меньше 30
+            return float(sum(1 for v in xs if (v > p["thr"] if p.get("side", "above") == "above" else v < p["thr"]))), []
         if st == "count_from":
             return float(sum(1 for v in xs if v >= p["thr"] - 1e-9)), []
         if st == "count_to":
@@ -621,6 +686,12 @@ def _named_ok(named: str, col_name: str, title: str) -> bool:
                             col_name.strip(), re.I))
     if generic or not have:
         have = have + stems_of(title)
+    elif is_participle(col_name):
+        # «Утверждено» — причастие без слова: слово — из названия файла («бюджета») или «средств» у денег
+        have = have + stems_of(title) + ["средств"]
+    elif re.fullmatch(r"(?:19|20)\d\d|.*\b(?:кв\.?|квартал)\s*(?:19|20)\d\d", col_name.strip(), re.I):
+        # колонка-период («2025», «II кв. 2026»): величина — по названию таблицы, «выручки за 2025 год»
+        have = have + stems_of(title) + ["год", "кв"]
     return all(any(_stem_eq(w, h) for h in have) for w in want)
 
 
@@ -738,6 +809,9 @@ def claims_problem(text: str, ok: dict[str, HeadlineFact], prov: dict[str, dict]
     m = None if caption else _LEAD_HEAD.match(t)
     if m is not None and m.group("c") is not None and "leader_share" not in ok:
         m = None  # «X — 31%…» — лидер доли; без доли «X — 5» — не утверждение о первенстве
+    if m is not None and m.group("c") is not None and re.match(r"^(?:всего|итого|в среднем|ниже|выше)\b",
+                                                             m.group("c").strip(), re.I):
+        m = None  # «Всего — 3 006, больше всего — Подольск» — итог, а не первенство
     if lead is not None and m is not None:
         said = m.group("a") or m.group("b") or m.group("c") or ""
         keys = _keys_of(prov.get(lead.id))

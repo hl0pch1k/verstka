@@ -85,7 +85,7 @@ def test_every_data_slide_carries_its_data_headline_source_and_reasons(sales_sto
         assert headline_ok(s.headline, d.headline_facts, data_slide_labels(s)), s.headline
         assert s.headline != d.plain_headline
     rev = _by_file(sales_story.outline)["Выручка по месяцам.csv"]
-    assert rev.headline == "Выручка выросла на 23% к сентябрю 2025"
+    assert rev.headline == "Выручка — на 23% больше, чем в сентябре 2025"
     assert rev.content.chart.y_title and rev.content.chart.x_title and rev.content.chart.unit == "млн ₽"
     nps = _by_file(sales_story.outline)["NPS по кварталам.csv"]
     assert nps.content.chart.gaps is True and None in nps.content.chart.series[0].values
@@ -257,7 +257,7 @@ def messages_ok(seen: dict) -> bool:
     user, system = seen["user"], seen["system"]
     assert "Never write a number that is not given to you" in system
     assert "[data-3] file «Выручка по месяцам.csv»" in user
-    assert "draft headline: Выручка выросла на 23% к сентябрю" in user
+    assert "draft headline: Выручка — на 23% больше, чем в сентябре" in user
     assert "+23% год к году (value 23.0 %)" in user
     return True
 

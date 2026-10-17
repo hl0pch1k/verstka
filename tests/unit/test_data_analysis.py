@@ -92,7 +92,7 @@ def test_400_days_resampled_to_months_without_partial_month():
     spec = chart_spec_of(p, t)
     assert len(spec.categories) == 13 <= 36 and spec.categories[0] == "янв 2025"
     # неполный февраль 2026 (4 дня) не превратился в «падение»
-    assert "выросло" in p.headline and "Число заказов" in p.headline
+    assert "больше, чем в январе 2025" in p.headline and "Число заказов" in p.headline
 
 
 def test_hourly_or_long_series_never_exceed_36_points():

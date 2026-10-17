@@ -342,13 +342,25 @@ def time_view(d: "Data", m: Optional[Measure], max_points: int = MAX_POINTS) -> 
                 measures = list(d.parallel)
             for mm in measures:
                 buckets: dict[int, list[float]] = {}
+                wts: dict[int, list[float]] = {}
                 typos = set(d.typo_rows.get(mm.name, ()))  # опечатки (×100 и больше) — не точка ряда
+                w = d.weight_of(mm)
                 for i, k in keyed:
                     v = mm.values[i]
                     if v is not None and i not in typos:
                         buckets.setdefault(pos[k], []).append(v)
+                        wts.setdefault(pos[k], []).append(float(w.values[i] or 0.0) if w is not None else 1.0)
                 h = how if mm is m else mm.how
                 nm = d.series_names.get(mm.name, mm.name) if len(measures) > 1 else mm.name
+                if w is not None and h == "mean":
+                    # уровень с весом (средний чек по магазинам за месяц): среднее взвешенное по числу чеков
+                    vals_ = []
+                    for p in range(len(order)):
+                        xs, ws = buckets.get(p, []), wts.get(p, [])
+                        tw = sum(ws)
+                        vals_.append(sum(x * y for x, y in zip(xs, ws)) / tw if xs and tw > 0 else agg(xs, h))
+                    series.append(SeriesV(nm, mm.unit_text, vals_))
+                    continue
                 series.append(SeriesV(nm, mm.unit_text, [agg(buckets.get(p, []), h) for p in range(len(order))]))
     if len(series) > 1 and not dim_name and all(re.fullmatch(r"(?:19|20)\d\d", sv.name.strip()) for sv in series):
         series.sort(key=lambda sv: sv.name)  # ряды-годы («2024», «2025») — по порядку лет
@@ -400,19 +412,39 @@ def columns_time_view(d: "Data") -> Optional[TimeView]:
     cols.sort(key=lambda t: t[0][1])
     freq = cols[0][0][0]
     add = cols[0][1].additive
+    rows, focus = _goal_row(d)
     vals: list[Optional[float]] = []
     for _, m in cols:
-        xs = [m.values[i] for i in d.rows_idx if m.values[i] is not None]
+        xs = [m.values[i] for i in rows if m.values[i] is not None]
         vals.append((float(sum(xs)) if add else float(sum(xs) / len(xs))) if xs else None)
     periods = [_iso(freq, pp[1]) for pp, _ in cols]
     # имя ряда — по названию датасета («Выручка по кварталам 2025» → «Выручка»)
     head = head_word(re.sub(r"^(?:[\w-]*\d[\w-]*\s+)+", "", title))
     hp = phrase(head) if head else None
     name = hp.nom[:1].upper() + hp.nom[1:] if hp is not None and hp.sure else "Сумма"
+    if focus:
+        name = focus
     m0 = cols[0][1]
     meas = Measure(j=-2, name=name, unit=m0.unit, type=m0.type, values=[], level=m0.level, time_unit=m0.time_unit,
                    basis=m0.basis)
     return TimeView(column={"quarter": "Квартал", "month": "Месяц", "year": "Год"}[freq], freq=freq, periods=periods,
                     labels=[period_label(p_, freq) for p_ in periods], series=[SeriesV(name, m0.unit_text, vals)],
                     measure=meas, source_freq=freq, source_points=len(periods), how="sum" if add else "mean",
-                    column_type="period", from_columns=True, col_js=[m.j for _, m in cols])
+                    column_type="period", from_columns=True, col_js=[m.j for _, m in cols], focus=focus,
+                    only_rows=rows if focus else [])
+
+
+def _goal_row(d: "Data") -> tuple[list[int], Optional[str]]:
+    """Строка, которую назвала цель: ровно одна подпись строки совпала со словами цели по основам («облачной
+    платформы» ↔ «Облачная платформа», «облака» ↔ «Облако») — ряд по ней. Иначе — все строки."""
+    from verstka.data.words import same_stem, stems_of
+
+    rows = list(d.rows_idx)
+    rj = d._matrix_rows()
+    if not d.subject or rj is None or len(rows) < 2:
+        return rows, None
+    subj = [s for s in d.subject if len(s) >= 4]
+    hits = [i for i in rows if any(same_stem(s, w) for s in subj for w in stems_of(d.text(i, rj)) if len(w) >= 4)]
+    if len(hits) != 1:
+        return rows, None
+    return hits, d.text(hits[0], rj)

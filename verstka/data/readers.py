@@ -52,6 +52,7 @@ from verstka.data.parse import (
     dayfirst_hint,
     decimal_hint,
     excel_serial_iso,
+    forecast_period,
     header_unit,
     is_total_label,
     iso_of_datetime,
@@ -248,7 +249,9 @@ def _type_column(vals: list[Any], name: str, file_decimal: Optional[str], *, eng
         pmap = {s: (p_sample[s] if s in p_sample else _period(s, dayfirst, years=time_header)) for s in distinct}
         hits = sum(counts[s] for s in distinct if pmap[s] is not None) + len(nonstr_num)
         if hits >= 0.8 * total:
-            out = [pmap[v] if v.__class__ is str else (str(int(v)) if _is_num(v) else None) for v in vals]
+            # «2026 (прогноз)», «2027П» — не пропуск: подпись остаётся, строку-прогноз узнают дальше и не смешивают с фактом
+            out = [(pmap[v] if pmap[v] is not None else (_clean_str(v) if forecast_period(v) is not None else None))
+                   if v.__class__ is str else (str(int(v)) if _is_num(v) else None) for v in vals]
             return _uniform_time(out), None
 
     if q_share >= 0.8:
@@ -393,7 +396,11 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
         return units_row, [None] * width, units_row
     if not _header_like(k2):
         return None
-    if not any(not s1[j] and s2[j] for j in range(width)):
+    k1 = [_kind(h1[j]) if j < len(h1) else "empty" for j in range(width)]
+    # объединённые ячейки группы, заполненные чтением («2025» над каждым кварталом), и годы над периодами — тоже группа
+    spans = any(s1[j] and s1[j] == s1[j - 1] and s2[j] for j in range(1, width))
+    years_over = any(k1[j] in ("year", "period") and s2[j] for j in range(width))
+    if not any(not s1[j] and s2[j] for j in range(width)) and not spans and not years_over:
         return None
     # подзаголовок стоит над числами хотя бы в одной колонке
     if not any(k2[j] in ("text", "year", "period") and _numbers_below(below, j) for j in filled2):
@@ -415,6 +422,11 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
             pn, pu = split_unit(parent)
             cn, cu = split_unit(s2[j])
             unit = cu or pu
+            if re.fullmatch(r"(?:19|20)\d\d(?:\s*(?:г\.?|год))?", pn.strip()) and period_str(f"{cn} {pn}") is not None:
+                # год над кварталом или месяцем: «I кв. 2025» — период, ось времени, а не «I кв. (2)»
+                names.append(f"{cn} {pn.strip()}" + (f", {unit}" if unit else ""))
+                groups.append(None)
+                continue
             names.append(f"{pn} {cn}" + (f", {unit}" if unit else ""))
             groups.append(pn or None)
             if k2[j] == "text":
@@ -470,9 +482,10 @@ def _group_spans(groups: list[Optional[str]]) -> list[list[int]]:
 
 
 def _group_row(row: list[Any]) -> bool:
-    """Строка групп над шапкой: одни названия, и не одно название в первой ячейке (это заголовок отчёта)."""
+    """Строка групп над шапкой: одни названия или годы («2025 · 2026» над кварталами), и не одно название в первой
+    ячейке (это заголовок отчёта)."""
     pos = [j for j, v in enumerate(row) if v is not None]
-    if not pos or not all(_kind(row[j]) == "text" for j in pos):
+    if not pos or not all(_kind(row[j]) in ("text", "year", "period") for j in pos):
         return False
     return len(pos) >= 2 or pos[0] >= 1
 
@@ -710,7 +723,8 @@ def _build_table(
     totals = [k for k, i in enumerate(kept_rows) if i in total_labels]
     row_units = [row_units_all[i] for i in kept_rows] if row_units_all is not None and label_j in keep else []
     melt_notes: list[str] = []
-    melted = _melt_wide(names, units, raw_header, typed_cols, kept_rows, set(totals), row_units)
+    melted = _melt_wide(names, units, raw_header, typed_cols, kept_rows, set(totals), row_units,
+                        _title_measure(title_rows))
     if melted is not None:
         names, units, raw_header, out_rows, totals, melt_notes = melted
         row_units, column_groups = [], []
@@ -1007,9 +1021,29 @@ def _header_period(name: str) -> Optional[tuple[str, str, int]]:
     return None
 
 
+_TITLE_STOP = re.compile(r"\s+(?:по|за|в|во|на|для|от|у|с|и)\s+|[,(:;—–]|\s-\s", re.IGNORECASE)
+_TITLE_NOT_A_MEASURE = {"данные", "таблица", "лист", "отчёт", "отчет", "итоги", "список", "выгрузка", "сводка",
+                        "структура", "распределение", "состав", "динамика", "показатели", "результаты", "сведения"}
+
+
+def _title_measure(title_rows: list[list[Any]]) -> Optional[str]:
+    """Мера из строки-названия над шапкой: «Выручка по регионам, млн ₽» → «Выручка» — имя значения широкой таблицы
+    вместо безликого «Значение». Только 1–3 слова без цифр и не «Отчёт», «Итоги», «Данные»."""
+    for r in title_rows:
+        filled = [v for v in r if v is not None]
+        if len(filled) != 1 or not isinstance(filled[0], str):
+            continue
+        head = _TITLE_STOP.split(" ".join(filled[0].split()), maxsplit=1)[0].strip()
+        words = head.split()
+        if 1 <= len(words) <= 3 and not re.search(r"\d", head) and re.fullmatch(r"[А-Яа-яЁё\s-]+", head) \
+                and words[0].lower() not in _TITLE_NOT_A_MEASURE:
+            return head[0].upper() + head[1:]
+    return None
+
+
 def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[str], cols: list[list[Cell]],
                kept_rows: list[int], totals: set[int], row_units: Optional[list[Optional[str]]] = None,
-               ) -> Optional[tuple]:
+               value_name: Optional[str] = None) -> Optional[tuple]:
     """Периоды в колонках («Регион · 2023 · 2024 · 2025», «Показатель · янв 2025 · фев 2025 · мар 2025») → длинная
     таблица: колонки-подписи, колонка периода («Год», «Месяц», «Квартал»), колонка значения. Если подписи —
     показатели («Показатель»: «Выручка, млн ₽», «Клиенты») или строка одна, каждый показатель становится своей
@@ -1106,9 +1140,10 @@ def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[st
         return _dedupe(out_names), out_units, out_raw, rows, [], notes
     if texty:
         return None  # разные единицы под периодами у обычной таблицы — оставить как есть
-    out_names = [names[j] for j in ids] + [pname] + [p or "Значение" for p in prefixes]
+    vname = value_name if value_name and len(prefixes) == 1 and value_name not in names else "Значение"
+    out_names = [names[j] for j in ids] + [pname] + [p or vname for p in prefixes]
     out_units = [units[j] for j in ids] + [None] + [group_unit(groups[p]) for p in prefixes]
-    out_raw = [raw_header[j] for j in ids] + [pname] + [p or "Значение" for p in prefixes]
+    out_raw = [raw_header[j] for j in ids] + [pname] + [p or vname for p in prefixes]
     rows: list[list[Cell]] = []
     new_totals: list[int] = []
     for i in range(n_rows):
@@ -1570,20 +1605,47 @@ def _read_text(name: str, text: str, digest: str) -> list[Table]:
     outside = [ln.rstrip() for k, ln in enumerate(lines) if k not in covered and not _MD_FENCE.match(ln)]
     notes = re.sub(r"\n{3,}", "\n\n", "\n".join(outside)).strip()
     tables: list[Table] = []
+    titles: list[Optional[str]] = []
     for k, (_start, _end, rows, header_row, _how) in enumerate(blocks):
+        # строка-название прямо над таблицей («Выручка по продуктам, млн ₽:») — её единица и имя, как у строки-названия
+        # над шапкой в Excel; иначе единица теряется в заметках
+        title = _text_title(lines, _start, covered)
+        if title is not None:
+            width = max((len(r) for r in rows), default=1)
+            rows = [[title] + [None] * (width - 1)] + rows
+            header_row = header_row + 1 if header_row is not None and header_row >= 0 else header_row
         try:
             tables.append(_build_table(
                 rows, file=name, kind="text", sheet=None, tid=_table_id(digest, k), notes=notes,
                 header_row=header_row, decimal=None,
             ))
+            titles.append(title)
         except _NoData:
             continue  # блок без значений — не таблица
     if not tables:
         raise DataReadError("Не нашёл таблицу в тексте", file=name)
     if len(tables) > 1:
         for k, t in enumerate(tables):
-            t.sheet = f"Таблица {k + 1}"
+            nm = split_unit(titles[k])[0].strip() if titles[k] else ""
+            t.sheet = nm if nm and len(nm) <= 60 and nm not in [x.sheet for x in tables[:k]] else f"Таблица {k + 1}"
     return tables
+
+
+def _text_title(lines: list[str], start: int, covered: set[int]) -> Optional[str]:
+    """Название таблицы в тексте: короткая строка прямо над ней (через одну пустую), с двоеточием в конце или с
+    единицей («Выручка по продуктам, млн ₽:», «Численность команды, чел.»). Абзац прозы — не название."""
+    k = start - 1
+    while k >= 0 and k not in covered and not lines[k].strip() and start - k <= 2:
+        k -= 1
+    if k < 0 or k in covered or start - k > 2:
+        return None
+    ln = " ".join(lines[k].strip().strip("#*_ ").split())
+    if not ln or len(ln) > 100 or not re.search(r"[А-Яа-яЁёA-Za-z]", ln) or _MD_FENCE.match(lines[k]):
+        return None
+    body = ln.rstrip(":").strip()
+    if not (ln.endswith(":") or split_unit(body)[1]) or body.count(".") > 2:
+        return None
+    return body
 
 
 # ======================================================================================================== XLSX

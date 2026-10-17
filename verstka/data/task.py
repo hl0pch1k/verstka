@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from verstka.data.aggregate import Data
@@ -62,6 +63,7 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         s["dynamics"] = 0.45  # колонки-периоды («I кв. · II кв. · …»): ось времени, если о ней просит цель
 
     m = d.main
+    scores = bool(d.part_group) and all(re.search(r"балл|очк|оценк", x.name, re.I) for x in d.part_group)
     # структура долей
     if d.funnel:
         pass  # этапы воронки — не части одного целого
@@ -70,7 +72,9 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     elif d.composition and cats is not None and not has_time:
         # несколько частей одного целого по категориям (формы обучения по направлениям); доли у всех строк одни и
         # те же (НДС 18% цены у каждого тарифа) — структура не главное, но осуществима
-        s["shares"] = 0.5 if d.composition_constant else 0.88
+        # баллы жюри и зрителей — части итога команды, но их сумма по всем командам («всего 508 баллов») смысла не
+        # имеет: главное — кто впереди по итогу
+        s["shares"] = 0.5 if d.composition_constant or scores else 0.88
     elif p.parts_of_whole and m is not None and m.additive and m.nonneg and cats is not None and cat_count <= 12:
         s["shares"] = 0.9  # части целого: строка «Итого» равна сумме
     elif m is not None and m.additive and m.nonneg and cats is not None and 2 <= cat_count <= 60 and not has_time \
@@ -87,7 +91,7 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
                 base = 0.3  # список без чисел (вехи, контакты): счёт строк по группам — запасной путь, первым — таблица
             if has_time:
                 base = min(base, 0.4)
-            if d.parts_measure is not None or p.parts_of_whole:
+            if (d.parts_measure is not None or p.parts_of_whole) and not scores:
                 base = min(base, 0.55)
             if d.kpi_like:
                 base = min(base, 0.4)
@@ -180,6 +184,12 @@ def _why(task: TaskKind, d: Data) -> str:
         k = len(tv.series)
         metrics = "одна главная метрика" if k <= 1 or tv.dim else f"{count_words(k, 'ряд', 'ряда', 'рядов')}"
         miss = tv.missing
+        if d.forecasts or d.forecast_rows:
+            # после последнего факта — прогноз, а не пустые периоды
+            vals_ = tv.main.values if not tv.dim else [1.0 if any(s_.values[i] is not None for s_ in tv.series) else None
+                                                        for i in range(tv.points)]
+            last_ = max((tv.periods[i] for i, v in enumerate(vals_) if v is not None), default=None)
+            miss = [p_ for p_ in miss if last_ is None or p_ < last_]
         if miss:
             gap = len(miss)
             gp = (f"{number_word(gap, pw[3])} {plural(gap, 'пустой', 'пустых', 'пустых')} "
@@ -187,6 +197,9 @@ def _why(task: TaskKind, d: Data) -> str:
                                                                                       "пустых периода",
                                                                                       "пустых периодов")
             return f"Ось времени, {metrics} и {gp} — их нельзя показать нулём или падением."
+        if k >= 2 and not tv.dim:  # несколько рядов: «как средние менялись» про ряд «Средние (P3)» — не то
+            return f"Есть ось времени ({count_words(tv.points, pw[0], pw[1], pw[2])}) и {metrics} — важно, как они " \
+                   f"менялись {pw[4]}."
         gend = mp.gender if mp is not None else "f"
         changed = {"m": "менялся", "f": "менялась", "n": "менялось", "pl": "менялись"}[gend]
         return (f"Есть ось времени ({count_words(tv.points, pw[0], pw[1], pw[2])}) и {metrics} — важно, как {mlow} "
