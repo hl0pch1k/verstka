@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="t d">
   <title id="t">Как устроен Verstka: разбор шаблона, план, сборка</title>
-  <desc id="d">Шаблон разбирается один раз в manifest.json. Агент (аналитик, дизайнер, критик, правка) читает бриф и манифест, компилятор сверяет каждое число с брифом и пишет outline.json. Вёрстка по дизайн-системе шаблона, проверка качества (42 + 3 проверки, автоисправление) и экспорт в PPTX, PDF и HTML.</desc>
+  <desc id="d">Шаблон разбирается один раз в manifest.json. Агент (аналитик, дизайнер, критик, правка) читает бриф и манифест, компилятор сверяет каждое число с брифом и пишет outline.json. Вёрстка по дизайн-системе шаблона, проверка качества (66 + 3 проверки, автоисправление) и экспорт в PPTX, PDF и HTML.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M1 1 L9 5 L1 9 z" fill="#0077FF"/>
@@ -89,7 +89,7 @@
 
     <rect x="536" y="440" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
     <text x="556" y="480" font-size="22" font-weight="700" fill="#111214">Проверка качества</text>
-    <text x="556" y="510" font-size="17" fill="#5E6776">42 + 3 проверки,</text>
+    <text x="556" y="510" font-size="17" fill="#5E6776">66 + 3 проверки,</text>
     <text x="556" y="534" font-size="17" fill="#5E6776">автоисправление с откатом</text>
 
     <rect x="866" y="440" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
