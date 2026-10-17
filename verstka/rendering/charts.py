@@ -90,6 +90,8 @@ EMU_PER_PT = 12700
 MIN_FILL_CONTRAST = 1.4  # a bar, slice or line must stand off its ground at least this much
 LEAD_MIN_CONTRAST = 2.2  # the lead colour of a chart (its largest slice, its highlighted bar) reads clearly on the ground
 DARK_MUTED_DE = 34.0  # on a dark ground the stepped-back bars are as bright as this distance from the accent allows
+MIN_PLOT = 0.55  # the plot area keeps at least this share of its frame's height (labels, titles and legend take the rest)
+SERIES_CONTRAST = 3.0  # a line, a marker or a bar of a series stands off its ground at least this much (graphical object)
 MIN_SERIES_DE = 20.0  # CIE76 distance between two series colours that a reader can tell apart
 SAME_HUE_DE = 32.0  # … and between two shades of the same hue
 MUTED_TOWARD_GROUND = 0.58  # the bars that step back: accent.1 moved this share of the way to the ground
@@ -287,23 +289,44 @@ def _quiet_fill(text: str, ground: str) -> str:
     return _mix(text, ground, 0.55)
 
 
-def chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Iterable[str] = ()) -> list[str]:
+def legible_color(hex_: str, ground: str, floor: float = SERIES_CONTRAST) -> str:
+    """A series colour that reads on its ground: the colour itself when it stands off the ground at `floor` (3:1), else
+    its own hue and saturation darkened (lightened on a dark ground) until it does — a light template green becomes a
+    deeper green, never another colour."""
+    c = _norm(hex_) or "0077FF"
+    if contrast_ratio(c, ground) >= floor:
+        return c
+    return shade_to(c, ground, floor) or c
+
+
+def chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Iterable[str] = (), floor: float = MIN_FILL_CONTRAST) -> list[str]:
     """`n` series colours: `base[0]` (accent.1) first, then candidates from `base` and `extra` in order that are data
-    colours (not a near-black or near-white grey), visible on the ground (≥ 1.4:1) and ≥ ΔE 20 from every colour
-    already taken. When the template runs out of such colours, tints and shades of the taken ones fill in — still
-    ΔE ≥ 20 from all — and only then a nearer colour is accepted."""
+    colours (not a near-black or near-white grey), visible on the ground (≥ `floor`: 1.4:1 for slices; a line, a
+    marker or a bar of a series asks 3:1 — a light template colour is darkened within its own hue) and ≥ ΔE 20 from
+    every colour already taken. When the template runs out of such colours, tints and shades of the taken ones fill in
+    — still ΔE ≥ 20 from all — and only then a nearer colour is accepted. A template whose colours cannot give `n`
+    distinct ones at `floor` gets the plain 1.4:1 palette instead (a repeated colour would be worse)."""
+    out = _chart_palette(base, ground, n, extra, floor)
+    if floor > MIN_FILL_CONTRAST and len(set(out)) < min(max(1, n), 8):
+        out = _chart_palette(base, ground, n, extra, MIN_FILL_CONTRAST)
+    return out
+
+
+def _chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Iterable[str], floor: float) -> list[str]:
     n = max(1, n)
+    g = _norm(ground)
+    ground_ = g or "FFFFFF"
     cands: list[str] = []
     for h in [*base, *extra]:
         h = _norm(h)
+        if h and floor > MIN_FILL_CONTRAST and _is_data_color(h):
+            h = legible_color(h, ground_, floor)  # (a light colour of the template: its own darker shade)
         if h and h not in cands:
             cands.append(h)
     if not cands:
         cands = ["0077FF"]
-    g = _norm(ground)
-    ground_ = g or "FFFFFF"
     first = cands[0]
-    visible = [h for h in cands[1:] if _is_data_color(h) and contrast_ratio(h, ground_) >= MIN_FILL_CONTRAST]
+    visible = [h for h in cands[1:] if _is_data_color(h) and contrast_ratio(h, ground_) >= floor]
     rest = sorted(visible, key=lambda h: (_chroma(h) < 12, visible.index(h)))
     out = [first]
 
@@ -329,7 +352,7 @@ def chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Ite
         s = [muted_tint(first, ground_), _mix(first, far, 0.55), _mix(first, ground_, 0.72), _mix(first, far, 0.3)]
         for c in out[1:]:
             s += [muted_tint(c, ground_), _mix(c, far, 0.55)]
-        return [h for h in s if contrast_ratio(h, ground_) >= MIN_FILL_CONTRAST]
+        return [h for h in s if contrast_ratio(h, ground_) >= floor]
 
     for de, strict in ((MIN_SERIES_DE, True), (MIN_SERIES_DE, False), (MIN_SERIES_DE * 0.6, False)):
         for h in synth() + rest:
@@ -345,7 +368,7 @@ def chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Ite
         for h in cands_fine:
             if len(out) >= n:
                 return out
-            if h not in out and contrast_ratio(h, ground_) >= MIN_FILL_CONTRAST and far_from_all(h, de, False):
+            if h not in out and contrast_ratio(h, ground_) >= floor and far_from_all(h, de, False):
                 out.append(h)
     i = 0
     while len(out) < n:  # a very long series list: repeat, never fail
@@ -1202,8 +1225,25 @@ def _fmt_value(v: Optional[float], unit: Optional[str], decimals: int) -> str:
     return f"{sign}{pre}{s}{suf}"
 
 
-def _nice_scale(lo: float, hi: float) -> tuple[float, float, float]:
-    """(min, max, major unit) of a quiet value axis: a round step giving 4–5 intervals, the ends snapped to it."""
+_BOUNDED_RE = re.compile(r"(?i)балл|оценк|score|рейтинг|rating|\bnps\b|индекс\s+удовлетвор|удовлетворённост|доля|процент")
+
+
+def bounded_cap(unit: Optional[str], text: Optional[str], values: Iterable[Optional[float]]) -> Optional[float]:
+    """The natural maximum of a bounded measure — a percent, a score out of 100 (an exam score, a rating, NPS, a
+    satisfaction index) — when the data lie inside it; None for a measure that can grow past 100. The axis of such a
+    measure ends at 100 and never runs to 120."""
+    vals = [v for v in values if v is not None]
+    if not vals or max(vals) > 100 or min(vals) < -100:
+        return None
+    u = " ".join((unit or "").split()).lower()
+    if u in ("%", "проц.", "процент", "процентов") or _BOUNDED_RE.search(text or ""):
+        return 100.0
+    return None
+
+
+def _nice_scale(lo: float, hi: float, cap: Optional[float] = None) -> tuple[float, float, float]:
+    """(min, max, major unit) of a quiet value axis: a round step giving 4–5 intervals, the ends snapped to it. `cap`: the
+    natural maximum of a bounded measure (`bounded_cap`) — an axis that would run past it ends on it instead."""
     if hi <= lo:
         hi = lo + (abs(lo) or 1.0)
     best = None
@@ -1222,6 +1262,24 @@ def _nice_scale(lo: float, hi: float) -> tuple[float, float, float]:
     if best is None:
         return lo, hi, (hi - lo) / 4
     _, a, b, step = best
+    if cap is not None and b > cap + 1e-9 and hi <= cap + 1e-9:
+        capped = None
+        for m in (0.1, 1, 10, 100):
+            for base in (1, 2, 2.5, 5):
+                st = base * mag * m
+                if abs(cap / st - round(cap / st)) > 1e-9:
+                    continue
+                aa = math.floor(lo / st + 1e-9) * st
+                kk = round((cap - aa) / st)
+                if kk < 3 or kk > 7:
+                    continue
+                cost = abs(kk - 4.5) + (0.3 if base == 2.5 else 0.0)
+                if capped is None or cost < capped[0]:
+                    capped = (cost, aa, cap, st)
+        if capped is not None:
+            _, a, b, step = capped
+        else:
+            b = cap
     return a, b, step
 
 
@@ -1410,6 +1468,8 @@ CAT_LINE = 1.25  # a category label's line height over its size
 TURN_SIN = 0.7071  # 45°
 
 
+_YEAR_BARE_RE = re.compile(r"^(?:19|20)(\d{2})$")
+_YEAR_TAIL_RE = re.compile(r"((?:[^\d\s][^\d]*\s))(?:19|20)(\d{2})(?!\d)")
 _DIGIT_GROUP_RE = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
 
 
@@ -1423,6 +1483,12 @@ def label_pieces(label: str) -> list[str]:
     """The pieces a renderer may break a category label between (ordinary spaces, and after the dash of a range;
     never at a no-break space, so never inside a number): each is as wide as the label's narrowest possible line."""
     return [p for p, _ in break_pieces(label, dashes=True)]
+
+
+def short_years(labels: Sequence[str]) -> list[str]:
+    """Period labels with the year cut to its last two digits («янв 2025» → «янв ’25», «III кв. 2025» → «III кв. ’25»,
+    «2005» → «’05»): the last way to keep a crowded time axis straight."""
+    return [_YEAR_BARE_RE.sub(lambda m: "’" + m.group(1), _YEAR_TAIL_RE.sub(lambda m: m.group(1) + "’" + m.group(2), c)) for c in labels]
 
 
 def period_levels(cats: Sequence[str]) -> list[list[str]]:
@@ -1452,6 +1518,7 @@ class CatFit:
     below: float = 0.0  # pt the labels take under the axis
     longest: float = 0.0  # the widest label shown (unturned), pt
     level: int = 0  # shortening level of `period_levels`
+    fits: bool = True  # False: nothing fit the room under the axis, the last resort overshoots it
 
 
 def _cat_room(family: Optional[str]) -> float:
@@ -1470,18 +1537,61 @@ LONG_WORD = 9
 
 
 def _word_room(word: str, lim: float) -> float:
-    return lim * WORD_SAFETY if len(word) >= LONG_WORD else lim
+    """A word cannot wrap: it must stand inside its room with a margin — a long word 3.5 %, a number of four digits and
+    more 8 % (a renderer's fallback face runs wider than the stand-in measured: «202 / 5»)."""
+    if len(word) >= LONG_WORD:
+        return lim * WORD_SAFETY
+    if sum(ch.isdigit() for ch in word) >= 4:
+        return lim * 0.92
+    return lim
 
 
-def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True) -> CatFit:
+_TIME_WORD_RE = re.compile(
+    r"(?i)(?:^|[^а-яёa-z])(?:янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[а-яёa-z]*\.?(?:[^а-яёa-z]|$)"
+    r"|\b(?:19|20)\d{2}\b|кв(?:\.|арт)|\bq[1-4]\b|\b[ivx]{1,3}\s*кв|недел|нед\.|\bw\d+\b|^\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?$|^\d{4}-\d{2}")
+
+
+def is_time_axis(cats: Sequence[str]) -> bool:
+    """True when the labels of an axis are periods in order — months, quarters, years, dates, weeks, or 1…n — a
+    series that reads left to right and can show every second or third label without losing which is which."""
+    labs = [" ".join(str(c).split()) for c in cats if str(c).strip()]
+    if len(labs) < 5:
+        return False
+    if sum(1 for t in labs if _TIME_WORD_RE.search(t)) >= 0.7 * len(labs):
+        return True
+    if all(re.fullmatch(r"\d{1,3}", t) for t in labs):
+        nums = [int(t) for t in labs]
+        return all(b > a for a, b in zip(nums, nums[1:]))
+    return False
+
+
+def thin_picks(n: int, k: int) -> list[int]:
+    """The labels a time axis keeps when it shows every k-th: the first, every k-th after it, and the last (a kept label
+    closer to the last than 0.7 k slots gives way to it)."""
+    k = max(1, k)
+    idx = list(range(0, n, k))
+    if n and idx[-1] != n - 1:
+        if (n - 1) - idx[-1] < 0.7 * k and len(idx) > 1:
+            idx.pop()
+        idx.append(n - 1)
+    return idx
+
+
+def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True, ordered: bool = False) -> CatFit:
     """Category labels measured one by one at the axis font against their slot (`slot` = the plot's width over the
     categories, pt; `below_max` = the most room under the axis the labels may take). In order, at each size of
     `sizes` (the axis size first, smaller ones after): every label on one line as written, then shortened
     (`period_levels`); then turned by 45° (shortest level; every k-th label when turned neighbours would touch) or
-    wrapped between whole words on two lines — `turn_first` picks which is tried first. Nothing is ever left for the
-    renderer to break inside a word: the last resort is the shortest labels turned at the smallest size, as many shown
-    as keep apart."""
+    wrapped between whole words on two lines — `turn_first` picks which is tried first. `ordered` (a time axis): the
+    labels stay straight — one line at a smaller size before anything else, then every 2nd, 3rd … label with the first
+    and the last kept («thin»; a shown label wider than its slot wraps on two lines) — and are turned only when no
+    thinning fits. Nothing is ever left for the renderer to break inside a word: the last resort is the shortest labels
+    turned at the smallest size, as many shown as keep apart (`fits` False)."""
     levels = period_levels(cats)
+    if ordered:
+        cut = short_years(levels[-1])
+        if cut != levels[-1]:
+            levels = levels + [cut]  # (a time axis may cut its years to two digits before it turns)
     n = max(1, len(cats))
     room = _cat_room(family)
     last = levels[-1]
@@ -1510,6 +1620,39 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
                 return CatFit(list(labs), "wrap", size, lines, 1, below, max((width(t, size) for t in labs), default=0.0), lv)
         return None
 
+    def thinned(size: float, force: bool = False) -> Optional[CatFit]:
+        lim = slot * room
+        for lv, labs in enumerate(levels):
+            if any(width(w, size) > _word_room(w, lim) for t in labs for w in label_pieces(t)):
+                continue  # a word wider than its slot is broken inside whatever the neighbours are
+            widest = max((width(t, size) for t in labs), default=0.0)
+            lines = 1 if widest <= lim else max((len(wrap_lines(t, family, size, False, lim, dashes=True)) for t in labs if t), default=1)
+            below = lines * size * CAT_LINE + size * 0.6
+            if lines > 2 or (below > below_max and not force):
+                continue
+            # the fewest hidden labels whose neighbours keep apart (a gap of a quarter of a label between them)
+            kmin = next((kk for kk in range(2, n + 1) if widest * 1.25 <= kk * slot), None)
+            if kmin is None:
+                continue
+            kk = next((x for x in range(kmin, min(n, kmin + 2) + 1) if (n - 1) % x == 0), kmin)  # (ends and steps even)
+            picks = set(thin_picks(n, kk))
+            labels = [t if j in picks else "" for j, t in enumerate(labs)]
+            return CatFit(labels, "thin", size, lines, kk, below, widest, lv)
+        return None
+
+    if ordered:
+        # a time axis: straight and whole — a smaller size before any turning, then thinned out
+        for size in sizes:
+            lim = slot * room
+            for lv, labs in enumerate(levels):
+                if all(width(t, size) <= (_word_room(t, lim) if len(label_pieces(t)) == 1 else lim) for t in labs if t):
+                    return CatFit(list(labs), "flat", size, 1, 1, size * CAT_LINE + size * 0.6, max((width(t, size) for t in labs), default=0.0), lv)
+        for size in sizes:
+            got = thinned(size)
+            if got is not None:
+                return got
+        turn_first = True
+
     for size in sizes:
         lim = slot * room
         for lv, labs in enumerate(levels):
@@ -1521,7 +1664,17 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
             got = step(size)
             if got is not None:
                 return got
-    return turned(min(sizes) if sizes else 10.0, force=True)
+    if ordered:
+        # nothing fits the room under the axis: a time axis still keeps its labels straight (two short lines cost less
+        # than a turned one), the frame is what is too short
+        for size in sorted(sizes):
+            got = thinned(size, force=True)
+            if got is not None:
+                got.fits = False
+                return got
+    got = turned(min(sizes) if sizes else 10.0, force=True)
+    got.fits = False
+    return got
 
 
 def is_other_category(name: str) -> bool:
@@ -1933,8 +2086,10 @@ def _bold_voice(typography: Optional[Typography]) -> bool:
     return max((s.weight_bold_share for s in (typography.scale or []) if s.role in ("display", "h1")), default=0.0) >= BOLD_VOICE_SHARE
 
 
-def _unit_shown_above(slide: Slide, bbox: Bbox, unit_full: str) -> bool:
-    """The caller already wrote the full unit right above the chart (a caption or a heading ending in it)."""
+def _unit_shown_above(slide: Slide, bbox: Bbox, unit_full: str, explicit: bool = False) -> bool:
+    """The caller already wrote the full unit right above the chart (a caption or a heading ending in it). `explicit`:
+    only a caption the composer set for the chart («Unit», «Chart title») counts — never the slide's heading, which
+    happens to say «423 млн ₽»: the value axis's title carries its unit whatever the headline says."""
     u = " ".join(unit_full.split()).lower()
     if not u:
         return False
@@ -1945,6 +2100,8 @@ def _unit_shown_above(slide: Slide, bbox: Bbox, unit_full: str) -> bool:
         return False
     for shp in shapes:
         if not getattr(shp, "has_text_frame", False) or shp.top is None or shp.height is None:
+            continue
+        if explicit and not (shp.name or "").startswith(("Chart title", "Unit")):
             continue
         t = " ".join(shp.text_frame.text.replace(" ", " ").split()).lower()
         if not t:
@@ -2015,11 +2172,23 @@ class _Kit:
     turned: bool = False  # its category labels were turned by 45° or thinned out (every other one blank) to stay whole
     cramped: bool = False  # the plot kept its least width (0.3 of the frame) past the room its axis and end labels leave:
     # the renderer cuts the value axis's labels («1 200 0…»)
+    relieved: set = field(default_factory=set)  # what `_relieve` already gave up
+    plot_share: float = 1.0  # the plot's height over the frame's, after the labels, axis titles and legend took theirs
+    thinned: bool = False  # a time axis shows every k-th label (the first and the last kept)
     x_title: Optional[str] = None  # the category axis's title (a scatter: the X axis's)
     y_title: Optional[str] = None  # the value axis's title (a scatter: the Y axis's), with the word unit
     inset_l: float = 0.0  # pt kept at the left of the frame for an axis title set along the left axis
     inset_b: float = 0.0  # pt kept above the legend for an axis title set under the bottom axis
     xs: list = field(default_factory=list)  # a scatter: the x of every point, per series
+    legend_title: Optional[str] = None  # the group the series belong to («Форма обучения»), set before the legend's entries
+    legend_names: list = field(default_factory=list)
+    legend_per_row: int = 1
+    legend_title_w: float = 0.0
+
+    def cap(self, values: Iterable[Optional[float]], text: Optional[str] = None) -> Optional[float]:
+        """The natural maximum of the measure these values are (`bounded_cap`): its unit and the words that name it."""
+        words = text if text is not None else " ".join(x for x in [self.y_title, self.spec.title, *[(s.name or "") for s in self.series]] if x)
+        return bounded_cap(self.unit, words, values)
 
     @property
     def foot(self) -> float:
@@ -2055,9 +2224,52 @@ def _legend(k: _Kit, names: Sequence[str], side: bool) -> None:
     if side:
         k.legend_w = min(widest + k.fs * 2.4, k.W * 0.45)
     else:
-        per_row = max(1, int(k.W // (widest + k.fs * 2.6)))
+        title_w = (text_width_pt(k.legend_title, k.family, k.fs) * 1.06 + k.fs * 0.8) if k.legend_title else 0.0
+        if title_w > k.W * 0.4:
+            title_w, k.legend_title = 0.0, None  # (a title that long names the legend worse than no title)
+        per_row = max(1, int((k.W - title_w) // (widest + k.fs * 2.6)))
         rows = math.ceil(len(names) / per_row)
         k.legend_h = rows * k.fs * 1.3 + k.fs * 0.9
+        k.legend_names, k.legend_per_row, k.legend_title_w = list(names), per_row, title_w
+
+
+def _legend_title(slide: Slide, k: _Kit, box: Bbox):
+    """The group the legend's series belong to («Форма обучения»), a title in front of the legend entries on their row:
+    a native text box in the muted colour and the legend's size, the legend itself set beside it by a manual layout
+    (a legend has no title of its own). The value axis is named for the measure; the group's name is this title."""
+    if not (k.legend_title and k.legend_names and k.legend_title_w):
+        return None
+    fs, W, H = k.fs, k.W, k.H
+    lg = k.chart._chartSpace.find(f".//{_c('legend')}")
+    if lg is None:
+        return None
+    entry = [text_width_pt(t, k.family, fs) + fs * 2.2 for t in k.legend_names]
+    chunks = [entry[i : i + k.legend_per_row] for i in range(0, len(entry), k.legend_per_row)]
+    row_w = max(sum(c) for c in chunks)
+    group = k.legend_title_w + row_w
+    if group > W:
+        return None
+    x0 = (W - group) / 2.0
+    rows = len(chunks)
+    y0 = H - rows * fs * 1.3 - fs * 0.35
+    _manual_layout(lg, (x0 + k.legend_title_w) / W, y0 / H, row_w / W, rows * fs * 1.3 / H, inner=False)
+    tb = slide.shapes.add_textbox(Emu(box.x + int(round(x0 * EMU_PER_PT))), Emu(box.y + int(round(y0 * EMU_PER_PT))), Emu(int(round(k.legend_title_w * EMU_PER_PT))), Emu(int(round(fs * 1.3 * EMU_PER_PT))))
+    tb.name = "Chart legend title"
+    tf = tb.text_frame
+    tf.word_wrap = False
+    tf.auto_size = MSO_AUTO_SIZE.NONE
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    run = tf.paragraphs[0].add_run()
+    run.text = k.legend_title
+    run.font.size = Pt(fs)
+    run.font.bold = False
+    run.font.color.rgb = _rgb(k.muted)
+    if k.family:
+        run.font.name = k.family
+    run._r.get_or_add_rPr().set("lang", "ru-RU")
+    _fonts_everywhere(tb._element, k.family)
+    return tb
 
 
 def _series_styles(k: _Kit) -> list[dict]:
@@ -2102,6 +2314,7 @@ def add_chart(
     legend: bool = True,
     amounts: bool = False,
     muted_hex: Optional[str] = None,
+    legend_title: Optional[str] = None,
 ):
     """A native chart at `bbox`, finished to the rules in the module docstring. `amounts` (a pie or a doughnut of
     amounts, not percents, drawn with the caller's legend): the chart keeps the amounts as its data and labels its
@@ -2114,8 +2327,11 @@ def add_chart(
     source on the slide clears it — `source_said`); `spec.xy`: the points of a scatter. `muted_hex`: the template's own
     secondary text colour (the composer's footnote colour) for the source line, which stands on the slide outside the
     chart — a colour of the template, as the audit wants every text of the slide. The returned graphic frame carries
-    `verstka_source` (the source line's text box, or None) and `verstka_source_dropped` (the line of a frame too small to
-    hold it, which the caller then prints in its own note; None when nothing was left out)."""
+    `verstka_source` (the source line's text box, or None), `verstka_source_dropped` (the line of a frame too small to
+    hold it, which the caller then prints in its own note; None when nothing was left out) and `verstka_legend_title`
+    (the text box of `legend_title` — the group the series of a stacked or grouped chart belong to, in front of the
+    legend; `spec.legend_title` when the schema has it — or None). `verstka_plot_share`: the plot's height over the
+    frame's after labels, titles and legend; `verstka_font_pt`: the size of the chart's labels."""
     kind = effective_chart_type(spec, outline)
     xs_all: list[list[float]] = []
     if kind == "scatter":
@@ -2183,7 +2399,7 @@ def add_chart(
         palette = [base if share >= 1.0 else _mix(base, ground, share) for base, share in shades]
         accent = lead
     else:
-        palette = chart_palette([lead], ground, max(1, len(series)), extra=extra)
+        palette = chart_palette([lead], ground, max(1, len(series)), extra=extra, floor=SERIES_CONTRAST)
         accent = palette[0]
 
     # --- type: sizes on the template scale, weight from its voice
@@ -2263,8 +2479,8 @@ def add_chart(
         low = y_title.lower()
         if unit_full.lower() in low or short_unit(unit_full).lower() in low:
             axis_unit = True
-        elif not _unit_shown_above(slide, bbox, unit_full):
-            y_title = f"{y_title.rstrip(' ,.:;')}, {unit_full}"
+        elif not _unit_shown_above(slide, bbox, unit_full, explicit=True):
+            y_title = f"{y_title.rstrip(' ,.:;')}, {unit_full}"  # (a heading that says the unit does not take it off the axis)
             axis_unit = True
     head = spec.title or None
     head_is_title = bool(head)
@@ -2350,6 +2566,7 @@ def add_chart(
     k.capped = capped
     k.pct_given = pie_pct
     k.x_title, k.y_title, k.xs = x_title, y_title, xs_all
+    k.legend_title = " ".join((legend_title or getattr(spec, "legend_title", None) or "").split()) or None
     # axis titles take a line of room along their axis: the left one at the frame's left edge, the bottom one above
     # the legend
     left_t, bottom_t = (x_title, y_title) if kind in _HORIZONTAL else (y_title, x_title)
@@ -2385,6 +2602,7 @@ def add_chart(
         _style_pie(k)
     _transparent(chart)
     _fonts_everywhere(cs, family)
+    gf.verstka_legend_title = _legend_title(slide, k, chart_box)
     gf.verstka_source_dropped = src_dropped  # the source line a frame too small for it left out: the caller prints it
     gf.verstka_source = _source_box(slide, Bbox(x=bbox.x, y=bbox.y + bbox.h - int(round(src_h * EMU_PER_PT)), w=bbox.w, h=int(round(src_h * EMU_PER_PT))), src, src_fs, _source_ink(muted_hex, text, muted, ground), family) if src else None
     # for a caller's own legend: the colour of every slice (series), and for a pie its tint as (base, share over the
@@ -2393,6 +2611,8 @@ def add_chart(
     gf.verstka_shades = list(shades) if kind in ("pie", "doughnut") else None
     # a caller trying narrower slots for the chart compares how its labels fit: their width over the slot, and whether
     # they had to be turned or thinned out
+    gf.verstka_plot_share = k.plot_share
+    gf.verstka_font_pt = k.fs  # the size of the chart's labels (`min_frame_height` wants it)
     gf.verstka_squeeze = k.squeeze
     gf.verstka_turned = k.turned
     gf.verstka_cramped = k.cramped
@@ -2466,6 +2686,41 @@ def _value_axis(k: _Kit, show: bool, fs: float, lo: Optional[float], hi: Optiona
     va.tick_labels.number_format = _tick_format(k.unit, tick_decimals(step, k.decimals))
     va.tick_labels.number_format_is_linked = False
     _axis_txpr(va, fs, k.muted, k.family)
+
+
+def _relieve(k: _Kit) -> bool:
+    """Gives the plot room in a frame too short for it, one thing at a time (False: nothing left to give): the legend
+    loses its air and keeps its rows. The axis titles stay — the audit asks every data chart for both."""
+    if "legend" not in k.relieved and k.legend_names:
+        rows = max(1, math.ceil(len(k.legend_names) / max(k.legend_per_row, 1)))
+        tight = rows * k.fs * 1.35 + k.fs * 0.55
+        k.relieved.add("legend")
+        if k.legend_h > tight + 0.5:
+            k.legend_h = tight
+            return True
+    return False
+
+
+def min_frame_height(kind: str, n: int = 1, font_pt: float = 10.8, *, legend_rows: int = 0, x_title: bool = False, value_title: bool = False, label_lines: int = 1) -> float:
+    """The least height (pt) of a chart's frame that still gives a readable plot: the plot keeps `MIN_PLOT` of the frame
+    and at least 5½ lines of type (four gridlines apart); a horizontal bars' plot also a row of 1.3 lines of type for each
+    of its `n` categories (the labels left of the bars never touch). `font_pt` is the size the chart sets its labels at
+    (`gf.verstka_font_pt` of a first draft; the template's chart size snapped up its type scale, never under 2 % of the
+    slide's height). Over and under the plot: the values over the bars, the category labels (`label_lines`: a time axis
+    whose labels wrap is 2), the category axis's title under the plot (`x_title`: a data chart always has one; for
+    horizontal bars `value_title`, the value axis's) and the legend (`legend_rows`). For the composer: about 9½ lines of
+    type for a column chart or a line with a time axis and no titles (≈ 100 pt at 10.8 pt), about 17 with an axis title
+    and a legend, and 1.3 lines of type more for every category of a bars chart."""
+    fs = max(float(font_pt), 8.0)
+    legend = (legend_rows * fs * 1.35 + fs * 0.55) if legend_rows else 0.0
+    if kind in _HORIZONTAL:
+        plot = max(n * fs * 1.3, 5.5 * fs)
+        around = fs * 0.3 + fs * 1.8 + (fs * (TITLE_LINE + 0.35) if value_title else 0.0) + legend
+    else:
+        plot = 5.5 * fs
+        top = fs * 2.4 if kind in ("column", "histogram") else (fs * 0.7 if kind == "stacked_column" else fs * 0.9)  # (values over the bars)
+        around = top + label_lines * fs * CAT_LINE + fs * 0.6 + (fs * (TITLE_LINE + 0.35) if x_title else 0.0) + legend
+    return max(plot + around, around / (1.0 - MIN_PLOT))
 
 
 def _axis_crosses(axis_el, where: str) -> None:
@@ -2709,15 +2964,23 @@ def _style_bars(k: _Kit) -> None:
                     cat_fs = size
                     break
             else:
-                room_h = H - k.title_h - k.foot
-                fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - max(H * 0.3, 0.42 * room_h)))
-                if fit.mode == "turn":
-                    rotate_cols = k.turned = True
+                room_h = H - top - k.foot
+                fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - MIN_PLOT * H), ordered=is_time_axis(cats))
+                if fit.mode in ("turn", "thin"):
+                    rotate_cols = fit.mode == "turn"
+                    k.turned = True
+                    k.thinned = fit.mode == "thin"
                     turned_below = fit.below
                     if fit.labels != list(cats):
                         cats = k.cats = list(fit.labels)
                         _set_categories(k, cats)
                     left, top, pw, ph = box(labels_on, axis_on, fs_val)
+
+    # a frame too short for its plot gives it room (`_relieve`: a title the labels repeat, the legend's air)
+    for _ in range(2):
+        if ph >= MIN_PLOT * H or not _relieve(k):
+            break
+        left, top, pw, ph = box(labels_on, axis_on, fs_val)
 
     # stacked: each value inside its segment where it fits (its width across the bar, its line along it); a value
     # that does not fit leaves its segment bare and brings a quiet value axis to read it by
@@ -2744,10 +3007,45 @@ def _style_bars(k: _Kit) -> None:
         if not all(inside.values()):
             axis_on = True
             left, top, pw, ph = box(labels_on, axis_on, fs_val)
-            lo_n, hi_n, _ = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)))
+            lo_n, hi_n, _ = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)), k.cap(ext))
             inside = fit_inside(pw, ph, lo_n, hi_n)
         if not any(inside.values()):
             labels_on = False
+
+    # horizontal rows hold their labels or the labels give way — never two lines of text over each other: a smaller size
+    # (down to the floor), the legend's air, the values off the bars (the value axis reads them), and last the category
+    # labels thinned out (the first and the last kept)
+    if horizontal and n > 1:
+        def need_h() -> float:
+            return max((len(wrap_lines(c, family, cat_fs, False, cat_w + 0.5, dashes=True)) for c in cats), default=1) * cat_fs * 1.2
+
+        for _ in range(4):
+            pitch = ph / n
+            if labels_on and not stacked and not axis_on and pitch < fs_val * 1.15:
+                labels_on, axis_on = False, True  # (the values stand on the axis instead of over each other)
+                left, top, pw, ph = box(labels_on, axis_on, fs_val)
+                continue
+            if need_h() <= pitch * 0.95:
+                break
+            smaller = [x for x in sorted({_snap(cat_fs * 0.9), _snap(cat_fs * 0.82), floor}, reverse=True) if floor - 0.05 <= x < cat_fs - 0.05]
+            fitting = next((x for x in smaller if max((len(wrap_lines(c, family, x, False, min(cat_w, W * 0.42) + 0.5, dashes=True)) for c in cats), default=1) * x * 1.2 <= pitch * 0.95), None)
+            if fitting is not None or smaller:
+                cat_fs = fitting if fitting is not None else smaller[-1]
+                cat_w = min(max((text_width_pt(c, family, cat_fs) for c in cats), default=20.0), W * 0.42)
+                left, top, pw, ph = box(labels_on, axis_on, fs_val)
+                if fitting is not None:
+                    continue
+            if _relieve(k):
+                left, top, pw, ph = box(labels_on, axis_on, fs_val)
+                continue
+            break
+        pitch = ph / n
+        if need_h() > pitch * 0.95:
+            picks = set(thin_picks(n, max(2, math.ceil(need_h() / max(pitch * 0.95, 1.0)))))
+            thin_cats = [c if j in picks else "" for j, c in enumerate(cats)]
+            cats = k.cats = thin_cats
+            _set_categories(k, cats)
+            k.turned = k.thinned = True
 
     plot = k.plot
     plot.gap_width = gap
@@ -2839,10 +3137,11 @@ def _style_bars(k: _Kit) -> None:
         if labels_on and not axis_on:
             hi = (max(tops) if stacked else max(flat)) or None
     if axis_on and flat:
-        lo, hi, step = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)))
+        lo, hi, step = _nice_scale(min(0.0, min(ext)), max(0.0, max(ext)), k.cap(ext))
     _value_axis(k, axis_on, fs, lo, hi, step)
     if horizontal:
         _axis_crosses(k.chart.value_axis._element, "max")  # (the categories run top-down: «max» is the bottom edge)
+    k.plot_share = ph / H
     _plot_layout(k, left, top, pw, ph)
 
 
@@ -3058,7 +3357,7 @@ def _style_line(k: _Kit) -> None:
                 lo_raw = 0.0
             else:
                 lo_raw = max(0.0, mn - (mx - mn) * 0.2)
-            lo, hi, step = _nice_scale(lo_raw, max(mx, 0.0))
+            lo, hi, step = _nice_scale(lo_raw, max(mx, 0.0), k.cap(flat))
             if not has_neg:
                 lo = max(0.0, lo)
         else:
@@ -3070,18 +3369,25 @@ def _style_line(k: _Kit) -> None:
 
     marker = 7 if multi else 8
     lab_h = fs_val * 1.2
-    top = k.title_h + ((max(fs_val, _snap(fs_val * ratio)) * 1.25 + marker / 2 + 6) if every_point else (fs * 0.9 if ends else fs * 0.9))
-    if axis_on:
-        left = k.inset_l + _axis_room([lo or 0.0, hi or 0.0] + flat, k.unit, k.decimals, family, fs, 1.2)
-    else:
-        left = k.inset_l + max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
-    right = max(1.0, end_w + fs * 0.9 - slot / 2 + 6) if ends else max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
-    pw = max(W - left - right, W * 0.3)
     floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
     sizes = sorted({cat_fs, max(min(floor, cat_fs), _snap(cat_fs * 0.9)), max(min(floor, cat_fs), _snap(cat_fs * 0.82))}, reverse=True)
-    room_h = H - top - k.foot
-    below_max = max(0.0, room_h - max(H * 0.3, 0.42 * room_h))
-    fit = fit_categories(cats, family, sizes, pw / n, below_max, turn_first=n >= 5)
+    ordered = is_time_axis(cats)  # a time axis thins out its labels before it turns any
+    top_head = k.title_h + ((max(fs_val, _snap(fs_val * ratio)) * 1.25 + marker / 2 + 6) if every_point else fs * 0.9)
+    for _ in range(3):
+        # the plot keeps `MIN_PLOT` of the frame: the labels under it take what is left; when no way of setting them fits,
+        # an axis title that says what the labels say and the legend's air give way (`_relieve`), then the labels again
+        top = top_head
+        if axis_on:
+            left = k.inset_l + _axis_room([lo or 0.0, hi or 0.0] + flat, k.unit, k.decimals, family, fs, 1.2)
+        else:
+            left = k.inset_l + max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
+        right = max(1.0, end_w + fs * 0.9 - slot / 2 + 6) if ends else max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
+        pw = max(W - left - right, W * 0.3)
+        room_h = H - top - k.foot
+        below_max = max(0.0, room_h - MIN_PLOT * H)
+        fit = fit_categories(cats, family, sizes, pw / n, below_max, turn_first=n >= 5, ordered=ordered)
+        if fit.fits or not _relieve(k):
+            break
     if fit.mode == "turn" and fit.labels and fit.labels[0]:
         # the first label turned hangs left of its point: the plot starts clear of it (and of a left axis title)
         hang = k.inset_l + TURN_SIN * (text_width_pt(fit.labels[0], family, fit.size) + CAT_LINE * fit.size) - pw / n / 2 + 2
@@ -3094,12 +3400,14 @@ def _style_line(k: _Kit) -> None:
         _set_categories(k, cats)
     bottom = k.foot + fit.below
     ph = max(H - top - bottom, H * 0.3)
+    k.plot_share = ph / H
     real_slot = pw / n
     k.cramped = W - left - right < pw - 0.5
     rotate = fit.mode == "turn"
     skip = 1
     k.squeeze = fit.longest / max(real_slot, 1.0)
     k.turned = rotate or fit.keep > 1  # turned or thinned out: every label shown is whole
+    k.thinned = fit.mode == "thin"
     k.cat_fit = fit
 
     # paint
@@ -3229,7 +3537,7 @@ def _style_line(k: _Kit) -> None:
 # ---------------------------------------------------------------------------------------------- scatter
 
 
-def _scatter_range(vals: Sequence[float], max_steps: int = 9, anchor: float = 0.15) -> tuple[float, float, float]:
+def _scatter_range(vals: Sequence[float], max_steps: int = 9, anchor: float = 0.15, cap: Optional[float] = None) -> tuple[float, float, float]:
     """(min, max, step) of a scatter axis on round ticks. A scatter has no baseline whose length a bar's would carry, so
     the axis starts at zero only when the data sit that near it (its lowest point within `anchor` of its highest), else
     at a round value under the lowest point; the step is the round one that wastes the least of the axis (up to
@@ -3241,6 +3549,8 @@ def _scatter_range(vals: Sequence[float], max_steps: int = 9, anchor: float = 0.
     else:
         lo_raw = mn - span * 0.05
     hi_raw = mx + span * 0.02  # (a marker's radius of clearance at the high edge)
+    if cap is not None and mx <= cap:
+        hi_raw = min(hi_raw, cap)  # a bounded measure (a score out of 100) ends on its natural maximum
     if hi_raw <= lo_raw:
         hi_raw = lo_raw + (abs(lo_raw) or 1.0)
     width = hi_raw - lo_raw
@@ -3254,11 +3564,13 @@ def _scatter_range(vals: Sequence[float], max_steps: int = 9, anchor: float = 0.
             n = round((b - a) / step)
             if n < 3 or n > max(3, max_steps):
                 continue
+            if cap is not None and mx <= cap and b > cap + 1e-9:
+                continue
             cost = abs(n - 5.0) * 0.18 + 3.0 * ((b - a) - width) / (b - a) + (0.3 if base == 2.5 else 0.0)
             if best is None or cost < best[0]:
                 best = (cost, a, b, step)
     if best is None:
-        lo, hi, step = _nice_scale(lo_raw, hi_raw)
+        lo, hi, step = _nice_scale(lo_raw, hi_raw, cap if (cap is not None and mx <= cap) else None)
     else:
         _, lo, hi, step = best
     if mn >= 0:
@@ -3310,8 +3622,11 @@ def _style_scatter(k: _Kit) -> None:
     ys_flat = [y for ys in k.values for y in ys] or [0.0]
     npts = len(ys_flat)
     # as many round steps as the frame's labels have room for: a tick label wants ~5.5 sizes of width, ~2.6 of height
-    x_lo, x_hi, x_step = _scatter_range(xs_flat, max(4, min(9, int(W / (fs * 5.5)))))
-    y_lo, y_hi, y_step = _scatter_range(ys_flat, max(4, min(9, int(H / (fs * 2.6)))))
+    # (a measure with a natural maximum — a score out of 100, a percent — ends its axis on it)
+    x_cap = bounded_cap(None, k.x_title, xs_flat)
+    y_cap = k.cap(ys_flat, " ".join(x for x in [k.y_title, *[(s.name or "") for s in k.series]] if x))
+    x_lo, x_hi, x_step = _scatter_range(xs_flat, max(4, min(9, int(W / (fs * 5.5)))), cap=x_cap)
+    y_lo, y_hi, y_step = _scatter_range(ys_flat, max(4, min(9, int(H / (fs * 2.6)))), cap=y_cap)
     want = k.spec.highlight_index
     hl = want if (want is not None and not multi and 0 <= want < len(k.values[0])) else None
     size = 8 if npts <= 30 else (7 if npts <= 120 else 5)
@@ -3330,6 +3645,10 @@ def _style_scatter(k: _Kit) -> None:
     bottom = k.foot + fs * CAT_LINE + fs * 0.6
     pw = max(W - left - right, W * 0.3)
     ph = max(H - top - bottom, H * 0.3)
+    if ph < MIN_PLOT * H and _relieve(k):  # (a short frame: the legend's air goes before the plot is squeezed)
+        bottom = k.foot + fs * CAT_LINE + fs * 0.6
+        ph = max(H - top - bottom, H * 0.3)
+    k.plot_share = ph / H
 
     muted_fill = muted_tint(k.accent, k.ground)
     for i, ser in enumerate(k.plot.series):

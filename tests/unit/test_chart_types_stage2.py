@@ -22,6 +22,7 @@ from verstka.rendering.charts import (
     NO_HIGHLIGHT,
     STACK_LABEL_CONTRAST,
     _chroma,
+    _hue_gap,
     _label_spot,
     _scatter_range,
     add_chart,
@@ -158,7 +159,9 @@ def test_stacked_bars_are_parts_of_one_whole():
         sers = bc.findall(f"{C}ser")
         fills = [_ser_fill(s) for s in sers]
         # the template's categorical colours, the accent first, every two clearly apart; «Прочее» quiet (no hue)
-        assert fills[0] == "0077FF" and set(fills[:3]) <= set(PALETTE)  # (not a colour of the template: not a series colour)
+        # (a colour of the template, or its own hue darkened to read at 3:1 — never another hue)
+        assert fills[0] == "0077FF" and all(any(_hue_gap(f, p) <= 8 for p in PALETTE) for f in fills[:3])
+        assert all(contrast_ratio(f, "FFFFFF") >= 3.0 for f in fills[:3])
         assert all(delta_e(a, b) >= 20 for i, a in enumerate(fills) for b in fills[i + 1 :])
         assert _chroma(fills[3]) < 12
         # a hairline of the ground between the segments, each value inside its segment
@@ -172,7 +175,7 @@ def test_stacked_series_never_take_the_story_paint():
     # «2025 / 2026» stacked are two parts, not a past and a lead: two template colours, not a tint of the accent
     spec = ChartSpec(type="stacked_column", categories=["I", "II", "III"], series=[InlineSeries(name="2025", values=[3, 4, 5]), InlineSeries(name="2026", values=[4, 5, 6])])
     fills = [_ser_fill(s) for s in _cs(spec).iter(f"{C}ser")]
-    assert fills[0] == "0077FF" and fills[1] in PALETTE[1:]
+    assert fills[0] == "0077FF" and fills[1] != fills[0] and any(_hue_gap(fills[1], p) <= 8 for p in PALETTE[1:])  # (a template colour, darkened to 3:1)
 
 
 def test_grouped_bars_highlight_a_category_and_keep_the_series_order():
@@ -683,7 +686,10 @@ def test_stacked_values_on_the_brand_blue_and_pink_are_white_and_on_a_light_fill
     for kind in ("stacked_column", "stacked_bar"):
         ink = _ink_by_fill(spec.model_copy(update={"type": kind}), style)
         assert ink["0077FF"] == "FFFFFF" and ink["FF3985"] == "FFFFFF"
-        assert ink["8BBFFA"] in ("000000", "1A1A1A") and contrast_ratio(ink["8BBFFA"], "8BBFFA") >= 4.5
+        # the template's light blue no longer paints a series as it is: the third colour stands off the ground at 3:1
+        # (its own shade too close to the accent: a deeper shade of the accent)
+        light = [f for f in ink if f not in ("0077FF", "FF3985")]
+        assert len(light) == 1 and contrast_ratio(light[0], "FFFFFF") >= 3.0 and contrast_ratio(ink[light[0]], light[0]) >= 3.0
         for fill, c in ink.items():
             assert c == label_on(fill, TEXT, "FFFFFF"), (kind, fill)  # one rule, written once
 

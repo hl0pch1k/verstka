@@ -21,7 +21,7 @@ import html
 import math
 from typing import Optional
 
-from verstka.rendering.charts import SEAM_PT, TITLE_LINE, label_on
+from verstka.rendering.charts import SEAM_PT, TITLE_LINE, label_on, thin_picks
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.schemas.common import contrast_ratio
 from verstka.schemas.deck_ir import IRAxisScale, IRChart, IRChartSeries, IRPointLabel
@@ -183,6 +183,15 @@ def _cat_step(cats: list[str], slot: float, size: float) -> int:
     """Show every k-th category label when they would run into each other (a line is continuous)."""
     longest = max((_width(c, size) for c in cats), default=0.0)
     return max(1, math.ceil(longest / (slot * 0.9))) if longest > slot * 0.9 else 1
+
+
+def _cat_shown(cats: list[str], slot: float, size: float) -> set[int]:
+    """Which category labels are drawn: those the chart wrote (the PPTX keeps the labels of a thinned time axis and blanks
+    the others — each is drawn), else every k-th when they would run into each other, always with the first and the last."""
+    if any(not c.strip() for c in cats):
+        return {i for i, c in enumerate(cats) if c.strip()}
+    step = _cat_step(cats, slot, size)
+    return set(thin_picks(len(cats), step)) if step > 1 else set(range(len(cats)))
 
 
 def _legend_rows(parts: list, items: list[tuple[str, str, bool]], width: float, y_bottom: float, size: float, muted: str) -> None:
@@ -453,6 +462,7 @@ def _columns(chart, series, cats, n_cat, width, height, top, colors, muted, base
     slot = pw / max(n_cat, 1)
     group, bar, pitch, inner = _bar_geometry(chart, slot, k_ser, stacked, min(slot / 1.7, width * 0.16 * min(k_ser, 3) * 0.9 if k_ser > 1 else width * 0.16))
     seam = SEAM_PT if (stacked or chart.gap_width == 0) else 0.0
+    shown_cats = _cat_shown(cats, slot, font_px)
     for i in range(n_cat):
         x_g = left + i * slot + (slot - group) / 2
         for k, s in enumerate(series):
@@ -479,7 +489,7 @@ def _columns(chart, series, cats, n_cat, width, height, top, colors, muted, base
                 else:
                     y = (y0 - size * 0.7) if v >= 0 else (y1 + size * 0.8)
                 parts.append(_txt(x + bar / 2, y, t, size, c, bold=b))
-        if i < len(cats) and i % _cat_step(cats, slot, font_px) == 0:
+        if i < len(cats) and i in shown_cats:
             parts.append(_txt(left + i * slot + slot / 2, height - font_px * 1.0, cats[i], font_px, muted))
     y_base = y_of(0.0) if lo <= 0.0 <= hi else y_of(lo)
     parts.append(f'<line x1="{left:.1f}" y1="{y_base:.1f}" x2="{left + pw:.1f}" y2="{y_base:.1f}" {base_rule} stroke-width="0.75"/>')
@@ -636,9 +646,9 @@ def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, mut
                     parts.append(_txt(x - 7, y, t, size, c, anchor="end", bold=b))
                 else:
                     parts.append(_txt(x, y - size * 1.0, t, size, c, bold=b))
-    skip = _cat_step(cats, step_x, font_px)
+    shown_cats = _cat_shown(cats, step_x, font_px)
     for i, c in enumerate(cats):
-        if i % skip == 0:
+        if i in shown_cats:
             parts.append(_txt(x_of(i), pad_t + ph + font_px * 1.2, c, font_px, muted))
     return parts
 
@@ -728,10 +738,13 @@ def _pie(chart, s, cats, width, height, top, colors, text_hex, muted, font_px, l
     parts: list = []
     vals = s.values
     total = sum(v for v in vals if v) or 1.0
-    side_legend = width / max(height, 1.0) >= 1.45
+    # a pie the slide gives its own legend (the composer's swatches and shares beside it: the chart has none) is a circle
+    # on the whole frame — no second legend under it
+    legend_on = bool(chart.has_legend)
+    side_legend = legend_on and width / max(height, 1.0) >= 1.45
     leg_w = (max((_width(c, font_px) for c in cats), default=40.0) + font_px * 2) if side_legend else 0.0
     leg_rows = 1 if side_legend or sum(_width(c, font_px) + font_px * 2.2 for c in cats) <= width else 2
-    leg_h = 0.0 if side_legend else font_px * (0.5 + 1.5 * leg_rows)
+    leg_h = 0.0 if (side_legend or not legend_on) else font_px * (0.5 + 1.5 * leg_rows)
     r = max(10.0, min((width - leg_w - font_px * 2) / 2, (height - top - leg_h - font_px) / 2))
     cx = (width - leg_w - font_px * 1.5) / 2 if side_legend else width / 2
     cy = top + (height - top - leg_h) / 2
@@ -772,6 +785,6 @@ def _pie(chart, s, cats, width, height, top, colors, text_hex, muted, font_px, l
             parts.append(f'<rect x="{lx:.1f}" y="{ly - font_px * 0.35:.1f}" width="{font_px * 0.7:.1f}" height="{font_px * 0.7:.1f}" fill="#{col}"/>')
             parts.append(_txt(lx + font_px, ly, c, font_px, muted, anchor="start"))
             ly += font_px * 1.5
-    else:
+    elif legend_on:
         _legend_rows(parts, [(c, s.point_colors.get(j) or colors[j % len(colors)], False) for j, c in enumerate(cats[: len(vals)])], width, height - font_px * 0.7, font_px, muted)
     return parts

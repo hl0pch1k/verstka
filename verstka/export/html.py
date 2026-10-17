@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import html
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -82,6 +83,22 @@ def _runs_html(p, slide_w: int, default_color: str, default_font: str) -> str:
     return "".join(out)
 
 
+def _rgba(hex_: str, alpha: float) -> str:
+    """`#RRGGBB` at `alpha` as CSS (a translucent swatch keeps the tint PowerPoint composites over the slide)."""
+    if alpha >= 0.999 or len(hex_) != 6:
+        return f"#{hex_}"
+    r, g, b = int(hex_[0:2], 16), int(hex_[2:4], 16), int(hex_[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha:.3f})"
+
+
+def _inset_css(e: IRElement, slide_w: int) -> str:
+    """The text frame's own insets (a:bodyPr lIns…), as the slide's width share — a text box with none (0) keeps its
+    whole width for its text: «46%» in a 38 pt box stays on one line; a figure in a box as tall as its line is not
+    pushed out of it by padding the PowerPoint box never had."""
+    l, t, r, b = e.insets_emu
+    return ";".join(f"padding-{side}:{v / max(slide_w, 1) * 100:.3f}cqw" for side, v in (("top", t), ("right", r), ("bottom", b), ("left", l)))
+
+
 def _text_html(e: IRElement, slide_w: int, default_color: str, default_font: str) -> str:
     align = {"ctr": "center", "r": "right", "just": "justify"}.get(e.paragraphs[0].align or "", "left") if e.paragraphs else "left"
     vpos = {"ctr": "center", "b": "flex-end"}.get(e.anchor or "t", "flex-start")
@@ -101,13 +118,14 @@ def _text_html(e: IRElement, slide_w: int, default_color: str, default_font: str
             inner.append(f'<p style="text-align:{align}{_lh(p)}">{runs}</p>')
     if in_list:
         inner.append("</ul>")
-    return f'<div class="tx" style="justify-content:{vpos}">{"".join(inner)}</div>'
+    nowrap = "" if e.wrap else ";white-space:nowrap"
+    return f'<div class="tx" style="justify-content:{vpos};{_inset_css(e, slide_w)}{nowrap}">{"".join(inner)}</div>'
 
 
 def _shape_css(e: IRElement, slide_w: int, slide_h: int) -> str:
     css = []
     if e.fill_hex:
-        css.append(f"background:#{e.fill_hex}")
+        css.append(f"background:{_rgba(e.fill_hex, e.fill_alpha)}")
     if e.line_hex:
         css.append(f"border:1px solid #{e.line_hex}")
     if e.geometry == "ellipse":
@@ -118,6 +136,23 @@ def _shape_css(e: IRElement, slide_w: int, slide_h: int) -> str:
     if e.rotation:
         css.append(f"transform:rotate({e.rotation:.1f}deg)")
     return ";".join(css)
+
+
+_NUMBER_CELL = re.compile(
+    r"[−+\-–]?\d[\d\s\u00a0\u202f.,]*\s*(?:%|п\.\s?п\.|×|x|₽|\$|€|руб\.?|тыс\.?|млн|млрд|трлн|чел\.?|шт\.?|мин\.?|ч\.?)*(?:\s*(?:₽|\$|€|руб\.?))?"
+)
+
+
+def _number_columns(rows: list[list[str]]) -> list[bool]:
+    """Which columns of a table are numbers (every body cell a figure with its unit, «1 433», «+38%», «423 млн ₽»): they
+    are right-aligned under their right-aligned headers, a column of words stays left-aligned under its header."""
+    width = max((len(r) for r in rows), default=0)
+    out = []
+    for j in range(width):
+        cells = [" ".join((r[j] if j < len(r) else "").split()) for r in rows[1:]]
+        cells = [c for c in cells if c and c not in ("—", "-", "–")]
+        out.append(bool(cells) and all(_NUMBER_CELL.fullmatch(c) for c in cells))
+    return out
 
 
 def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, cache: dict, manifest: TemplateManifest, default_font: str) -> str:
@@ -141,13 +176,14 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
     if e.type == "table" and e.table and e.table.rows:
         ts = manifest.components.table_style
         rows = e.table.rows
-        head = "".join(f'<th style="background:#{e.table.header_fill_hex or ts.header_fill_hex or "0077FF"};color:#{ts.header_text_hex or "FFFFFF"}">{html.escape(c)}</th>' for c in rows[0])
-        body = "".join("<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
+        num = _number_columns(rows)
+        head = "".join(f'<th{" class=n" if num[j] else ""} style="background:#{e.table.header_fill_hex or ts.header_fill_hex or "0077FF"};color:#{ts.header_text_hex or "FFFFFF"}">{html.escape(c)}</th>' for j, c in enumerate(rows[0]))
+        body = "".join("<tr>" + "".join(f'<td{" class=n" if num[j] else ""}>{html.escape(c)}</td>' for j, c in enumerate(r)) + "</tr>" for r in rows[1:])
         return f'<div class="el" style="{style}"><table style="font-size:{_size_css(ts.font_size_pt, ir.slide_w)};color:#{ts.body_text_hex or text_default}"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
     if e.type in ("text", "shape"):
         box = _shape_css(e, ir.slide_w, ir.slide_h)
         inner = _text_html(e, ir.slide_w, text_default, default_font) if e.has_text else ""
-        return f'<div class="el" style="{style};{box}">{inner}</div>'
+        return f'<div class="el txt" style="{style};{box}">{inner}</div>'
     if e.type == "connector":
         return f'<div class="el" style="{style};border-top:1px solid #{e.line_hex or "999999"}"></div>'
     return ""
@@ -199,13 +235,13 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
 body{{margin:0;background:#1e1e22;font-family:'{html.escape(default_font)}',Play,Arial,sans-serif;padding:24px 16px}}
 .deck{{max-width:1280px;margin:0 auto}}
 .slide{{position:relative;width:100%;aspect-ratio:{ratio:.5f};overflow:hidden;margin:0 auto 28px;box-shadow:0 10px 30px rgba(0,0,0,.35);border-radius:6px;container-type:inline-size}}
-.el{{position:absolute;box-sizing:border-box;overflow:hidden}}
+.el{{position:absolute;box-sizing:border-box;overflow:hidden}} .el.txt{{overflow:visible}}
 .el.chrome{{pointer-events:none}}
 .pic{{background-size:cover;background-position:center;background-repeat:no-repeat}} .pic.contain{{background-size:contain}}
 {image_css}
-.tx{{display:flex;flex-direction:column;height:100%;padding:0.35cqw 0.6cqw;box-sizing:border-box;line-height:1.2;word-wrap:break-word}}
+.tx{{display:flex;flex-direction:column;height:100%;box-sizing:border-box;line-height:1.2;word-wrap:break-word}}
 .tx p{{margin:0 0 0.25em 0}} .tx ul{{margin:0;padding-left:1.2em}} .tx li{{margin:0 0 0.25em 0}}
-table{{border-collapse:collapse;width:100%;height:100%}} th,td{{padding:0.3em 0.6em;text-align:left;border-bottom:1px solid rgba(128,128,128,.35)}} td:not(:first-child){{text-align:right}}
+table{{border-collapse:collapse;width:100%;height:100%}} th,td{{padding:0.3em 0.6em;text-align:left;border-bottom:1px solid rgba(128,128,128,.35)}} th.n,td.n{{text-align:right}}
 .num{{position:absolute;right:1cqw;bottom:0.6cqw;font-size:1.1cqw;opacity:.35}}
 @media print{{body{{background:#fff;padding:0}} .slide{{box-shadow:none;border-radius:0;page-break-after:always;margin:0}} .num{{display:none}}}}
 </style></head><body><div class="deck">
