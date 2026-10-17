@@ -480,7 +480,7 @@ def test_the_designer_prompts_carry_the_editors_rules():
     skills = SkillsRegistry.load()
     designer = skills.get("slide_designer")
     critic = skills.get("design_critic")
-    assert designer.version == "1.6.0" and critic.version == "1.3.1"
+    assert designer.version == "1.7.0" and critic.version == "1.3.1"
     text = (Path(__file__).resolve().parents[2] / "skills" / "slide_designer" / "prompts" / "system.md").read_text(encoding="utf-8")
     for rule in ("распределены неравномерно", "never the headline in other words", "ALL its items", "names its factors", "titled the same way", "no cause, effect or classification", "signature slides", "within the words that design gives",
                  "never cards whose only content is a figure", "on every item of a numbered sequence or null on every item"):

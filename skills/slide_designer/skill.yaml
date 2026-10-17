@@ -1,5 +1,5 @@
 name: slide_designer
-version: 1.6.0
+version: 1.7.0
 role: llm
 description: >
   Designs ONE slide of the deck (Agent v2): chooses its visual form by the visual-form guide and the user's explicit
@@ -77,3 +77,7 @@ changelog:
     as an ordinal and a position badge as no figure (uniform_numbers: all or none), agent.keep_promise restores the
     lost items from the source's own list or takes the promise out of the headline, agent._poor_form keeps the
     variants' reshape off those forms."
+  - "1.7.0: qa3 (VK model): an edited headline cut mid-phrase to fit 10 words («…опросы не проводились при переходе»),
+    a key figure labelled only «в неделю» with the brief's «до 5 часов» shown as «5 часов». Now: a headline is a whole
+    statement (say less, never cut), a label says what the figure counts and a bound stays. Guards: slide_edit
+    whole_headline, agent.plain_labels."

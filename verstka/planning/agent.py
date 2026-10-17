@@ -3115,31 +3115,188 @@ def keep_promise(s: OutlineSlide, source: str, fallback: Optional[str] = None) -
 _ASK_SENTENCE_RE = re.compile(r"^\s*(?:просим|прошу|призываем|приглашаем|ждём|ждем|предлагаем\s+(?:вам|утвердить|поддержать|принять|начать))(?![\wё])", re.I)
 
 
-def keep_ask(s: OutlineSlide, source: str) -> list[str]:
-    """The brief's request to its audience reaches the slide (S5: «Просим утвердить запуск и бюджет на продвижение»
-    left only in the notes): a request sentence of the slide's source that the slide does not show becomes its takeaway
-    when it has none, else a line under its block, else it takes the takeaway's place — the ask is what the deck is
-    for. What changed, in English, for the warnings."""
-    if s.kind.value in FRAME_KINDS or s.data is not None or not (source or "").strip():
-        return []
-    said: list[str] = []
-    for sn in H.split_sentences(source) or []:
-        ask = H.strip_end(sn.strip())
-        if not _ASK_SENTENCE_RE.match(ask) or len(ask.split()) > 16:
+@functools.lru_cache(maxsize=16)
+def brief_asks(text: str) -> tuple[tuple[str, str], ...]:
+    """The brief's requests to its audience, (the section's heading or "", the sentence): a sentence that asks («Просим
+    утвердить запуск и бюджет на продвижение») anywhere, and every sentence of a section headed as an ask («Что нужно от
+    партнёров»: «Зачёт модулей программы как дисциплин по выбору, аудитории для практикумов, …»)."""
+    out: list[tuple[str, str]] = []
+    heading, ask_section = "", False
+    for line in (text or "").splitlines():
+        m = _HEADING_SENTENCE_RE.match(line)
+        if m:
+            heading = H.strip_end(m.group("t"))
+            ask_section = bool(_ASK_SECTION_RE.search(heading))
             continue
-        if _Shown(_visible_text(s)).line(ask):
+        if not line.strip() or re.match(r"^\s*#\s", line) or line.lstrip().startswith("|"):
+            continue
+        for sn in H.split_sentences(line.strip()) or [line.strip()]:
+            sn = H.strip_end(sn.strip())
+            if sn and (ask_section or _ASK_SENTENCE_RE.match(sn)):
+                out.append((heading if ask_section else "", sn))
+    return tuple(out)
+
+
+def _ask_parts(sentence: str) -> list[str]:
+    """An ask that lists what it asks for («Зачёт модулей …, аудитории для практикумов, продвижение …») as its parts; a
+    sentence with a verb before its list («VK Education даёт платформу, наставников …») or a request is one line."""
+    if _ASK_SENTENCE_RE.match(sentence):
+        return [sentence]
+    parts = _enum_parts(sentence)
+    if len(parts) >= 2 and not any(m.group(0).lower() not in _NOT_VERBS for m in _VERB_RE.finditer(parts[0])):
+        return parts
+    return [sentence]
+
+
+def ask_shown(sentence: str, text: str) -> bool:
+    """The deck (or a slide: `text`, what it shows) says the ask: its parts, most of them."""
+    shown = _Shown(text)
+    parts = _ask_parts(sentence)
+    return sum(1 for p in parts if shown.line(p)) * 2 > len(parts) if len(parts) > 1 else shown.line(sentence)
+
+
+def keep_ask(s: OutlineSlide, source: str, asks: Optional[list[tuple[str, str]]] = None) -> list[str]:
+    """The brief's requests to its audience reach the slide (S5: «Просим утвердить запуск и бюджет на продвижение» left
+    in the notes; the partners' ask of the edu brief dropped by a revision). `asks`: the brief's asks (brief_asks) to
+    place here, by default the request sentences of the slide's source. A request is the slide's takeaway — its callout,
+    never a line in small print (qa3 N-L8) — and the takeaway it replaces becomes a line when there is room; an ask that
+    lists what it asks for comes as the slide's lines (its parts, or one line «<heading>: a, b, c» when there is no room
+    for them). What changed, in English, for the warnings."""
+    if s.kind.value in FRAME_KINDS or s.data is not None:
+        return []
+    if asks is None:
+        asks = [("", H.strip_end(sn.strip())) for sn in (H.split_sentences(source or "") or []) if _ASK_SENTENCE_RE.match(sn.strip())]
+    said: list[str] = []
+    for heading, ask in asks:
+        if len(ask.split()) > 24 or ask_shown(ask, _visible_text(s)):
             continue
         c = s.content
         room = {"comparison": 2, "two_column": 2}.get(s.kind.value, _LINE_ROOM.get(s.kind.value, 0)) - len(c.bullets)
-        if not s.takeaway:
+        if c.chart is not None:
+            room = min(room, 1)
+        parts = _ask_parts(ask)
+        if _ASK_SENTENCE_RE.match(ask) and len(ask.split()) <= 14:
+            old_tk = s.takeaway
             s.takeaway = ask
-            said.append(f"the brief's request «{ask[:60]}» was not on the slide: the slide's takeaway now")
-        elif room > 0 and not c.chart:
-            c.bullets.append(ask)
-            said.append(f"the brief's request «{ask[:60]}» was not on the slide: a line of the slide now")
+            if old_tk and room > 0 and not adds_nothing(old_tk, s.headline):
+                c.bullets.append(old_tk)
+            said.append(f"the brief's request «{ask[:60]}» is the slide's takeaway now" + (f" (the takeaway «{old_tk[:40]}» a line)" if old_tk else ""))
+            continue
+        shown = _Shown(_visible_text(s))
+        missing = [p for p in parts if not shown.line(p)]
+        if len(missing) > 1 and room >= len(missing):
+            c.bullets.extend(H.cap_first(H.strip_end(p)) for p in missing)
+        elif room >= 1:
+            line = f"{heading}: {', '.join(_low_first(p) for p in parts)}" if heading and len(parts) > 1 else H.cap_first(ask)
+            c.bullets.append(H.strip_end(line))
+        elif not s.takeaway:
+            s.takeaway = H.strip_end(f"{heading}: {', '.join(_low_first(p) for p in parts)}" if heading and len(parts) > 1 else ask)
         else:
-            said.append(f"the brief's request «{ask[:60]}» takes the takeaway's place of «{s.takeaway[:60]}»")
-            s.takeaway = ask
+            c.bullets.append(H.cap_first(ask))  # the ask is content: on the slide, whatever the room
+        said.append(f"the brief's ask «{ask[:60]}» was not on the slide: added")
+    return said
+
+
+# a callout label that is only a period or a base («в неделю», «на человека», «в месяц»): it says nothing of what the
+# figure counts (qa3 N-L7: «5 часов · в неделю» lost «менеджеры … на контроль статусов»)
+_BARE_LABEL_RE = re.compile(
+    r"^(?:в|на|за|из|от|к|до)\s+(?:\w+\s+)?(?:неделю|недели|месяц|месяца|день|дня|год|года|квартал|квартала|час|часа|человека|сотрудника|"
+    r"клиента|пользователя|компанию|команду|сутки|смену)$",
+    re.I,
+)
+
+
+def _sentence_without_figure(sentence: str, value: str) -> Optional[str]:
+    """The sentence of a key figure without that figure (its hedge and unit too), in the sentence's own order:
+    «Менеджеры тратят до 5 часов в неделю на контроль статусов» · 5 часов → «Менеджеры тратят в неделю на контроль
+    статусов»."""
+    from verstka.planning.grounding import figures as g_figures
+
+    want = [f for f in g_figures(value or "") if f.date is None]
+    if not want:
+        return None
+    for f in g_figures(sentence or ""):
+        if f.date is None and abs(f.mag - want[0].mag) <= 1e-6 * max(1.0, abs(f.mag)):
+            start = f.start
+            m = re.search(r"(?:(?<![\wё])(?:до|около|почти|более|свыше|менее|примерно|порядка)\s+)$", sentence[:start], re.I)
+            if m:
+                start = m.start()
+            out = re.sub(r"\s{2,}", " ", (sentence[:start] + " " + sentence[f.uend:]).strip(" ,—–-:;."))
+            return H.cap_first(H.strip_end(out)) if out else None
+    return None
+
+
+def plain_labels(s: OutlineSlide, source: str) -> list[str]:
+    """Every key figure says what it counts: a label that is only a period or a base («в неделю») takes its sentence's
+    words from the source («Менеджеры тратят на контроль статусов в неделю»). What changed, in English."""
+    from verstka.planning.grounding import figures as g_figures
+
+    said: list[str] = []
+    for n in s.content.numbers:
+        # «до 5 часов» stays «до 5 часов»: a figure the source gives as an upper bound is never shown as a fact
+        sn0 = _figure_sentence(n.value, source or "")
+        vf = [f for f in g_figures(n.value or "") if f.date is None]
+        if sn0 and len(vf) == 1 and not re.match(r"^\s*(?:до|около|почти|более|свыше|менее|примерно|≈|~|<|>)", n.value or "", re.I):
+            for f in g_figures(sn0):
+                if f.date is None and abs(f.mag - vf[0].mag) <= 1e-6 * max(1.0, abs(f.mag)):
+                    m = re.search(r"(?<![\wё])(до|около|почти|более|свыше|менее|примерно)\s+$", sn0[: f.start], re.I)
+                    pair = re.search(r"(?<![\wё])(?:с|со|от)\s+[\d\s\u00a0.,]+\S*\s+до\s+$", sn0[max(0, f.start - 40): f.start], re.I)
+                    if m and not pair:
+                        new_v = f"{m.group(1).lower()} {n.value}"
+                        said.append(f"the figure {n.value} is «{m.group(1)} {n.value}» in the source → «{new_v}»")
+                        n.value = new_v
+                    break
+        lab = H.strip_end((n.label or "").strip())
+        if lab and not _BARE_LABEL_RE.match(lab):
+            continue
+        sn = _figure_sentence(n.value, source or "")
+        new = _sentence_without_figure(sn, n.value) if sn else None
+        if new and not _BARE_LABEL_RE.match(new) and 2 <= len(new.split()) <= 9:
+            said.append(f"the label «{lab}» of {n.value} says nothing of what it counts → «{new}»")
+            n.label = new
+    return said
+
+
+def lone_line_repeat(s: OutlineSlide, title: str) -> Optional[str]:
+    """A slide whose only line says its headline again (qa3 N-L5: «Наставники — действующие инженеры VK Tech» as the
+    headline and as its only card): the headline becomes the slide's working title (its topic: «Опытные наставники из
+    VK Tech») and the line stays the slide's statement. What changed, or None."""
+    if s.kind.value in FRAME_KINDS or s.data is not None:
+        return None
+    c = s.content
+    if c.chart is not None or c.table is not None or c.numbers or c.columns or c.formula:
+        return None
+    lines = [*c.bullets, *c.paragraphs] + [" ".join(x for x in (it.title, it.text) if x) for it in c.items]
+    lines = [x for x in lines if (x or "").strip()]
+    if len(lines) != 1:
+        return None
+    line, head = lines[0], s.headline or ""
+    if not (same_text(line, head) or adds_nothing(line, head) or adds_nothing(head, line)):
+        return None
+    topic = H.strip_end(title or "")
+    if len(topic.split()) < 2 or same_text(topic, line) or same_text(topic, head):
+        return None
+    s.headline = H.cap_first(topic)
+    return f"the only line «{line[:60]}» said the headline again: the headline is the slide's topic «{topic[:60]}» now"
+
+
+def keep_asks_in_deck(o: DeckOutline, unit_text_of: dict[str, str], brief_text: str) -> list[str]:
+    """Every ask of the brief is on some slide of the deck (S5, o04: the partners' ask lost in all three variants and
+    nothing flagged it): an ask no slide shows goes to the slide whose source holds it, else to the last content slide."""
+    asks = brief_asks(brief_text or "")
+    if not asks:
+        return []
+    content = [sl for sl in o.slides if sl.kind.value not in FRAME_KINDS and sl.data is None]
+    if not content:
+        return []
+    said: list[str] = []
+    for heading, ask in asks:
+        deck_text = "\n".join(_visible_text(sl) for sl in o.slides)
+        if ask_shown(ask, deck_text):
+            continue
+        host = next((sl for sl in content if said_in(ask, unit_text_of.get(sl.id, ""), 0.8)), None) or content[-1]
+        done = keep_ask(host, unit_text_of.get(host.id, ""), [(heading, ask)])
+        said.extend(f"slide {host.id}: {x}" for x in done)
     return said
 
 
@@ -3653,6 +3810,10 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
         d.changes.append(f"slide {d.unit.key}: the items numbered all or none")
     if position_labels(c.items, d.unit.text or ""):
         d.changes.append(f"slide {d.unit.key}: an item's number said again in its words («Модуль 1» beside the badge 1) dropped")
+    said = lone_line_repeat(s, d.unit.title)
+    if said:
+        d.changes.append(f"slide {d.unit.key}: {said}")
+    d.changes.extend(f"slide {d.unit.key}: {x}" for x in plain_labels(s, d.unit.text or ""))
     s.takeaway = plain_change(s.takeaway)
     c.bullets = [plain_change(b) or b for b in c.bullets]
     charts = [x for x in (c.chart, c.chart2) if x is not None]
@@ -5499,6 +5660,11 @@ def _revision_worse(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> O
     gb = [k for k, _ in slide_gaps(new, ctx) if k in _CONTENT_GAPS]
     if len(gb) > len(ga):
         return f"more gaps ({len(gb)} > {len(ga)})"
+    if ctx is not None:
+        # a critic's «split it into two slides» answered by dropping the brief's ask (o04: the partners' ask lost)
+        for _, ask in brief_asks(ctx.brief.text or ""):
+            if said_in(ask, old.unit.text or "", 0.8) and ask_shown(ask, _visible_text(old.slide)) and not ask_shown(ask, _visible_text(new.slide)):
+                return "the brief's ask is gone"
     return None
 
 
@@ -6421,10 +6587,19 @@ def run_agent(
                 if u is not None and not u.frame and (u.text or "").strip():
                     fb = _fallback_headline(u, ctx) if promised_counts(sl.headline) else None
                     warns.extend(f"slide {u.key}: {x}" for x in keep_promise(sl, u.text, fb))
-                    warns.extend(f"slide {u.key}: {x}" for x in keep_ask(sl, u.text))
+                    asks = [(h, a) for h, a in brief_asks(ctx.brief.text or "") if said_in(a, u.text, 0.8)]
+                    warns.extend(f"slide {u.key}: {x}" for x in keep_ask(sl, u.text, asks or None))
                 uniform_numbers(sl.content.items)
                 if u is not None and position_labels(sl.content.items, u.text or ""):
                     warns.append(f"slide {u.key}: an item's number said again in its words dropped")
+                if u is not None and not u.frame:
+                    said = lone_line_repeat(sl, u.title) or None
+                    if said:
+                        warns.append(f"slide {u.key}: {said}")
+                    warns.extend(f"slide {u.key}: {x}" for x in plain_labels(sl, u.text or ""))
+            # …and every ask of the brief reaches some slide of the variant
+            texts = {sl.id: unit_by_key[units_of[sl.id][0]].text for sl in o.slides if len(units_of.get(sl.id) or []) == 1 and units_of[sl.id][0] in unit_by_key}
+            warns.extend(keep_asks_in_deck(o, texts, ctx.brief.text or ""))
         except Exception:  # noqa: BLE001 - the deck stands without this check
             log.warning("promised counts failed on %s", st.name, exc_info=True)
         if ctx.written:
