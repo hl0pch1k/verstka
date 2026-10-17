@@ -1693,6 +1693,32 @@ def _photo_frame_beside(slide: Slide, area: Bbox, kit, pal: "_Palette", name: st
     return Bbox(x=area.x, y=area.y, w=area.w - pw - g, h=area.h)
 
 
+def _photo_strip(slide: Slide, box: tuple[int, int, int, int], kit, pal: "_Palette", name: str) -> None:
+    """The picture's place as a full-height strip at the slide's edge (rendering/picture_layouts.py `picture_strip`):
+    square-cornered, in the quiet fill of a free place; the picture fills it whole."""
+    from verstka.rendering.compose import Canvas
+
+    frame = Bbox(x=box[0], y=box[1], w=box[2], h=box[3])
+    fill = _photo_fill(kit, pal, _ground_at(slide, frame))
+    el = Canvas(slide, kit).rect(frame, fill, name=PHOTO_PLACE_NAME)
+    _style_photo_place(el, kit, pal, fill)
+    nv = el.find(".//" + q("p:cNvPr"))
+    if nv is not None:
+        nv.set("name", PHOTO_PLACE_NAME)
+        nv.set("descr", _photo_descr(name))
+    slide.__dict__["_photo_frame_box"] = frame
+    # a page number the strip covers stays over it (the picture keeps it there too: picture_layouts `raise_ids`)
+    tree = el.getparent()
+    for other in list(tree):
+        if other is el or etree.QName(other).localname != "sp":
+            continue
+        txt = "".join(t.text or "" for t in other.iter(q("a:t"))).strip()
+        b = element_bbox(other)
+        if txt and len(txt) <= 4 and b and b[0] < frame.x2 and b[0] + b[2] > frame.x and b[1] < frame.y2 and b[1] + b[3] > frame.y and tree.index(other) < tree.index(el):
+            tree.remove(other)
+            el.addnext(other)
+
+
 def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     from verstka.rendering.compose import Composer, Kit
 
@@ -1703,9 +1729,9 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         comp = "bullets"  # no picture of the template says what the slide says: the text alone (an art canvas may frame it)
     wide = _needs_width(oslide, comp)
     photo = oslide.content.photo_slot
-    # the user adds their own photo: the template's own slide for a photo when it has one (its picture place stays
-    # free), else the usual canvas with a quiet frame beside the content
-    place = _choose_photo_place(builder, manifest, ds) if photo else None
+    # a picture (generated or the user's own photo) is a full-height strip at the slide's edge, the content beside it
+    # (the owner, 18.10: «от самого верха до самого низа, а с другой стороны текст») — never the sample's photo frame
+    place = None
     art = place if place is not None else (_choose_art(builder, manifest, ds, comp, oslide, outline) if not wide and not photo else None)
     canvas = art.pattern if art is not None else _pick_canvas(builder, manifest, family, comp, wide, need_pill=ds.pill)
     ground = None
@@ -1741,6 +1767,19 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         if ghex:
             pal.bg = ghex
             pal.text = pal.text2 = _readable(ghex, [pal.text, t.color_for("text.primary")])
+    strip_box = None
+    if photo:
+        from verstka.rendering.picture_layouts import beside_strip, picture_strip
+
+        strip_box = picture_strip(slide, W, H, left=(outline.strategy == "compact"))
+        sx, sw = beside_strip(strip_box, sx, sw, W)
+        if strip_box[0] > 0:
+            slide.__dict__["_verstka_text_right"] = sx + sw  # the heading stops before the strip
+        if title_ph is not None and title_ph.left is not None and title_ph.width is not None:
+            # the heading keeps to the text's side
+            x0 = max(int(title_ph.left), sx)
+            x1 = min(int(title_ph.left) + int(title_ph.width), sx + sw)
+            title_ph.left, title_ph.width = Emu(x0 if x1 - x0 >= int(0.2 * W) else sx), Emu(x1 - x0 if x1 - x0 >= int(0.2 * W) else sw)
     scale = sorted({s.size_pt for s in typo.scale} | {float(x) for x in (typo.sizes_used or []) if x >= 8})
     h1, title_color, title_bold, title_font = _title_style(manifest, family, pal)
     if contrast_ratio(title_color, pal.bg) < 3.0:
@@ -1860,6 +1899,10 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
                         nv.set("descr", _photo_descr(photo))
                 warnings.append(f"the template's own photo place kept free for the user's photo (slide {place.pattern.source_slide} of the template)")
                 photo_caption(slide, place.box, kit, oslide.content.photo_hint, head_text=place_head(oslide.content.photo_slot))
+            elif strip_box is not None:
+                _photo_strip(slide, strip_box, kit, pal, photo)
+                warnings.append("the picture's place: a full-height strip at the slide's edge, the content beside it")
+                caption_beside = True
             else:
                 area = _photo_frame_beside(slide, area, kit, pal, photo, W, H, left=(outline.strategy == "compact"))
                 warnings.append("a free place for the user's photo kept beside the content")
@@ -3116,6 +3159,9 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     if cut_r is not None:
         w_free = min(w_free, cut_r - box.x)
         warnings.append("заголовок отодвинут от рисунка шаблона")
+    strip_r = slide.__dict__.get("_verstka_text_right")  # the picture's full-height strip at the right edge
+    if strip_r is not None:
+        w_free = min(w_free, int(strip_r) - box.x)
     if slide.__dict__.get("_verstka_cutouts"):
         from verstka.rendering.cutouts import sheet_box
 
@@ -3131,6 +3177,8 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
         # right (a centred line would end off-centre)
         cx = box.x + box.w // 2
         lim_r = box.x + _free_width(slide, box, W, H, int(safe.x2 * W), skip=(title_ph._element,))
+        if strip_r is not None:
+            lim_r = min(lim_r, int(strip_r))
         lim_l = _free_left(slide, box, W, H, safe_x, skip=(title_ph._element,))
         lim_r = min(lim_r, cut_r) if cut_r is not None else lim_r
         lim_l = max(lim_l, cut_l) if cut_l is not None else lim_l

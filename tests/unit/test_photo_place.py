@@ -128,8 +128,9 @@ def test_a_template_without_a_photo_slide_gets_a_frame_beside_the_figures(tmp_pa
     assert osl.content.photo_slot == "Фото помещения"
     prs = Presentation(str(tmp_path / "run" / "structured" / "deck.pptx"))
     place, texts = _boxes(prs.slides[i], prs.slide_width, prs.slide_height)
-    assert place is not None and (place[2] - place[0]) >= 0.2 and (place[3] - place[1]) >= 0.3
-    assert all(_apart(place, b) for _, b in texts)
+    # the picture's place is a full-height strip at the slide's edge (the owner, 18.10); only the page number stands on it
+    assert place is not None and (place[2] - place[0]) >= 0.38 and place[1] <= 0.001 and place[3] >= 0.999 and (place[0] <= 0.001 or place[2] >= 0.999)
+    assert all(_apart(place, b) or len(t.strip()) <= 3 for t, b in texts)
     words = " ".join(t for t, _ in texts)
     for fig in ("100", "35", "25", "20"):
         assert fig in words
@@ -148,9 +149,9 @@ def _dataset_template(stem: str) -> Path | None:
     return None
 
 
-def test_a_template_with_a_photo_slide_lends_its_own_photo_place(tmp_path):
-    """VK Education has content slides with a photo half: the slide is set on one of them, the photo made an empty
-    place of the same size where it stood. Skipped when the VK templates (Датасет/) are not on this machine."""
+def test_a_template_with_a_photo_slide_still_gets_the_full_height_strip(tmp_path):
+    """VK Education has content slides with a photo half: the picture still takes a full-height strip at the slide's
+    edge (the owner, 18.10), not the sample's frame. Skipped when the VK templates (Датасет/) are not on this machine."""
     from verstka.pipeline.generate import generate_variants
     from verstka.schemas.common import PatternKind
     from verstka.schemas.outline import DeckOutline, NumberCallout, OutlineSlide, SlideContent
@@ -166,9 +167,10 @@ def test_a_template_with_a_photo_slide_lends_its_own_photo_place(tmp_path):
                           workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, audit=True, exports=[])
     prs = Presentation(str(tmp_path / "run" / "structured" / "deck.pptx"))
     place, texts = _boxes(prs.slides[0], prs.slide_width, prs.slide_height)
-    assert place is not None and (place[2] - place[0]) >= 0.3 and (place[3] - place[1]) >= 0.5
-    assert all(_apart(place, b) for _, b in texts)
-    assert any("template's own photo place" in w for r in g.variants[0].render.slides for w in r.warnings)
+    # never the sample's photo frame: a full-height strip at the slide's edge, the content beside it (the owner, 18.10)
+    assert place is not None and (place[2] - place[0]) >= 0.38 and place[1] <= 0.001 and place[3] >= 0.999
+    assert all(_apart(place, b) or len(t.strip()) <= 3 for t, b in texts)
+    assert any("full-height strip" in w for r in g.variants[0].render.slides for w in r.warnings)
 
 
 def _ir(index: int, oid: str | None):

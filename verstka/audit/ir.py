@@ -395,6 +395,15 @@ def _part_template_elements(pkg: PptxPackage, part: str, ctx: SlideContext, sour
         e = _ir_element(s, W, H)
         e.id = f"{source}:{s.id}"
         e.source = source
+        turn = abs(((s.rotation or 0.0) % 180.0) - 90.0)
+        if turn < 1.0:
+            # a band turned a quarter (the master's rectangle stood on its end as the slide's right stripe): its box is
+            # where it paints — the unturned box ran across the slide's content, and the audit recoloured a figure
+            # «on the stripe» white on the white slide (the owner's template, 18.10)
+            b = s.bbox
+            cx, cy = b.x + b.w / 2, b.y + b.h / 2
+            e.bbox = type(b)(x=int(cx - b.h / 2), y=int(cy - b.w / 2), w=int(b.h), h=int(b.w))
+            e.bbox_frac = e.bbox.to_frac(W, H)
         la = paint.get(s.id)
         if la is not None:
             # what the shape really paints: a gradient's mean, a pattern's blend, a picture's median

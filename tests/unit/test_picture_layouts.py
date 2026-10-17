@@ -248,3 +248,23 @@ def test_a_note_the_designer_copied_into_the_slide_leaves_its_text():
     warns: list = []
     strip_picture_notes(o, warns)
     assert o.slides[0].content.bullets == ["Офис на улице Вавилова"] and o.slides[0].content.photo_hint and warns
+
+
+def test_a_content_slides_picture_is_a_full_height_strip_away_from_the_layouts_logo():
+    """The owner (18.10, after 88ef1e9): «картинка — от самого верха до самого низа, а с другой стороны текст». The
+    strip takes ~44 % of the slide at the right edge — the left one for the compact variant — unless the layout draws
+    a logo there; the text's columns stay beside it."""
+    prs, s = _deck()
+    sw = int(PL.STRIP_SHARE * W)
+    assert PL.picture_strip(s, W, H) == (W - sw, 0, sw, H)
+    assert PL.picture_strip(s, W, H, left=True) == (0, 0, sw, H)
+    # a logo the layout draws at the bottom left: the compact variant's strip goes right
+    tmp = s.shapes.add_picture(io.BytesIO(_jpeg(200, 200)), Inches(0.4), Inches(6.8), Inches(1), Inches(0.4))
+    el = tmp._element
+    el.getparent().remove(el)
+    s.slide_layout._element.cSld.find(q("p:spTree")).append(el)
+    assert PL.picture_strip(s, W, H, left=True) == (W - sw, 0, sw, H)
+    x, w = PL.beside_strip((W - sw, 0, sw, H), Inches(0.5), W - Inches(1), W)
+    assert x == Inches(0.5) and x + w <= W - sw - int(0.03 * W)
+    x, w = PL.beside_strip((0, 0, sw, H), Inches(0.5), W - Inches(1), W)
+    assert x >= sw + int(0.03 * W) and x + w == W - Inches(0.5)

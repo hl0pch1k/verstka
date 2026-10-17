@@ -329,6 +329,34 @@ def _free(region: tuple[int, int, int, int], things: list[_Thing], pad: int) -> 
     return not any(t.kind in ("text", "solid") and _hits(region, t.box, pad) for t in things)
 
 
+# ------------------------------------------------------------------ the strip of a content slide
+
+# the owner (18.10, after 88ef1e9): «если на слайде картинка — она от самого верха до самого низа, а с другой стороны
+# от неё текст». A content slide with a picture is laid out around a full-height strip at one edge of the slide:
+STRIP_SHARE = 0.44  # the strip's width, a share of the slide's
+STRIP_GUTTER = 0.04  # between the strip and the text, a share of the slide's width
+
+
+def picture_strip(slide, W: int, H: int, left: bool = False) -> tuple[int, int, int, int]:
+    """The full-height strip at the slide's right edge (`left`: the left one first — the compact variant mirrors the
+    others) where the layout and the master draw no logo, text or picture; the side with fewer of them otherwise."""
+    sw = int(STRIP_SHARE * W)
+    boxes = {"right": (W - sw, 0, sw, H), "left": (0, 0, sw, H)}
+    under = [t for t in _things(slide, W, H, set()) if t.el_id is None and t.kind in ("text", "solid")]
+    order = ["left", "right"] if left else ["right", "left"]
+    best = min(order, key=lambda side: (sum(1 for t in under if _hits(boxes[side], t.box)), order.index(side)))
+    return boxes[best]
+
+
+def beside_strip(strip: tuple[int, int, int, int], sx: int, sw: int, W: int) -> tuple[int, int]:
+    """The text's columns (x, width) beside the strip, inside the slide's safe area (sx, sw)."""
+    g = int(STRIP_GUTTER * W)
+    if strip[0] <= 0:
+        nx = max(sx, strip[2] + g)
+        return nx, max(int(0.2 * W), sx + sw - nx)
+    return sx, max(int(0.2 * W), min(sw, strip[0] - g - sx))
+
+
 # ------------------------------------------------------------------ the frame
 
 

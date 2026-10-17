@@ -547,11 +547,9 @@ def score_pattern(
         if holes and not slide.content.photo_slot and not slide.content.image_hint:
             return ScoreResult(0.0, reasons + ["место под фото в образце останется пустым"], fit)
         if slide.content.photo_slot:
-            # the user's photo goes where the sample keeps its picture (`clone._make_photo_place`): a sample without
-            # one is set by the composer, which leaves the place beside the content
-            if photo_place(pattern, pics) is None:
-                return ScoreResult(0.0, reasons + ["в образце нет места под фото"], fit)
-            reasons.append("место под фото — на месте картинки образца")
+            # a picture is a full-height strip at the slide's edge with the content beside it (the owner, 18.10) —
+            # laid out by the composer (synth `_photo_strip`), never squeezed into the sample's own photo frame
+            return ScoreResult(0.0, reasons + ["картинка — полосой во всю высоту слайда, содержание рядом"], fit)
         if slide.content.table is not None and pattern.data_box is not None:
             n_cols = len(slide.content.table.columns)
             if n_cols >= 3 and pattern.data_box.w < 0.6:

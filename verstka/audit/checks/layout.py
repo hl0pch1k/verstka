@@ -285,6 +285,8 @@ def margin_violation(ctx: AuditContext) -> list[Issue]:
         for e in text_elements(s):
             if is_chrome_like(e, ctx.ir, ctx.manifest) or e.nested or at_template_position(e, ctx.manifest):
                 continue
+            if (e.name or "").startswith("Photo caption"):
+                continue  # the free picture place's own line: the place is a strip to the slide's edge (it goes with the picture)
             if e.ph_type in ("title", "ctrTitle"):
                 # a heading inside the box its own layout gives it stands where the template sets headings — the
                 # margins measured on other samples (a cover's) are not this layout's
