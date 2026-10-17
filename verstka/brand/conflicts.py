@@ -63,12 +63,21 @@ def brand_conflicts(
     path = Path(source) if source else (ws.source if ws is not None and ws.source.exists() else None)
     plan = brand_plan(path, manifest, brand, "brand")
     cp, fp = plan.colors, plan.fonts
+    # при приоритете шаблона итог каждой строки — то, что сделает копия с этим приоритетом: бренд только занимает
+    # места, которые автор шаблона не заполнял (стандартный шрифт, слоты стандартной темы), остальное — как в шаблоне
+    tplan = brand_plan(path, manifest, brand, "template") if priority == "template" else None
     out: list[BrandConflict] = []
 
-    def add(what: str, tpl: str, brd: str, result_brand: str, kind: str, lacking: bool = False) -> None:
-        # при приоритете шаблона бренд только дополняет: расхождение остаётся как в шаблоне
-        result = result_brand if priority == "brand" or lacking else f"{tpl}, как в шаблоне"
+    def add(what: str, tpl: str, brd: str, result_brand: str, kind: str, result_template: Optional[str] = None) -> None:
+        result = result_brand if priority == "brand" else (result_template or f"{tpl}, как в шаблоне")
         out.append(BrandConflict(what=what, template=tpl, brand=brd, result=result, kind=kind))  # type: ignore[arg-type]
+
+    def tpl_color(h: str) -> Optional[str]:
+        """Что станет с цветом шаблона при приоритете шаблона: цвет бренда (слот стандартной темы) или None — как был."""
+        if tplan is None:
+            return None
+        got = tplan.colors.map(h)
+        return _hx(got) if got != h else None
 
     # --- шрифты
     rows = []
@@ -81,20 +90,21 @@ def brand_conflicts(
     if len(rows) == 2 and same_tpl and same_brand:
         rows = [("Шрифт", rows[0][1], rows[0][2], rows[0][3], rows[0][4])]
     for what, tpl, bf, written, fb in rows:
-        add(what, tpl, bf.family, font_result(bf, written or bf.family, fb), "font", lacking=fp.lacking(tpl))
+        role = "body" if what == "Шрифт текста" else "heading"
+        t_written = tplan.fonts.target(tpl, role) if tplan is not None else None
+        add(what, tpl, bf.family, font_result(bf, written or bf.family, fb), "font", font_result(bf, t_written, fb) if t_written else None)
 
     # --- акценты главной палитры
     for i, a in enumerate(cp.main[: len(ACCENT_ORDINALS)]):
         res = cp.table.get(a, cp.anchors.get(a, a))
         b = cp.brand_of.get(a) or cp.kept_target.get(a) or res
-        lacking = plan.theme.stock and a in plan.theme.slots.values()
         if a in cp.keep:
             why = kept_reason_text(cp, a) or "цвет шаблона"
             out.append(BrandConflict(what=ACCENT_ORDINALS[i], template=_hx(a), brand=_hx(b) if b != a else "нет пары", result=f"{_hx(a)}, как в шаблоне: {why}", kind="color"))
         elif b != a:
             # тон бренда при светлоте шаблона — светлое осталось светлым, текст на нём — читаемым
             result = _hx(res) if res == b else f"{_hx(res)} — оттенок {_hx(b)}"
-            add(ACCENT_ORDINALS[i], _hx(a), _hx(b), result, "color", lacking=lacking)
+            add(ACCENT_ORDINALS[i], _hx(a), _hx(b), result, "color", tpl_color(a))
 
     # --- текст и фон: только заметная разница
     for what, pair, role in (("Цвет текста", cp.text_pair, "text"), ("Фон", cp.background_pair, "background")):
@@ -110,9 +120,9 @@ def brand_conflicts(
             out.append(BrandConflict(what=what, template=_hx(t), brand=_hx(bh), result=f"{_hx(t)}, как в шаблоне: {why or 'цвет шаблона'}", kind="color"))
         elif b != bh and why:
             # точный цвет бренда нельзя (занят другим цветом шаблона) — своя светлота, оттенок бренда
-            add(what, _hx(t), _hx(bh), f"{_hx(b)}, светлота шаблона: {why}", "color")
+            add(what, _hx(t), _hx(bh), f"{_hx(b)}, светлота шаблона: {why}", "color", tpl_color(t))
         elif t != b:
-            add(what, _hx(t), _hx(bh), _hx(b), "color")
+            add(what, _hx(t), _hx(bh), _hx(b), "color", tpl_color(t))
 
     # --- логотип: чей и где
     bdir = resolve_brand_dir(brand, brand_dir, workspace_root)
@@ -128,6 +138,8 @@ def brand_conflicts(
             result = f"{brd}: {outcome.note}"
         add("Логотип", tpl, brd, result, "logo")
     if not brand.logos:
-        # в брендбуке нет файлов логотипа — видно и в слое «Брендбук», а не только в отчёте копии
-        add("Логотип", tpl if own else "у шаблона нет", "в брендбуке нет файлов логотипа", f"{tpl} оставлен" if own else "без логотипа", "logo")
+        # в брендбуке нет файлов логотипа — видно и в слое «Брендбук», а не только в отчёте копии; итог при любом
+        # приоритете один: логотип шаблона, а где его нет — без логотипа
+        kept = f"{tpl} оставлен" if own else "без логотипа"
+        add("Логотип", tpl if own else "у шаблона нет", "в брендбуке нет файлов логотипа", kept, "logo", kept)
     return out

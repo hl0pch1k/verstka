@@ -488,7 +488,7 @@ def test_conflicts_with_the_chosen_template(api, monkeypatch):
     monkeypatch.setattr(store, "manifest", lambda tid: sentinel if tid == "tpl0000000000001" else None)
     calls = []
 
-    def fake(manifest, spec, brand_dir):
+    def fake(manifest, spec, brand_dir, priority="brand"):
         calls.append((manifest, spec.id, brand_dir))
         return [BrandConflict(what="Шрифт заголовков", template="Play", brand="VK Sans Display", result="VK Sans Display, замена — Play", kind="font")]
 

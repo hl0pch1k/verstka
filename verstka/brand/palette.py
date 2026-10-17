@@ -27,6 +27,7 @@ import colorsys
 import logging
 import math
 import re
+import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -61,6 +62,8 @@ def kept_reason_text(plan: "ColorPlan", h: str) -> Optional[str]:
         return f"#{target} у шаблона — другой цвет, они бы слились" if target else "у шаблона рядом другой похожий цвет"
     if code == "contrast":
         return "с цветом бренда текст шаблона стал бы нечитаемым"
+    if code == "tone":
+        return "у шаблона текст серый, а не чёрный — его светлота сохранена"
     if code == "semantic":
         return "смысловой цвет, в брендбуке нет пары"
     if code == "no_brand_colors":
@@ -70,6 +73,8 @@ def kept_reason_text(plan: "ColorPlan", h: str) -> Optional[str]:
 
 # заметная разница цветов (ΔE76): ближе — для человека один цвет
 NEUTRAL_DE = 15.0
+# текст шаблона заметно светлее или темнее текста бренда (по L*) — своя светлота, оттенок бренда
+TEXT_TONE_DL = 25.0
 
 
 # ============================================================================================ цвет: меры
@@ -254,17 +259,21 @@ def package_theme(pkg: Package) -> ThemeInfo:
 def template_theme(src: Path | str) -> ThemeInfo:
     """Тема шаблона по файлу (пустая, если файл не читается); кэш по файлу."""
     key = file_key(src)
-    if key is not None and key in _THEMES:
-        return _THEMES[key]
+    if key is not None:
+        with _CACHE_LOCK:
+            hit = _THEMES.get(key)
+        if hit is not None:
+            return hit
     try:
         theme = package_theme(Package(src))
     except Exception as e:  # noqa: BLE001
         log.warning("theme unreadable: %s", e)
         theme = ThemeInfo()
     if key is not None:
-        if len(_THEMES) > 32:
-            _THEMES.clear()
-        _THEMES[key] = theme
+        with _CACHE_LOCK:
+            if len(_THEMES) > 32:
+                _THEMES.clear()
+            _THEMES[key] = theme
     return theme
 
 
@@ -282,6 +291,9 @@ class TextPair:
     fixed_ground: bool = False  # под текстом картинка — её цвет не меняется
 
 
+# кэши живут в долгоживущем сервере, где копии строятся параллельно: чтение и вытеснение — под замком (вычисление —
+# без него: два потока посчитают одно и то же, но не уронят друг друга KeyError)
+_CACHE_LOCK = threading.RLock()
 _PAIRS: dict[tuple, list[TextPair]] = {}
 _IRS: "OrderedDict[tuple, object]" = OrderedDict()
 IR_CACHE_SIZE = 2  # IR большого шаблона с картинками — десятки мегабайт (ЛЦТ ≈ 70, VK Education ≈ 140): сервер живёт долго
@@ -304,9 +316,10 @@ def source_ir(src: Path | str):
     key = file_key(src)
     if key is None:
         return None
-    if key in _IRS:
-        _IRS.move_to_end(key)
-        return _IRS[key]
+    with _CACHE_LOCK:
+        if key in _IRS:
+            _IRS.move_to_end(key)
+            return _IRS[key]
     try:
         from verstka.audit.ir import build_deck_ir
 
@@ -314,9 +327,10 @@ def source_ir(src: Path | str):
     except Exception as e:  # noqa: BLE001
         log.warning("deck IR unavailable: %s", e)
         ir = None
-    _IRS[key] = ir
-    while len(_IRS) > IR_CACHE_SIZE:
-        _IRS.popitem(last=False)
+    with _CACHE_LOCK:
+        _IRS[key] = ir
+        while len(_IRS) > IR_CACHE_SIZE:
+            _IRS.popitem(last=False)
     return ir
 
 
@@ -326,8 +340,10 @@ def text_pairs(src: Path | str, manifest: Optional[TemplateManifest] = None) -> 
     key = file_key(src)
     if key is None:
         return []
-    if key in _PAIRS:
-        return _PAIRS[key]
+    with _CACHE_LOCK:
+        hit = _PAIRS.get(key)
+    if hit is not None:
+        return hit
     out: dict[tuple, TextPair] = {}
     try:
         from verstka.audit.checks.common import composite_hex, fill_alpha, ground_of, text_elements
@@ -358,9 +374,10 @@ def text_pairs(src: Path | str, manifest: Optional[TemplateManifest] = None) -> 
     except Exception as e:  # noqa: BLE001 - без пар план строится без проверки контраста
         log.warning("text pairs unavailable: %s", e)
     res = list(out.values())
-    if len(_PAIRS) > 32:
-        _PAIRS.clear()
-    _PAIRS[key] = res
+    with _CACHE_LOCK:
+        if len(_PAIRS) > 32:
+            _PAIRS.clear()
+        _PAIRS[key] = res
     return res
 
 
@@ -596,7 +613,17 @@ def plan_colors(
     t_text = _token_with(manifest, "text.primary") or (theme.slots.get("dk1") if light_ground else None)
     b_text, b_bg = _brand_hex(brand, "text"), _brand_hex(brand, "background")
     if t_text and b_text:
-        if (lightness(t_text) < 50) == (lightness(b_text) < 50):
+        if (lightness(t_text) < 50) == (lightness(b_text) < 50) and tone(t_text) != "chromatic" and abs(lightness(t_text) - lightness(b_text)) > TEXT_TONE_DL:
+            # серый текст шаблона (#666666 у lo_focus) — его тон, а не чёрный бренда: своя светлота в оттенке бренда.
+            # Иначе подписи обложки темнеют там, где шаблон рассчитывал на серый, и вёрстка обложки ведёт себя иначе,
+            # чем на самом шаблоне (README, lo_focus с брендбуком VK Cloud)
+            tinted = tinted_like(t_text, b_text) if lab_chroma(b_text) >= 4.0 else t_text
+            plan.text_pair = (t_text, tinted)
+            if tinted != t_text:
+                plan.table[t_text] = tinted
+            else:
+                plan.kept(t_text, "tone", b_text)
+        elif (lightness(t_text) < 50) == (lightness(b_text) < 50):
             plan.table[t_text] = b_text
             plan.text_pair = (t_text, b_text)
             dk1 = theme.slots.get("dk1")
@@ -675,7 +702,7 @@ def plan_colors(
         target = plan.kept_target.get(h)
         if target and delta_e(h, target) <= NEUTRAL_DE:
             continue  # для человека это тот же цвет — предупреждать не о чем
-        if role and plan.kept_reason[h] in ("polarity", "guard", "contrast"):
+        if role and plan.kept_reason[h] in ("polarity", "guard", "contrast", "tone"):
             if h in plan.keep:
                 plan.warnings.append(f"{role} шаблона #{h} оставлен: {kept_reason_text(plan, h)}.")
             else:

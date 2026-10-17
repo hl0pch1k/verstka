@@ -1555,15 +1555,14 @@ def _brandbook_or_error(bid: str) -> BrandSpec:
     raise HTTPException(404, "Брендбук не найден — загрузите его снова")
 
 
-def _brand_conflicts(manifest: TemplateManifest, spec: BrandSpec, brand_dir: Optional[Path]) -> list[BrandConflict]:
-    """Where the brandbook and the template differ, and what the deck gets with «брендбук важнее» (the web shows
-    «шаблон важнее» by itself)."""
+def _brand_conflicts(manifest: TemplateManifest, spec: BrandSpec, brand_dir: Optional[Path], priority: BrandPriority = "brand") -> list[BrandConflict]:
+    """Where the brandbook and the template differ, and what the deck gets with the chosen priority (`result` as is)."""
     from verstka.brand.conflicts import brand_conflicts
 
-    return brand_conflicts(manifest, spec, priority="brand", workspace_root=store.root, brand_dir=brand_dir)
+    return brand_conflicts(manifest, spec, priority=priority, workspace_root=store.root, brand_dir=brand_dir)
 
 
-def _conflicts_with(spec: BrandSpec, template_id: Optional[str], brand_dir: Optional[Path]) -> tuple[Optional[TemplateManifest], list[BrandConflict]]:
+def _conflicts_with(spec: BrandSpec, template_id: Optional[str], brand_dir: Optional[Path], priority: BrandPriority = "brand") -> tuple[Optional[TemplateManifest], list[BrandConflict]]:
     """The template to compare with (None — none chosen or not analysed) and the brandbook's conflicts with it."""
     if not template_id:
         return None, []
@@ -1575,7 +1574,7 @@ def _conflicts_with(spec: BrandSpec, template_id: Optional[str], brand_dir: Opti
     if manifest is None:
         return None, []
     try:
-        return manifest, _brand_conflicts(manifest, spec, brand_dir)
+        return manifest, _brand_conflicts(manifest, spec, brand_dir, priority)
     except Exception:  # noqa: BLE001 - the brandbook stands; the layer shows no conflicts
         log.warning("brand conflicts failed: %s × %s", spec.id, template_id, exc_info=True)
         return manifest, []
@@ -1782,6 +1781,7 @@ def upload_brandbook(
     figma_url: Optional[str] = Form(None),
     template_id: Optional[str] = Form(None),
     use_models: bool = Form(True),
+    brand_priority: BrandPriority = Form("brand"),
 ) -> dict:
     """Брендбук: файл (PDF-гайдлайн, токены JSON, архив .zip, тема .pptx, логотип), папка (`files`, имя части — путь в
     папке) или ссылка Figma. Разбор — задачей: события шагов open · palette · fonts · logos · rules · compare (`step`,
@@ -1835,7 +1835,7 @@ def upload_brandbook(
 
                 (bdir / BRAND_USAGE).write_text(json.dumps(call_totals(stats), ensure_ascii=False, indent=2), encoding="utf-8")
             events.finish(spec)
-            manifest, conflicts = _conflicts_with(spec, template_id, bdir)
+            manifest, conflicts = _conflicts_with(spec, template_id, bdir, brand_priority)
             if not marker.exists() or not store.write_brandbook(bid, spec):
                 raise ValueError(_BRAND_REMOVED)
             marker.unlink(missing_ok=True)
@@ -1864,10 +1864,11 @@ def upload_brandbook(
 
 
 @app.get("/api/brandbooks/{bid}")
-def get_brandbook(bid: str, template_id: Optional[str] = None) -> dict:
-    """Разобранный брендбук и его расхождения с шаблоном `template_id` (другой шаблон — свои расхождения)."""
+def get_brandbook(bid: str, template_id: Optional[str] = None, brand_priority: BrandPriority = "brand") -> dict:
+    """Разобранный брендбук и его расхождения с шаблоном `template_id` (другой шаблон — свои расхождения); `result`
+    каждой строки — что получит колода с приоритетом `brand_priority`."""
     spec = _brandbook_or_error(bid)
-    _, conflicts = _conflicts_with(spec, template_id, store.brandbook_dir(bid))
+    _, conflicts = _conflicts_with(spec, template_id, store.brandbook_dir(bid), brand_priority)
     return {"brand": spec.model_dump(mode="json"), "conflicts": [c.model_dump(mode="json") for c in conflicts]}
 
 

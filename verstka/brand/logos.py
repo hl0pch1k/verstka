@@ -23,6 +23,7 @@ import posixpath
 import re
 import shutil
 import subprocess
+import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -144,19 +145,23 @@ def pics_of(pkg: Package, part: str) -> list[Pic]:
 
 # кэш по отпечатку содержимого: сами байты картинок в кэше не держатся
 _PROBES: "OrderedDict[str, Optional[tuple]]" = OrderedDict()
+# кэши — общие для потоков сервера (копии строятся параллельно): чтение, запись и вытеснение — под одним замком
+_CACHE_LOCK = threading.RLock()
 
 
 def image_probe(data: bytes) -> Optional[tuple]:
     """(размер, «отпечаток» 16×16, чернила: light | dark | color | empty, прозрачный фон?, «как логотип»: несколько
     плоских цветов — четыре самых частых покрывают ≥ 85 % непрозрачных точек)."""
     key = hashlib.sha256(data).hexdigest()
-    if key in _PROBES:
-        _PROBES.move_to_end(key)
-        return _PROBES[key]
+    with _CACHE_LOCK:
+        if key in _PROBES:
+            _PROBES.move_to_end(key)
+            return _PROBES[key]
     res = _probe(data)
-    _PROBES[key] = res
-    while len(_PROBES) > 4096:  # ЛЦТ — 815 мелких картинок: кэш не должен вытеснять их по кругу
-        _PROBES.popitem(last=False)
+    with _CACHE_LOCK:
+        _PROBES[key] = res
+        while len(_PROBES) > 4096:  # ЛЦТ — 815 мелких картинок: кэш не должен вытеснять их по кругу
+            _PROBES.popitem(last=False)
     return res
 
 
@@ -698,8 +703,11 @@ def has_template_logo(src: Path | str, manifest: Optional[TemplateManifest] = No
 
     key = file_key(src)
     mkey = (key, manifest.template_id if manifest else None)
-    if key is not None and mkey in _HAS_LOGO:
-        return _HAS_LOGO[mkey]
+    if key is not None:
+        with _CACHE_LOCK:
+            hit = _HAS_LOGO.get(mkey)
+        if hit is not None:
+            return hit
     try:
         pkg = Package(src)
         theme = package_theme(pkg)
@@ -709,9 +717,10 @@ def has_template_logo(src: Path | str, manifest: Optional[TemplateManifest] = No
         log.warning("template logos not found: %s", e)
         got = bool(manifest and any(a.kind == "logo" for a in manifest.assets))
     if key is not None:
-        if len(_HAS_LOGO) > 64:
-            _HAS_LOGO.clear()
-        _HAS_LOGO[mkey] = got
+        with _CACHE_LOCK:
+            if len(_HAS_LOGO) > 64:
+                _HAS_LOGO.clear()
+            _HAS_LOGO[mkey] = got
     return got
 
 
@@ -2194,9 +2203,11 @@ def logo_outcome(src: Path | str, manifest: TemplateManifest, brand: BrandSpec, 
     if not images:
         return None
     key = (file_key(src), manifest.template_id, brand.logo_place, brand.margins_px, tuple(hashlib.sha256(im.data).hexdigest()[:12] for im in images))
-    if key[0] is not None and key in _OUTCOMES:
-        _OUTCOMES.move_to_end(key)
-        return _OUTCOMES[key]
+    if key[0] is not None:
+        with _CACHE_LOCK:
+            if key in _OUTCOMES:
+                _OUTCOMES.move_to_end(key)
+                return _OUTCOMES[key]
     try:
         pkg = Package(src)
         theme = package_theme(pkg)
@@ -2205,7 +2216,8 @@ def logo_outcome(src: Path | str, manifest: TemplateManifest, brand: BrandSpec, 
         log.warning("logo outcome unavailable: %s", e)
         return None
     if key[0] is not None:
-        _OUTCOMES[key] = got
-        while len(_OUTCOMES) > 16:
-            _OUTCOMES.popitem(last=False)
+        with _CACHE_LOCK:
+            _OUTCOMES[key] = got
+            while len(_OUTCOMES) > 16:
+                _OUTCOMES.popitem(last=False)
     return got

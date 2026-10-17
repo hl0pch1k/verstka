@@ -2091,3 +2091,105 @@ def _deck_in(src: Path, out: Path, ws: Path):
     got = generate_variants(src, outline=DeckOutline.model_validate(d), strategies=["structured"], out_dir=out, workspace_root=ws,
                             use_llm=False, use_vlm=False, render_images=False, audit=False, autofix=False, exports=[], pictures=False, eyes=False)
     return got.variants[0], next(out.rglob("deck.pptx"))
+
+
+# ============================================================================================== финальное ревью
+
+
+def test_grey_template_text_keeps_its_tone(tmp_path, fonts_missing):
+    """Основной текст шаблона серый (#666666 у lo_focus), текст бренда почти чёрный: серый остаётся серым (своя
+    светлота, оттенок бренда) и это сказано, иначе подписи обложки темнеют и вёрстка обложки ломается (README C2).
+    Тёмный цветной текст шаблона (бирюзовый lo_vivid) по-прежнему становится текстом бренда."""
+    src = build_custom(tmp_path, "grey", bg="FFFFFF", text="666666", cards=[("E8A202", "666666")])
+    m = _analyze(src, tmp_path / "ws")
+    plan = ap.brand_plan(src, m, _vk_cloud()).colors
+    assert plan.text_pair and plan.text_pair[0] == "666666"
+    got = plan.map("666666")
+    assert abs(pal.lightness(got) - pal.lightness("666666")) < 3
+    assert any("#666666" in w and "серый" in w for w in plan.warnings)
+    src2 = build_custom(tmp_path, "teal", bg="FFFFFF", text="04617B", cards=[("E8A202", "04617B")])
+    plan2 = ap.brand_plan(src2, _analyze(src2, tmp_path / "ws2"), _vk_cloud()).colors
+    assert plan2.map("04617B") == "0B1220"
+
+
+def test_template_priority_conflicts_say_what_the_deck_gets(synthetic, fonts_missing, tmp_path):
+    """«Шаблон важнее»: итог каждой строки расхождений — то, что запишет копия с этим приоритетом: слоты стандартной
+    темы и стандартный шрифт занимает бренд, остальное — как в шаблоне."""
+    src, m, bdir = synthetic
+    brand = _brand()
+    out = tmp_path / "tpl.pptx"
+    res = apply_brand(src, out, brand, manifest=m, priority="template", brand_dir=bdir)
+    rows = brand_conflicts(m, brand, priority="template", source=src, brand_dir=bdir)
+    assert rows
+    for c in rows:
+        if c.kind == "color" and c.template.startswith("#"):
+            written = res.colors.get(c.template)
+            if written:
+                assert c.result.startswith(written), (c.what, c.result, written)
+            else:
+                assert c.result.startswith(f"{c.template}, как в шаблоне"), (c.what, c.result)
+        if c.kind == "font":
+            assert ("как в шаблоне" in c.result) == (c.template not in res.font_swaps), (c.what, c.result, res.font_swaps)
+        if c.kind == "logo":
+            assert "логотип Облако" not in c.result or "как в шаблоне" in c.result
+
+
+def test_brand_caches_survive_parallel_builds(tmp_path):
+    """Кэши брендбука общие для потоков сервера: параллельное чтение и вытеснение не роняют сборку (финальное ревью
+    I7)."""
+    import threading
+
+    files = [build_custom(tmp_path, f"c{i}", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], n=1) for i in range(6)]
+    pngs = [_logo_png(tmp_path / f"l{i}.png", (i * 40, 119, 255, 255), (11, 18, 32, 255)).read_bytes() for i in range(6)]
+    errors: list[BaseException] = []
+
+    def work(k: int) -> None:
+        try:
+            for j in range(12):
+                f = files[(k + j) % len(files)]
+                pal.template_theme(f)
+                pal.source_ir(f)
+                lg.image_probe(pngs[(k + j) % len(pngs)])
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=work, args=(k,)) for k in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and len(pal._IRS) <= pal.IR_CACHE_SIZE
+
+
+def test_api_returns_conflicts_for_the_requested_priority(tmp_path, monkeypatch):
+    """`GET /api/brandbooks/{id}?template_id=…&brand_priority=template` считает расхождения с приоритетом шаблона:
+    `result` — то, что получит колода («…, как в шаблоне»), а не итог «брендбук важнее»."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import verstka.api.app as A
+    from verstka.api.store import Store
+
+    store = Store(tmp_path)
+    monkeypatch.setattr(A, "store", store)
+    monkeypatch.setattr(ap, "font_available", lambda f: f == "Play")
+    tid = "cbbe3aa6a21d23ce"
+    d = tmp_path / "templates" / tid
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_bytes(gzip.open(FIX / f"manifest_{tid}.json.gz").read())
+    (d / "source.pptx").write_bytes((FIX / "vktech_short.pptx").read_bytes())
+    c = TestClient(A.app)
+    r = c.post("/api/brandbooks", files={"file": ("Брендбук.json", (BRAND_EXAMPLE / "tokens.json").read_bytes(), "application/json")})
+    bid, jid = r.json()["brandbook_id"], r.json()["job_id"]
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        job = A.runner.get(jid)
+        if job is not None and job.events and job.events[-1].get("status") in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    brand_rows = {x["what"]: x["result"] for x in c.get(f"/api/brandbooks/{bid}?template_id={tid}").json()["conflicts"]}
+    tpl_rows = {x["what"]: x["result"] for x in c.get(f"/api/brandbooks/{bid}?template_id={tid}&brand_priority=template").json()["conflicts"]}
+    assert brand_rows["Шрифт заголовков"] == "VK Sans Display, замена — Play"
+    assert tpl_rows["Шрифт заголовков"] == "Play, как в шаблоне"
+    assert tpl_rows["Второй акцент"] == "#FF3885, как в шаблоне"
