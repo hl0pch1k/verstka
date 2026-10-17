@@ -9,7 +9,7 @@ import { useApp } from "../../store";
 import type { Variant } from "../../types";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
-import { slideHeadline, slideSrc, slidesOf } from "../result/resultView";
+import { deckTemplate, slideHeadline, slideSrc, slidesOf } from "../result/resultView";
 import { Shots } from "../result/Stage";
 import { useStack } from "../shell/tier";
 import { Layer, lsDelay } from "./Layer";
@@ -25,7 +25,8 @@ export function Lightbox() {
   const total = slidesOf(v);
   const open = ui.lightbox && !!v && total > 0;
   const n = Math.min(Math.max(1, selectedSlide), Math.max(1, total));
-  const tpl = g ? templates.find((t) => t.template_id === g.template_id) : undefined;
+  // шаблон презентации — исходный (у брендированной копии свой id), его пропорции
+  const tpl = g ? templates.find((t) => t.template_id === deckTemplate(g)) : undefined;
   const aspect = tpl?.aspect && tpl.aspect > 0 ? tpl.aspect : 16 / 9;
 
   const close = useCallback(() => dispatch({ type: "set", patch: { lightbox: false } }), [dispatch]);

@@ -4,7 +4,7 @@ import type { ActiveJob } from "../../lib/jobState";
 import type { AuditReport, BrandSpec, Generation, GenerationMeta, Issue, Variant } from "../../types";
 import { DATA_SLIDES } from "../details/dataWhy.fixtures";
 import { compactChecks, sourceText } from "./compact";
-import { dataFigures, deckBrand, deckTemplate, docLine, lookCard, qualityCard, whyFile } from "./resultView";
+import { skippedLine, dataFigures, deckBrand, deckTemplate, docLine, lookCard, qualityCard, whyFile } from "./resultView";
 import { liveWork } from "./slideJob";
 
 const meta = (patch: Partial<GenerationMeta> = {}): GenerationMeta => ({ id: "g1", template_id: "t1", strategies: ["structured"], ...patch });
@@ -90,4 +90,13 @@ test("откуда текст колоды из файлов (V2 v105 `hpSrc`): 
   assert.equal(sourceText(g({ brief: "Итоги продаж", dataset_ids: ["a", "b", "c", "d", "e", "f", "g"] }), null), "Текст написал агент — по брифу и 7 файлам данных");
   assert.equal(sourceText(g({ brief: "", dataset_ids: ["a"] }), null), "Текст написал агент — по 1 файлу данных");
   assert.equal(sourceText(g({ brief: "Итоги" }), null), "Ваш текст — агент разложил его по слайдам");
+});
+
+test("файлы без слайда: одна тихая строка, причины — в подсказке", () => {
+  assert.equal(skippedLine({}), null);
+  const one = skippedLine({ data_story: { datasets: 2, slides: 3, skipped: [{ file: "Заметки.txt", sheet: null, message: "Не для графика: одни тексты." }] } });
+  assert.deepEqual(one, { text: "Без слайда: «Заметки.txt» — Не для графика: одни тексты", title: "«Заметки.txt» — Не для графика: одни тексты" });
+  const two = skippedLine({ data_story: { datasets: 3, slides: 3, skipped: [{ file: "a.csv", sheet: null, message: "x" }, { file: "b.xlsx", sheet: "Лист2", message: "y" }] } });
+  assert.equal(two?.text, "Без слайда: 2 файла");
+  assert.equal(two?.title, "«a.csv» — x\n«b.xlsx · Лист2» — y");
 });

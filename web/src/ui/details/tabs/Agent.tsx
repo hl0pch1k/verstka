@@ -114,7 +114,7 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
               {ed.rows.map((e) => (
                 <li key={e.key} className={cls("da-ed dla-ed", e.off && "dla-off")}>
                   <Tx tx="a-q" style={{ margin: 0, fontSize: 15, fontWeight: 600, lineHeight: "24px", color: "#0B1220" }}>
-                    «{e.q}»{e.off && <span className="dd-tag dd-tag-n p2-in" style={{ marginLeft: 8 }}>отменена</span>}
+                    {e.quoted ? `«${e.q}»` : e.q}{e.off && <span className="dd-tag dd-tag-n p2-in" style={{ marginLeft: 8 }}>отменена</span>}
                   </Tx>
                   {e.a && <Tx tx="a-a" style={{ margin: "4px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{e.a}</Tx>}
                 </li>

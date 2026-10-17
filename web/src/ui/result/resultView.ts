@@ -151,7 +151,19 @@ export interface QualityView {
   /** Сверка чисел: с текстом брифа или (колода из файлов с данными) с файлами; `compact` — слова узкой колонки
    *  («7 файлов данных — числа сверены», V2 v105 `hp-ncol`), без них — по числу в начале строки. */
   figures: { text: string; tone: "ok" | "warn"; title?: string; compact?: { lead: string; rest: string } } | null;
+  /** Файлы с данными, которым не досталось слайда (generation.json `data_story.skipped`): одна тихая строка, причины —
+   *  в подсказке. */
+  skipped?: { text: string; title: string } | null;
   title: string;
+}
+
+/** «Без слайда: «Клиенты.xlsx» — причина» или «Без слайда: 2 файла»; причины всех — в подсказке. null — все файлы на слайдах. */
+export function skippedLine(g: Pick<GenerationMeta, "data_story">): { text: string; title: string } | null {
+  const sk = (g.data_story?.skipped ?? []).filter((s) => s && s.file);
+  if (!sk.length) return null;
+  const name = (s: { file: string; sheet: string | null }) => (s.sheet ? `${s.file} · ${s.sheet}` : s.file);
+  const lines = sk.map((s) => `«${name(s)}» — ${(s.message || "не подошёл для слайда").replace(/[.\s]+$/, "")}`);
+  return { text: sk.length === 1 ? `Без слайда: ${lines[0]}` : `Без слайда: ${plural(sk.length, "файл", "файла", "файлов")}`, title: lines.join("\n") };
 }
 
 /** Проверки аудита, что сверяют числа слайдов с файлами (verstka/audit/checks/data.py). */
@@ -193,6 +205,7 @@ export function qualityCard(g: Generation, v: Variant): QualityView | null {
     errors: (errors ?? 0) > 0,
     warnings: warnings ? plural(warnings, "предупреждение", "предупреждения", "предупреждений") : null,
     figures: dataFigures(g, v) ?? figuresLine(v.audit?.summary.figures),
+    skipped: skippedLine(g),
     title: `Оценка качества ${score} из 100${counted ? ` · ${counted}` : ""}`,
   };
 }

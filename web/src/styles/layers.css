@@ -338,3 +338,8 @@
   /* «На весь экран» на сенсорном экране: подсказка клавиш не нужна — листают стрелки */
   .lb-keys{display:none !important}
 }
+/* сайт: что не прочиталось или не встало — тихими строками над палитрой (I5) */
+.bb-wl{display:flex;flex-direction:column;gap:6px;margin:12px 0 0;padding:0;list-style:none}
+.bb-wl>li{display:flex;align-items:flex-start;gap:8px;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+.bb-wl svg{flex:none;margin-top:3px;color:#B45309}
+.bb-sec.bb-warns{margin-top:0}

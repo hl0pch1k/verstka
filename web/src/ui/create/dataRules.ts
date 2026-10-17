@@ -6,6 +6,7 @@ import type {
   BrandColorRole, BrandConflict, BrandPriority, BrandSpec, DatasetSummary, JobEvent, SourceKind, TaskKind,
 } from "../../types";
 import { plural } from "../../lib/utils";
+import { GOAL_VIZ, vizNameLower } from "../../lib/vizNames";
 import type { GoalNote, GoalsAnswer } from "../../api";
 import { HELPER_COL, PLATE_PAD } from "../deck/layout";
 
@@ -140,12 +141,12 @@ export const dataBusy = (cards: Pick<DataCard, "status">[]): boolean => cards.so
 //    «справочно»): показывают, что текст влияет на выбор графика. Сам выбор — на сервере (verstka/data/goals.py)
 export interface Goal { q: string; to: string; task: TaskKind }
 const GOALS: { re: RegExp; to: string; task: TaskKind }[] = [
-  { re: /(?:покажи(?:те)?|показать)\s+(?:рост|динамик|изменени|тренд|как\s+(?:рос|менял))[^,.;:!?\n]*/i, to: "линейный график", task: "dynamics" },
-  { re: /(?:сравни(?:те)?|сравнить)\s+[^,.;:!?\n]+/i, to: "столбцы", task: "comparison" },
-  { re: /(?:из\s+чего\s+(?:складывается|состоит)|(?:покажи(?:те)?|показать)\s+(?:дол|структур))[^,.;:!?\n]*/i, to: "кольцевая диаграмма", task: "shares" },
-  { re: /(?:как\s+распредел[её]н[аоы]?|(?:покажи(?:те)?|показать)\s+распределени)[^,.;:!?\n]*/i, to: "гистограмма", task: "distribution" },
-  { re: /(?:есть\s+ли\s+связь|связь\s+между|зависит\s+ли)[^,.;:!?\n]*/i, to: "точечная диаграмма", task: "relationship" },
-  { re: /(?:справочно|для\s+справки)[^,.;:!?\n]*/i, to: "таблица", task: "reference" },
+  { re: /(?:покажи(?:те)?|показать)\s+(?:рост|динамик|изменени|тренд|как\s+(?:рос|менял))[^,.;:!?\n]*/i, to: vizNameLower(GOAL_VIZ.dynamics), task: "dynamics" },
+  { re: /(?:сравни(?:те)?|сравнить)\s+[^,.;:!?\n]+/i, to: vizNameLower(GOAL_VIZ.comparison), task: "comparison" },
+  { re: /(?:из\s+чего\s+(?:складывается|состоит)|(?:покажи(?:те)?|показать)\s+(?:дол|структур))[^,.;:!?\n]*/i, to: vizNameLower(GOAL_VIZ.shares), task: "shares" },
+  { re: /(?:как\s+распредел[её]н[аоы]?|(?:покажи(?:те)?|показать)\s+распределени)[^,.;:!?\n]*/i, to: vizNameLower(GOAL_VIZ.distribution), task: "distribution" },
+  { re: /(?:есть\s+ли\s+связь|связь\s+между|зависит\s+ли)[^,.;:!?\n]*/i, to: vizNameLower(GOAL_VIZ.relationship), task: "relationship" },
+  { re: /(?:справочно|для\s+справки)[^,.;:!?\n]*/i, to: vizNameLower(GOAL_VIZ.reference), task: "reference" },
 ];
 /** Цели в тексте по порядку, у каждой задачи — первая; «покажи рост выручки» → линейный график (V2 `dtGoals`). */
 export function goalsOf(text: string): Goal[] {
@@ -183,13 +184,26 @@ export function goalChips(server: Pick<GoalsAnswer, "goals"> | null, fallback: G
   if (server) {
     for (const g of server.goals) {
       const q = quoteOf(g.quote);
-      push({ key: `${g.task}|${q}`, q, to: g.viz_title || null, title: [g.label || g.task_title, g.file].filter(Boolean).join(" · ") });
+      // название вида — из одной таблицы интерфейса (как в «Почему так» и «Плане»), а не своё у целей
+      push({ key: `${g.task}|${q}`, q, to: g.viz ? vizNameLower(g.viz) : g.viz_title || null, title: [g.label || g.task_title, g.file].filter(Boolean).join(" · ") });
     }
   } else {
     for (const g of fallback) push({ key: `${g.task}|${g.q}`, q: g.q, to: g.to, title: `«${g.q}» → ${g.to}` });
   }
   return out;
 }
+/** Прежний ответ, пока новый в пути: остаются цели и строки, чьи цитаты ещё есть в тексте (текст заменили — их нет,
+ *  и показывается прикидка, а не цели прежнего текста). null — от ответа ничего не осталось. */
+export function stillInText(a: GoalsAnswer, text: string): GoalsAnswer | null {
+  const norm = (s: string) => s.toLowerCase().replace(/ё/g, "е").replace(/[«»"“”.,;:!?…—–-]+/g, " ").replace(/\s+/g, " ").trim();
+  const t = norm(text);
+  const has = (q: string) => !!norm(q) && t.includes(norm(q));
+  const goals = a.goals.filter((g) => has(g.quote));
+  const notes = a.notes.filter((n) => has(n.quote));
+  if (a.goals.length && !goals.length) return null;
+  return { ...a, goals, notes };
+}
+
 /** Предложения брифа без ответа в данных — одной тихой строкой: первое и сколько ещё; целиком — в подсказке. */
 export function goalNoteLine(notes: Pick<GoalNote, "quote" | "reason">[]): { line: string; all: string } | null {
   const ns = notes.filter((n) => n.quote.trim() && n.reason.trim());
@@ -235,21 +249,48 @@ export function fieldWidths(wrap: number): { wide: number; narrow: number } {
   return { wide: body - PANEL - GAP, narrow: body - HELPER_COL - dataPanel(wrap).narrow - GAP };
 }
 
-/** Таблетки целей, которые помещаются целиком в коробку (поля 24, с помощником 16): в широкой раскладке таблетка —
- *  «цель» + «→ график» и поля 12, в узкой — только «цель» и поля 10; промежуток 8. Не поместилась — она и следующие
- *  гаснут в этой раскладке (а не обрезаются посреди слова); первая видна всегда. `w` — ширины текста цели и «→ график». */
-export function goalsFit(w: { q: number; gt: number }[], wrap: number): { wide: boolean[]; narrow: boolean[] } {
+/** Как встают таблетки целей на компьютере: `full` — все в ряд с «→ видом графика»; `short` — все в ряд, вид — в
+ *  подсказке таблетки; `two` — в два ряда в той же коробке (88): первый ряд — справа от подписи «Цели из текста» (отступ
+ *  `lab.l`), второй — во всю ширину, в его конце — «ещё N» (`lab.more` с промежутком), если не поместились; вид — в
+ *  подсказке. `wide`/`narrow` — ряд каждой таблетки без помощника и с ним (0 — не поместилась: она и следующие гаснут,
+ *  счёт — «ещё N»); первая видна всегда. Таблетка —
+ *  «цель» и поля 12 (с видом — ещё «→ вид»), с помощником — поля 10; промежуток 8. */
+export interface GoalsLayout { mode: "full" | "short" | "two"; wide: number[]; narrow: number[] }
+export function goalsLayout(w: { q: number; gt: number }[], wrap: number, lab: { l: number; more: number } = { l: 0, more: 0 }): GoalsLayout {
   const f = fieldWidths(wrap);
-  const fit = (inner: number, width: (x: { q: number; gt: number }) => number) => {
-    let x = 0;
-    let ok = true;
+  const iw = f.wide - 48, inn = f.narrow - 32;
+  const lay = (inner: number, width: (p: { q: number; gt: number }) => number, rows: number, indent = 0, tail = 0) => {
+    let row = 1, x = 0, gone = false;
     return w.map((p, i) => {
-      x += (i ? 8 : 0) + width(p);
-      ok = ok && (i === 0 || x <= inner + 0.5);
-      return ok;
+      if (gone) return 0;
+      const wd = width(p);
+      for (;;) {
+        const need = (x ? x + 8 : 0) + wd;
+        if (need <= inner - (row === 1 ? indent : 0) - (row === rows ? tail : 0) + 0.5 || (i === 0 && row === rows)) {
+          x = need;
+          return row;
+        }
+        if (row < rows) {
+          row += 1;
+          x = 0;
+          continue;
+        }
+        gone = true;
+        return 0;
+      }
     });
   };
-  return { wide: fit(f.wide - 48, (p) => p.q + 24 + p.gt), narrow: fit(f.narrow - 32, (p) => p.q + 20) };
+  const all = (r: number[]) => r.every((x) => x > 0);
+  const narrow1 = lay(inn, (p) => p.q + 20, 1);
+  const full = lay(iw, (p) => p.q + 24 + p.gt, 1);
+  if (all(full)) return { mode: "full", wide: full, narrow: narrow1 };
+  const short = lay(iw, (p) => p.q + 24, 1);
+  if (all(short)) return { mode: "short", wide: short, narrow: narrow1 };
+  const two = (inner: number, pad: number) => {
+    const r = lay(inner, (p) => p.q + pad, 2, lab.l);
+    return all(r) ? r : lay(inner, (p) => p.q + pad, 2, lab.l, lab.more);
+  };
+  return { mode: "two", wide: two(iw, 24), narrow: two(inn, 20) };
 }
 
 /** Тесная колода с помощником (окно около 1366 и уже): в заголовке шага 01 у карточки брендбука остаётся плитка палитры —
@@ -258,18 +299,35 @@ export const brandTight = (wrap: number): boolean => (wrap > 0 ? wrap : 1392) - 
 
 // ── брендбук
 export type BrandSource = "pdf" | "json" | "dir" | "figma";
-export const BRAND_ACCEPT: Record<Exclude<BrandSource, "figma">, string> = {
+/** Что выбирают в меню «Брендбук»: файл (PDF, токены, архив), папку целиком или ссылку Figma. */
+export type BrandPick = "pdf" | "json" | "dir" | "zip" | "figma";
+export const BRAND_ACCEPT: Record<"pdf" | "json" | "zip", string> = {
   pdf: ".pdf,application/pdf",
   json: ".json,application/json",
-  dir: ".zip,application/zip",
+  zip: ".zip,application/zip",
 };
-/** Пункты меню «Брендбук» (V2 `bbItems`); пример — отдельной строкой под чертой. */
-export const BRAND_ITEMS: { key: BrandSource; name: string; meta: string }[] = [
+/** Пункты меню «Брендбук» (V2 `bbItems`; «Папка или архив» — двумя пунктами: окно выбора папки и файла разное);
+ *  пример — отдельной строкой под чертой. */
+export const BRAND_ITEMS: { key: BrandPick; name: string; meta: string }[] = [
   { key: "pdf", name: "PDF-гайдлайн", meta: "палитра, шрифты, правила" },
   { key: "json", name: "Токены (JSON)", meta: "цвета, шрифты, отступы" },
-  { key: "dir", name: "Папка или архив", meta: "логотипы и примеры слайдов" },
+  { key: "dir", name: "Папка брендбука", meta: "логотипы и примеры слайдов" },
+  { key: "zip", name: "Архив .zip", meta: "та же папка одним файлом" },
   { key: "figma", name: "Figma — файл или ссылка", meta: "стили и компоненты" },
 ];
+
+/** Пределы брендбука — как у сервера (app.py `max_brandbook_bytes` 50 МБ, `_MAX_BRAND_FOLDER_FILES` 300): больше —
+ *  не отправляется, причина — словами сервера (а не «Сеть недоступна» от его раннего 413). */
+export const MAX_BRAND_BYTES = 50 * 1024 * 1024;
+export const MAX_BRAND_FILES = 300;
+export function brandSizeProblem(src: { size: number } | { size: number }[]): string | null {
+  if (Array.isArray(src)) {
+    if (src.length > MAX_BRAND_FILES) return `В папке брендбука больше ${MAX_BRAND_FILES} файлов — оставьте логотипы, токены, гайдлайн и примеры слайдов или загрузите архив .zip`;
+    if (src.reduce((n, f) => n + f.size, 0) > MAX_BRAND_BYTES) return "Брендбук больше 50 МБ — сожмите картинки в PDF или загрузите токены JSON и логотипы архивом";
+    return null;
+  }
+  return src.size > MAX_BRAND_BYTES ? "Брендбук больше 50 МБ — сожмите картинки в PDF или загрузите токены JSON и логотипы архивом" : null;
+}
 /** Пример — PDF-гайдлайн (examples/brandbook-vk-cloud); число страниц и имя файла — из разобранного брендбука. */
 export const BRAND_SAMPLE = { name: "Пример: Брендбук VK Cloud", meta: "PDF-гайдлайн · палитра, шрифты, логотипы" };
 
@@ -288,8 +346,13 @@ export function brandFileName(src: File | File[] | { figmaUrl: string }): string
   return src.name;
 }
 
-/** Ссылка на файл Figma: figma.com/file|design|proto/… */
-export const figmaUrlOk = (s: string): boolean => /^(https?:\/\/)?([\w-]+\.)?figma\.com\/(file|design|proto|board)\/[A-Za-z0-9]+/i.test(s.trim());
+/** Ссылка на файл Figma — по тем же правилам, что у сервера (verstka/brand/figma.py `normalize_url`, `_URL_RE`): кавычки,
+ *  «<…>» и отсутствие «https://» не мешают; вид — design, file, proto, board, slides, deck, make; ключ — от 10 знаков. */
+export function figmaUrlOk(s: string): boolean {
+  let t = s.trim().replace(/^[<>"'«»]+|[<>"'«»]+$/g, "").trim();
+  if (/^(?:[\w-]+\.)?figma\.com\//i.test(t)) t = `https://${t}`;
+  return /^https?:\/\/(?:[\w-]+\.)?figma\.com\/(?:file|design|proto|board|slides|deck|make)\/[A-Za-z0-9]{10,}/i.test(t);
+}
 
 /** Шаги разбора по событиям задачи (§6: палитра · шрифты · логотипы · правила): открыт файл, палитра, шрифты, логотипы,
  *  правила, сверка с шаблоном. Событие с `step` — этот шаг готов, `message` — его итог («6 цветов»); событие без
@@ -332,7 +395,7 @@ export interface StepRow { a: string; b: string; state: "done" | "cur" | "pend" 
 const OPEN: Record<BrandSource, [string, string]> = {
   pdf: ["открыт файл", "страницы"],
   json: ["прочитаны токены", "цвета, шрифты, отступы"],
-  dir: ["открыт архив", "логотипы и примеры слайдов"],
+  dir: ["открыт брендбук", "логотипы и примеры слайдов"],
   figma: ["открыт файл Figma", "стили и компоненты"],
 };
 export function brandRows(run: BrandRun, src: BrandSource, template: string | null): StepRow[] {
@@ -354,7 +417,7 @@ export function brandTiles(run: BrandRun): BrandTile[] {
   return [
     { key: "fonts", name: "Шрифты", meta: plural(fonts.length, "шрифт", "шрифта", "шрифтов"), on: at("fonts") && fonts.length > 0 },
     { key: "palette", name: "Палитра", meta: plural(colors.length, "цвет", "цвета", "цветов"), on: at("palette") && colors.length > 0 },
-    { key: "logos", name: "Логотипы", meta: String(logos.length), on: at("logos") && logos.length > 0 },
+    { key: "logos", name: "Логотипы", meta: plural(logos.length, "логотип", "логотипа", "логотипов"), on: at("logos") && logos.length > 0 },
   ].map((t) => ({ ...t, meta: t.on ? t.meta : "…" })) as BrandTile[];
 }
 
@@ -396,9 +459,10 @@ export const fontRoleLabel = (role: "heading" | "body"): string => (role === "he
 
 /** Расхождение для слоя (V2 `bbConf`): что, шаблон, брендбук, кружки цвета и что в презентации — по тому, что важнее.
  *  `result` сервера — при «брендбук важнее» (по умолчанию); «шаблон важнее» — как в шаблоне. */
-export function conflictView(c: BrandConflict, priority: BrandPriority): { k: string; a: string; b: string; sw: boolean; res: string } {
+export function conflictView(c: BrandConflict): { k: string; a: string; b: string; sw: boolean; res: string } {
   const sw = c.kind === "color" && /^#[0-9A-F]{6}$/i.test(c.template) && /^#[0-9A-F]{6}$/i.test(c.brand);
-  const res = priority === "template" ? `${c.template}, как в шаблоне` : c.result || c.brand;
+  // `result` сервера — что получит колода с выбранным приоритетом (GET …?brand_priority=): как есть, без прикидок
+  const res = c.result || c.brand;
   return { k: c.what, a: c.template, b: c.brand, sw, res };
 }
 

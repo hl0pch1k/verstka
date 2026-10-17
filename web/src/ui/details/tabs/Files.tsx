@@ -17,6 +17,7 @@ import { Tx } from "../../kit/Tx";
 import { SHEET_PAD } from "../../deck/layout";
 import { filesCols, filesVars, SheetCtx, type FilesCols, type SheetMorph } from "../sheetMorph";
 import type { DeckManifest } from "../useDeckManifest";
+import { deckTemplate } from "../../result/resultView";
 
 const H = { margin: 0 } as const;
 /** Группа факта — клетка сетки «Паспорта»: встаёт по верху своей клетки (высота стопки на ходу — своя). */
@@ -215,7 +216,7 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
   const { strategyTitle, templateLabel } = useApp();
   const [dev, setDev] = useState(false);
   const files = fileRows(g, v.strategy, strategyTitle);
-  const pass = passport(g, v, templateLabel(g.template_id, v.run_manifest?.template.file ?? g.template_file), strategyTitle);
+  const pass = passport(g, v, templateLabel(deckTemplate(g), v.run_manifest?.template.file ?? g.template_file), strategyTitle);
   const m = v.run_manifest;
   const stages = m ? stagesOf(m) : null;
   const check = checkTiles(g, v);

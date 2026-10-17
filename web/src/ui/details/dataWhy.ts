@@ -5,6 +5,7 @@
 // посчитано, каким был бы заголовок-описание). Всё — из `OutlineSlide.data` (SlideData) и содержимого слайда: интерпретация
 // данных — детерминированный код сервера, здесь только слова. Чистые функции, без React.
 import { plural } from "../../lib/utils";
+import { VIZ_TITLES } from "../../lib/vizNames";
 import type {
   ColumnProfile, ColumnRole, ColumnType, HeadlineFact, OutlineSlide, SlideData, SourceKind, TaskKind, TimeFreq, Variant, VizKind, VizOption,
 } from "../../types";
@@ -24,23 +25,8 @@ export const TASK_TITLES: Record<TaskKind, string> = {
 const TASK_ORDER: TaskKind[] = ["dynamics", "comparison", "shares", "distribution", "relationship", "reference", "kpi"];
 const TASK_SHOWN = (k: TaskKind, task: TaskKind | null) => k !== "kpi" || task === "kpi";
 
-/** Форма слайда в навигации «Почему так» («Слайд 4 / 9 · Горизонтальные столбцы»). */
-export const VIZ_FORM: Record<VizKind, string> = {
-  line: "Линейный график",
-  column: "Столбцы",
-  bar: "Горизонтальные столбцы",
-  histogram: "Гистограмма",
-  pie: "Круговая диаграмма",
-  doughnut: "Кольцевая диаграмма",
-  scatter: "Рассеяние",
-  grouped_column: "Сгруппированные столбцы",
-  grouped_bar: "Сгруппированные полосы",
-  stacked_column: "Накопительные столбцы",
-  stacked_bar: "Накопительные полосы",
-  kpi_cards: "Карточки",
-  table: "Таблица",
-  area: "Область",
-};
+/** Форма слайда в навигации «Почему так» («Слайд 4 / 9 · Полосы») — одно название на вид (lib/vizNames, как на сервере). */
+export const VIZ_FORM: Record<VizKind, string> = VIZ_TITLES;
 
 /** Тип колонки — подпись и тег, четыре вида, как на холсте (V2 `dsType`: дата — синий, число — светлый, категория —
  *  серый, текст — с обводкой); единица (₽, %) — в имени колонки, роль — рядом. */
@@ -115,12 +101,15 @@ const MONTHS = ["январь", "февраль", "март", "апрель", "�
 const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 const ROMAN = ["I", "II", "III", "IV"];
 
-/** Период оси времени по-русски: «2025-01» → «январь 2025», «2026-Q3» → «III кв. 2026», «2025-01-31» → «31 января
+/** Период оси времени по-русски: «2025-01» → «январь 2025», «2026-Q3» → «III кв. 2026», «2025-W05» → «5-я неделя 2025», «2025-01-31» → «31 января
  *  2025»; непонятное — как есть. */
 export function periodText(iso: string): string {
   const s = iso.trim();
   let m = s.match(/^(\d{4})-Q([1-4])$/i);
   if (m) return `${ROMAN[Number(m[2]) - 1]}\u00a0кв. ${m[1]}`;
+  // ISO-неделя: «2025-W05» → «5-я неделя 2025»
+  m = s.match(/^(\d{4})-W(\d{1,2})$/i);
+  if (m && Number(m[2]) >= 1 && Number(m[2]) <= 53) return `${Number(m[2])}-я неделя ${m[1]}`;
   m = s.match(/^(\d{4})-(\d{2})$/);
   if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return `${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
   m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/);

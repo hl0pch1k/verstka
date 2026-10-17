@@ -15,7 +15,7 @@ const variant = (edits: Partial<VariantEdit>[] = []): Variant => ({
 test("«Почему так» слайда с данными (регионы): файл, колонки, профиль, задача, варианты, заголовок-вывод — из SlideData", () => {
   const s = DATA_SLIDES[4];
   const w = dataWhyView(variant(), 4, s, s.data!);
-  assert.equal(w.form, "Горизонтальные столбцы");
+  assert.equal(w.form, "Полосы");
   assert.equal(w.file, "Регионы.xlsx");
   assert.equal(w.kind, "xlsx");
   assert.equal(w.meta, "XLSX · 8 строк × 3 колонки · сравнение");
@@ -50,7 +50,7 @@ test("«Почему так» слайда с данными (регионы): �
   assert.ok(/^Москва — 1 433 млн ₽ из 3 495 млн ₽, это 41%/.test(plain(w.from)));
   assert.equal(w.plain, "Выручка по регионам");
   assert.equal(w.undoable, false);
-  assert.equal(dataWhyCap({ n: 4, total: 9 }, s.data!), "Слайд 4 / 9 · Горизонтальные столбцы");
+  assert.equal(dataWhyCap({ n: 4, total: 9 }, s.data!), "Слайд 4 / 9 · Полосы");
 });
 
 test("пересобрано другим вариантом: «Выбран» у него, лучший по данным — со своими доводами, у выбранного — что анализ ставил его ниже", () => {
@@ -106,7 +106,7 @@ test("карточки показателей: «Ключевые значени
   assert.equal(w.kinds.length, 7);
   assert.deepEqual(w.kinds.filter((k) => k.on).map((k) => k.t), ["Ключевые значения"]);
   assert.equal(plain(w.key), "+23 %");
-  assert.equal(w.form, "Карточки");
+  assert.equal(w.form, "Карточки показателей");
 });
 
 test("справочник: колонки больше восьми — строкой «и ещё», таблица топ-10 — «Топ-10» не число заголовка", () => {
@@ -165,4 +165,10 @@ test("«Вернуть как было» пересборки, что разби
   assert.equal(rebuiltFirst({ edits: [edit([5, 6, 7])] }, 6), 5);
   assert.equal(rebuiltFirst({ edits: [edit([5, 6, 7]), edit([2], "fix")] }, 6), 6);
   assert.equal(rebuiltFirst({ edits: [] }, 4), 4);
+});
+
+test("недели по-русски: «2025-W05» → «5-я неделя 2025»", () => {
+  assert.equal(periodText("2025-W05"), "5-я неделя 2025");
+  assert.equal(periodText("2026-w52"), "52-я неделя 2026");
+  assert.equal(periodText("2025-W60"), "2025-W60");
 });

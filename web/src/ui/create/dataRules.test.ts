@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
-  brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsFit,
-  fmtLabel, foldBrandEvent, goalChips, goalNoteLine, goalsKey, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelShort, panelStatus, parseManifest, runWord, sizeProblem, type DataCard,
+  brandSizeProblem, brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsLayout,
+  fmtLabel, foldBrandEvent, goalChips, goalNoteLine, goalsKey, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelShort, panelStatus, parseManifest, runWord, sizeProblem, stillInText, type DataCard,
 } from "./dataRules";
 import type { BrandConflict, BrandSpec, DatasetSummary, JobEvent } from "../../types";
 
@@ -76,7 +76,7 @@ test("шапка панели: ход разбора, итог; id для сбо
 test("цели из текста: по порядку, у задачи — первая, со своим графиком; без целей — подпись «графики выберу по данным»", () => {
   assert.deepEqual(goalsOf(BRIEF), [
     { q: "покажи рост выручки", to: "линейный график", task: "dynamics" },
-    { q: "сравни регионы", to: "столбцы", task: "comparison" },
+    { q: "сравни регионы", to: "полосы", task: "comparison" },
   ]);
   assert.deepEqual(goalsOf("Из чего складывается выручка? Как распределено время ответа. Есть ли связь цены и спроса; справочно — клиенты").map((g) => g.task),
     ["shares", "distribution", "relationship", "reference"]);
@@ -107,11 +107,19 @@ test("панель «Данные» в узкой колоде: 400 → 320 пр
   // ещё у́же — панель не у́же 200
   assert.equal(dataPanel(1100).narrow, 200);
 });
-test("таблетки целей: гаснут те, что не помещаются целиком (первая — всегда); тесная колода с помощником", () => {
+test("таблетки целей: все в ряд с видом, без вида или в два ряда; не поместившиеся — счётом; тесная колода с помощником", () => {
   const w = [{ q: 150, gt: 129 }, { q: 105, gt: 70 }];
-  assert.deepEqual(goalsFit(w, 1392), { wide: [true, true], narrow: [true, true] });
-  assert.deepEqual(goalsFit(w, 1232), { wide: [true, false], narrow: [true, false] });
-  assert.deepEqual(goalsFit([{ q: 900, gt: 100 }], 1232), { wide: [true], narrow: [true] });
+  // поле 688 (внутри 640) / с помощником 352 (внутри 320)
+  assert.deepEqual(goalsLayout(w, 1392), { mode: "full", wide: [1, 1], narrow: [1, 1] });
+  // поле 528 (внутри 480): с видом не помещаются — все в ряд без вида; с помощником (внутри 248) — вторая гаснет
+  assert.deepEqual(goalsLayout(w, 1232), { mode: "short", wide: [1, 1], narrow: [1, 0] });
+  // много целей при свободном поле — второй ряд (первый — справа от подписи, отступ 131), а не «ещё N»; с помощником —
+  // что поместилось в два ряда, в конце второго — место под «ещё N» (48)
+  const five = Array.from({ length: 5 }, () => ({ q: 150, gt: 100 }));
+  assert.deepEqual(goalsLayout(five, 1392, { l: 131, more: 48 }), { mode: "two", wide: [1, 1, 2, 2, 2], narrow: [1, 2, 0, 0, 0] });
+  // первая не помещается справа от подписи — встаёт во второй ряд
+  assert.deepEqual(goalsLayout([{ q: 600, gt: 100 }, { q: 600, gt: 100 }], 1392, { l: 131, more: 48 }).wide, [2, 0]);
+  assert.deepEqual(goalsLayout([{ q: 900, gt: 100 }], 1232), { mode: "full", wide: [1], narrow: [1] });
   assert.equal(brandTight(1392), false);
   assert.equal(brandTight(1318), true);
   assert.equal(brandTight(1232), true);
@@ -122,9 +130,12 @@ test("брендбук: откуда, имя файла, ссылка Figma", ()
     ["pdf", "json", "dir", "dir", "figma"]);
   assert.equal(brandFileName(f("Брендбук VK Cloud.pdf")), "Брендбук VK Cloud.pdf");
   assert.equal(brandFileName({ figmaUrl: "x" }), "Файл Figma");
-  assert.equal(figmaUrlOk("https://www.figma.com/design/AbC123/Brand?node-id=1"), true);
-  assert.equal(figmaUrlOk("figma.com/file/AbC123"), true);
-  assert.equal(figmaUrlOk("https://example.com/file/AbC"), false);
+  // как у сервера (brand/figma.py): ключ от 10 знаков, без «https://» и в кавычках — тоже ссылка
+  assert.equal(figmaUrlOk("https://www.figma.com/design/AbC123defGH/Brand?node-id=1"), true);
+  assert.equal(figmaUrlOk("figma.com/file/AbC123defGH"), true);
+  assert.equal(figmaUrlOk("«https://figma.com/slides/AbC123defGH/x»"), true);
+  assert.equal(figmaUrlOk("https://www.figma.com/design/AbC123/Brand"), false);
+  assert.equal(figmaUrlOk("https://example.com/file/AbC123defGH"), false);
 });
 test("разбор брендбука: шаги по событиям задачи, итог шага — после двоеточия, ход без шага — по доле", () => {
   let r = BRAND_RUN0;
@@ -158,13 +169,12 @@ test("брендбук: название, подпись карточки, сл�
   assert.equal(brandLayerMeta(SPEC, "x", "VK Tech"), "Брендбук VK Cloud.pdf · 24 страницы · применяется к шаблону VK Tech");
   assert.deepEqual(brandPalette(SPEC), ["#0077FF", "#2787F5", "#0B1220", "#FFFFFF", "#FF3985", "#00C2FF"]);
 });
-test("расхождения: брендбук важнее — что решил сервер; шаблон важнее — как в шаблоне; кружки — у цветов", () => {
+test("расхождения: что, шаблон, брендбук, кружки — у цветов; «что в презентации» — как посчитал сервер, как есть", () => {
   const font: BrandConflict = { what: "Шрифт заголовков", template: "Play", brand: "VK Sans Display", result: "VK Sans Display, замена — Play", kind: "font" };
-  const color: BrandConflict = { what: "Второй акцент", template: "#FF3885", brand: "#FF3985", result: "#FF3985", kind: "color" };
-  assert.deepEqual(conflictView(font, "brand"), { k: "Шрифт заголовков", a: "Play", b: "VK Sans Display", sw: false, res: "VK Sans Display, замена — Play" });
-  assert.equal(conflictView(font, "template").res, "Play, как в шаблоне");
-  assert.equal(conflictView(color, "brand").sw, true);
-  assert.equal(conflictView(color, "template").res, "#FF3885, как в шаблоне");
+  const color: BrandConflict = { what: "Второй акцент", template: "#FF3885", brand: "#FF3985", result: "#FF3885", kind: "color" };
+  assert.deepEqual(conflictView(font), { k: "Шрифт заголовков", a: "Play", b: "VK Sans Display", sw: false, res: "VK Sans Display, замена — Play" });
+  assert.equal(conflictView(color).sw, true);
+  assert.equal(conflictView(color).res, "#FF3885");
 });
 test("запрос сборки: поля второй ступени — только когда есть данные или брендбук", () => {
   assert.deepEqual(dataRequest([], null, "brand"), {});
@@ -187,10 +197,12 @@ test("манифест примера: текст, число слайдов, ф
 test("цели из текста — как их поймёт сборка: таблетки по ответу сервера, без него — прикидка по тексту; строка без ответа", () => {
   const g = (patch: Record<string, unknown>) => ({ quote: "Покажи рост выручки.", dataset_id: "d1", file: "Выручка.csv", task: "dynamics", task_title: "Динамика",
     viz: "line", viz_title: "линейный график", label: "Динамика · «выручка»", ...patch });
-  const server = { goals: [g({}), g({ quote: "покажи рост выручки" }), g({ quote: "«сравни регионы»", task: "comparison", viz_title: null, label: "Сравнение категорий", file: null })] };
+  const server = { goals: [g({}), g({ quote: "покажи рост выручки" }), g({ quote: "«сравни регионы»", task: "comparison", viz: "bar", viz_title: "столбцы", label: "Сравнение категорий", file: null }), g({ quote: "что-то", task: "kpi", viz: null, viz_title: null, label: "Ключевые значения", file: null })] };
   assert.deepEqual(goalChips(server as never, goalsOf("покажи долю")), [
     { key: "dynamics|покажи рост выручки", q: "покажи рост выручки", to: "линейный график", title: "Динамика · «выручка» · Выручка.csv" },
-    { key: "comparison|сравни регионы", q: "сравни регионы", to: null, title: "Сравнение категорий" },
+    // название вида — из одной таблицы интерфейса («полосы»), а не своё у ответа целей («столбцы»)
+    { key: "comparison|сравни регионы", q: "сравни регионы", to: "полосы", title: "Сравнение категорий" },
+    { key: "kpi|что-то", q: "что-то", to: null, title: "Ключевые значения" },
   ]);
   // сервер ответил «целей нет» — таблеток нет (прикидка не подмешивается)
   assert.deepEqual(goalChips({ goals: [] }, goalsOf("покажи рост выручки")), []);
@@ -203,4 +215,22 @@ test("цели из текста — как их поймёт сборка: та
   });
   assert.equal(goalsKey("  Покажи   рост ", ["d1", "d2"], true), "1|d1,d2|Покажи рост");
   assert.ok(goalsKey("x", ["d1"], true) !== goalsKey("x", ["d1"], false));
+});
+
+test("брендбук: пределы сервера — 50 МБ и 300 файлов в папке, его словами", () => {
+  const MB = 1024 * 1024;
+  assert.equal(brandSizeProblem({ size: 50 * MB }), null);
+  assert.equal(brandSizeProblem({ size: 50 * MB + 1 }), "Брендбук больше 50 МБ — сожмите картинки в PDF или загрузите токены JSON и логотипы архивом");
+  assert.equal(brandSizeProblem(Array.from({ length: 301 }, () => ({ size: 1 })))?.startsWith("В папке брендбука больше 300 файлов"), true);
+  assert.equal(brandSizeProblem([{ size: 30 * MB }, { size: 30 * MB }])?.startsWith("Брендбук больше 50 МБ"), true);
+});
+
+test("цели прежнего текста: остаются только те, чьи цитаты ещё в тексте; ни одной — прикидка по новому тексту", () => {
+  const g = (quote: string) => ({ quote, dataset_id: "d1", file: "a.csv", task: "dynamics", task_title: "Динамика", viz: "line", viz_title: "Линейный график", label: quote });
+  const a = { source: "model", model: null, cached: false, seconds: 1, error: null, skipped: null,
+    goals: [g("покажи рост выручки"), g("сравни регионы")], notes: [{ quote: "Где узкие места?", reason: "нет данных" }] };
+  const kept = stillInText(a, "Покажи рост  выручки за год. Где узкие места");
+  assert.deepEqual(kept?.goals.map((x) => x.quote), ["покажи рост выручки"]);
+  assert.equal(kept?.notes.length, 1);
+  assert.equal(stillInText(a, "Совсем другой бриф про найм"), null);
 });

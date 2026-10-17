@@ -16,15 +16,17 @@ import { useRise } from "../result/useRise";
 import { usePhone } from "../shell/tier";
 import { Layer, lsDelay } from "./Layer";
 import { Scrim } from "./Scrim";
+import { deckTemplate } from "../result/resultView";
 
 const thumb = (id: string, n: number) => `/api/templates/${encodeURIComponent(id)}/files/thumbs/slide-${String(n).padStart(3, "0")}.jpg`;
 /** V2 `tpPvSlides`: задержка лесенки 160 + 40·i, не дольше восьмой миниатюры. */
 const slideDelay = (i: number) => 160 + Math.min(i, 7) * 40;
 
 /** Презентация на этом шаблоне, у которой можно открыть вкладку «Шаблон»: открытая, иначе самая новая готовая. */
-function deckOf(id: string, open: { id: string; template_id?: string | null } | null, list: { id: string; template_id: string; status?: string; created_at?: number }[]): string | null {
-  if (open?.template_id === id) return open.id;
-  const ready = list.filter((g) => g.template_id === id && g.status !== "failed" && g.status !== "running");
+function deckOf(id: string, open: { id: string; template_id: string; base_template_id?: string | null } | null, list: { id: string; template_id: string; base_template_id?: string | null; status?: string; created_at?: number }[]): string | null {
+  // шаблон презентации — исходный (брендированная копия — свой id): deckTemplate
+  if (open && deckTemplate(open) === id) return open.id;
+  const ready = list.filter((g) => deckTemplate(g) === id && g.status !== "failed" && g.status !== "running");
   ready.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
   return ready[0]?.id ?? null;
 }

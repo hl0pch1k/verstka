@@ -83,7 +83,8 @@ export function legacyLines(log: string[]): AgentLine[] {
 
 // ---- ваши правки ------------------------------------------------------------------------------------------------------
 
-export interface EditRow { key: string; q: string; a: string; off: boolean }
+/** `quoted` — строка — слова человека (в «кавычках»); пересборка слайда кнопкой и «Правка» без текста — подпись. */
+export interface EditRow { key: string; q: string; a: string; off: boolean; quoted: boolean }
 
 const isUndo = (e: VariantEdit) => e.kind === "undo" || e.undo_of != null;
 
@@ -93,6 +94,18 @@ function answer(e: VariantEdit): string {
   const parts = [e.fixed?.length ? `Исправлено ${plural(e.fixed.length, "замечание", "замечания", "замечаний")}` : null,
     e.score_before != null && e.score_after != null ? `оценка ${Math.round(e.score_before)} → ${Math.round(e.score_after)}` : null];
   return parts.filter(Boolean).join(" · ");
+}
+
+/** Заголовок строки журнала: «Пересобрать слайд так» — «Пересборка слайда 4 — полосы» (а не «Правка»), иначе — что
+ *  просили в чате. */
+export function editTitle(e: Pick<VariantEdit, "kind" | "request" | "slides">): string {
+  const req = e.request?.trim() ?? "";
+  if (e.kind === "rebuild") {
+    const n = e.slides?.length ? ` ${e.slides.join(", ")}` : "";
+    const how = /так:\s*(.+)$/i.exec(req)?.[1]?.trim();
+    return `Пересборка слайда${n}${how ? ` — ${how}` : ""}`;
+  }
+  return req || "Правка";
 }
 
 /** Журнал правок, как его держит сервер: каждая правка хранит версию, «верни как было» снимает самую новую ещё
@@ -107,7 +120,7 @@ export function editRows(edits: VariantEdit[]): { rows: EditRow[]; active: numbe
       if (at >= 0) off.add(kept.splice(at, 1)[0]);
     } else if (e.version != null) kept.push(i);
   });
-  const rows = edits.map((e, i) => ({ e, i })).filter(({ e }) => !isUndo(e)).map(({ e, i }) => ({ key: `${i}`, q: e.request?.trim() || "Правка", a: answer(e), off: off.has(i) }));
+  const rows = edits.map((e, i) => ({ e, i })).filter(({ e }) => !isUndo(e)).map(({ e, i }) => ({ key: `${i}`, q: editTitle(e), a: answer(e), off: off.has(i), quoted: e.kind !== "rebuild" && !!e.request?.trim() }));
   const active = rows.filter((r) => !r.off).length;
   const hint = active ? "Что вы меняли в чате после сборки. «Вернуть как было» отменит последнюю правку."
     : rows.length ? "Все правки отменены — слайды такие, как после сборки."

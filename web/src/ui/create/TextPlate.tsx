@@ -606,9 +606,11 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   const busy = !!tp.reading;
   // строка о ходе чтения («Модель не подключена…») встаёт на место подсказки и «Читаю…»; ошибка сильнее неё
   const infoOn = !issue && !!tp.info;
-  const hintOn = !issue && !busy && !infoOn && line.kind === "topic";
+  // с файлами данных строка — о них («бриф — текст по данным»), а не «цифр и таблиц в тексте нет»
+  const noFactsWithData = data.cards.length > 0 && line.kind === "facts" && !line.facts;
+  const hintOn = !issue && !busy && !infoOn && (line.kind === "topic" || noFactsWithData);
   const readyOn = !issue && !busy && !infoOn && line.kind === "ready";
-  const factsOn = !issue && !busy && !infoOn && line.kind === "facts";
+  const factsOn = !issue && !busy && !infoOn && line.kind === "facts" && !noFactsWithData;
   const busyOn = busy && !infoOn && !issue;
   // гаснущая строка держит своё: разбор, ошибку, имя презентации, строку о ходе
   const facts = useHeld(line.kind === "facts" ? line : null);

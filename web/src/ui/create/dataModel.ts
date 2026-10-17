@@ -19,26 +19,31 @@ export interface BrandState {
   conflicts: BrandConflict[];
   /** С каким шаблоном сверены расхождения (другой шаблон — расхождения перечитываются); null — ни с каким. */
   tplFor: string | null;
+  /** При каком приоритете сервер посчитал «что в презентации» у расхождений (другой — перечитываются). */
+  prioFor: BrandPriority | null;
+  /** Что не встало при сверке с шаблоном (ответ GET /api/brandbooks/{id}: брендированная копия), по-русски. */
+  applyWarnings: string[];
   error: string | null;
   /** Неудачу можно повторить с тем же файлом (не повторить — пример не скачался). */
   canRetry: boolean;
 }
 export const BRAND0: BrandState = {
-  phase: "none", source: "pdf", file: "", id: null, run: BRAND_RUN0, spec: null, conflicts: [], tplFor: null, error: null, canRetry: false,
+  phase: "none", source: "pdf", file: "", id: null, run: BRAND_RUN0, spec: null, conflicts: [], tplFor: null, prioFor: null, applyWarnings: [], error: null, canRetry: false,
 };
 
 /** Откуда брендбук по прочитанному (`BrandSpec.source`): токены — «json», папка — «dir». */
 export const sourceOfSpec = (s: BrandSpec["source"]): BrandSource => (s === "tokens" ? "json" : s === "folder" ? "dir" : s);
 
 /** Приложенный брендбук по ответу сервера (GET /api/brandbooks/{id}: что прочитано и расхождения с `tplFor`). */
-export const brandOn = (id: string, brand: BrandSpec, conflicts: BrandConflict[], tplFor: string | null): BrandState => ({
-  ...BRAND0, phase: "on", id, source: sourceOfSpec(brand.source), file: brand.file ?? "", spec: brand, conflicts, tplFor,
+export const brandOn = (id: string, brand: BrandSpec, conflicts: BrandConflict[], tplFor: string | null, prioFor: BrandPriority | null = "brand"): BrandState => ({
+  ...BRAND0, phase: "on", id, source: sourceOfSpec(brand.source), file: brand.file ?? "", spec: brand, conflicts, tplFor, prioFor,
   run: { done: BRAND_STEPS.length, facts: {}, brand },
 });
 
-/** Расхождения сверены не с выбранным шаблоном (шаблон сменили, пока брендбук разбирался, или его тогда не было). */
-export const conflictsStale = (b: Pick<BrandState, "phase" | "id" | "tplFor">, templateId: string | null): boolean =>
-  b.phase === "on" && !!b.id && !!templateId && b.tplFor !== templateId;
+/** Расхождения сверены не с выбранным шаблоном (шаблон сменили, пока брендбук разбирался, или его тогда не было) или
+ *  посчитаны для другого приоритета («шаблон важнее» / «брендбук важнее»). */
+export const conflictsStale = (b: Pick<BrandState, "phase" | "id" | "tplFor" | "prioFor">, templateId: string | null, priority: BrandPriority = "brand"): boolean =>
+  b.phase === "on" && !!b.id && !!templateId && (b.tplFor !== templateId || b.prioFor !== priority);
 
 // ── файлы и очередь
 /** Только поля карточки: `GET /api/datasets/{id}` несёт ещё профиль и план — в черновик они не идут. */
@@ -105,7 +110,8 @@ export function parseDataDraft(raw: unknown): DataDraft {
   const cards = Array.isArray(d.cards) ? d.cards.filter(isCard).map((c) => ({ ...c, summary: c.summary ? toSummary(c.summary) : null })) : [];
   const b = d.brand as Partial<BrandState> | null | undefined;
   const brand = b && typeof b.id === "string" && b.spec && typeof b.spec === "object"
-    ? { ...brandOn(b.id, b.spec as BrandSpec, Array.isArray(b.conflicts) ? b.conflicts : [], typeof b.tplFor === "string" ? b.tplFor : null), file: typeof b.file === "string" ? b.file : (b.spec as BrandSpec).file ?? "" }
+    ? { ...brandOn(b.id, b.spec as BrandSpec, Array.isArray(b.conflicts) ? b.conflicts : [], typeof b.tplFor === "string" ? b.tplFor : null,
+      b.prioFor === "template" || b.prioFor === "brand" ? b.prioFor : null), file: typeof b.file === "string" ? b.file : (b.spec as BrandSpec).file ?? "" }
     : BRAND0;
   return {
     cards, brand, priority: d.priority === "template" ? "template" : "brand",
@@ -116,7 +122,7 @@ export function parseDataDraft(raw: unknown): DataDraft {
 export function draftOf(cards: DataCard[], brand: BrandState, priority: BrandPriority, used: string[]): Record<string, unknown> {
   const keep = cards.filter((c) => c.status === "done" || c.status === "fail").map((c) => ({ ...c, summary: c.summary ? toSummary(c.summary) : null }));
   const b = brand.phase === "on" && brand.id
-    ? { source: brand.source, file: brand.file, id: brand.id, spec: brand.spec, conflicts: brand.conflicts, tplFor: brand.tplFor }
+    ? { source: brand.source, file: brand.file, id: brand.id, spec: brand.spec, conflicts: brand.conflicts, tplFor: brand.tplFor, prioFor: brand.prioFor }
     : null;
   return { cards: keep, brand: b, priority, used: used.slice(-USED_MAX) };
 }

@@ -17,7 +17,7 @@ const remember = (key: string, a: GoalsAnswer) => {
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string);
 };
 
-export function useServerGoals(brief: string, ids: string[], models: boolean): GoalsAnswer | null {
+export function useServerGoals(brief: string, ids: string[], models: boolean): { answer: GoalsAnswer | null; fresh: boolean } {
   const idsKey = ids.join(",");
   const key = goalsKey(brief, ids, models);
   const [got, setGot] = useState<{ key: string; ids: string; a: GoalsAnswer } | null>(() => {
@@ -55,6 +55,6 @@ export function useServerGoals(brief: string, ids: string[], models: boolean): G
       ctl.abort();
     };
   }, [key, idsKey]);
-  if (!idsKey || failed === key || !got || got.ids !== idsKey) return null;
-  return got.a;
+  if (!idsKey || failed === key || !got || got.ids !== idsKey) return { answer: null, fresh: false };
+  return { answer: got.a, fresh: got.key === key };
 }

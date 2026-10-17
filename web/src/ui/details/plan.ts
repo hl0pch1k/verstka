@@ -7,14 +7,12 @@ import type { ChartSpec, DeckOutline, Fact, SlideContent, Variant, WriterInfo } 
 import { writerSlides } from "../layers/writerText";
 import { slideSrc } from "../result/resultView";
 import { formulaParts, latexText } from "./latex";
+import { vizName } from "../../lib/vizNames";
 
 export { formulaParts, latexText } from "./latex";
 
-const CHART: Record<string, string> = {
-  bar: "Горизонтальная диаграмма", column: "Столбчатая диаграмма", line: "Линейный график", area: "Диаграмма с областями",
-  pie: "Круговая диаграмма", doughnut: "Кольцевая диаграмма",
-};
-export const chartName = (type: string) => CHART[type] ?? "Диаграмма";
+/** Название диаграммы — одно на вид, как везде (lib/vizNames, как на сервере). */
+export const chartName = (type: string) => vizName(type);
 
 /** Подпись короче `max` знаков — по целым словам, с многоточием, если что-то отрезано. */
 export function shortLabel(text: string, max = 32): string {

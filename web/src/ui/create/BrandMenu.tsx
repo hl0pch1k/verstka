@@ -5,11 +5,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "../../store";
 import { cls } from "../kit/cls";
-import { BRAND_ACCEPT, BRAND_ITEMS, BRAND_SAMPLE, brandMeta, brandName, brandPalette, brandTight, figmaUrlOk, type BrandSource } from "./dataRules";
+import { BRAND_ACCEPT, BRAND_ITEMS, BRAND_SAMPLE, brandMeta, brandName, brandPalette, brandTight, figmaUrlOk, type BrandPick } from "./dataRules";
 import { useDeckWrap } from "../deck/useDeckFit";
 import { DsIcon, DsSpin, type DsIconName } from "./dsKit";
 
-const ITEM_ICON: Record<BrandSource, DsIconName> = { pdf: "file", json: "json", dir: "folder", figma: "frame" };
+const ITEM_ICON: Record<BrandPick, DsIconName> = { pdf: "file", json: "json", dir: "folder", zip: "folder", figma: "frame" };
 /** Пример брендбука — GET /api/examples/brandbook-vk-cloud (манифест: файл брендбука ссылкой). */
 export const BRAND_EXAMPLE = "brandbook-vk-cloud";
 
@@ -69,6 +69,7 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
   const has = b.phase === "on" && !!b.spec;
   const btn = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [figma, setFigma] = useState(false);
   const [link, setLink] = useState("");
@@ -101,8 +102,14 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
     if (!menu) dispatch({ type: "open", step: "tpl" });
     setMenu(!menu);
   };
-  const pick = (k: BrandSource) => {
+  const pick = (k: BrandPick) => {
     if (k === "figma") return setFigma(true);
+    // папка целиком: своё окно выбора (webkitdirectory) — файлы уходят с путями в папке (API: `files`)
+    if (k === "dir") {
+      setMenu(false);
+      folder.current?.click();
+      return;
+    }
     const el = input.current;
     if (!el) return;
     el.accept = BRAND_ACCEPT[k];
@@ -186,6 +193,13 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
           const f = e.currentTarget.files?.[0];
           e.currentTarget.value = "";
           if (f) data.startBrand(f);
+        }} />
+      <input ref={folder} type="file" hidden tabIndex={-1} aria-hidden="true" multiple
+        {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+        onChange={(e) => {
+          const fs = Array.from(e.currentTarget.files ?? []);
+          e.currentTarget.value = "";
+          if (fs.length) data.startBrand(fs);
         }} />
     </div>
   );

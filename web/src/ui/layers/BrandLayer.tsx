@@ -36,6 +36,7 @@ export function BrandLayer() {
   const tpl = templates.find((t) => t.template_id === templateId);
   const tplName = tpl ? tplLabel(tpl) : null;
   const name = spec ? `Брендбук ${brandName(spec, b.file)}` : "";
+  const warns = [...new Set([...(spec?.warnings ?? []), ...b.applyWarnings].map((w) => w.trim()).filter(Boolean))];
   const seg = radioGroup(SEG.map(([k]) => k), data.priority, data.setPriority);
   // «Убрать брендбук»: карточки, открывшей слой, больше нет — фокус встаёт на кнопку «Брендбук», которая вернулась
   const remove = () => {
@@ -71,7 +72,15 @@ export function BrandLayer() {
                 <div className="bb-g">
                   {/* что извлечено */}
                   <div style={{ minWidth: 0 }}>
-                    <section className="p2-ls" aria-labelledby="bb-h-pal" style={lsDelay(160)}>
+                    {/* что не прочиталось или не встало (брендбук и его применение к шаблону) — тихими строками */}
+                    {warns.length > 0 && (
+                      <section className="p2-ls bb-warns" aria-labelledby="bb-h-w" style={lsDelay(140)}>
+                        <h3 id="bb-h-w" className="dd-h">Что не прочиталось</h3>
+                        <ul className="bb-wl">{warns.map((w, i) => <li key={i}><Icon name="info" size={14} /><span>{w}</span></li>)}</ul>
+                      </section>
+                    )}
+                    {spec.colors.length > 0 && (
+                    <section className={cls("p2-ls", warns.length > 0 && "bb-sec")} aria-labelledby="bb-h-pal" style={lsDelay(160)}>
                       <h3 id="bb-h-pal" className="dd-h">Палитра</h3>
                       <ul className="bb-sws">
                         {spec.colors.map((c, i) => (
@@ -83,6 +92,7 @@ export function BrandLayer() {
                         ))}
                       </ul>
                     </section>
+                    )}
                     {spec.fonts.length > 0 && (
                       <section className="p2-ls bb-sec" aria-labelledby="bb-h-font" style={lsDelay(200)}>
                         <h3 id="bb-h-font" className="dd-h">Шрифты</h3>
@@ -130,7 +140,7 @@ export function BrandLayer() {
                       {b.conflicts.length > 0 ? (
                         <ul className="bb-cfs">
                           {b.conflicts.map((c, i) => {
-                            const v = conflictView(c, data.priority);
+                            const v = conflictView(c);
                             return (
                               <li key={`${c.what}-${i}`} className="bb-cf">
                                 <span className="bb-cfk">{v.k}</span>

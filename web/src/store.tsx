@@ -440,6 +440,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const data = useDataState({
     templateId,
+    useModels: params.useModels,
     setBrief: (t) => {
       setBrief(t);
       dispatch({ type: "set", patch: { improve: false } });

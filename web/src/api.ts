@@ -8,7 +8,11 @@ import { parseManifest, type ExampleManifest } from "./ui/create/dataRules";
 
 /** Разобранный брендбук (итог задачи POST /api/brandbooks и ответ GET /api/brandbooks/{id}): что прочитано и чем он
  *  расходится с шаблоном (`result` расхождения — при «брендбук важнее»). */
-export interface BrandbookResult { brand: BrandSpec; conflicts: BrandConflict[] }
+export interface BrandbookResult {
+  brand: BrandSpec; conflicts: BrandConflict[];
+  /** Что не встало при применении к шаблону (брендированная копия), по-русски — если сервер их пришлёт. */
+  warnings?: string[];
+}
 /** Цель брифа, как её поняла сборка (POST /api/goals, verstka/data/intent.py `GoalsRead.payload`). */
 export interface ServerGoal {
   quote: string; dataset_id: string | null; file: string | null; sheet?: string | null; task: string; task_title: string;
@@ -140,17 +144,26 @@ export const api = {
   deleteDataset: (id: string) => request<{ deleted: boolean }>(`/api/datasets/${encodeURIComponent(id)}`, { method: "DELETE" }),
   /** Брендбук: файл (PDF, токены JSON, архив .zip), папка (файлы с путями) или ссылка Figma. Разбор — задачей (её
    *  события — шаги: open · palette · fonts · logos · rules · compare); `template_id` — с чем сверять. */
-  uploadBrandbook: (src: File | File[] | { figmaUrl: string }, templateId?: string | null) => {
+  uploadBrandbook: (src: File | File[] | { figmaUrl: string }, templateId?: string | null, useModels = true, priority: "brand" | "template" = "brand") => {
     const fd = new FormData();
     if (Array.isArray(src)) for (const f of src) fd.append("files", f, (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
     else if ("figmaUrl" in src) fd.append("figma_url", src.figmaUrl.trim());
     else fd.append("file", src, src.name);
     if (templateId) fd.append("template_id", templateId);
+    // «Модель пишет тексты» выключен — PDF читается без модели зрения (по тексту); расхождения — для выбранного приоритета
+    fd.append("use_models", useModels ? "true" : "false");
+    fd.append("brand_priority", priority);
     return request<{ job_id: string; brandbook_id: string }>("/api/brandbooks", { method: "POST", body: fd });
   },
   /** Брендбук и его расхождения с шаблоном `templateId` (другой шаблон — свои расхождения). */
-  getBrandbook: (id: string, templateId?: string | null) =>
-    request<BrandbookResult>(`/api/brandbooks/${encodeURIComponent(id)}${templateId ? `?template_id=${encodeURIComponent(templateId)}` : ""}`),
+  getBrandbook: (id: string, templateId?: string | null, priority?: "brand" | "template") => {
+    const q = new URLSearchParams();
+    if (templateId) q.set("template_id", templateId);
+    // `result` расхождений — что получит колода с этим приоритетом (app.py `get_brandbook`, 5832003)
+    if (priority) q.set("brand_priority", priority);
+    const qs = q.toString();
+    return request<BrandbookResult>(`/api/brandbooks/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`);
+  },
   deleteBrandbook: (id: string) => request<{ deleted: boolean }>(`/api/brandbooks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   /** Файл брендбука (логотип): путь — как в `BrandLogo.file`. */
   brandbookFileUrl: (id: string, path: string) => `/api/brandbooks/${encodeURIComponent(id)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,

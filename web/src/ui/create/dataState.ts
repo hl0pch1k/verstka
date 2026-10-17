@@ -12,7 +12,7 @@ import { trackJob } from "../../lib/jobs";
 import { uid } from "../../lib/utils";
 import type { BrandPriority, DatasetSummary, Job } from "../../types";
 import {
-  BRAND_STEPS, brandFileName, brandSourceOf, dataBusy, dataRequest, datasetIds, foldBrandEvent,
+  BRAND_STEPS, brandFileName, brandSizeProblem, brandSourceOf, dataBusy, dataRequest, datasetIds, foldBrandEvent,
   type BrandEvent, type DataCard, type DataRequest,
 } from "./dataRules";
 import {
@@ -63,6 +63,8 @@ export interface DataState {
 
 export interface DataDeps {
   templateId: string | null;
+  /** «Модель пишет тексты»: выключен — брендбук читается без модели зрения. */
+  useModels: boolean;
   /** Текст примера встаёт в поле (как «Взять пример»: «Улучшить готовую» кончается). */
   setBrief(text: string): void;
   /** Число слайдов примера. */
@@ -85,6 +87,8 @@ export function useDataState(deps: DataDeps): DataState {
   const [cards, setCardsState] = useState<DataCard[]>(draft.cards);
   const [brand, setBrand] = useState<BrandState>(draft.brand);
   const [priority, setPriority] = useState<BrandPriority>(draft.priority);
+  const priorityRef = useRef(priority);
+  priorityRef.current = priority;
   const [used, setUsed] = useState<string[]>(draft.used);
   const [exampleBusy, setExampleBusy] = useState(false);
   // карточки меняются и из асинхронного хода очереди: ссылка — всегда последнее состояние
@@ -172,9 +176,10 @@ export function useDataState(deps: DataDeps): DataState {
   }, []);
 
   /** Разбор кончился: расхождения — с шаблоном `tplFor` (тем, что был выбран при загрузке). */
-  const finishBrand = useCallback((n: number, res: BrandbookResult, tplFor: string | null) => {
+  const finishBrand = useCallback((n: number, res: BrandbookResult, tplFor: string | null, prioFor: BrandPriority) => {
     if (brandSeq.current !== n) return;
-    setBrand((b) => ({ ...b, phase: "done", spec: res.brand, conflicts: res.conflicts ?? [], tplFor, run: { ...b.run, done: BRAND_STEPS.length, brand: res.brand } }));
+    setBrand((b) => ({ ...b, phase: "done", spec: res.brand, conflicts: res.conflicts ?? [], tplFor, prioFor,
+      applyWarnings: res.warnings ?? [], run: { ...b.run, done: BRAND_STEPS.length, brand: res.brand } }));
     later(HOLD_MS, () => {
       if (brandSeq.current !== n) return;
       setBrand((b) => (b.phase === "done" ? { ...b, phase: "out" } : b));
@@ -191,12 +196,19 @@ export function useDataState(deps: DataDeps): DataState {
     brandSrc.current = src;
     const old = brandRef.current.id;
     if (old) dropBrandbook(old);
+    // больше пределов сервера — не отправляется: причина его же словами, сразу
+    const big = "figmaUrl" in src ? null : brandSizeProblem(src);
+    if (big) {
+      setBrand({ ...BRAND0, phase: "fail", source: brandSourceOf(src), file: brandFileName(src), error: big, canRetry: false });
+      return;
+    }
     setBrand({ ...BRAND0, phase: "run", source: brandSourceOf(src), file: brandFileName(src) });
     const failed = (text: string) => {
       if (brandSeq.current === n) setBrand((b) => ({ ...b, phase: "fail", error: text, canRetry: true }));
     };
     const tpl = depsRef.current.templateId;
-    void api.uploadBrandbook(src, tpl).then(({ job_id, brandbook_id }) => {
+    const prio = priorityRef.current;
+    void api.uploadBrandbook(src, tpl, depsRef.current.useModels, prio).then(({ job_id, brandbook_id }) => {
       if (brandSeq.current !== n) return dropBrandbook(brandbook_id);
       setBrand((b) => ({ ...b, id: brandbook_id }));
       brandStop.current = trackJob(job_id, {
@@ -205,10 +217,10 @@ export function useDataState(deps: DataDeps): DataState {
         },
         onDone: (job: Job) => {
           const res = job.result as Partial<BrandbookResult> | null;
-          if (res?.brand) return finishBrand(n, { brand: res.brand, conflicts: res.conflicts ?? [] }, tpl);
+          if (res?.brand) return finishBrand(n, { brand: res.brand, conflicts: res.conflicts ?? [] }, tpl, prio);
           // итог задачи без брендбука (старый сервер) — его читаем отдельно, с нынешним шаблоном
           const now = depsRef.current.templateId;
-          void api.getBrandbook(brandbook_id, now).then((r) => finishBrand(n, r, now), (e) => failed(failText(e, "Не удалось разобрать брендбук")));
+          void api.getBrandbook(brandbook_id, now, prio).then((r) => finishBrand(n, r, now, prio), (e) => failed(failText(e, "Не удалось разобрать брендбук")));
         },
         onFailed: (job: Job) => failed(humanError(job.error ?? job.message, "Не удалось разобрать брендбук")),
       });
@@ -233,19 +245,21 @@ export function useDataState(deps: DataDeps): DataState {
 
   // расхождения сверены не с выбранным шаблоном (его сменили, пока брендбук разбирался, или позже, или его тогда не
   // было) — читаются заново с ним; тихо: не прочитались — остаются прежние, и попытка повторится со следующей сменой
+  // и с тем приоритетом, что выбран: «что в презентации» сервер считает сам (GET …?priority=)
   const templateId = deps.templateId;
-  const stale = conflictsStale(brand, templateId);
+  const stale = conflictsStale(brand, templateId, priority);
   const staleId = stale ? brand.id : null;
   useEffect(() => {
     if (!staleId || !templateId) return;
     let alive = true;
-    api.getBrandbook(staleId, templateId).then((r) => {
-      if (alive) setBrand((b) => (b.id === staleId && b.phase === "on" ? { ...b, spec: r.brand, conflicts: r.conflicts ?? [], tplFor: templateId } : b));
+    api.getBrandbook(staleId, templateId, priority).then((r) => {
+      if (alive) setBrand((b) => (b.id === staleId && b.phase === "on" ? { ...b, spec: r.brand, conflicts: r.conflicts ?? [], tplFor: templateId,
+        prioFor: priority, applyWarnings: r.warnings ?? [] } : b));
     }, () => {});
     return () => {
       alive = false;
     };
-  }, [staleId, templateId]);
+  }, [staleId, templateId, priority]);
 
   // ── пример: текст, файлы и брендбук
   const loadExample = useCallback(async (name: string, where: "text" | "brand" = "text") => {
@@ -263,7 +277,11 @@ export function useDataState(deps: DataDeps): DataState {
         setCards([]);
         addFiles(ex.files);
       }
-      if (ex.brandbook) startBrand(ex.brandbook);
+      // брендбук примера уже приложен или разбирается (тот же файл) — второй раз не разбирается
+      const b = brandRef.current;
+      const same = !!ex.brandbook && (b.phase === "on" || b.phase === "run" || b.phase === "done" || b.phase === "out")
+        && (b.file === ex.brandbook.name || b.spec?.file === ex.brandbook.name);
+      if (ex.brandbook && !same) startBrand(ex.brandbook);
       return true;
     } catch (e) {
       const text = `Не удалось загрузить пример: ${failText(e, "попробуйте ещё раз")}`;
@@ -305,8 +323,9 @@ export function useDataState(deps: DataDeps): DataState {
         const n = ++brandSeq.current;
         brandStop.current?.();
         const tpl = depsRef.current.templateId;
-        void api.getBrandbook(id, tpl).then((r) => {
-          if (brandSeq.current === n) setBrand(brandOn(id, r.brand, r.conflicts ?? [], tpl));
+        const prio = p.brandPriority ?? priorityRef.current;
+        void api.getBrandbook(id, tpl, prio).then((r) => {
+          if (brandSeq.current === n) setBrand({ ...brandOn(id, r.brand, r.conflicts ?? [], tpl, prio), applyWarnings: r.warnings ?? [] });
         }, () => {});
       }
     }

@@ -73,6 +73,12 @@ function QualityCard({ q, variant, onOpen }: { q: QualityView; variant: string; 
               {q.figures.text}
             </span>
           )}
+          {/* файлы, которым не досталось слайда: одна тихая строка, причины — в подсказке */}
+          {q.skipped && (
+            <span title={q.skipped.title} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+              {q.skipped.text}
+            </span>
+          )}
         </span>
       </span>
     </button>

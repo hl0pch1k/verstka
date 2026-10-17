@@ -545,6 +545,20 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-gt{display:inline-block;max-width:var(--gtw,220px);overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
 .dt-zone{z-index:5}
 .dt-gc-x{visibility:hidden}
+/* сайт: все цели, что помещаются, — в ряд без «→ вида» (он в подсказке таблетки) или в два ряда в той же коробке 88:
+   ряды 8–40 и 48–80, первый — справа от подписи (её середина — 24, как у ряда); две копии раскладок на одном месте
+   (hp-wo / hp-no), без переноса посреди хода помощника. В потоке два ряда занимают столько же, сколько один */
+.dt-goal{position:relative}
+.dt-gcs-s .dt-gt{max-width:0 !important;opacity:0 !important}
+.dt-gcs.dt-gcs-2{display:grid;align-items:start;height:72px;margin:-34px 0 -6px}
+.dt-gcs-2>.dt-g2r{grid-area:1 / 1;position:relative;display:flex;flex-direction:column;gap:8px;min-width:0}
+.dt-grow{display:flex;align-items:center;gap:8px;min-width:0;height:32px;overflow:clip}
+.dt-grow1{padding-left:var(--gi,0px)}
+.dt-g2r>.dt-gc-x{position:absolute;top:0;left:0}
+.dt-gmore{flex:none;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.dt-gm{position:absolute;top:0;left:0;visibility:hidden;pointer-events:none;font-size:13px;font-weight:600;line-height:20px;white-space:nowrap}
+.dt-gm>span{position:absolute;top:0;left:0}
+.dt-gn.dt-gn-off{opacity:0;visibility:hidden;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
 @media (width >= 1280px){
   /* узкая колода: панель «Данные» 400 → 320 (сайт: в тесной колоде — у́же, --dtn: dataRules `dataPanel`), поле — копии
      текста (c-tad); «→ тип графика» у целей сжимается и гаснет; в разборе брендбука вторая дорожка сжимается до нуля
@@ -560,7 +574,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar .dt-gc{padding:0 10px;transition-duration:520ms}
   .dt-gt{transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .dt-gt{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
-  /* сайт: таблетка, не поместившаяся целиком в одной из раскладок (GoalsBox, dataRules `goalsFit`), гаснет в ней на месте —
+  /* сайт: таблетка, не поместившаяся целиком в одной из раскладок (GoalsBox, dataRules `goalsLayout`), гаснет в ней на месте —
      по таймингу hp-wo / hp-no, вместе с ходом своих полей; не помещается ни в одной — не видна */
   .dt-gc.hp-wo{transition:padding 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .dt-gc.hp-wo{transition:padding 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
@@ -635,7 +649,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .dt-gn{flex:1 1 100%;margin-left:24px;padding-left:0}
   .dt-gl .hp-sw > span{white-space:normal}
   /* 02 · цели из текста (I4): все цели видны — коробка по высоте, таблетки переносятся рядами, длинная цель — своими
-     строками (стопкой их не прячет `goalsFit`: GoalsBox) */
+     строками (стопкой их не прячет `goalsLayout`: GoalsBox) */
   .dt-goal{height:auto;min-height:88px;padding:16px 24px}
   .dt-gcs{flex-wrap:wrap;row-gap:8px;overflow:visible}
   .dt-gc{flex:0 1 auto;max-width:100%;height:auto;min-height:32px;padding:6px 12px;white-space:normal}

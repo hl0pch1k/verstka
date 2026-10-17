@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { VariantEdit } from "../../types";
-import { agentCap, agentRoles, editRows } from "./agentTab";
+import { agentCap, agentRoles, editRows, editTitle } from "./agentTab";
 import { GEN, titleOf } from "./details.fixtures";
 
 const nb = (s: string) => s.replace(/ /g, " ");
@@ -94,4 +94,13 @@ test("«Взгляд дизайнера», пропущенный серверо
   const bare = agentRoles(GEN, { ...v, eyes: { ...eyes, skipped_code: null } }, titleOf).find((r) => r.key === "eyes")!;
   assert.equal(bare.skip, true);
   assert.ok(!/[a-z]/i.test(bare.sum ?? ""));
+});
+
+test("журнал правок: пересборка слайда — «Пересборка слайда 4 — полосы», а не «Правка»", () => {
+  assert.equal(editTitle({ kind: "rebuild", request: "Пересобери слайд 4 так: полосы", slides: [4] }), "Пересборка слайда 4 — полосы");
+  assert.equal(editTitle({ kind: "rebuild", request: "", slides: [4] }), "Пересборка слайда 4");
+  assert.equal(editTitle({ kind: "edit", request: "", slides: [] }), "Правка");
+  // в кавычках — только слова человека
+  const r = editRows([E({ kind: "rebuild", request: "Пересобери слайд 4 так: полосы", slides: [4], version: 1 }), E({ request: "покажи таблицей", version: 2 }), E({ kind: "edit" })]);
+  assert.deepEqual(r.rows.map((x) => [x.q, x.quoted]), [["Пересборка слайда 4 — полосы", false], ["покажи таблицей", true], ["Правка", false]]);
 });
