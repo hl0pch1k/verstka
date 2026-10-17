@@ -90,6 +90,7 @@ EMU_PER_PT = 12700
 MIN_FILL_CONTRAST = 1.4  # a bar, slice or line must stand off its ground at least this much
 LEAD_MIN_CONTRAST = 2.2  # the lead colour of a chart (its largest slice, its highlighted bar) reads clearly on the ground
 DARK_MUTED_DE = 34.0  # on a dark ground the stepped-back bars are as bright as this distance from the accent allows
+TILT_DEG = 1.0  # a thinned time axis's labels stand 1° off the level: LibreOffice and PowerPoint do not wrap a turned label
 SCATTER_ASPECT = 1.7  # a scatter's plot is never wider than this many times its height
 TREND_MIN_R = 0.5  # |r| from which a scatter draws its trend line
 TREND_MIN_POINTS = 6
@@ -1536,6 +1537,7 @@ class CatFit:
     longest: float = 0.0  # the widest label shown (unturned), pt
     level: int = 0  # shortening level of `period_levels`
     fits: bool = True  # False: nothing fit the room under the axis, the last resort overshoots it
+    tilt: bool = False  # thinned labels on one line each, tilted by TILT_DEG: a renderer never wraps or breaks a tilted label
 
 
 def _cat_room(family: Optional[str]) -> float:
@@ -1549,6 +1551,7 @@ def _cat_room(family: Optional[str]) -> float:
 # a long single word must keep a margin inside its room: it cannot wrap, it breaks inside («Автоматически» measured
 # 0.4 pt inside a 63 pt slot still broke as «Автоматическ / и» in the render; «Сейчас» at 94 % of its slot did not —
 # the renderer's own measure drifts with the word's length)
+WRAP_MAX_LABELS = 12  # up to this many labels of a time axis are all shown (on two lines when they must be), not thinned
 WORD_SAFETY = 0.965
 LONG_WORD = 9
 
@@ -1606,10 +1609,28 @@ def ellipsize(text: str, family: Optional[str], size: float, width: float) -> st
     return t + "…"
 
 
-def thin_picks(n: int, k: int) -> list[int]:
+def thin_picks(n: int, k: int, present: Optional[Sequence[bool]] = None) -> list[int]:
     """The labels a time axis keeps when it shows every k-th: the first, every k-th after it, and the last (a kept label
-    closer to the last than 0.7 k slots gives way to it)."""
+    closer to the last than 0.7 k slots gives way to it). `present` (which periods hold a value): the labels go to
+    periods that have one — a quarter with no figure is never named while its measured neighbour is not — the first and
+    the last being the first and the last period with a value, each kept step moved at most half a step to the nearest
+    one that has a value (or left out when none is near)."""
     k = max(1, k)
+    if present is not None and len(present) == n and any(present) and not all(present):
+        have = [j for j in range(n) if present[j]]
+        first, last = have[0], have[-1]
+        picks = [first]
+        pos = first + k
+        while pos < last:
+            near = [j for j in have if abs(j - pos) <= k // 2 and j > picks[-1] + 0.5 * k]
+            if near:
+                picks.append(min(near, key=lambda j: (abs(j - pos), j)))
+            pos += k
+        if last != picks[-1]:
+            if last - picks[-1] < 0.7 * k and len(picks) > 1:
+                picks.pop()
+            picks.append(last)
+        return picks
     idx = list(range(0, n, k))
     if n and idx[-1] != n - 1:
         if (n - 1) - idx[-1] < 0.7 * k and len(idx) > 1:
@@ -1618,7 +1639,7 @@ def thin_picks(n: int, k: int) -> list[int]:
     return idx
 
 
-def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True, ordered: bool = False, soft_sizes: Sequence[float] = ()) -> CatFit:
+def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True, ordered: bool = False, soft_sizes: Sequence[float] = (), present: Optional[Sequence[bool]] = None) -> CatFit:
     """Category labels measured one by one at the axis font against their slot (`slot` = the plot's width over the
     categories, pt; `below_max` = the most room under the axis the labels may take). In order, at each size of
     `sizes` (the axis size first, smaller ones after): every label on one line as written, then shortened
@@ -1662,39 +1683,49 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
                 return CatFit(list(labs), "wrap", size, lines, 1, below, max((width(t, size) for t in labs), default=0.0), lv)
         return None
 
-    def thinned(size: float, force: bool = False) -> Optional[CatFit]:
-        lim = slot * room
+    def tilt_thin(size: float, want: int, force: bool = False) -> Optional[CatFit]:
+        """Every k-th label, each on one line, the others blank, the axis's text tilted by TILT_DEG: a tilted label is never
+        wrapped or broken (a straight one is broken at its slot's width by LibreOffice, «ян / в»), so it owns the k slots
+        between kept labels. The fewest hidden labels whose neighbours keep apart (a quarter of a label between them)."""
+        below = size * CAT_LINE + size * 0.6
+        if below > below_max and not force:
+            return None
+        best = None
         for lv, labs in enumerate(levels):
-            if any(width(w, size) > _word_room(w, lim) for t in labs for w in label_pieces(t)):
-                continue  # a word wider than its slot is broken inside whatever the neighbours are
             widest = max((width(t, size) for t in labs), default=0.0)
-            lines = 1 if widest <= lim else max((len(wrap_lines(t, family, size, False, lim, dashes=True)) for t in labs if t), default=1)
-            below = lines * size * CAT_LINE + size * 0.6
-            if lines > 2 or (below > below_max and not force):
-                continue
-            # the fewest hidden labels whose neighbours keep apart (a gap of a quarter of a label between them)
             kmin = next((kk for kk in range(2, n + 1) if widest * 1.25 <= kk * slot), None)
             if kmin is None:
                 continue
             kk = next((x for x in range(kmin, min(n, kmin + 2) + 1) if (n - 1) % x == 0), kmin)  # (ends and steps even)
-            picks = set(thin_picks(n, kk))
-            labels = [t if j in picks else "" for j, t in enumerate(labs)]
-            return CatFit(labels, "thin", size, lines, kk, below, widest, lv)
-        return None
+            picks = set(thin_picks(n, kk, present))
+            if len(picks) < min(3, n):
+                continue
+            got = CatFit([t if j in picks else "" for j, t in enumerate(labs)], "thin", size, 1, kk, below, widest, lv, tilt=True)
+            if len(picks) >= want:
+                return got
+            if best is None or len(picks) > best[0]:
+                best = (len(picks), got)
+        return best[1] if (best is not None and force) else None
 
     if ordered:
-        # a time axis: straight and whole — a smaller size before any turning, then thinned out
+        # a time axis stays straight and whole as far as it can: one line at a smaller size; the labels all, on two lines,
+        # when there are few; else every k-th one on a line of its own with the axis tilted a degree; turned last
         for size in sizes:
             lim = slot * room
             for lv, labs in enumerate(levels):
                 if all(width(t, size) <= (_word_room(t, lim) if len(label_pieces(t)) == 1 else lim) for t in labs if t):
                     return CatFit(list(labs), "flat", size, 1, 1, size * CAT_LINE + size * 0.6, max((width(t, size) for t in labs), default=0.0), lv)
-        for size in [*sizes, *soft_sizes]:
-            # (a thinned label owns its slot in LibreOffice whatever the blank neighbours are: every word inside one slot;
-            # a size a little under the floor is cheaper for the plot than turned labels)
-            got = thinned(size)
-            if got is not None:
-                return got
+        if n <= WRAP_MAX_LABELS:
+            for size in [*sizes, *soft_sizes]:
+                got = wrapped(size)
+                if got is not None:
+                    return got
+        want = 5 if n >= 15 else 4
+        for need in (want, 3):
+            for size in sizes:
+                got = tilt_thin(size, need)
+                if got is not None:
+                    return got
         turn_first = True
 
     for size in sizes:
@@ -1711,8 +1742,8 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
     if ordered:
         # nothing fits the room under the axis: a time axis still keeps its labels straight (two short lines cost less
         # than a turned one), the frame is what is too short
-        for size in sorted([*sizes, *soft_sizes]):
-            got = thinned(size, force=True)
+        for size in sorted(sizes):
+            got = tilt_thin(size, 3, force=True)
             if got is not None:
                 got.fits = False
                 return got
@@ -2274,7 +2305,10 @@ def _legend(k: _Kit, names: Sequence[str], side: bool) -> None:
         title_w = (text_width_pt(k.legend_title, k.family, k.fs) * 1.06 + k.fs * 0.8) if k.legend_title else 0.0
         if title_w > k.W * 0.4:
             title_w, k.legend_title = 0.0, None  # (a title that long names the legend worse than no title)
-        per_row = max(1, int((k.W - title_w) // (widest + k.fs * 2.6)))
+        # LibreOffice sets the entries of a legend that wraps on a grid of the widest one — marker, gap, name, gap — and wraps
+        # it well before the frame's edge (measured: three entries of a 433 pt frame at 11.5 pt came out on two rows, the
+        # estimate by name widths alone said one and the legend sat on the axis title): rows are counted on that grid
+        per_row = max(1, int((k.W * 0.85 - title_w) // (widest + k.fs * 3.9)))
         rows = math.ceil(len(names) / per_row)
         k.legend_h = rows * k.fs * 1.3 + k.fs * 0.9
         k.legend_names, k.legend_per_row, k.legend_title_w = list(names), per_row, title_w
@@ -2380,7 +2414,8 @@ def add_chart(
     legend; `spec.legend_title` when the schema has it — or None). `verstka_plot_share`: the plot's height over the
     frame's after labels, titles and legend; `verstka_font_pt`: the size of the chart's labels; `verstka_rows_fit`
     (horizontal bars: False when the frame is too short for its rows — every name is still written, never blanked) and
-    `verstka_min_height` (pt: the least frame that gives this chart a readable plot, `min_frame_height`)."""
+    `verstka_min_height` / `verstka_min_width` (pt:
+    the least frame that gives this chart a readable plot, `min_frame_height` / `min_frame_width`)."""
     kind = effective_chart_type(spec, outline)
     xs_all: list[list[float]] = []
     if kind == "scatter":
@@ -2673,6 +2708,7 @@ def add_chart(
     # a caller trying narrower slots for the chart compares how its labels fit: their width over the slot, and whether
     # they had to be turned or thinned out
     gf.verstka_rows_fit = k.rows_fit
+    gf.verstka_min_width = min_frame_width(kind, len(cats) if kind not in ("pie", "doughnut", "scatter") else 1, k.fs, y_title=bool(k.y_title))
     # the least frame that gives this chart a readable plot at the size it was set in (the composer's retry with a taller one)
     legend_rows = math.ceil(len(k.legend_names) / max(k.legend_per_row, 1)) if k.legend_names else 0
     gf.verstka_min_height = min_frame_height(kind, len(cats) if kind not in ("pie", "doughnut", "scatter") else 1, k.fs, legend_rows=legend_rows,
@@ -2689,7 +2725,7 @@ def add_chart(
 # ---------------------------------------------------------------------------------------------- axes
 
 
-def _cat_axis(k: _Kit, fs: float, reverse: bool = False, line: bool = True, skip: int = 1, rotate: bool = False) -> None:
+def _cat_axis(k: _Kit, fs: float, reverse: bool = False, line: bool = True, skip: int = 1, rotate: bool = False, tilt: bool = False) -> None:
     ca = k.chart.category_axis
     ca.visible = True
     ca.has_major_gridlines = False
@@ -2709,6 +2745,12 @@ def _cat_axis(k: _Kit, fs: float, reverse: bool = False, line: bool = True, skip
         if bp is not None:
             bp.set("rot", "-2700000")
             bp.attrib.pop("vert", None)
+    elif tilt:
+        # a degree off the level: LibreOffice neither wraps nor breaks a rotated label (and thins what overlaps), PowerPoint
+        # sets it on one line; the eye sees it straight
+        bp = el.find(_c("txPr") + "/" + _a("bodyPr"))
+        if bp is not None:
+            bp.set("rot", str(-int(round(TILT_DEG * 60000))))
     if reverse:
         scaling = el.find(_c("scaling"))
         orient = scaling.find(_c("orientation")) if scaling is not None else None
@@ -2789,6 +2831,18 @@ def min_frame_height(kind: str, n: int = 1, font_pt: float = 10.8, *, legend_row
         top = fs * 2.4 if kind in ("column", "histogram") else (fs * 0.7 if kind == "stacked_column" else fs * 0.9)  # (values over the bars)
         around = top + label_lines * fs * CAT_LINE + fs * 0.6 + (fs * (TITLE_LINE + 0.35) if x_title else 0.0) + legend
     return max(plot + around, around / (1.0 - MIN_PLOT))
+
+
+def min_frame_width(kind: str, n: int = 1, font_pt: float = 10.8, *, y_title: bool = False) -> float:
+    """The least width (pt) of a chart's frame that still gives a readable plot: the tick labels and the value axis's title
+    at its left, a plot of at least 12 lines of type (a scatter's is near-square: as wide as it is high at the least; the
+    engine narrows a wider one to `SCATTER_ASPECT` times its height, so a scatter frame much wider than that is wasted),
+    and `n` slots of a line of type for the categories of the other kinds. A composer that has a frame narrower than
+    this gives the chart more room or draws it another way (≈ 220 pt for a scatter at 12 pt)."""
+    fs = max(float(font_pt), 8.0)
+    left = fs * 3.6 + (fs * (TITLE_LINE + 0.45) if y_title else 0.0)
+    plot = 12.0 * fs if kind == "scatter" else max(12.0 * fs, max(n, 1) * 1.1 * fs)
+    return left + plot + fs * 1.5
 
 
 def _axis_crosses(axis_el, where: str) -> None:
@@ -3016,7 +3070,7 @@ def _style_bars(k: _Kit) -> None:
         direct = False
         _legend(k, [s.name for s in series], side=False)
     left, top, pw, ph = box(labels_on, axis_on, fs_val)
-    rotate_cols = False
+    rotate_cols = tilt_cols = False
     if not horizontal and cats:
         # B3-1: LibreOffice breaks a column's label inside a word wider than 95 % of its slot — every word measured at
         # the axis font against the real slot: a size down (never under the floor), else the labels turn by 45°
@@ -3033,9 +3087,10 @@ def _style_bars(k: _Kit) -> None:
                     break
             else:
                 room_h = H - top - k.foot
-                fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - MIN_PLOT * H), ordered=is_time_axis(cats), soft_sizes=_soft_sizes(floor, [cat_fs]))
+                fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - MIN_PLOT * H), ordered=is_time_axis(cats), soft_sizes=_soft_sizes(floor, [cat_fs]), present=[any(vs[j] is not None for vs in values if j < len(vs)) for j in range(n)])
                 if fit.mode in ("turn", "thin"):
                     rotate_cols = fit.mode == "turn"
+                    tilt_cols = fit.tilt
                     k.turned = True
                     k.thinned = fit.mode == "thin"
                     turned_below = fit.below
@@ -3204,7 +3259,7 @@ def _style_bars(k: _Kit) -> None:
             _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, lab, family, pos, pts))
 
     # axes: columns stand on one hairline baseline; horizontal bars start at a common edge and need none (unless < 0)
-    _cat_axis(k, cat_fs, reverse=horizontal, line=not horizontal or has_neg, rotate=rotate_cols)
+    _cat_axis(k, cat_fs, reverse=horizontal, line=not horizontal or has_neg, rotate=rotate_cols, tilt=tilt_cols)
     lo = hi = step = None
     if flat and not has_neg:
         lo = 0.0
@@ -3459,7 +3514,7 @@ def _style_line(k: _Kit) -> None:
         pw = max(W - left - right, W * 0.3)
         room_h = H - top - k.foot
         below_max = max(0.0, room_h - MIN_PLOT * H)
-        fit = fit_categories(cats, family, sizes, pw / n, below_max, turn_first=n >= 5, ordered=ordered, soft_sizes=_soft_sizes(floor, sizes))
+        fit = fit_categories(cats, family, sizes, pw / n, below_max, turn_first=n >= 5, ordered=ordered, soft_sizes=_soft_sizes(floor, sizes), present=[any(vs[j] is not None for vs in values if j < len(vs)) for j in range(n)])
         if fit.fits or not _relieve(k):
             break
     if fit.mode == "turn" and fit.labels and fit.labels[0]:
@@ -3599,7 +3654,7 @@ def _style_line(k: _Kit) -> None:
                 _set_ser_dlbls(ser_el, _dlbls(k.fmt_plain, fs_val, lab_color, family, None, pts, show_val=False))
 
     # the baseline implies zero: without a value axis over a raised minimum there is none
-    _cat_axis(k, cat_fs, skip=skip, line=axis_on or not (lo and lo > 0), rotate=rotate)
+    _cat_axis(k, cat_fs, skip=skip, line=axis_on or not (lo and lo > 0), rotate=rotate, tilt=fit.tilt)
     _value_axis(k, axis_on, fs, lo, hi, step)
     ax = k.chart.category_axis._element
     _set_child_val(ax, "lblOffset", "100", ("tickLblSkip", "tickMarkSkip", "noMultiLvlLbl", "extLst"))

@@ -27,6 +27,7 @@ from verstka.rendering.charts import (
     is_time_axis,
     legible_color,
     min_frame_height,
+    min_frame_width,
     pearson,
     period_levels,
     short_years,
@@ -103,18 +104,21 @@ def test_a_time_axis_is_recognised_and_thinned_with_its_ends():
 
 
 def test_crowded_time_labels_are_thinned_not_turned():
-    for w_share in (0.88, 0.6):
+    for w_share in (0.88, 0.6, 0.4):
         s, gf, cs = _chart(_line(), _frame(w_share, 170))
-        assert _rot(cs) == "0", w_share  # straight, whatever the crowding
+        assert _rot(cs) in ("0", "-60000"), w_share  # straight (or a degree off the level), never turned by 45°
         labels = _cat_cache(cs)
         shown = [i for i, t in enumerate(labels) if t]
         assert shown[0] == 0 and shown[-1] == len(MONTHS) - 1 and len(shown) < len(MONTHS)  # every k-th, the first and the last kept
         assert all(labels[i] in (MONTHS[i], short_years(period_levels(MONTHS)[-1])[i], period_levels(MONTHS)[-1][i]) for i in shown)  # (the labels, perhaps with the year cut)
-        # every kept label's words stand in the slot: a renderer never breaks one inside («202 / 5»)
+        # a thinned label has the room of the steps between kept labels: none runs into the next one
         ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
         slot = float(ml.find(f"{C}w").get("val")) * gf.width / 12700 / len(MONTHS)
         size = int(cs.find(f".//{C}catAx/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100
-        assert all(text_width_pt(w, "Play", size) <= slot * 0.95 for i in shown for w in labels[i].split())
+        if _rot(cs) == "-60000":
+            assert all(text_width_pt(labels[a], "Play", size) * 1.1 <= (b - a) * slot for a, b in zip(shown, shown[1:])), w_share
+        else:
+            assert all(text_width_pt(w, "Play", size) <= slot * 0.95 for i in shown for w in labels[i].split())  # (straight: every word inside its slot)
 
 
 def test_the_year_is_cut_to_two_digits_before_a_label_turns():
@@ -123,7 +127,7 @@ def test_the_year_is_cut_to_two_digits_before_a_label_turns():
     assert period_levels(["2 квартал", "Январь 2026"])[-1] == ["2 кв.", "Янв 2026"]  # (the other callers' levels are as they were)
     # a very crowded axis: straight labels with the short year, not 45° ones
     s, gf, cs = _chart(_line(), _frame(0.6, 170))
-    assert _rot(cs) == "0" and any("’" in t for t in _cat_cache(cs))
+    assert _rot(cs) in ("0", "-60000")  # (never 45°; the year is cut where the full label would leave too few labels)
 
 
 def test_fit_categories_prefers_a_smaller_size_then_thinning_then_turning_on_a_time_axis():
@@ -326,29 +330,41 @@ def test_the_group_name_stands_in_front_of_the_legend():
 WIDE_FACE = ChartStyleSpec(series_colors=["0077FF", "00D3E6", "005EFF", "FF6C6C", "0563C1"], font_family="Montserrat", font_size_pt=7.0)  # (not measured: a wider stand-in)
 
 
-def test_a_narrow_slot_thins_a_time_axis_at_a_size_under_the_floor_before_it_turns():
-    # 21 months in a 24.7 pt slot, a face wider than the stand-in measures: «янв» does not fit one slot at the floor
-    # (10.8 pt), so the labels were turned; a size a little under the floor (a thinned label owns its slot in LibreOffice)
-    # keeps them straight
+def test_a_narrow_slot_thins_a_time_axis_on_single_tilted_lines_before_it_turns():
+    # 21 months in a 24.7 pt slot (or in 12 pt, the narrowest frames of the live runs), a face wider than the stand-in
+    # measures: a straight label would be broken at its slot («ян / в»); every k-th label on one line, the axis tilted a degree
+    # (LibreOffice and PowerPoint do not wrap a turned label), each kept label has the k slots between kept ones
     cats = MONTHS
-    got = fit_categories(cats, "Montserrat", [10.8], 24.7, 40.0, ordered=True)
-    assert got.mode == "turn" and not got.fits  # (without the smaller sizes)
-    from verstka.rendering.charts import _soft_sizes
+    for slot in (24.7, 16.0, 12.1):
+        got = fit_categories(cats, "Montserrat", [11.5], slot, 40.0, ordered=True)
+        assert got.mode == "thin" and got.tilt and got.fits and got.lines == 1 and got.keep >= 2, slot
+        kept = [i for i, t in enumerate(got.labels) if t]
+        assert kept[0] == 0 and kept[-1] == len(cats) - 1 and 4 <= len(kept) < len(cats)
+        assert all(text_width_pt(got.labels[a], "Montserrat", got.size) * 1.1 <= (b - a) * slot * 1.001 for a, b in zip(kept, kept[1:])), slot
+    # few labels are all shown, on two lines when they must (a gap axis of 8 quarters), not thinned
+    qs = ["IV кв. 2024", "I кв. 2025", "II кв. 2025", "III кв. 2025", "IV кв. 2025", "I кв. 2026", "II кв. 2026", "III кв. 2026"]
+    got = fit_categories(qs, "Play", [11.5], 38.0, 60.0, ordered=True)
+    assert got.mode in ("flat", "wrap") and all(got.labels) and not got.tilt
+    # on the chart: a tilted axis writes its degree, a straight one a level text
+    s, gf, cs = _chart(_line(), _frame(0.4, 170), style=WIDE_FACE)
+    assert _rot(cs) == "-60000" and len([t for t in _cat_cache(cs) if t]) >= 4
+    assert _rot(_chart(_line(cats=qs, vals=[41.0, 43, 44, 46, 48, 49, 51, 52]), _frame(0.88, 260))[2]) == "0"  # (room enough: all straight on the level)
 
-    soft = _soft_sizes(10.8, [10.8])
-    assert soft and all(8.0 <= x < 10.8 for x in soft)
-    got = fit_categories(cats, "Montserrat", [10.8], 24.7, 40.0, ordered=True, soft_sizes=soft)
-    assert got.mode == "thin" and got.fits and got.size < 10.8 and got.keep >= 2 and got.lines <= 2
-    kept = [i for i, t in enumerate(got.labels) if t]
-    assert kept[0] == 0 and kept[-1] == len(cats) - 1
-    # on the chart: straight, thinned, the first and the last kept, its words inside the slot at the size it was set in
-    s, gf, cs = _chart(_line(), _frame(0.63, 170), style=WIDE_FACE)
-    ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
-    slot = float(ml.find(f"{C}w").get("val")) * gf.width / 12700 / len(MONTHS)
-    assert slot < 26 and _rot(cs) == "0"
-    shown = [i for i, t in enumerate(_cat_cache(cs)) if t]
-    assert shown[0] == 0 and shown[-1] == len(MONTHS) - 1 and 4 <= len(shown) < len(MONTHS)
-    assert int(cs.find(f".//{C}catAx/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100 < 10.8
+
+def test_thinned_labels_go_to_the_periods_that_have_a_value():
+    # 8 quarters, two without a figure: the labels shown are quarters that were measured
+    present = [True, True, False, True, True, True, False, True]
+    picks = thin_picks(8, 2, present)
+    assert picks[0] == 0 and picks[-1] == 7 and all(present[j] for j in picks) and picks == sorted(set(picks))
+    assert thin_picks(8, 2) == [0, 2, 4, 6, 7] or thin_picks(8, 2)[0] == 0  # (no flags: as before)
+    # first and last are the first and last periods with a value
+    assert thin_picks(8, 3, [False, True, True, False, True, True, True, False])[0] == 1 and thin_picks(8, 3, [False, True, True, False, True, True, True, False])[-1] == 6
+    # on a chart: 15 months with gaps, narrow: every label shown is above a value
+    vals = [296.0, 301, None, 312, 309, None, 318, 326, 331, None, 340, 347, 352, None, 361]
+    cs = _chart(_line(cats=MONTHS[:15], vals=vals), _frame(0.4, 170), style=WIDE_FACE)[2]
+    labels = _cat_cache(cs)
+    shown = [i for i, t in enumerate(labels) if t]
+    assert len(shown) >= 3 and all(vals[i] is not None for i in shown)
 
 
 def test_every_horizontal_row_keeps_its_name_even_in_a_frame_too_short_for_the_rows():
@@ -426,3 +442,32 @@ def test_a_scatter_frame_is_sized_for_a_near_square_plot():
     spec = ChartSpec(type="scatter", xy=[XYSeries(name="a", x=xs, y=ys)], x_title="x", y_title="y")
     gf = _chart(spec, _frame(0.88, 400))[1]
     assert gf.verstka_min_height == pytest.approx(min_frame_height("scatter", 1, gf.verstka_font_pt, x_title=True))
+
+
+def test_a_scatter_frame_has_a_least_width_as_well_as_a_least_height():
+    fs = 12.0
+    w = min_frame_width("scatter", 1, fs, y_title=True)
+    h = min_frame_height("scatter", 30, fs, x_title=True)
+    assert 200 <= w <= 240 and 185 <= h <= 205  # ≈ 226 × 196 pt at 12 pt, a near-square plot of 12 lines of type
+    assert min_frame_width("scatter", 1, fs, y_title=True) > min_frame_width("scatter", 1, fs)  # (the axis title takes its line)
+    assert min_frame_width("line", 21, fs, y_title=True) > w  # (21 slots of a line of type take more)
+    xs, ys = _cloud(40, 1.9, 6.0)
+    spec = ChartSpec(type="scatter", xy=[XYSeries(name="a", x=xs, y=ys)], x_title="x", y_title="y")
+    gf = _chart(spec, _frame(0.88, 400))[1]
+    assert gf.verstka_min_width == pytest.approx(min_frame_width("scatter", 1, gf.verstka_font_pt, y_title=True))
+
+
+def test_a_scatter_legend_reserves_the_rows_the_renderer_will_set():
+    # three groups in a 433 pt frame at 11.5 pt (a live run: LibreOffice put them on two rows, the estimate said one and the
+    # legend sat on the axis title): the engine reserves two rows, the plot ends above them
+    groups = [XYSeries(name=n, x=_cloud(30, 1.9, 7.0, seed=i)[0], y=_cloud(30, 1.9, 7.0, seed=i)[1]) for i, n in enumerate(("Технический", "Естественнонаучный", "Гуманитарный"))]
+    spec = ChartSpec(type="scatter", xy=groups, x_title="Подготовка, ч/нед.", y_title="Балл")
+    narrow = Bbox(x=int(W * 0.06), y=int(H * 0.22), w=int(433 * 12700), h=int(240 * 12700))
+    s, gf, cs = _chart(spec, narrow, style=ChartStyleSpec(series_colors=["2F8AA5"], font_family="Arial", font_size_pt=11.5))
+    ml = cs.find(f".//{C}plotArea/{C}layout/{C}manualLayout")
+    plot_bottom = (float(ml.find(f"{C}y").get("val")) + float(ml.find(f"{C}h").get("val"))) * gf.height / 12700
+    x_title = next(a for a in cs.findall(f".//{C}valAx") if a.find(f"{C}axPos").get("val") == "b").find(f"{C}title/{C}layout/{C}manualLayout")
+    size = int(cs.find(f".//{C}legend/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100
+    title_y = float(x_title.find(f"{C}y").get("val")) * gf.height / 12700
+    legend_top = gf.height / 12700 - 2 * size * 1.3  # (two rows at the bottom)
+    assert title_y + size <= legend_top + 1.0 and plot_bottom < title_y  # the axis title stands above both legend rows

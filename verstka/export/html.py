@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from lxml import etree
+
 from verstka.audit.ir import build_deck_ir
 from verstka.export.svg_charts import chart_svg
 from verstka.ingest.package import PptxPackage
@@ -106,23 +108,52 @@ def _crop_css(crop) -> str:
     return f";background-size:{100 / (1 - l - r):.3f}% {100 / (1 - t - b):.3f}%;background-position:{px:.3f}% {py:.3f}%;background-repeat:no-repeat"
 
 
-def _layout_pic_crop(pkg: PptxPackage, source_part: str, image_part: str) -> Optional[tuple[float, float, float, float]]:
-    """The crop (`a:srcRect`) of a layout's or master's picture of `image_part`, as fractions l, t, r, b."""
+def _layer_pictures(pkg: PptxPackage, part: str, slide_w: int, slide_h: int) -> list[dict]:
+    """The pictures a layout or a master really holds — as the deck has them (a brand's logo moved into its corner, a
+    template picture cropped): (image part, frame as fractions of the slide, crop). Placeholders and hidden shapes are not
+    drawn on a slide; pictures inside groups are placed through their groups' transforms. Rotated or flipped ones are drawn
+    unrotated in their frame."""
+    out: list[dict] = []
     try:
-        root = pkg.xml(source_part)
-        for pic in root.iterfind(".//p:pic", _NS):
-            blip = pic.find("p:blipFill/a:blip", _NS)
-            rid = blip.get(f"{{{_NS['r']}}}embed") if blip is not None else None
-            if not rid or pkg.target_of(source_part, rid) != image_part:
-                continue
-            rect = pic.find("p:blipFill/a:srcRect", _NS)
-            if rect is None:
-                return None
-            vals = tuple(int(rect.get(k) or 0) / 100000.0 for k in ("l", "t", "r", "b"))
-            return vals if any(vals) else None
+        tree = pkg.xml(part).find("p:cSld/p:spTree", _NS)
     except Exception:  # noqa: BLE001
-        return None
-    return None
+        return out
+    if tree is None:
+        return out
+
+    def walk(el, m: tuple[float, float, float, float]) -> None:
+        sx, sy, tx, ty = m
+        for ch in el:
+            if not isinstance(ch.tag, str):
+                continue
+            name = etree.QName(ch).localname
+            if name == "grpSp":
+                xf = ch.find("p:grpSpPr/a:xfrm", _NS)
+                if xf is None:
+                    continue
+                off, ext, c_off, c_ext = xf.find("a:off", _NS), xf.find("a:ext", _NS), xf.find("a:chOff", _NS), xf.find("a:chExt", _NS)
+                if None in (off, ext, c_off, c_ext) or int(c_ext.get("cx") or 0) == 0 or int(c_ext.get("cy") or 0) == 0:
+                    continue
+                gx, gy = int(ext.get("cx")) / int(c_ext.get("cx")), int(ext.get("cy")) / int(c_ext.get("cy"))
+                walk(ch, (sx * gx, sy * gy, tx + sx * (int(off.get("x")) - int(c_off.get("x")) * gx), ty + sy * (int(off.get("y")) - int(c_off.get("y")) * gy)))
+            elif name == "pic":
+                c_nv = ch.find("p:nvPicPr/p:cNvPr", _NS)
+                if ch.find("p:nvPicPr/p:nvPr/p:ph", _NS) is not None or (c_nv is not None and c_nv.get("hidden") in ("1", "true")):
+                    continue
+                blip = ch.find("p:blipFill/a:blip", _NS)
+                rid = blip.get(f"{{{_NS['r']}}}embed") if blip is not None else None
+                image = pkg.target_of(part, rid) if rid else None
+                xf = ch.find("p:spPr/a:xfrm", _NS)
+                if not image or xf is None or xf.find("a:off", _NS) is None or xf.find("a:ext", _NS) is None:
+                    continue
+                x, y = tx + sx * int(xf.find("a:off", _NS).get("x")), ty + sy * int(xf.find("a:off", _NS).get("y"))
+                w, h = sx * int(xf.find("a:ext", _NS).get("cx")), sy * int(xf.find("a:ext", _NS).get("cy"))
+                rect = ch.find("p:blipFill/a:srcRect", _NS)
+                crop = tuple(int(rect.get(k) or 0) / 100000.0 for k in ("l", "t", "r", "b")) if rect is not None else None
+                out.append({"image": image, "x": x / slide_w, "y": y / slide_h, "w": w / slide_w, "h": h / slide_h, "crop": crop if crop and any(crop) else None})
+
+    walk(tree, (1.0, 1.0, 0.0, 0.0))
+    return out
 
 
 def _slide_facts(pkg: PptxPackage, slide_part: Optional[str], slide_w: int) -> dict[str, dict]:
@@ -288,32 +319,32 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
     pkg = PptxPackage.open(pptx)
     cache: dict[str, str] = {}
     default_font = manifest.tokens.typography.primary_family or "Play"
-    # layout/master chrome (logos, footers) is inherited in PPTX; draw it from the manifest's chrome inventory
-    chrome_by_layout: dict[str, list] = {}
-    for c in manifest.tokens.chrome:
-        if c.source.startswith("layout:") or c.source.startswith("master:"):
-            chrome_by_layout.setdefault(c.source.split(":", 1)[1], []).append(c)
     slides_html = []
     slide_parts = list(pkg.slide_parts)
     for s in ir.slides:
         bg = s.background_hex or ("000000" if s.family.value == "dark" else "FFFFFF")
         parts = [f'<section class="slide" id="s{s.index}" style="background:#{bg}" data-index="{s.index}">']
-        layout_chrome = chrome_by_layout.get(s.layout_part or "", [])
-        master_part = None
+        # the layout's and the master's pictures (logos, backdrops) are inherited by a slide in PPTX: drawn as the DECK has
+        # them — the manifest describes the template as it was read, before a brand moved its logo into a corner
+        slide_part = slide_parts[s.index - 1] if 0 < s.index <= len(slide_parts) else None
+        layout_part = s.layout_part or (pkg.layout_of(slide_part) if slide_part else None)
+        layers: list[str] = []
         try:
-            master_part = pkg.master_of(s.layout_part) if s.layout_part else None
+            master_part = pkg.master_of(layout_part) if layout_part else None
         except Exception:  # noqa: BLE001
             master_part = None
-        if master_part:
-            layout_chrome = layout_chrome + chrome_by_layout.get(master_part, [])
-        for c in layout_chrome:
-            if c.kind == "pic" and c.image_part:
-                cls = _image_class(pkg, c.image_part, cache)
+        hide_master = bool(layout_part) and pkg.xml(layout_part).get("showMasterSp") in ("0", "false")
+        if master_part and not hide_master:
+            layers.append(master_part)
+        if layout_part:
+            layers.append(layout_part)
+        for layer in layers:
+            for pic in _layer_pictures(pkg, layer, ir.slide_w, ir.slide_h):
+                cls = _image_class(pkg, pic["image"], cache)
                 if cls:
-                    crop = _layout_pic_crop(pkg, c.source.split(":", 1)[1], c.image_part) if ":" in c.source else None
-                    css = _crop_css(crop)
-                    parts.append(f'<div class="el chrome pic{"" if css else " contain"} {cls}" style="left:{_pct(c.bbox.x)};top:{_pct(c.bbox.y)};width:{_pct(c.bbox.w)};height:{_pct(c.bbox.h)}{css}"></div>')
-        facts = _slide_facts(pkg, slide_parts[s.index - 1] if 0 < s.index <= len(slide_parts) else None, ir.slide_w)
+                    css = _crop_css(pic["crop"])
+                    parts.append(f'<div class="el chrome pic{"" if css else " contain"} {cls}" style="left:{_pct(pic["x"])};top:{_pct(pic["y"])};width:{_pct(pic["w"])};height:{_pct(pic["h"])}{css}"></div>')
+        facts = _slide_facts(pkg, slide_part, ir.slide_w)
         for e in sorted(s.elements, key=lambda e: e.z):
             parts.append(_element_html(e, s, ir, pkg, cache, manifest, default_font, facts))
         if s.notes:

@@ -10,11 +10,12 @@ import pytest
 from lxml import etree
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.oxml import parse_xml
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.util import Emu, Pt
 
 from verstka.analysis.manifest import analyze_template
-from verstka.export.html import _crop_css, _layout_pic_crop, _number_columns, _rgba, export_html
+from verstka.export.html import _crop_css, _layer_pictures, _number_columns, _rgba, export_html
 from verstka.export.svg_charts import chart_svg
 from verstka.rendering.charts import TREND_SERIES
 from verstka.schemas.deck_ir import IRChart, IRChartSeries
@@ -150,23 +151,59 @@ def test_a_cropped_picture_is_drawn_cropped_not_fitted_whole():
     assert "background-position:100.000% 100.000%" in _crop_css((0.3, 0.2, 0.0, 0.0))
     assert _crop_css(None) == "" and _crop_css((0.0, 0.0, 0.0, 0.0)) == "" and _crop_css((-0.1, 0.0, 0.0, 0.0)) == ""
 
-    class _Pkg:  # a layout with two pictures: the cover's image cropped, another not
+def test_layout_pictures_are_read_from_the_deck_with_their_crop_and_group_transform():
+    ns = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    xml = etree.fromstring(
+        f"<p:sldLayout {ns}><p:cSld><p:spTree>"
+        # the cover's cube, cropped, in the frame it is shown in
+        '<p:pic><p:nvPicPr><p:cNvPr id="2" name="cube"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/><a:srcRect r="47427" b="3311"/></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="6096000" cy="3429000"/></a:xfrm></p:spPr></p:pic>'
+        # a brand's logo moved into the bottom-right corner, inside a group scaled 2×
+        '<p:grpSp><p:nvGrpSpPr><p:cNvPr id="3" name="g"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="9144000" y="5143500"/><a:ext cx="2438400" cy="1371600"/><a:chOff x="0" y="0"/><a:chExt cx="1219200" cy="685800"/></a:xfrm></p:grpSpPr>'
+        '<p:pic><p:nvPicPr><p:cNvPr id="4" name="logo"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId3"/></p:blipFill><p:spPr><a:xfrm><a:off x="609600" y="342900"/><a:ext cx="609600" cy="342900"/></a:xfrm></p:spPr></p:pic></p:grpSp>'
+        # a picture placeholder and a hidden picture are not drawn on a slide
+        '<p:pic><p:nvPicPr><p:cNvPr id="5" name="ph"/><p:cNvPicPr/><p:nvPr><p:ph type="pic"/></p:nvPr></p:nvPicPr><p:blipFill><a:blip r:embed="rId4"/></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr></p:pic>'
+        '<p:pic><p:nvPicPr><p:cNvPr id="6" name="hid" hidden="1"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId4"/></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr></p:pic>'
+        "</p:spTree></p:cSld></p:sldLayout>"
+    )
+
+    class _Pkg:
         def xml(self, part):
-            ns = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
-            return etree.fromstring(
-                f"<p:sld {ns}><p:cSld><p:spTree>"
-                '<p:pic><p:blipFill><a:blip r:embed="rId2"/><a:srcRect r="47427" b="3311"/></p:blipFill></p:pic>'
-                '<p:pic><p:blipFill><a:blip r:embed="rId3"/><a:srcRect b="0" l="0" r="0" t="0"/></p:blipFill></p:pic>'
-                "</p:spTree></p:cSld></p:sld>"
-            )
+            return xml
 
         def target_of(self, part, rid):
-            return {"rId2": "ppt/media/cube.png", "rId3": "ppt/media/logo.png"}.get(rid)
+            return {"rId2": "ppt/media/cube.png", "rId3": "ppt/media/logo.png", "rId4": "ppt/media/x.png"}.get(rid)
 
-    pkg = _Pkg()
-    assert _layout_pic_crop(pkg, "ppt/slideLayouts/slideLayout1.xml", "ppt/media/cube.png") == pytest.approx((0.0, 0.0, 0.47427, 0.03311))
-    assert _layout_pic_crop(pkg, "ppt/slideLayouts/slideLayout1.xml", "ppt/media/logo.png") is None
-    assert _layout_pic_crop(pkg, "ppt/slideLayouts/slideLayout1.xml", "ppt/media/other.png") is None
+    pics = _layer_pictures(_Pkg(), "ppt/slideLayouts/slideLayout1.xml", 12192000, 6858000)
+    assert [p["image"] for p in pics] == ["ppt/media/cube.png", "ppt/media/logo.png"]
+    cube, logo = pics
+    assert cube["crop"] == pytest.approx((0.0, 0.0, 0.47427, 0.03311)) and (cube["x"], cube["y"], cube["w"], cube["h"]) == pytest.approx((0.0, 0.0, 0.5, 0.5))
+    # the group's offset and scale carry the logo to the bottom-right corner of the slide (as the deck has it)
+    assert logo["crop"] is None and (logo["x"], logo["y"], logo["w"], logo["h"]) == pytest.approx((10363200 / 12192000, 5829300 / 6858000, 1219200 / 12192000, 685800 / 6858000))
+    assert logo["x"] > 0.8 and logo["y"] > 0.8
+
+
+def test_the_html_draws_the_decks_own_layout_logo_not_the_templates(manifest, tmp_path):
+    from PIL import Image
+
+    img = tmp_path / "logo.png"
+    Image.new("RGB", (60, 20), (0, 90, 220)).save(img)
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    layout = prs.slide_layouts[6]
+    _, rid = layout.part.get_or_add_image_part(str(img))
+    pic = parse_xml(
+        '<p:pic xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<p:nvPicPr><p:cNvPr id="90" name="Logo"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>'
+        f'<p:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+        f'<p:spPr><a:xfrm><a:off x="{int(W * 0.8)}" y="{int(H * 0.9)}"/><a:ext cx="{int(W * 0.15)}" cy="{int(H * 0.05)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+    )  # the logo, bottom-right
+    layout.shapes._spTree.append(pic)
+    prs.slides.add_slide(layout)
+    page = _html(prs, manifest, tmp_path)
+    m = re.search(r'<div class="el chrome pic contain im\d+" style="left:([\d.]+)%;top:([\d.]+)%;width:([\d.]+)%;height:([\d.]+)%', page)
+    assert m and float(m.group(1)) == pytest.approx(80.0, abs=0.01) and float(m.group(2)) == pytest.approx(90.0, abs=0.01)  # (where the deck's layout has it)
+
+
 
 
 def test_a_slide_picture_with_a_crop_keeps_it_in_the_html(manifest, tmp_path):
