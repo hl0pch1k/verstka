@@ -1,5 +1,5 @@
 {
-"about": "Ответы Qwen3.8-27B (VK inference, qwen38-27b-fp8, мышление выключено) навыку goal_reader 1.0.0 — живой прогон 2026-10-17, по одному вызову на бриф: tests/fixtures/intent/labels.json (168) и holdout.json (30). tables_sha — таблицы, над которыми модель отвечала.",
+"about": "Ответы Qwen3.8-27B (VK inference, qwen38-27b-fp8, мышление выключено) навыку goal_reader 1.0.0 — живой прогон 2026-10-17, по одному вызову на бриф: tests/fixtures/intent/labels.json (168) и holdout.json (30). tables_sha — таблицы, над которыми модель отвечала; c4-20…24 и h-13, h-14 перезаписаны 2026-10-17 после раунда 10 (таблицы читаются иначе).",
 "answers": {
 "c4-01A": {
 "reading": {
@@ -2125,12 +2125,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 0.57,
-"tokens_in": 4653,
-"tokens_out": 2,
-"calls": null,
+"call_seconds": 3.02,
+"tokens_in": 4626,
+"tokens_out": 106,
+"calls": 1,
 "tables_sha": [
-"4b39d27b025e09b1"
+"96242f31f74f45ef"
 ]
 },
 "c4-20B": {
@@ -2140,7 +2140,7 @@
 "span": "Сравни команды по забитым мячам",
 "dataset": "d1",
 "task": "comparison",
-"metric": null,
+"metric": "Забито",
 "dimension": "Команда",
 "categories": [],
 "ask": null,
@@ -2151,19 +2151,19 @@
 "threshold": null,
 "compare_to": null,
 "yes_no": false,
-"confidence": 0.8
+"confidence": 0.95
 }
 ],
 "unanswerable": []
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 0.59,
-"tokens_in": 4650,
+"call_seconds": 0.68,
+"tokens_in": 4623,
 "tokens_out": 2,
-"calls": null,
+"calls": 2,
 "tables_sha": [
-"4b39d27b025e09b1"
+"96242f31f74f45ef"
 ]
 },
 "c4-20C": {
@@ -2191,12 +2191,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.13,
-"tokens_in": 4667,
-"tokens_out": 74,
-"calls": null,
+"call_seconds": 1.21,
+"tokens_in": 4640,
+"tokens_out": 111,
+"calls": 1,
 "tables_sha": [
-"4b39d27b025e09b1"
+"96242f31f74f45ef"
 ]
 },
 "c4-21A": {
@@ -2224,12 +2224,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.05,
-"tokens_in": 4529,
-"tokens_out": 76,
-"calls": null,
+"call_seconds": 0.94,
+"tokens_in": 4508,
+"tokens_out": 2,
+"calls": 2,
 "tables_sha": [
-"a73a7fc6c72cab8b"
+"b54d8180ffa98215"
 ]
 },
 "c4-21B": {
@@ -2257,12 +2257,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.47,
-"tokens_in": 4528,
+"call_seconds": 1.51,
+"tokens_in": 4507,
 "tokens_out": 106,
-"calls": null,
+"calls": 1,
 "tables_sha": [
-"a73a7fc6c72cab8b"
+"b54d8180ffa98215"
 ]
 },
 "c4-21C": {
@@ -2276,14 +2276,14 @@
 "dimension": null,
 "categories": [],
 "ask": "mean",
-"aggregation": "mean",
-"weight": null,
+"aggregation": "weighted_mean",
+"weight": "Сдавали",
 "period": null,
-"direction": null,
+"direction": "higher",
 "threshold": null,
 "compare_to": null,
 "yes_no": false,
-"confidence": 0.9
+"confidence": 0.95
 },
 {
 "span": "какие школы ниже 60 баллов",
@@ -2310,12 +2310,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.95,
-"tokens_in": 4545,
-"tokens_out": 214,
-"calls": null,
+"call_seconds": 2.16,
+"tokens_in": 4524,
+"tokens_out": 228,
+"calls": 1,
 "tables_sha": [
-"a73a7fc6c72cab8b"
+"b54d8180ffa98215"
 ]
 },
 "c4-22A": {
@@ -2581,13 +2581,19 @@
 "span": "В каком отделе больше всего вакансий в 2025 году?",
 "dataset": "d1",
 "task": "comparison",
-"metric": "2025 Вакансии",
+"metric": "Вакансии",
 "dimension": "Отдел",
 "categories": [],
 "ask": "max",
 "aggregation": null,
 "weight": null,
-"period": null,
+"period": {
+"kind": "latest",
+"start": null,
+"end": null,
+"base": null,
+"target": null
+},
 "direction": "higher",
 "threshold": null,
 "compare_to": null,
@@ -2599,12 +2605,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.26,
-"tokens_in": 4530,
-"tokens_out": 116,
-"calls": null,
+"call_seconds": 0.75,
+"tokens_in": 4541,
+"tokens_out": 2,
+"calls": 2,
 "tables_sha": [
-"bdaa010a43d70016"
+"a8ea8c57fa6c3fb0"
 ]
 },
 "c4-24B": {
@@ -2614,8 +2620,8 @@
 "span": "Как изменился штат по сравнению с прошлым годом?",
 "dataset": "d1",
 "task": "dynamics",
-"metric": "2025 Штат",
-"dimension": "Отдел",
+"metric": "Штат",
+"dimension": null,
 "categories": [],
 "ask": null,
 "aggregation": null,
@@ -2631,19 +2637,19 @@
 "threshold": null,
 "compare_to": null,
 "yes_no": false,
-"confidence": 0.9
+"confidence": 0.95
 }
 ],
 "unanswerable": []
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.43,
-"tokens_in": 4526,
-"tokens_out": 142,
-"calls": null,
+"call_seconds": 1.37,
+"tokens_in": 4537,
+"tokens_out": 130,
+"calls": 1,
 "tables_sha": [
-"bdaa010a43d70016"
+"a8ea8c57fa6c3fb0"
 ]
 },
 "c4-24C": {
@@ -2653,7 +2659,7 @@
 "span": "Нужно понять, какие отделы выросли сильнее всех за год.",
 "dataset": "d1",
 "task": "dynamics",
-"metric": "2025 Штат",
+"metric": "Штат",
 "dimension": "Отдел",
 "categories": [],
 "ask": "fastest",
@@ -2670,19 +2676,19 @@
 "threshold": null,
 "compare_to": null,
 "yes_no": false,
-"confidence": 0.9
+"confidence": 0.95
 }
 ],
 "unanswerable": []
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 0.54,
-"tokens_in": 4536,
+"call_seconds": 0.58,
+"tokens_in": 4547,
 "tokens_out": 2,
-"calls": null,
+"calls": 2,
 "tables_sha": [
-"bdaa010a43d70016"
+"a8ea8c57fa6c3fb0"
 ]
 },
 "c4-25A": {
@@ -6603,12 +6609,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.23,
-"tokens_in": 4652,
+"call_seconds": 1.59,
+"tokens_in": 4625,
 "tokens_out": 104,
 "calls": 1,
 "tables_sha": [
-"4b39d27b025e09b1"
+"96242f31f74f45ef"
 ]
 },
 "h-14": {
@@ -6625,7 +6631,7 @@
 "aggregation": null,
 "weight": null,
 "period": null,
-"direction": null,
+"direction": "higher",
 "threshold": {
 "value": 75.0,
 "unit": null
@@ -6639,12 +6645,12 @@
 },
 "model": "qwen38-27b-fp8",
 "error": null,
-"call_seconds": 1.45,
-"tokens_in": 4533,
-"tokens_out": 135,
+"call_seconds": 1.41,
+"tokens_in": 4512,
+"tokens_out": 143,
 "calls": 1,
 "tables_sha": [
-"a73a7fc6c72cab8b"
+"b54d8180ffa98215"
 ]
 },
 "h-15": {
