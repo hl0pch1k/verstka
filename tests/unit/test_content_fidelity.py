@@ -210,7 +210,10 @@ def test_the_briefs_request_reaches_the_slide():
     s = OutlineSlide(id="x", kind=K.comparison, headline="Срывы дедлайнов снижаются с 31% до 12%", takeaway="Окупаемость за квартал за счёт роста конверсии в «Про»",
                      notes="Просим утвердить запуск и бюджет на продвижение.",
                      content=SlideContent(columns=[SlideItem(title="До", text="31%"), SlideItem(title="После", text="12%")]))
-    assert A.keep_ask(s, src) and s.content.bullets == ["Просим утвердить запуск и бюджет на продвижение"]
+    assert A.keep_ask(s, src)
+    # the request is the slide's callout (qa3 N-L8: an 8 pt footnote), the takeaway it replaced a line
+    assert s.takeaway == "Просим утвердить запуск и бюджет на продвижение"
+    assert s.content.bullets == ["Окупаемость за квартал за счёт роста конверсии в «Про»"]
     assert not A.keep_ask(s, src)  # shown: nothing more
     s2 = OutlineSlide(id="y", kind=K.bullets, headline="h", content=SlideContent(bullets=["a"]))
     A.keep_ask(s2, src)
@@ -471,3 +474,129 @@ def test_a_number_of_the_files_notes_counts_as_the_datas():
     new = bare.model_copy(deep=True)
     new.takeaway = "NPS вырос до 52; опрошено 1 240 клиентов"
     assert keep_data(bare, new).takeaway == bare.takeaway
+
+
+# ------------------------------------------------------------------ qa3: the brief's asks reach the deck
+
+
+EDU_PLAN = "Зачёт модулей программы как дисциплин по выбору, аудитории для практикумов, продвижение среди студентов 3–4 курсов.\nСо своей стороны VK Education даёт платформу, наставников и стажировки для лучших 10% выпускников.\nПодписание соглашений с университетами до 1 декабря, набор третьего потока в феврале, запуск программы в 20 университетах к сентябрю следующего года."
+
+
+def _steps_slide() -> OutlineSlide:
+    return OutlineSlide(id="sl11", kind=K.timeline, headline="Подписание соглашений до 1 декабря и запуск в 20 университетах к сентябрю",
+                        takeaway="Набор третьего потока стартует в феврале", content=SlideContent(items=[
+                            SlideItem(title="До 1 декабря", text="Подписание соглашений с университетами"), SlideItem(title="Февраль", text="Набор третьего потока"),
+                            SlideItem(title="Сентябрь", text="Запуск программы в 20 университетах")]))
+
+
+def test_the_briefs_asks_are_read():
+    asks = A.brief_asks(EDU)
+    assert [a for _, a in asks][:1] == ["Зачёт модулей программы как дисциплин по выбору, аудитории для практикумов, продвижение среди студентов 3–4 курсов"]
+    assert all(h == "Что нужно от партнёров" for h, _ in asks)
+    assert [a for _, a in A.brief_asks(VKWS)] == ["Просим утвердить запуск и бюджет на продвижение"]
+
+
+def test_the_partners_ask_reaches_the_deck():
+    """o04 (qa3): the critic asked to split «партнёры + следующие шаги», the revision dropped the ask, nothing flagged it."""
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="sl1", kind=K.title, headline="t"), _steps_slide(), OutlineSlide(id="sl12", kind=K.thanks, headline="Спасибо")])
+    said = A.keep_asks_in_deck(o, {"sl11": EDU_PLAN}, EDU)
+    lines = o.slides[1].content.bullets
+    assert said and "Зачёт модулей программы как дисциплин по выбору" in lines and "Аудитории для практикумов" in lines, lines
+    assert any("10% выпускников" in x for x in lines)
+    assert not A.keep_asks_in_deck(o, {"sl11": EDU_PLAN}, EDU)  # shown now
+
+
+def test_a_revision_that_drops_the_ask_is_not_taken():
+    ctx = _ctx(EDU)
+    unit = A._Unit(key="u10", title="Партнёрство и планы", text=EDU_PLAN)
+    old = _steps_slide()
+    old.content.bullets = ["Зачёт модулей как дисциплин по выбору", "Аудитории для практикумов", "Продвижение среди студентов 3–4 курсов"]
+    new = _steps_slide()
+    assert A._revision_worse(A._Design(unit=unit, slide=old, by="model"), A._Design(unit=unit, slide=new, by="model"), ctx) == "the brief's ask is gone"
+
+
+# ------------------------------------------------------------------ qa3: ordinary-deck slides and data-deck edits
+
+
+def test_a_lone_line_never_repeats_the_headline():
+    s = OutlineSlide(id="x", kind=K.bullets, headline="Наставники — действующие инженеры VK Tech", content=SlideContent(paragraphs=["Наставники — действующие инженеры VK Tech"]))
+    assert A.lone_line_repeat(s, "Опытные наставники из VK Tech")
+    assert s.headline == "Опытные наставники из VK Tech" and s.content.paragraphs == ["Наставники — действующие инженеры VK Tech"]
+    two = OutlineSlide(id="y", kind=K.bullets, headline="h a b", content=SlideContent(bullets=["первое", "второе"]))
+    assert A.lone_line_repeat(two, "Тема слайда") is None
+
+
+def test_a_key_figure_says_what_it_counts_and_keeps_its_bound():
+    # o01 compact (qa3 N-L7): «5 часов · в неделю» for the brief's «Менеджеры тратят до 5 часов в неделю на контроль статусов»
+    src = "Ручные напоминания ставят только 18% сотрудников.\nМенеджеры тратят до 5 часов в неделю на контроль статусов.\nСредний чек вырастет с 300 до 330 рублей."
+    s = OutlineSlide(id="x", kind=K.stat_row, headline="Ручной контроль стоит 5 часов в неделю", content=SlideContent(numbers=[
+        NumberCallout(value="18%", label="Сотрудников ставят ручные напоминания"), NumberCallout(value="5 часов", label="в неделю"), NumberCallout(value="330 ₽", label="Средний чек")]))
+    A.plain_labels(s, src)
+    assert [(n.value, n.label) for n in s.content.numbers] == [
+        ("18%", "Сотрудников ставят ручные напоминания"), ("до 5 часов", "Менеджеры тратят в неделю на контроль статусов"), ("330 ₽", "Средний чек")]
+
+
+def test_a_cut_headline_is_taken_to_the_end_of_its_phrase():
+    src = "Опрос NPS во II квартале 2025 и 2026 года не проводился: в эти месяцы команда переходила на новую систему опросов."
+    from verstka.planning.slide_edit import whole_headline
+
+    assert whole_headline("NPS вырос до 52, опросы не проводились при переходе", src) == "NPS вырос до 52, опросы не проводились при переходе на новую систему опросов"
+    assert whole_headline("NPS вырос до 52", src) == "NPS вырос до 52"
+
+
+def _bars_outline() -> DeckOutline:
+    from verstka.schemas.data import HeadlineFact, SlideData
+
+    data = SlideData(dataset_id="d2", file="Регионы.xlsx", headline_facts=[HeadlineFact(id="f1", text="Москва — 41% выручки", value=41, kind="share")])
+    s = OutlineSlide(id="sl4", kind=K.chart, headline="Москва даёт 41% выручки, быстрее всех растёт Казань", data=data,
+                     takeaway="Москва — 1 433 млн ₽ из 3 495 млн ₽. Казань: +38% — быстрее всех",
+                     content=SlideContent(chart=ChartSpec(type="bar", categories=["Москва", "Санкт-Петербург", "Казань"], series=[InlineSeries(name="Выручка", values=[1433, 900, 400])], highlight_index=0)))
+    return DeckOutline(title="Итоги", strategy="structured", slides=[OutlineSlide(id="sl1", kind=K.title, headline="Итоги"), s])
+
+
+def test_an_emphasis_is_the_charts_highlight_or_said_plainly():
+    """qa3 N-E4: «выдели Казань цветом» answered «переделан» and changed nothing; the caption lost its accents."""
+    from verstka.planning.slide_edit import redesign_slide
+
+    o = _bars_outline()
+    r = redesign_slide(o, 2, parse_brief_text(BRIEF), None, request="выдели Казань цветом")  # no model needed
+    s = r.outline.slides[1]
+    assert s.content.chart.highlight_index == 2 and s.takeaway == o.slides[1].takeaway and s.headline == o.slides[1].headline
+    assert "Казань" in r.reply and r.how == "rules"
+    with pytest.raises(ValueError, match="нет такой категории"):
+        redesign_slide(o, 2, parse_brief_text(BRIEF), None, request="выдели Новосибирск цветом")
+    with pytest.raises(ValueError, match="уже выделена"):
+        redesign_slide(o, 2, parse_brief_text(BRIEF), None, request="выдели Москву цветом")
+    plain = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.title, headline="t"), OutlineSlide(id="b", kind=K.bullets, headline="h", content=SlideContent(bullets=["x"]))])
+    with pytest.raises(ValueError, match="диаграммы нет"):
+        redesign_slide(plain, 2, parse_brief_text("x"), None, request="выдели первый пункт цветом")
+
+
+def test_a_slide_that_did_not_change_is_never_reported_as_changed():
+    from verstka.planning.slide_edit import redesign_slide
+    from verstka.skills_registry.registry import SkillsRegistry
+
+    outline = DeckOutline(title="t", strategy="structured", slides=[
+        OutlineSlide(id="sl1", kind=K.title, headline="t"),
+        OutlineSlide(id="sl2", kind=K.bullets, headline="Как внедряем", content=SlideContent(bullets=["Пилот на одной команде", "Запуск на всю компанию"]))])
+    brief = parse_brief_text("Как внедряем: пилот на одной команде, затем запуск на всю компанию.")
+    same = {"kind": "bullets", "headline": "Как внедряем", "bullets": ["Пилот на одной команде", "Запуск на всю компанию"]}
+    with pytest.raises(ValueError, match="не изменился"):
+        redesign_slide(outline, 2, brief, None, request="перепиши понятнее", skills=SkillsRegistry.load(), providers=_designer(same))
+
+
+def test_a_data_decks_summary_is_checked_against_its_story():
+    """qa3 N-E3: «Исправить слайд» on the summary of a data deck failed with «после проверки цифр на слайде ничего не
+    осталось» — its figures were checked against the one-line brief, not against the data story."""
+    from verstka.planning.slide_edit import redesign_slide, story_brief
+    from verstka.skills_registry.registry import SkillsRegistry
+
+    o = _bars_outline()
+    o.slides.append(OutlineSlide(id="sl9", kind=K.cards, headline="Три главных вывода", content=SlideContent(items=[
+        SlideItem(title="Москва", text="41% выручки"), SlideItem(title="Казань", text="+38% — быстрее всех")])))
+    assert "1 433 млн ₽" in story_brief(o, parse_brief_text(BRIEF)).text
+    answer = {"kind": "stat_row", "headline": "Москва даёт 41% выручки, Казань растёт быстрее всех",
+              "numbers": [{"value": "41%", "label": "Доля Москвы в выручке"}, {"value": "+38%", "label": "Рост Казани"}]}
+    r = redesign_slide(o, 3, parse_brief_text(BRIEF), None, request="сделай крупными цифрами", skills=SkillsRegistry.load(), providers=_designer(answer))
+    s = r.outline.slides[2]
+    assert [n.value for n in s.content.numbers] == ["41%", "+38%"], s.content

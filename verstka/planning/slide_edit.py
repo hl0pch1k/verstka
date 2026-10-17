@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from verstka.schemas.outline import Brief, DeckOutline, OutlineSlide
@@ -330,12 +330,91 @@ def describe_change(old: OutlineSlide, new: OutlineSlide) -> str:
     if new.headline != old.headline:
         changed.append(f"заголовок «{new.headline}»")
     if (new.takeaway or "") != (old.takeaway or ""):
-        changed.append(f"вывод «{new.takeaway}»" if new.takeaway else "без отдельного вывода")
+        word = "подпись" if old.data is not None else "вывод"
+        changed.append(f"{word} «{new.takeaway}»" if new.takeaway else f"без отдельного вывода")
+    for key in ("chart", "chart2"):
+        a, b = getattr(old.content, key), getattr(new.content, key)
+        if a is not None and b is not None and a.highlight_index != b.highlight_index and b.highlight_index is not None and 0 <= b.highlight_index < len(b.categories):
+            changed.append(f"выделено «{b.categories[b.highlight_index]}» на диаграмме")
     if new.content.photo_slot and not old.content.photo_slot:
         changed.append("оставлено свободное место под фото — вставьте его в рамку на слайде")
     elif old.content.photo_slot and not new.content.photo_slot:
         changed.append("место под фото убрано")
     return "; ".join(changed) if changed else "переписан текст"
+
+
+def story_brief(outline: DeckOutline, brief: Optional[Brief]) -> Optional[Brief]:
+    """The text a data deck's slide is checked against (N-E3): its one-line brief says nothing of the figures, the data
+    story does — every data slide's facts, headline, caption and figures and the story's own slides (the summary, «Что
+    дальше»), which the story writer built from those facts. None for a deck without data slides (the brief as it is)."""
+    data = [s for s in outline.slides if s.data is not None]
+    if not data:
+        return None
+    lines: list[str] = []
+    for s in outline.slides:
+        if s.kind.value in FRAME_KINDS:
+            continue
+        lines.append(_slide_text(s))
+        if s.data is not None:
+            lines += [f.text for f in s.data.headline_facts if f.text]
+            lines += [f.explain for f in s.data.headline_facts if f.explain]
+            if data_context(s):
+                lines.append(data_context(s))
+    base = brief or Brief(text="")
+    story = "\n".join(x for x in lines if x and x.strip())
+    return base.model_copy(update={"text": f"{base.text or ''}\n\n{story}".strip()})
+
+
+# «выдели Казань цветом», «подсвети Москву», «сделай акцент на Казани»: a category of the slide's chart, made to stand out
+_EMPHASIS_RE = re.compile(r"(?<![\wё])(?:выдели\w*|выделить|подсвет\w*|акцент\w*|сделай\s+ярче|отметь\s+цветом|покрась)", re.I)
+
+
+def emphasis_request(request: str) -> bool:
+    return bool(_EMPHASIS_RE.search(request or "")) and not re.search(r"(?<![\wё])(?:жирн|курсив|заголов)", request or "", re.I)
+
+
+def emphasis_index(request: str, s: OutlineSlide) -> tuple[Optional[str], Optional[int], list[str]]:
+    """(which chart: "chart" | "chart2", the category the request names, the chart's categories) — the category matched
+    by the stems of its words («Казань» in «выдели Казань цветом», «Казани»)."""
+    words = [w.lower() for w in re.findall(r"[А-Яа-яЁёA-Za-z0-9]{3,}", request or "")]
+    for key in ("chart", "chart2"):
+        ch = getattr(s.content, key)
+        if ch is None or not ch.categories:
+            continue
+        cats = [str(c) for c in ch.categories]
+        for k, cat in enumerate(cats):
+            stems = [w.lower()[: max(4, len(w) - 2)] for w in re.findall(r"[А-Яа-яЁёA-Za-z0-9]{3,}", cat)]
+            if stems and all(any(w.startswith(st) for w in words) for st in stems):
+                return key, k, cats
+        return key, None, cats
+    return None, None, []
+
+
+def _visible(s: OutlineSlide) -> dict:
+    """What the person sees of a slide (its form, words, figures, charts and their highlight), for «did it change»."""
+    return s.model_dump(include={"kind", "headline", "subtitle", "takeaway", "footnote", "content"})
+
+
+_TAIL_RE = re.compile(r"(?:^|\s)(?P<prep>при|на|в|во|к|ко|для|из|по|о|об|от|с|со|за|до|после|без|через|перед)\s+(?P<w>[а-яё-]{4,})$", re.I)
+
+
+def whole_headline(headline: str, source: str) -> str:
+    """A headline cut mid-phrase to fit a word count («…опросы не проводились при переходе») taken to the end of its
+    phrase in the source («…при переходе на новую систему опросов»), when the source continues that word; as it is
+    otherwise (N-E6)."""
+    h = (headline or "").strip()
+    m = _TAIL_RE.search(h)
+    if not m or not source:
+        return h
+    stem = m.group("w").lower()[:6]
+    for mm in re.finditer(rf"(?<![\wё]){re.escape(stem)}[а-яё]*\s+(?P<rest>[^.;:!?()«»—–]+)", source, re.I):
+        rest = mm.group("rest").strip(" ,")
+        if not rest or len(rest.split()) > 6 or rest.split()[0].lower() in ("и", "а", "но", "что", "где", "когда"):
+            continue
+        out = f"{h} {rest}"
+        if len(out.split()) <= 16:
+            return out
+    return h
 
 
 @dataclass
@@ -347,6 +426,24 @@ class SlideRedesign:
     reply: str
     how: str
     what: str
+    # what the edit's model calls cost (pipeline/generate.call_totals): carried into the variant's run_manifest.usage
+    usage: dict = field(default_factory=dict)
+
+
+# the usage of the edits whose outlines the caller has not rendered yet, by the outline's hash (revise.rerender_variant
+# takes it when it renders that outline: the chat's edit returns only the outline)
+_EDIT_USAGE: dict[str, dict] = {}
+
+
+def outline_key(o: DeckOutline) -> str:
+    import hashlib
+
+    return hashlib.sha256(o.model_dump_json().encode("utf-8")).hexdigest()[:24]
+
+
+def take_edit_usage(o: DeckOutline) -> dict:
+    """The usage of the edit that made `o` (once), {} when none is known."""
+    return _EDIT_USAGE.pop(outline_key(o), {})
 
 
 def redesign_slide(
@@ -382,8 +479,17 @@ def redesign_slide(
         raise ValueError("обложку и разделители агент собирает из названия и разделов текста — поменяйте их в тексте и соберите презентацию заново")
     request = request or ""
     fixing = note is not None
-    brief = brief or Brief(text=_slide_text(old))
+    # a data deck's slides are checked against its data story, never against its one-line brief alone (N-E3)
+    brief = story_brief(outline, brief) or brief or Brief(text=_slide_text(old))
     tracker = A._Tracker(progress)
+    stats: list = []
+    if providers is not None:
+        try:
+            from verstka.pipeline.generate import _recording
+
+            providers, _ = _recording(providers, stats)  # what the edit's model calls cost (run_manifest.usage)
+        except Exception:  # noqa: BLE001 - recording is a nicety
+            pass
     structure, _ = A.analyse_brief(brief)  # the rules' reading: no model call, the data the deck was built from
     facts = A._resolve_facts(None, brief, [], structure)
     ctx = A._build_ctx(brief, structure, facts, manifest)
@@ -415,7 +521,19 @@ def redesign_slide(
 
     photo = photo_request(request) if request.strip() else None
     drop_photo = bool(request.strip()) and photo_dropped(request)
-    if old.data is not None:
+    emphasis: Optional[tuple[str, int]] = None
+    if not fixing and emphasis_request(request):
+        # «выдели Казань цветом»: the chart's own highlight on that category — a safe edit the rules make, no model; a
+        # colour the slide cannot show this way is said so, never reported as done (N-E4)
+        key, k, cats = emphasis_index(request, old)
+        if key is None:
+            raise ValueError(f"цветом выделяется столбец, точка или сектор диаграммы, а на слайде {index} диаграммы нет — выделить так не получится")
+        if k is None:
+            raise ValueError(f"на диаграмме слайда {index} нет такой категории — можно выделить: " + ", ".join(f"«{c}»" for c in cats[:12]))
+        if getattr(old.content, key).highlight_index == k:
+            raise ValueError(f"«{cats[k]}» на слайде {index} уже выделена цветом")
+        emphasis = (key, k)
+    if old.data is not None and emphasis is None:
         # a slide made from a data file changes its form only among the analysis's options («Пересобрать слайд так»);
         # its words — with the model only (the rules have nothing to say about the data)
         from verstka.data.rebuild import _form_phrase, option_for_request
@@ -433,7 +551,11 @@ def redesign_slide(
     answered = False  # the model answered (its answer may still not fit the slide): never «the model is unavailable»
     proposed: Optional[OutlineSlide] = None  # a data slide's words as the model proposed them (before the number rule)
     refused_first: list[str] = []
-    if agent.models:
+    if emphasis is not None:
+        new = old.model_copy(deep=True)
+        getattr(new.content, emphasis[0]).highlight_index = emphasis[1]
+        how = "rules"
+    elif agent.models:
         tracker.emit("designer", f"Дизайнер: слайд {index} — {start_line if start_line is not None else '«' + request[:140] + '»'}.", slide=index)
         if note is None:
             note = (
@@ -448,7 +570,7 @@ def redesign_slide(
                 f"\n- This slide is made from the data file «{old.data.file}»: its chart, table and figures stay exactly as they are "
                 "(do not return them). Change only the words the request is about: the headline, the caption under the chart "
                 "(\"takeaway\"), the subtitle or the lines. Every number you write is one of this slide's own figures, as in "
-                "your previous design."
+                "your previous design. A headline is a whole statement: never cut a phrase to fit a word count (say less instead)."
             )
             notes = data_context(old)
             if notes:
@@ -473,6 +595,8 @@ def redesign_slide(
             if ans is None:
                 return d.slide, None, []
             prop = data_words(old, ans, fields, adding=bool(_ADD_RE.search(request or "")))  # the words only: the brief's checks are not the data's
+            if prop.headline != old.headline:
+                prop.headline = whole_headline(prop.headline, f"{unit.text}\n{data_context(old)}")
             got = keep_data(old, prop.model_copy(deep=True))
             log.info("data slide edit %s: proposed %s", index, json.dumps({"headline": prop.headline, "takeaway": prop.takeaway, "fields": sorted(fields or [])}, ensure_ascii=False))
             return got, prop, _refused(old, prop, got)
@@ -523,6 +647,8 @@ def redesign_slide(
     refused: list[str] = []
     if old.data is not None:
         new = keep_data(old, new)
+        if emphasis is not None:
+            getattr(new.content, emphasis[0]).highlight_index = emphasis[1]  # (the data's chart, with the asked highlight)
         if proposed is not None:
             refused = refused_first
             if _words_of(new) == _words_of(old) and not (photo or drop_photo):
@@ -563,10 +689,17 @@ def redesign_slide(
     for t in checked.tables:
         if not any(t.columns == u.columns and t.rows == u.rows for u in grounded.tables):
             grounded.tables.append(t)
+    if _visible(result) == _visible(old) and not (photo or drop_photo):
+        # never «переделан» for a slide that did not change (N-E4): the reply says what happened instead
+        if answered:
+            raise ValueError("модель ответила, но слайд после проверки не изменился — попробуйте сказать иначе, что поменять")
+        raise ValueError(f"слайд {index} не изменился: такую правку по правилам сделать не получилось")
     after = A.form_ru(result)
     what = describe_change(old, result)
     reply = f"Слайд {index} переделан: {what}."
-    if how == "rules":
+    if emphasis is not None:
+        reply = f"Слайд {index}: выделил «{getattr(result.content, emphasis[0]).categories[emphasis[1]]}» цветом на диаграмме."
+    elif how == "rules":
         reply += " Модель не ответила, форму сменил по правилам." if not answered else " Ответ модели не подошёл к слайду, форму сменил по правилам."
     if refused:
         reply += " Не взял из ответа модели: " + "; ".join(refused) + "."
@@ -574,7 +707,18 @@ def redesign_slide(
     line = log_line if log_line is not None else f"Правка: слайд {index} по просьбе «{request.strip()[:160]}» — {{what}}."
     grounded.agent_log = [*outline.agent_log, line.replace("{what}", what)]
     log.info("slide edit %s: %s", how, json.dumps({"slide": index, "request": request[:200], "fix": fixing}, ensure_ascii=False))
-    return SlideRedesign(outline=grounded, reply=reply, how=how, what=what)
+    usage: dict = {}
+    if stats:
+        try:
+            from verstka.pipeline.generate import call_totals
+
+            usage = call_totals(list(stats))
+            if len(_EDIT_USAGE) > 64:
+                _EDIT_USAGE.clear()
+            _EDIT_USAGE[outline_key(grounded)] = usage
+        except Exception:  # noqa: BLE001
+            usage = {}
+    return SlideRedesign(outline=grounded, reply=reply, how=how, what=what, usage=usage)
 
 
 def revise_slide(

@@ -118,6 +118,71 @@ def _read_audit(path: Path):
         return None
 
 
+_PROVENANCE = ("planner", "providers", "usage", "skills", "inputs", "verstka_version", "git_commit", "created_at")
+
+
+def add_usage(base: Optional[dict], extra: Optional[dict]) -> dict:
+    """The generation's usage with an edit's model calls on top (N-E2): the totals and `by_skill` grow, and `edits`
+    keeps what the edits alone cost."""
+    out = copy.deepcopy(base) if isinstance(base, dict) else {}
+    if not extra or not extra.get("calls"):
+        return out
+    for key in ("calls", "requests", "tokens_in", "tokens_out", "failed"):
+        out[key] = int(out.get(key) or 0) + int(extra.get(key) or 0)
+    if extra.get("cost_rub") is not None:
+        out["cost_rub"] = round(float(out.get("cost_rub") or 0.0) + float(extra["cost_rub"]), 4)
+    by = out.setdefault("by_skill", {})
+    for skill, b in (extra.get("by_skill") or {}).items():
+        mine = by.setdefault(skill, {"calls": 0, "requests": 0, "tokens_in": 0, "tokens_out": 0, "failed": 0, "seconds": 0.0, "cost_rub": None})
+        for key in ("calls", "requests", "tokens_in", "tokens_out", "failed"):
+            mine[key] = int(mine.get(key) or 0) + int(b.get(key) or 0)
+        mine["seconds"] = round(float(mine.get("seconds") or 0.0) + float(b.get("seconds") or 0.0), 2)
+        if b.get("cost_rub") is not None:
+            mine["cost_rub"] = round(float(mine.get("cost_rub") or 0.0) + float(b["cost_rub"]), 4)
+    edits = out.setdefault("edits", {"calls": 0, "requests": 0, "tokens_in": 0, "tokens_out": 0, "failed": 0, "cost_rub": None, "count": 0})
+    for key in ("calls", "requests", "tokens_in", "tokens_out", "failed"):
+        edits[key] = int(edits.get(key) or 0) + int(extra.get(key) or 0)
+    if extra.get("cost_rub") is not None:
+        edits["cost_rub"] = round(float(edits.get("cost_rub") or 0.0) + float(extra["cost_rub"]), 4)
+    edits["count"] = int(edits.get("count") or 0) + 1
+    out.setdefault("scope", "generation")
+    return out
+
+
+def carry_provenance(old: Optional[dict], new: Optional[dict], edit_usage: Optional[dict] = None) -> Optional[dict]:
+    """The re-rendered variant's run manifest with the generation's provenance (N-E2): who planned it, the models and
+    skills it used, what the calls cost (plus the edit's own calls) and the inputs; the re-render keeps its own audit,
+    slides, timings and the new outline's hash."""
+    if new is None:
+        return None
+    if old is None:
+        if edit_usage:
+            new["usage"] = add_usage(new.get("usage"), edit_usage)
+        return new
+    for key in _PROVENANCE:
+        if old.get(key) is None:
+            continue
+        if key == "inputs":
+            inputs = dict(old["inputs"]) if isinstance(old["inputs"], dict) else {}
+            mine = new.get("inputs") if isinstance(new.get("inputs"), dict) else {}
+            if mine.get("outline_sha256"):
+                inputs["outline_sha256"] = mine["outline_sha256"]
+            new["inputs"] = inputs
+        else:
+            new[key] = copy.deepcopy(old[key])
+    if edit_usage:
+        new["usage"] = add_usage(new.get("usage"), edit_usage)
+    timings = new.get("timings_s") if isinstance(new.get("timings_s"), dict) else None
+    if timings is not None and isinstance(old.get("timings_s"), dict):
+        timings["generation"] = old["timings_s"].get("generation") or old["timings_s"]
+    return new
+
+
+def _slide_state(s) -> str:
+    """A slide's plan as it renders (everything but the agent's words about it)."""
+    return s.model_dump_json(exclude={"rationale", "alternatives"})
+
+
 def rerender_variant(
     vdir: Path,
     strategy: str,
@@ -138,6 +203,21 @@ def rerender_variant(
 
     from verstka.pipeline.generate import generate_variants
 
+    edit_usage: dict = {}
+    try:
+        from verstka.planning.slide_edit import take_edit_usage
+
+        edit_usage = take_edit_usage(outline)
+    except Exception:  # noqa: BLE001
+        edit_usage = {}
+    try:
+        # the slides the edit did not touch keep their layout exactly (N-E1): only the edited ones are laid out again
+        pinned = _rerender_pinned(Path(vdir), strategy, outline, Path(template_source), Path(workspace_root), brief=brief, exports=exports, edit_usage=edit_usage)
+    except Exception:  # noqa: BLE001 - the variant is laid out again as a whole, as before
+        log.warning("pinned re-render failed: the variant is laid out again", exc_info=True)
+        pinned = None
+    if pinned is not None:
+        return pinned
     scratch = vdir.parent / f".{strategy}.revise"
     shutil.rmtree(scratch, ignore_errors=True)
     # who planned the deck (the agent, its model and calls) stays the variant's: an edit re-renders a supplied plan
@@ -168,9 +248,8 @@ def rerender_variant(
             path = vdir / name
             if path.exists():
                 path.write_text(path.read_text(encoding="utf-8").replace(str(made), str(vdir)), encoding="utf-8")
-        new_manifest = _read_json(vdir / "run_manifest.json")
-        if new_manifest is not None and old_manifest is not None and old_manifest.get("planner"):
-            new_manifest["planner"] = old_manifest["planner"]
+        new_manifest = carry_provenance(old_manifest, _read_json(vdir / "run_manifest.json"), edit_usage)
+        if new_manifest is not None:
             (vdir / "run_manifest.json").write_text(json.dumps(new_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         # the remarks that stayed keep their ids (the audit numbers them through the deck, so an edit of one slide would
         # rename the remarks of every slide after it)
@@ -182,6 +261,151 @@ def rerender_variant(
             (vdir / "audit_report.json").write_text(new_audit.model_dump_json(indent=2), encoding="utf-8")
             v.audit = new_audit
         v.out_dir = vdir
+        return v
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _rerender_pinned(vdir: Path, strategy: str, outline: DeckOutline, template_source: Path, workspace_root: Path, *, brief: Optional[Brief], exports: Optional[list[str]], edit_usage: Optional[dict] = None):
+    """The edited plan rendered with every untouched slide pinned (N-E1: a caption edit on slide 3 re-laid out slide 9):
+    the edited slides are matched and rendered again in a scratch deck, fixed by the autofix on those slides only, and
+    spliced into the current deck; every other slide keeps its XML (checked by fingerprints), its preview and its
+    layout entry. None when that is not possible — another number or order of slides, nothing kept, missing files —
+    and the variant is laid out again as a whole."""
+    from verstka.analysis.manifest import analyze_template
+    from verstka.api.remarks import carry_report_ids
+    from verstka.audit.autofix import autofix_loop
+    from verstka.audit.runner import run_audit
+    from verstka.ingest.workspace import TemplateWorkspace
+    from verstka.matching.matcher import match_outline
+    from verstka.pipeline.generate import VariantResult, render_outputs
+    from verstka.planning.strategies import load_strategies
+    from verstka.rendering.renderer import RenderResult, render_deck, strip_outline_marks
+    from verstka.schemas.audit import AuditReport, Issue
+    from verstka.schemas.layout import LayoutPlan
+
+    t0 = time.time()
+    need = ("outline.json", "layout_plan.json", "audit_report.json", "deck.pptx")
+    if not all((vdir / f).exists() for f in need):
+        return None
+    outline0 = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+    if [s.id for s in outline0.slides] != [s.id for s in outline.slides]:
+        return None
+    changed = [k for k, (a, b) in enumerate(zip(outline0.slides, outline.slides), 1) if _slide_state(a) != _slide_state(b)]
+    if not changed or len(changed) == len(outline.slides):
+        return None
+    plan0 = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
+    if any(plan0.for_outline(s.id) is None for s in outline.slides):
+        return None
+    report0 = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
+    deck0 = vdir / "deck.pptx"
+    manifest = analyze_template(template_source, workspace_root=workspace_root, providers=None, skills=None, use_llm=False, use_vlm=False)
+    ws = TemplateWorkspace.create(template_source, workspace_root)
+    st = load_strategies()
+    strategy_obj = st.get(strategy) or next(iter(st.values()))
+    fresh = match_outline(outline, manifest, strategy_obj)
+    plan = plan0.model_copy(deep=True)
+    for k in changed:
+        oid = outline.slides[k - 1].id
+        plan = _with_entry(plan, fresh.for_outline(oid), oid)
+    brief_text = brief.text if brief is not None else None
+    exports = [e for e in (exports or []) if e in ("pdf", "html")]
+    scratch = vdir.parent / f".{strategy}.pinned"
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
+    try:
+        work = scratch / "work.pptx"
+        o = outline.model_copy(deep=True)
+        render_deck(o, plan, manifest, ws, work)  # the whole scratch deck; only the edited slides are used
+        rep = run_audit(work, manifest, o, ws, use_vlm=False, use_llm=False, render=False, strategy=strategy, brief_text=brief_text)
+        ids = {i.id for i in rep.issues if i.slide in changed and i.severity in ("error", "warn") and i.kind != "model" and i.autofix is not None and i.autofix.action != "none"}
+        records: list[dict] = []
+        if ids:
+            start = len(rep.applied_fixes)
+            rep, plan, o, _ = autofix_loop(work, rep, o, plan, manifest, ws, max_iterations=2, only_ids=ids, render=False, brief_text=brief_text)
+            records = list(rep.applied_fixes[start:])
+        final = scratch / "final.pptx"
+        shutil.copy2(deck0, final)
+        for k in changed:
+            splice_slide(final, work, k, scratch / "spliced.pptx")
+            (scratch / "spliced.pptx").replace(final)
+        try:
+            strip_outline_marks(final)
+        except Exception:  # noqa: BLE001
+            log.warning("outline markers left in the notes", exc_info=True)
+        # a picture the edited slide had goes back into its place (no model call)
+        pic_records = None
+        for k in changed:
+            got = _keep_slide_picture(vdir, final, o, k)
+            if got is not None:
+                pic_records = got
+        report = carry_report_ids(report0, run_audit(final, manifest, o, ws, use_vlm=False, use_llm=False, render=False, strategy=strategy, brief_text=brief_text))
+        report.issues.extend(i.model_copy(deep=True) for i in report0.issues if i.kind == "model" and i.slide not in changed)
+        report.applied_fixes = list(report0.applied_fixes) + [{"action": "edit", "slides": changed}] + records
+        report.iterations = report0.iterations
+        report.recompute()
+        fp0, fp1 = slide_fingerprints(deck0), slide_fingerprints(final)
+        other = changed_slides(fp0, fp1, skip=set(changed))
+        out = scratch / "out"
+        out.mkdir()
+        shutil.copy2(final, out / "deck.pptx")
+        paths, images, warns, render_ok = render_outputs(out, manifest, o.title, exports, images=True)
+        for w in warns:
+            log.warning("pinned re-render: %s", w)
+        if render_ok is False:
+            report.issues.append(Issue(id="file_opens-0-render", slide=0, check_id="file_opens", severity="warn", kind="deterministic", message="LibreOffice не смог отрендерить файл"))
+            report.recompute()
+        merged = scratch / "slides"
+        merged.mkdir()
+        old_images = {int(p.stem.rsplit("-", 1)[-1]): p for p in _previews(vdir)}
+        new_images = {k: p for k, p in enumerate(images, 1)}
+        for k in range(1, len(o.slides) + 1):
+            fresh_img = k in changed or k in other or k not in old_images
+            src = (new_images.get(k) if fresh_img else old_images.get(k)) or old_images.get(k)
+            if src is not None:
+                shutil.copy2(src, merged / f"slide-{k:03d}.jpg")
+        # the files in place (the caller kept the previous version)
+        (out / "deck.pptx").replace(deck0)
+        if pic_records is not None:
+            from verstka.images.fill import write_records
+
+            write_records(vdir, pic_records)
+        for fmt in ("pdf", "html"):
+            made = out / f"deck.{fmt}"
+            if made.exists():
+                made.replace(vdir / f"deck.{fmt}")
+            elif (vdir / f"deck.{fmt}").exists():
+                (vdir / f"deck.{fmt}").unlink()  # it would show the deck before the edit
+        if any(merged.iterdir()):
+            shutil.rmtree(vdir / "slides", ignore_errors=True)
+            merged.replace(vdir / "slides")
+        report.deck = str(deck0)
+        report.slide_images = {k: str(p) for k, p in enumerate(_previews(vdir), 1)}
+        (vdir / "outline.json").write_text(o.model_dump_json(indent=2), encoding="utf-8")
+        (vdir / "layout_plan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+        (vdir / "audit_report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+        rm = _read_json(vdir / "run_manifest.json")
+        if rm is not None:
+            rm["audit"] = report.summary.model_dump()
+            rm["applied_fixes"] = report.applied_fixes
+            rm.setdefault("inputs", {})["outline_sha256"] = hashlib.sha256(o.model_dump_json().encode("utf-8")).hexdigest()[:16]
+            slides = rm.get("slides")
+            for k in changed:
+                e = plan.for_outline(o.slides[k - 1].id)
+                if e is not None and isinstance(slides, list) and len(slides) >= k and isinstance(slides[k - 1], dict):
+                    slides[k - 1].update({"mode": e.mode, "pattern_id": e.pattern_id, "composition": e.composition})
+            if edit_usage:
+                rm["usage"] = add_usage(rm.get("usage"), edit_usage)
+            rm.setdefault("timings_s", {})["edit"] = round(time.time() - t0, 2)
+            (vdir / "run_manifest.json").write_text(json.dumps(rm, ensure_ascii=False, indent=2), encoding="utf-8")
+        v = VariantResult(strategy=strategy, out_dir=vdir, outline=o, plan=plan, render=RenderResult(pptx_path=deck0), images=_previews(vdir),
+                          warnings=[], seconds=round(time.time() - t0, 2), audit=report,
+                          exports={fmt: vdir / f"deck.{fmt}" for fmt in exports if (vdir / f"deck.{fmt}").exists()})
+        v.planner = (rm or {}).get("planner") or {}
+        v.other_slides = other  # type: ignore[attr-defined]  (the slides besides the edited ones that changed: none expected)
+        v.changed_slides = changed  # type: ignore[attr-defined]
+        if other:
+            log.warning("pinned re-render: slides %s changed besides the edited %s", other, changed)
         return v
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -723,6 +947,7 @@ def fix_slide(
     kept: list[dict] = []  # the edits that stayed (what the reply says was done)
     how, what = "autofix", ""
     redesigned = False
+    spent: list[dict] = []  # what the designer's calls of this fix cost (run_manifest.usage)
 
     voice.plain("Критик читает замечания", 0.03)
     voice.agent("critic", RM.critic_line(n, remarks, titles), 0.05)
@@ -830,6 +1055,7 @@ def fix_slide(
                     )
                 except ValueError as e:
                     return None, str(e)
+                spent.append(r.usage)
                 o = _with_slide(outline0, r.outline, n)
                 strategy_obj = load_strategies().get(strategy) or next(iter(load_strategies().values()))
                 pl = _with_entry(plan0, match_outline(o, manifest, strategy_obj).for_outline(oid), oid)
@@ -948,7 +1174,13 @@ def fix_slide(
         applied = not worse and slide_changed and (bool(fixed) or bool(wishes))
         why = None
         if not applied:
-            why = "Новая версия слайда вышла хуже — оставил как было" if worse else "Замечания остались — попробуйте добавить пожелание"
+            if worse:
+                why = "Новая версия слайда вышла хуже — оставил как было"
+            elif wishes:
+                # (a wish was given: «попробуйте добавить пожелание» would ask for what the person already did)
+                why = "Пожелание не удалось выполнить — слайд оставлен как был"
+            else:
+                why = "Замечания остались — попробуйте добавить пожелание"
         voice.agent("check", RM.check_line(fixed, remarks, remaining, applied, worse, titles, other=other), 0.8)
         if applied and other:
             voice.agent("check", f"Проверка: изменились и слайды {RM.slides_phrase(other)}.", 0.8)
@@ -1025,6 +1257,9 @@ def fix_slide(
             rm["audit"] = report.summary.model_dump()
             rm["applied_fixes"] = report.applied_fixes
             rm.setdefault("inputs", {})["outline_sha256"] = hashlib.sha256(final_outline.model_dump_json().encode("utf-8")).hexdigest()[:16]
+            for u in spent:
+                if u:
+                    rm["usage"] = add_usage(rm.get("usage"), u)
             entry = final_plan.for_outline(oid)
             slides = rm.get("slides")
             if entry is not None and isinstance(slides, list) and len(slides) >= n and isinstance(slides[n - 1], dict):
