@@ -618,3 +618,35 @@ def test_a_paraphrased_request_line_becomes_the_callout_in_the_briefs_words():
                                           bullets=["Окупаемость разработки за один квартал", "Рост конверсии в тариф «Про»", "Запрос: утвердить запуск и бюджет"]))
     A.keep_ask(s, "Просим утвердить запуск и бюджет на продвижение.")
     assert s.takeaway == "Просим утвердить запуск и бюджет на продвижение" and len(s.content.bullets) == 2
+
+
+# ------------------------------------------------------------------ qa4: a wish about the look keeps the conclusions
+
+
+def _summary_outline() -> DeckOutline:
+    o = _bars_outline()
+    o.slides.append(OutlineSlide(id="sl9", kind=K.cards, headline="Выручка растёт быстрее клиентов, но зависит от Москвы", takeaway="Москва — 41% выручки", content=SlideContent(items=[
+        SlideItem(title="Итоги квартала", text="Выручка растёт быстрее числа клиентов: +23% против +18%"),
+        SlideItem(title="Регионы", text="Москва даёт 41% выручки, Казань растёт быстрее всех"),
+        SlideItem(title="Каналы", text="Прямые продажи приносят почти половину выручки — 46%")])))
+    return o
+
+
+def test_bigger_figures_never_cost_the_conclusions():
+    """qa4 NEW-E1: «цифры крупнее» on the summary turned the conclusions into bare figures (+23%, +18%, 41%, 46%) and the
+    new caption did not back the new headline."""
+    from verstka.planning.slide_edit import redesign_slide
+    from verstka.skills_registry.registry import SkillsRegistry
+
+    bare = {"kind": "stat_row", "headline": "Выручка +23%, Москва 41%", "takeaway": "80% обращений получают ответ за 2 часа",
+            "numbers": [{"value": "+23%", "label": "Выручка"}, {"value": "41%", "label": "Москва"}, {"value": "46%", "label": "Прямые"}]}
+    o = _summary_outline()
+    with pytest.raises(ValueError, match="пропадали выводы"):
+        redesign_slide(o, 3, parse_brief_text(BRIEF), None, request="цифры крупнее", skills=SkillsRegistry.load(), providers=_designer(bare))
+    whole = {"kind": "stat_row", "headline": "Другой заголовок", "takeaway": "Другой вывод", "numbers": [
+        {"value": "+23%", "label": "Выручка растёт быстрее числа клиентов: против +18%"},
+        {"value": "41%", "label": "Москва даёт выручки, Казань растёт быстрее всех"},
+        {"value": "46%", "label": "Прямые продажи приносят почти половину выручки"}]}
+    r = redesign_slide(o, 3, parse_brief_text(BRIEF), None, request="цифры крупнее", skills=SkillsRegistry.load(), providers=_designer(whole))
+    s = r.outline.slides[2]
+    assert s.kind == K.stat_row and s.headline == o.slides[2].headline and s.takeaway == o.slides[2].takeaway

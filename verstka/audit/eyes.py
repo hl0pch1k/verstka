@@ -226,13 +226,15 @@ class EyesOutcome:
     flagged: list[dict] = field(default_factory=list)  # {"slide", "outline_id", "problems": [{code, severity, where, evidence}]}
     fixed: list[dict] = field(default_factory=list)  # {"slide", "outline_id", "result", "reason"}: the new layout stayed
     kept: list[dict] = field(default_factory=list)  # tried again, the old layout stayed: {"slide", "outline_id", "why"}
+    # the model's remarks the slide's own data contradicts (check_problem), dropped: {"slide", "code", "where", "evidence", "why"}
+    dismissed: list[dict] = field(default_factory=list)
     skipped: Optional[str] = None
     skipped_code: Optional[str] = None  # SKIP_RU: off · no_model · no_time · no_images · no_answer · failed
     seconds: float = 0.0
 
     def summary(self) -> dict:
         return {
-            "looked": self.looked, "calls": self.calls, "flagged": self.flagged, "fixed": self.fixed, "kept": self.kept,
+            "looked": self.looked, "calls": self.calls, "flagged": self.flagged, "fixed": self.fixed, "kept": self.kept, "dismissed": self.dismissed,
             "skipped": self.skipped, "skipped_code": self.skipped_code, "seconds": round(self.seconds, 2),
         }
 
@@ -318,6 +320,119 @@ def _data_note(osl: Any) -> str:
     if gaps:
         note += f" No data for {', '.join(gaps)}: the gap in the line is intended."
     return note.strip()
+
+
+# ---------------------------------------------------------------------------------------------- what code can verify
+
+# a remark about a chart: its axis, points, bars, labels, legend
+_CHART_WORDS_RE = re.compile(r"диаграм|график|(?<![\wё])ос[иьей]|столб|точк|лини[яию]|сектор|легенд|категор|бар|axis|chart|legend|bar", re.I)
+_GAP_RE = re.compile(r"разорван|разрыв|обрыв|прерыв|пропуск|break|gap", re.I)
+_POSITION_RE = re.compile(r"(?<![\wё])(?:над|под)(?![\wё])|далеко от|не на сво|сдвинут|смещ|не совпада|не там|не напротив", re.I)
+_CUT_RE = re.compile(r"обрез|обрыв|не влез|не помещ|обрубл|урезан|cut|truncat|clip", re.I)
+_CROWD_RE = re.compile(r"слипа|слипл|наезжа|налож|перекрыва|сливают|не читаются|нечита|повёрнут|повернут|наклон|под углом|мелк|overlap|crowd", re.I)
+_QUOTED_RE = re.compile(r"[«\"“]([^«»\"“”]{2,60})[»\"”]")
+# the deterministic checks that see the same thing the model names (a remark they back is verified)
+_BACKED_BY: dict[str, set[str]] = {
+    "text_cut": {"text_clipped", "text_overflow", "out_of_bounds", "text_outside_card", "margin_violation"},
+    "word_broken": {"word_break"},
+    "overlap": {"overlap", "content_over_art", "text_outside_card"},
+    "cramped": {"text_overflow", "too_many_bullets", "bullet_too_long", "text_clipped"},
+    "too_small": {"size_not_in_scale", "text_overflow"},
+    "low_contrast": {"contrast_low", "table_contrast_low"},
+    "unbalanced": {"fill_ratio", "empty_slide"},
+    "leftover": {"placeholder_text", "empty_slide"},
+    "chart_unreadable": {"chart_missing_labels", "too_many_series", "table_too_big", "table_cell_wrap"},
+}
+
+
+def _charts(slide_ir: Any) -> list[Any]:
+    return [e for e in (getattr(slide_ir, "elements", None) or []) if getattr(e, "chart", None) is not None]
+
+
+def _label_fit(e: Any) -> Optional[bool]:
+    """Whether a chart's category labels have room as the chart sets them (None: not a chart with category labels).
+    Columns and lines: the longest label at ~9 pt against one category's share of the frame's width; bars: one label line
+    against a row's height."""
+    ch = e.chart
+    cats = [str(c) for c in (ch.categories or []) if str(c).strip()]
+    if not cats or ch.type in ("pie", "doughnut", "scatter", "radar", "other"):
+        return None
+    w_pt, h_pt = e.bbox.w / 12700.0, e.bbox.h / 12700.0
+    if w_pt <= 0 or h_pt <= 0:
+        return None
+    if ch.type == "bar":
+        return h_pt * 0.8 / len(cats) >= 9.0 * 1.1
+    longest = max(len(w) for c in cats for w in c.split()) if cats else 0
+    return longest * 9.0 * 0.55 <= w_pt * 0.9 / len(cats) * 1.6  # a label may wrap onto two lines under its column
+
+
+def check_problem(p: ReviewProblem, slide_ir: Any, osl: Any, det: list[Issue]) -> tuple[str, str]:
+    """What the slide's own data says of the model's remark: ("verified" | "unverified" | "contradicted", why).
+    Verified — the chart's IR or a deterministic check shows the same (a gap the data has, a frame past the slide, labels
+    with no room, an overflow the XML check found); contradicted — the IR shows it is not so (an axis «broken» with no gap
+    in its data, a point «over the wrong label» on a chart drawn from checked data, a label «cut» that the chart holds
+    whole inside the slide); unverified — neither. Only a verified remark lays the slide out again; a contradicted one is
+    dropped (qa4 U2: «ось Y разорвана», «точка 52 над II кв.», «Институт обрезан» on correct charts)."""
+    text = f"{p.where} {p.evidence}"
+    charts = _charts(slide_ir)
+    backed = {i.check_id for i in det} & _BACKED_BY.get(p.code, set())
+    chart_claim = bool(charts) and (p.code == "chart_unreadable" or bool(_CHART_WORDS_RE.search(text)))
+    if chart_claim:
+        e = charts[0]
+        ch = e.chart
+        values = [v for sr in ch.series for v in sr.values]
+        from_data = getattr(osl, "data", None) is not None
+        if _GAP_RE.search(text):
+            gaps = any(v is None for v in values)
+            if not gaps:
+                return "contradicted", "в данных нет пропусков: ось и линия сплошные"
+            if from_data:
+                return "contradicted", "разрыв — пропуск в данных, он задуман и подписан"
+            return "verified", "в данных есть пропуск"
+        if _POSITION_RE.search(text) and re.search(r"\d", text):
+            if from_data:
+                return "contradicted", "точки стоят по значениям из файла — данные проверены"
+            nums = [float(x.replace(",", ".")) for x in re.findall(r"\d+(?:[.,]\d+)?", text)]
+            if any(any(v is not None and abs(v - n) < 1e-6 for v in values) for n in nums):
+                return "contradicted", "точка с этим значением есть в данных диаграммы на своей категории"
+            return "unverified", ""
+        if _CUT_RE.search(text):
+            f = e.bbox_frac
+            inside = f.x >= -0.005 and f.y >= -0.005 and f.x + f.w <= 1.005 and f.y + f.h <= 1.005
+            if not inside:
+                return "verified", "рамка диаграммы выходит за слайд"
+            named = [q.strip().lower() for q in _QUOTED_RE.findall(text)] + [w.lower() for w in re.findall(r"[А-ЯЁA-Z][а-яёa-z]{3,}", text)]
+            cats = [str(c).lower() for c in ch.categories] + [str(sr.name or "").lower() for sr in ch.series]
+            if any(n and any(n == c or n in c.split() for c in cats) for n in named):
+                return "contradicted", "подпись целиком в данных диаграммы, а рамка диаграммы — внутри слайда"
+            return ("verified", "проверка XML видит то же") if backed else ("unverified", "")
+        if _CROWD_RE.search(text) or p.code == "chart_unreadable":
+            fit = _label_fit(e)
+            if fit is True and not backed:
+                return "contradicted", "подписям категорий хватает места в рамке диаграммы"
+            if fit is False:
+                return "verified", "подписям категорий не хватает места в рамке диаграммы"
+        return ("verified", "проверка XML видит то же") if backed else ("unverified", "")
+    if backed:
+        return "verified", "проверка XML видит то же"
+    return "unverified", ""
+
+
+def sort_problems(problems: list[ReviewProblem], slide_ir: Any, osl: Any, det: list[Issue]) -> tuple[list[ReviewProblem], list[ReviewProblem], list[dict]]:
+    """(the remarks that stand, the major ones among them code verified — the only ones that lay the slide out again,
+    the dropped ones with why)."""
+    keep: list[ReviewProblem] = []
+    verified: list[ReviewProblem] = []
+    dropped: list[dict] = []
+    for p in problems:
+        verdict, why = check_problem(p, slide_ir, osl, det)
+        if verdict == "contradicted":
+            dropped.append({**p.model_dump(), "why": why})
+            continue
+        keep.append(p)
+        if verdict == "verified" and p.severity == "major":
+            verified.append(p)
+    return keep, verified, dropped
 
 
 def _said(problems: list[ReviewProblem]) -> str:
@@ -418,13 +533,23 @@ def look(
         say("Взгляд дизайнера: модель не ответила — слайды остались как были.", None)
         return done("the model did not answer")
     seen: dict[int, list[ReviewProblem]] = {}
+    verified: dict[int, list[ReviewProblem]] = {}
+    ir_at = {s.index: s for s in ir}
     for i, r in reviews.items():
         if r is None or not r.known():
             continue
-        seen[i] = r.known()
-        out.flagged.append({"slide": i, "outline_id": oid_of.get(i), "problems": [p.model_dump() for p in r.known()]})
-    majors = sorted(((i, [p for p in ps if p.severity == "major"]) for i, ps in seen.items()), key=lambda x: (-len(x[1]), x[0]))
-    majors = [(i, ps) for i, ps in majors if ps][: int(cfg["max_fixes"])]
+        det = [x for x in report.issues if x.slide == i and x.kind != "model"]
+        keep, sure, dropped = sort_problems(r.known(), ir_at.get(i), by_id.get(oid_of.get(i) or ""), det)
+        out.dismissed += [{"slide": i, "outline_id": oid_of.get(i), **d} for d in dropped]
+        if not keep:
+            continue
+        seen[i] = keep
+        if sure:
+            verified[i] = sure
+        out.flagged.append({"slide": i, "outline_id": oid_of.get(i), "problems": [p.model_dump() for p in keep], "verified": [p.code for p in sure]})
+    # only a remark the slide's own data backs lays the slide out again (qa4 U3: a rematch on a remark nothing confirms
+    # was rolled back every time — the new layout could not cure what was not there)
+    majors = sorted(verified.items(), key=lambda x: (-len(x[1]), x[0]))[: int(cfg["max_fixes"])]
     if not seen:
         say(f"Взгляд дизайнера: посмотрел на {ru_slides(out.looked)} — замечаний нет.", None)
     else:
@@ -491,6 +616,17 @@ def look(
             if moved:
                 trial = audited or run_audit(pptx, manifest, outline, ws, render=False, strategy=report.strategy, brief_text=brief_text, writer=writer)
                 worse = {oid for oid in moved if _slide_weight(trial, oid) > _slide_weight(report, oid)}
+                # a verified problem the new layout no longer shows (its overflow gone, its labels with room now) is cured:
+                # the code saw it, the code sees it fixed — the model's side-by-side, prone to the picture's position,
+                # does not decide it (qa4 U3: every rematch ended «kept» on «only in one order»)
+                trial_ir = {sl.index: sl for sl in _ir_slides(trial, outline)}
+                cured: dict[str, str] = {}
+                for oid, (i, _r) in moved.items():
+                    if oid in worse or not verified.get(i):
+                        continue
+                    det_new = [x for x in trial.issues if x.slide == i and x.kind != "model"]
+                    if not any(check_problem(p, trial_ir.get(i), by_id.get(oid), det_new)[0] == "verified" for p in verified[i]):
+                        cured[oid] = f"проверка подтвердила, что на новой вёрстке этого нет: {_said(verified[i])}"
                 for oid in worse:
                     i, res = moved.pop(oid)
                     _restore_slide(plan, outline, snapshot, oid)
@@ -500,11 +636,14 @@ def look(
                 reasons: dict[str, str] = {}
                 if moved and cfg.get("compare", True):
                     # the model has to see the new layout: without the time to look, the old one stays
-                    after = shoot(pptx, Path(vdir) / "eyes" / "after", int(cfg["dpi"])) if _left(deadline) >= 8.0 else {}
+                    after = shoot(pptx, Path(vdir) / "eyes" / "after", int(cfg["dpi"])) if _left(deadline) >= 8.0 and any(o not in cured for o in moved) else {}
 
                     asks: list[tuple[str, int, bool]] = []
                     verdicts: list[tuple[str, str, str]] = []
                     for oid, (i, _) in moved.items():
+                        if oid in cured:
+                            verdicts.append((oid, "new", cured[oid]))
+                            continue
                         if i not in before or i not in after or _left(deadline) < 5.0:
                             verdicts.append((oid, "same", "не хватило времени сравнить вёрстки"))
                             continue
@@ -565,6 +704,8 @@ def look(
                     if back and moved:
                         render_result, _a = rerender()
                     reasons = {oid: why for oid, v, why in verdicts if v == "new"}
+                elif moved:
+                    reasons = {oid: why for oid, why in cured.items() if oid in moved}
                 for oid, (i, res) in moved.items():
                     fixed_ids.add(oid)
                     # what the render put on the slide: a sample that read badly there gives way to a fallback

@@ -1,5 +1,5 @@
 name: slide_design_review
-version: 1.2.0
+version: 1.3.0
 role: vlm
 description: >
   «Взгляд дизайнера» (Verstka 3.0): looks at one rendered slide like an art director checking a proof before it goes to
@@ -13,6 +13,12 @@ params:
   temperature: 0.0
   max_tokens: 500
 changelog:
+  - "1.3.0: qa4 U2/U3: correct charts were flagged («ось Y разорвана», «точка 52 над II кв.», «Институт обрезан») and
+    every rematch they started was rolled back. Now a chart remark quotes what it sees (the letters of a cut label, two
+    labels that overlap) and never names a broken axis, a point's category or values. audit/eyes.check_problem verifies
+    every remark against the slide's IR (gaps in the data, the chart frame inside the slide, room for the category labels)
+    and the deterministic checks: a contradicted remark is dropped, only a verified major one lays the slide out again,
+    and a new layout on which the verified problem is gone is taken without the side-by-side vote."
   - "1.2.0: a data slide's review is told the chart is checked against its file (its categories and gaps): no more «52 … далеко от своей отметки» on a correct NPS chart with a gap (qa3 U2)"
   - "1.1.0: «where» asked in Russian (the person reads it in the timeline and the report); the prompt of a slide of an old deck («Улучшить готовую») names no empty title or form"
   - "1.0.0: Verstka 3.0. Checked live on Qwen3.8-27B (2026-10-07): it found the four words broken mid-word in the narrow cards of Marketing Report slide 8, the empty row of a ruled grid under a callout on Классика slide 3, and passed a clean VK Tech slide"

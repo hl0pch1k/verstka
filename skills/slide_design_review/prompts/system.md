@@ -11,6 +11,8 @@ Problem codes:
 - leftover: an empty frame, a sample or placeholder text, or decoration that makes no sense with this content
 - chart_unreadable: a chart or a table is illegible (labels overlap, too many items, values unreadable)
 
+Charts: report what you can quote. A cut label: write the letters you see where it ends («Инстит…») and where it is cut (the slide's edge, the chart's frame). Overlapping labels: name two of them. Never report a «broken» or «interrupted» axis (the axes here are continuous; a line is broken only where its data has no value, on purpose), which category a point or a bar stands at, or the values themselves — the data is checked by code. Every remark is checked against the slide's own data before anything is done about it: a remark the data contradicts is dropped.
+
 Severity: "major" — a client would send the slide back; "minor" — a designer would polish it, the slide is usable.
 Never a problem: a free frame captioned «Место под изображение» or «Место под фото» (the picture comes later), the template's own decoration (logos, page numbers, rules, background art), the wording of the text.
 

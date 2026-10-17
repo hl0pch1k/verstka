@@ -70,6 +70,14 @@ def _same_shots(pptx: Path, out: Path, dpi: int) -> dict[int, Path]:
     return got
 
 
+@pytest.fixture(autouse=True)
+def _scripted_remarks_are_verified(monkeypatch):
+    """The scripted model's remark («Температ|ура» on a deck without such a word) stands verified on every layout here:
+    these tests are about the ladder and the side-by-side gates; what code verifies, and the cure it sees, is
+    tests/unit/test_eyes_verify.py."""
+    monkeypatch.setattr(E, "check_problem", lambda *a, **k: ("verified", "сценарий теста"))
+
+
 @pytest.fixture
 def variant(simple_deck, tmp_path):
     res = generate_variants(simple_deck, brief=parse_brief_text(BRIEF), strategies=["structured"], out_dir=tmp_path / "out", workspace_root=tmp_path / "ws",
@@ -447,3 +455,40 @@ def test_the_config_file_is_read_with_defaults_for_what_it_leaves_out(tmp_path):
     cfg = E.load_config(p)
     assert cfg["enabled"] is False and cfg["max_fixes"] == 2 and "unknown" not in cfg and cfg["compare"] is True
     assert E.load_config(tmp_path / "missing.yaml") == E.DEFAULTS
+
+
+def test_a_verified_problem_the_new_layout_cures_is_taken_without_the_vote(variant, tmp_path, monkeypatch):
+    """qa4 U3: every rematch the model started ended «kept, rolled_back». A problem code verified (here: the scripted
+    check) and no longer verified on the new layout is cured: the new layout stays even when the model would keep the
+    old one, and the side-by-side is not asked at all."""
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    seen_calls = {"n": 0}
+
+    def check(*a, **kw):
+        seen_calls["n"] += 1
+        return ("verified", "сценарий") if seen_calls["n"] == 1 else ("unverified", "")
+
+    monkeypatch.setattr(E, "check_problem", check)
+    calls: list = []
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, False, calls))
+    assert [f["slide"] for f in seen.fixed] == [k] and not seen.kept
+    assert seen.fixed[0]["reason"].startswith("проверка подтвердила")
+    assert not [c for c in calls if "Prefer the new attempt" in c[0]]  # no vote asked
+
+
+def test_an_unverified_remark_never_starts_a_relayout(variant, tmp_path, monkeypatch):
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    monkeypatch.setattr(E, "check_problem", lambda *a, **kw: ("unverified", ""))
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, True, []))
+    assert [f["slide"] for f in seen.flagged] == [k] and not seen.fixed and not seen.kept and rr is None
+    assert any(i.check_id == "design_review" and i.slide == k for i in report.issues)  # the remark stays for the person
+
+
+def test_a_remark_the_data_contradicts_is_dropped(variant, tmp_path, monkeypatch):
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    monkeypatch.setattr(E, "check_problem", lambda *a, **kw: ("contradicted", "в данных нет пропусков"))
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, True, []))
+    assert not seen.flagged and [d["slide"] for d in seen.dismissed] == [k] and not any(i.check_id == "design_review" for i in report.issues)

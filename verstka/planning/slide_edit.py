@@ -390,6 +390,55 @@ def emphasis_index(request: str, s: OutlineSlide) -> tuple[Optional[str], Option
     return None, None, []
 
 
+# a wish about how the slide looks (size, emphasis, room), not about what it says
+_STYLE_WISH_RE = re.compile(r"крупн|покрупн|мельч|помельч|размер|шрифт|акцент|выдел|жирн|ярч|заметн|цвет|просторн|воздух", re.I)
+_CONTENT_WISH_RE = re.compile(r"добав|убер|удал|перепиш|сократ|замен|допиш|переформул|короче|длиннее|упрост|поменяй\s+(?:текст|слова|заголов|вывод|подпис)", re.I)
+_STYLE_NOTE = (
+    "\n- The person asks only about how the slide looks (size, emphasis, room). Keep every line, card, figure and its words "
+    "exactly as they are — each conclusion stays whole, never a bare figure without its words — and keep the headline and "
+    "the takeaway. Change only the form, so that the figures stand out (big figures with their words under them)."
+)
+
+
+def style_only(request: str) -> bool:
+    return bool(_STYLE_WISH_RE.search(request or "")) and not _CONTENT_WISH_RE.search(request or "")
+
+
+def conclusion_lines(s: OutlineSlide) -> list[str]:
+    """What a slide says, line by line: its cards (title and text), lines, columns and figures with their labels."""
+    c = s.content
+    out = [" ".join(x for x in (it.title, it.text) if x) for it in c.items]
+    out += list(c.bullets) + list(c.paragraphs)
+    for col in c.columns:
+        out += list(col.bullets) or ([col.text] if col.text else [])
+    out += [f"{n.value} {n.label}".strip() for n in c.numbers]
+    return [x for x in out if (x or "").strip()]
+
+
+def lost_lines(old: OutlineSlide, new: OutlineSlide) -> list[str]:
+    """The lines of `old` that `new` does not say any more (most of their words or their figures gone)."""
+    from verstka.planning import agent as A
+
+    shown = A._Shown(A._visible_text(new))
+
+    def kept(line: str) -> bool:
+        # its words, not only its figure: «+23%» alone does not say «Выручка растёт быстрее числа клиентов»
+        stems = shown.stems_of(re.sub(r"[\d\s\u00a0.,%+−–-]+(?=\s|$)", " ", line))
+        words_ok = not stems or sum(1 for w in stems if shown.stems.has(w)) * 2 >= len(stems)
+        # …and every figure of it («+23% против +18%» keeps both)
+        return words_ok and all(shown.figure(v) for v in A.figures(line))
+
+    return [x for x in conclusion_lines(old) if not kept(x)]
+
+
+def keep_words(old: OutlineSlide, new: OutlineSlide, request: str) -> None:
+    """A wish about the look («цифры крупнее», «заголовок крупнее») keeps the slide's headline and takeaway word for word:
+    the cards and the headline stay one statement (qa4 NEW-E1: a new caption «80% обращений…» under a new headline it did
+    not back)."""
+    new.headline = old.headline
+    new.takeaway = old.takeaway
+
+
 def _visible(s: OutlineSlide) -> dict:
     """What the person sees of a slide (its form, words, figures, charts and their highlight), for «did it change»."""
     return s.model_dump(include={"kind", "headline", "subtitle", "takeaway", "footnote", "content"})
@@ -551,6 +600,7 @@ def redesign_slide(
     answered = False  # the model answered (its answer may still not fit the slide): never «the model is unavailable»
     proposed: Optional[OutlineSlide] = None  # a data slide's words as the model proposed them (before the number rule)
     refused_first: list[str] = []
+    style_lost: list[str] = []  # the conclusions a look-only redesign would have lost (it is refused then)
     if emphasis is not None:
         new = old.model_copy(deep=True)
         getattr(new.content, emphasis[0]).highlight_index = emphasis[1]
@@ -612,11 +662,28 @@ def redesign_slide(
                         first = again
                 new, proposed, refused_first = first
             else:
-                d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=note, previous=A._previous_json(old))
+                styling = style_only(request) and old.kind.value not in FRAME_KINDS
+                ask_note = note + (_STYLE_NOTE if styling else "")
+                d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=ask_note, previous=A._previous_json(old))
                 answered = True
                 A.tidy_design(d, ctx)
                 new = d.slide
-            how = "model"
+                if styling:
+                    # «цифры крупнее» on the summary (qa4 NEW-E1): four conclusions became four bare figures and the new
+                    # caption did not back the headline — the wish changes how the slide looks, never what it says
+                    keep_words(old, new, request)
+                    lost = lost_lines(old, new)
+                    if lost and clock.left() > 20:
+                        d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, previous=A._previous_json(old), issues=ask_note + (
+                            "\n- Your previous answer lost these lines of the slide; keep each of them word for word: " + "; ".join(f"«{x}»" for x in lost[:8]) + "."))
+                        A.tidy_design(d, ctx)
+                        new = d.slide
+                        keep_words(old, new, request)
+                        lost = lost_lines(old, new)
+                    if lost:
+                        style_lost = lost
+                        new = None
+            how = "model" if new is not None else how
         except A.UnusableAnswer:
             answered = True
             log.warning("slide edit: the designer's answer has no content for slide %s", index)
@@ -631,8 +698,15 @@ def redesign_slide(
     if new is None:
         if form is not None:
             new = rules_form(outline, old, form[0], form[1])
+            if new is not None and style_only(request):
+                keep_words(old, new, request)
+                if lost_lines(old, new):
+                    new = None  # (the rules' form would lose the conclusions too)
             if new is not None:
                 how = "rules"
+        if new is None and style_lost:
+            raise ValueError(f"модель ответила, но в её варианте пропадали выводы слайда («{style_lost[0][:60]}»…) — слайд оставлен как был; "
+                             "крупнее можно сделать, только сохранив все выводы")
         if new is None:
             if form is None:
                 if answered:
