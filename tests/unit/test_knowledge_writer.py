@@ -254,3 +254,32 @@ def test_the_authors_words_of_a_list_line_come_without_its_marker():
     got = authors_words("Малый бизнес — крупнейший сегмент клиентской базы: 610 из 1 240", text)
     assert got == "Малый бизнес формирует крупнейший сегмент клиентской базы, насчитывая 610 компаний"  # never «- Малый…» as a headline
     assert authors_words("Иван продал 30% акций", "Иван продал 30% акций компании.") == "Иван продал 30% акций компании"
+
+
+def test_documents_that_ask_nothing_close_without_an_invented_request(ref):
+    assert not T.kb_asks("Презентация для совета директоров: итоги 3 квартала и планы на 2027 год.", ref)
+    assert T.kb_asks("Итоги квартала. Просим утвердить бюджет.", ref)
+    plan = T.TopicPlan(title="Итоги", facts=["x"], slides=[{"title": "Выручка"}, {"title": "Выводы и что просим"}])
+    assert not T.kb_final(plan, asks=False) and plan.slides[-1].title == T.KB_ASKLESS_TITLE
+    slides = [
+        T.TopicSlide(title="NPS", lead="Индекс NPS вырос с 31 до 44 за счёт сокращения срока подключения.", takeaway="Клиенты довольны быстрым подключением."),
+        T.TopicSlide(title="Достижения", lead="Запущен тариф «Старт».",
+                     points=["Сокращение срока подключения стало главной причиной роста индекса NPS с 31 в первом квартале до 44 в третьем."]),
+        T.TopicSlide(title="Выводы и что просим", lead="Рост квартала устойчив. Совету директоров предлагается утвердить найм 8 инженеров поддержки.",
+                     points=["В четвёртом квартале планируется нанять 8 инженеров поддержки для ночной смены.", "Просим одобрить бюджет 2027 года."],
+                     takeaway="Утверждение найма снизит отток."),
+    ]
+    done = T.kb_tidy(slides, asks=False)
+    assert slides[1].points == []  # «NPS 31 → 44» is the lead of the slide before (qa6 10 s5/s6)
+    close = slides[-1]
+    assert close.title == T.KB_ASKLESS_TITLE and close.lead == "Рост квартала устойчив." and close.takeaway == ""
+    assert "В четвёртом квартале планируется нанять 8 инженеров поддержки для ночной смены." in close.points  # the documents' plan stays
+    assert not any("одобрить" in p for p in close.points)
+    assert sum(d["kind"] == "closing_invented_ask" for d in done) == 3
+    # the closing states conclusions: no table of its own, no advice the documents do not give (live qa6 10)
+    tail = [T.TopicSlide(title="Риски", lead="Рост цен на оборудование может снизить маржу на 3 п.п.",
+                         takeaway="Снижение маржи потребует пересмотра ценовой политики."),
+            T.TopicSlide(title="Выводы и планы", points=["Выход в Казахстан запланирован на первый квартал 2027 года."],
+                         table={"header": ["Направление", "Сумма"], "rows": [["Дата-центры", "240"]]})]
+    T.kb_tidy(tail, asks=False)
+    assert tail[-1].table is None and not any("ценовой" in p for p in tail[-1].points)

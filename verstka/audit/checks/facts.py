@@ -137,6 +137,15 @@ def _chart_derived(text: str, f, changes: tuple[list[float], list[float], list[f
     return _near(f.value, f.dec, [d / (f.scale or 1.0) for d in diffs])
 
 
+def _line_change(text: str, f) -> bool:
+    """A percent the line computes from two of its own figures: the change («1 840 против 1 750 (+5%)») or the share."""
+    from verstka.planning.grounding import figures
+
+    vals = [g.value for g in figures(text) if g.start != f.start and g.unit != "pct" and g.value and g.date is None]
+    cands = [x for a in vals for b in vals if a != b for x in ((a - b) / b * 100, abs(a - b) / b * 100, a / b * 100)]
+    return _near(abs(f.value), f.dec, cands)
+
+
 def _plain(text: str) -> str:
     """A line as words: no-break spaces and word joiners as spaces, no closing period, lower case."""
     return " ".join(re.sub(r"[\u00a0\u202f\u2009\u2060\u200b]", " ", text or "").split()).rstrip(".").lower()
@@ -253,6 +262,8 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                         v = "derived"
                     elif v != "ok" and _chart_derived(t, f, changes):
                         v = "derived"  # «×2,1» beside a chart of 120 000 → 254 795: read off the chart's own values
+                    elif v != "ok" and f.unit == "pct" and _line_change(t, f):
+                        v = "derived"  # «1 840 млн ₽ против 1 750 (+5%)»: the change of the line's own two figures (qa6)
                     elif v == "ok" and not idx._same(f):
                         v = "derived"  # a difference, a percent change or a ratio of the brief's figures
                     if v != "ok" and t in row_given:

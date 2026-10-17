@@ -12,7 +12,8 @@ Must-know facts of this slide:
 {% endfor %}
 {% if source is defined and source == "kb" %}
 Fragments of the person's knowledge base (each with its document and place in brackets). Write the slide from these
-fragments ONLY: every figure, date, name and unit exactly as a fragment states it; nothing from your own knowledge; a
+fragments ONLY: every figure, date, name and unit exactly as a fragment states it; a change names both of its periods
+(«с 980 в первом квартале до 1 240 в третьем», never a bare «с 980 до 1 240»); every point is a whole sentence with its verb; nothing from your own knowledge; a
 detail no fragment gives is left out. The slide's title and lead state its conclusion from these facts. Only this
 slide's ground: a fact the other slides of the plan cover is not repeated here; no point repeats the lead. A table of a
 fragment goes to "table" (or "chart" for one measure), never into the points as «| … |» lines.

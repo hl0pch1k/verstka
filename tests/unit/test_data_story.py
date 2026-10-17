@@ -242,8 +242,9 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
     summary = next(s for s in o.slides if s.id == "summary")
     assert summary.headline == "Рост держится на Москве и прямых продажах"
     assert [it.title for it in summary.content.items] == ["Выручка и клиенты", "Выручка по регионам", "Каналы продаж", "Узкое место: время ответа поддержки"]
-    steps = next(s for s in o.slides if s.id == "next-steps")
-    assert [i.title for i in steps.content.items] == ["Разобрать узкие места поддержки", "Сократить время ответа поддержки"]
+    # the steps are the model's, not the input's «Что дальше» (qa6): no closing slide of invented steps
+    assert not any(s.id == "next-steps" for s in o.slides)
+    assert {"Разобрать узкие места поддержки", "Сократить время ответа поддержки"} <= set(refused)
     assert o.planned_by == "model" and st.model == "qwen-test" and st.model_used
     assert st.usage()["calls"] == 2 and st.usage()["failed"] == 0  # the goals' call and the storyteller's
     assert any("не принято" in x for x in o.agent_log)
@@ -356,8 +357,8 @@ def test_true_numbers_recombined_across_slides_are_refused(sales):
     assert [(i.title, i.text) for i in summary.content.items] == [(i.title, i.text) for i in det_summary.content.items]
     refused = {r["to"] for r in st.rejected}
     assert {"Выручка выросла на 41%", "Выручка выросла на 41% к сентябрю", "Москва даёт 23% выручки", "Прямые продажи — 52% выручки"} <= refused
-    # a step without numbers stands on its own, but one step alone makes no «Что дальше» slide (a mostly empty slide)
-    assert "Разобрать узкие места поддержки" not in refused
+    # a step the input does not propose is refused (qa6), and one step alone makes no «Что дальше» slide
+    assert "Разобрать узкие места поддержки" in refused
     assert not any(s.id == "next-steps" for s in st.outline.slides)
 
 

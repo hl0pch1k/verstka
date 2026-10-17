@@ -137,6 +137,18 @@ def input_asks(brief_text: str, notes: Optional[list[str]] = None) -> list[str]:
     return uniq
 
 
+def _closing_head(lines: list[str]) -> str:
+    """The heading of the slide of the input's asks or next steps: the ask itself when it is short («Просим утвердить
+    перенос 85 млн ₽»), the goal its proposal opens with, else «Что просим» / «Что дальше» — never the plan's line
+    («Что делаем в 4 квартале и что просим у правления») over a slide that asks nothing (qa6)."""
+    from verstka.data.answer import steps_head
+
+    ask = next((a for a in lines if re.match(r"(?:просим|прошу|утвердить|одобрить|выделить|согласовать)", a, re.I)), None)
+    if ask:
+        return H.strip_end(ask) if len(ask.split()) <= 10 else "Что просим"
+    return steps_head(lines[0]) or "Что дальше"
+
+
 def _ask_slide(sid: str, head: str, lines: list[str]) -> OutlineSlide:
     from verstka.schemas.outline import SlideContent
 
@@ -233,7 +245,9 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
         elif not mine and k == closing and any(x.id == "next-steps" for x in slides):
             # the story's «Что дальше» (the input's own next steps) is the closing item's slide, under its words
             ns = next(x for x in slides if x.id == "next-steps")
-            ns.headline = H.cap_first(it.title)
+            # (its heading is the input's own goal — the plan's line «что просим у правления» over a slide that asks
+            # nothing promised what is not there, qa6; the item's words go to the section)
+            ns.section = ns.section or H.cap_first(it.title)
             summary = [x for x in summary if x is not ns]
             part.append(ns)
             said.append(f"пункт плана «{it.title}» — следующие шаги из входа")
@@ -241,7 +255,7 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
             # the plan's closing item («что просим у правления») with the input's own words for it (the files' «Что дальше: …»)
             lines = [a for a in input_asks(brief_text, notes) if H.strip_end(a).lower() != H.strip_end(it.title).lower()]
             if lines:
-                part.append(_ask_slide(f"data-plan-{k + 1}", H.cap_first(it.title), lines))
+                part.append(_ask_slide(f"data-plan-{k + 1}", _closing_head(lines), lines))
                 said.append(f"пункт плана «{it.title}» — словами входа: «{lines[0][:60]}»")
         elif not mine:
             said.append(f"пункт плана «{it.title}» — ни файла, ни своего текста: слайда нет")

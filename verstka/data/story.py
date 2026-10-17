@@ -30,7 +30,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 from pydantic import BaseModel, Field
 
 from verstka.data.answer import (
-    card_label, plan_vocab, question_goals, route, rows_answer, step_grounded, steps_basis, summary_headline, topic_only,
+    card_label, plan_vocab, question_goals, route, rows_answer, step_grounded, steps_basis, steps_head, summary_headline, topic_only,
     weak_card,
 )
 from verstka.data.goals import goals_of
@@ -1538,7 +1538,7 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     if len(good_steps) >= 2 and (limit is None or len(o.slides) < limit):
         at = next((k + 1 for k, s in enumerate(o.slides) if s.id == "summary"), len(o.slides))
         # numbered steps at the template's sizes, not two bullets on an empty slide (qa3 N-L3)
-        o.slides.insert(at, OutlineSlide(id="next-steps", kind=PatternKind.process, headline="Что дальше", content=SlideContent(items=[SlideItem(title=x) for x in good_steps]), rationale="Следующие шаги по выводам данных — сформулированы моделью, без новых чисел."))
+        o.slides.insert(at, OutlineSlide(id="next-steps", kind=PatternKind.process, headline=steps_head(basis) or "Что дальше", content=SlideContent(items=[SlideItem(title=x) for x in good_steps]), rationale="Следующие шаги — то, что предлагает сам вход («Что дальше: …» файлов), без новых чисел."))
         used = True
 
     # the context: the brief's numbers only

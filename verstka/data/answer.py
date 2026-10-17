@@ -13,7 +13,7 @@
 - `card_label` — тема карточки, а не имя файла («Выручка и клиенты» вместо «Итоги квартала»);
 - `summary_headline` — заголовок итога из двух сильнейших выводов, а не «Четыре главных вывода»; `topic_only` —
   тема без вывода («Ключевые итоги года»), которую итог и обложка не берут;
-- `steps_basis` / `step_grounded` — следующий шаг стоит на тексте файлов («Что дальше: …») или на узком месте данных,
+- `steps_basis` / `step_grounded` / `steps_head` — следующий шаг стоит только на тексте входа («Что дальше: …»), не на узком месте данных,
   а не придуман."""
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from verstka.schemas.data import DatasetPlan, HeadlineFact, Table
 
 __all__ = [
     "RowsAnswer", "question_goals", "route", "row_names", "rows_answer", "weak_card", "card_label", "summary_headline",
-    "topic_only", "mid_case", "steps_basis", "step_grounded", "plan_vocab",
+    "topic_only", "mid_case", "steps_basis", "steps_head", "step_grounded", "plan_vocab",
 ]
 
 _QUESTION_RE = re.compile(r"[^.!?…\n]*\?")
@@ -428,6 +428,15 @@ def steps_basis(notes: Sequence[dict]) -> str:
     return " ".join(m.group(1).strip() for n in notes for m in _BASIS_RE.finditer(n.get("text") or ""))
 
 
+def steps_head(basis: str) -> Optional[str]:
+    """The closing slide's heading in the input's own words: the goal its proposal opens with («удержать темп роста в
+    IV квартале за счёт партнёрского канала…» → «Удержать темп роста в IV квартале»), or None when it has none short
+    enough — never the plan's line «Что делаем … и что просим» over a slide that asks nothing (qa6)."""
+    first = re.split(r"\s+за\s+сч[её]т\s+|\s+благодаря\s+|[,;:.!?]\s|\s[—–]\s", (basis or "").strip(), maxsplit=1)[0].strip(" .,;:—–")
+    n = len(first.split())
+    return first[:1].upper() + first[1:] if 2 <= n <= 9 else None
+
+
 def _content(step: str) -> list[str]:
     words = re.findall(r"[a-zа-яё0-9]+", (step or "").lower())
     if words and re.search(r"(?:ть|ти|чь|ться)$", words[0]):
@@ -454,26 +463,20 @@ _WEAK_WORDS = frozenset(stems_of("узкие места слабые места 
 
 
 def step_grounded(step: str, basis: str, weak: set[str], data: set[str]) -> tuple[bool, str]:
-    """A next step stands on the files' own proposal (its words, the data's words around them) or on a weak spot of
-    the data (a distribution's tail: the step names it — «Разобрать узкие места поддержки», «Сократить время ответа
-    поддержки») — not on the model's invention («Усилить работу с абитуриентами…» over files that propose to keep the
-    budget places and to move the R&D money, qa4 NEW-S5). (ok, why not)."""
+    """A next step stands on the input's own proposal — the files' «Что дальше: …», «Предлагаем …» (its words, the
+    data's words around them) — and on nothing else: not on the model's invention («Усилить работу с абитуриентами…»
+    over files that propose to keep the budget places, qa4 NEW-S5), nor on a weak spot of the data the input proposes
+    nothing about («Сократить хвост обращений дольше 120 минут» — the model's step, not the author's: qa6). `weak` is
+    kept for the callers. (ok, why not)."""
+    if not basis:
+        return False, "во входе нет следующих шагов — финал их не придумывает"
     words = _content(step)
+    b = set(stems_of(basis))
+    hb = _hits(words, b)
     if len(words) < 2:
-        return True, ""
+        return (True, "") if hb else (False, "такого шага нет в тексте входа")
     need = 0.6 * len(words)
-    if weak and _hits(words, weak):
-        h = _hits(words, weak | _WEAK_WORDS)
-        if len(h) >= 2 and len(h) >= need:
-            return True, ""
-    if basis:
-        b = set(stems_of(basis))
-        hb = _hits(words, b)
-        both = _hits(words, b | data)
-        if len(hb) >= 2 and len(both) >= need:
-            return True, ""
-        return False, "такого шага нет ни в тексте файлов, ни в узком месте данных"
-    h = _hits(words, data)
-    if len(h) >= 2 and len(h) >= need:
+    both = _hits(words, b | data)
+    if len(hb) >= 2 and len(both) >= need:
         return True, ""
-    return False, "шаг не следует из данных"
+    return False, "такого шага нет в тексте входа"

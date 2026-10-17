@@ -91,8 +91,8 @@ def test_a_step_about_what_the_files_explain_is_refused(sales):
     seen: dict = {}
     st = _story(sales, SALES_BRIEF, {"next_steps": ["Разобрать причины отсутствия данных по NPS во II квартале",
                                                     "Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]}, seen)
-    steps = next(s for s in st.outline.slides if s.id == "next-steps")
-    assert [i.title for i in steps.content.items] == ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]
+    # (the tail step is the model's, not the input's — qa6: one step left makes no slide)
+    assert not any(s.id == "next-steps" for s in st.outline.slides)
     why = next(r["why"] for r in st.rejected if r["what"] == "next_step")
     assert "объясняют сами файлы" in why and "не проводился" in why
     # the model is told what the files say, and asked for the brief's own asks (узкие места)
@@ -224,9 +224,9 @@ def test_the_summary_cards_lead_with_their_key_figure_and_the_steps_are_numbered
     assert key_figure("NPS вырос в 2026 году") is None
     o = build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales)
     assert [i.number for i in _summary(o).content.items] == ["+23%", "41%", "46%", "20%"]  # (the weak spot: its tail, qa4 S3)
-    st = _story(sales, SALES_BRIEF, {"next_steps": ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]})
+    st = _story(sales, SALES_BRIEF, {"next_steps": ["Удержать темп роста в IV квартале за счёт партнёрского канала", "Развивать партнёрский канал в Казани"]})
     steps = next(s for s in st.outline.slides if s.id == "next-steps")
-    assert steps.kind.value == "process" and [i.title for i in steps.content.items] == ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]
+    assert steps.kind.value == "process" and [i.title for i in steps.content.items] == ["Удержать темп роста в IV квартале за счёт партнёрского канала", "Развивать партнёрский канал в Казани"]
 
 
 def test_an_edit_of_a_data_slide_takes_its_figures_from_the_files():

@@ -835,7 +835,21 @@ _PICTURE_ASK_RE = re.compile(r"(?<![а-яё])(?:картинк|фото|изоб
 KB_REPEAT = 0.6  # a point that says this much of an earlier slide's statement is a repetition (knowledge base mode)
 
 
-def kb_final(plan: TopicPlan) -> bool:
+_KB_ASK_RE = re.compile(r"(?<![а-яё])(?:просим|прошу|прос[ьи]б\w*|предлагается|предлага\w*\s+(?:утвердить|одобрить|согласовать|выделить)|"
+                        r"утвердить|утвержден\w*|одобрить|одобрени\w*|согласовать|выделить|запрашива\w*)", re.I)
+KB_ASKLESS_TITLE = "Выводы и планы"
+_ADVICE_RE = re.compile(r"(?<![а-яё])(?:потребу\w+|требу\w+|следует|необходим\w*|нужн\w*|рекоменду\w*|стоит\s+\w+ть|целесообразн\w*)", re.I)
+
+
+def kb_asks(topic: str, kb: Any) -> bool:
+    """Whether the input asks for something: the person's request or a document of the base («Просим утвердить…»).
+    A deck whose input asks nothing closes on its conclusions and the documents' plans — never on an invented
+    «Предлагаем утвердить…» (qa6 06, 10)."""
+    texts = [topic or ""] + [getattr(f, "text", "") or "" for f in (getattr(kb, "frags", None) or [])]
+    return any(_KB_ASK_RE.search(t) for t in texts)
+
+
+def kb_final(plan: TopicPlan, asks: bool = True) -> bool:
     """The deck from the person's documents ends with its conclusion and what is asked / what comes next: a plan whose
     last slide is not one gets it (its facts — the documents', the slide writer reads its fragments). Returns whether
     the slide was added."""
@@ -847,9 +861,11 @@ def kb_final(plan: TopicPlan) -> bool:
         parts = [x.strip() for x in re.split(r"\s+(?:и|&)\s+|\s*[,;:]\s*", last.title or "") if x.strip()]
         rest = [x for x in parts if not _FINAL_TITLE_RE.search(x)]
         if len(parts) < 2 or not rest:
+            if not asks and _KB_ASK_RE.search(last.title or "") or not asks and re.search(r"просим|предлагаем", last.title or "", re.I):
+                last.title = KB_ASKLESS_TITLE  # «Выводы и что просим» over documents that ask nothing
             return False
         last.title = H.cap_first(" и ".join(rest))
-    plan.slides.append(PlannedSlide(title="Выводы и что предлагаем", form="list",
+    plan.slides.append(PlannedSlide(title="Выводы и что предлагаем" if asks else KB_ASKLESS_TITLE, form="list",
                                     goal="the deck's main conclusion from the facts of the slides before, and what the documents say is "
                                          "planned, asked for or comes next — only what the fragments state, no new figures"))
     return True
@@ -878,6 +894,7 @@ def _body(s: TopicSlide) -> str:
 
 
 KB_RETELL = 0.4
+KB_RETELL_TWO = 0.3  # a point with two figures of another statement retells it with fewer of its words («NPS с 31 до 44»)
 
 
 def _statements(s: TopicSlide) -> list[str]:
@@ -888,14 +905,14 @@ def _statements(s: TopicSlide) -> list[str]:
     return [x for x in out if x]
 
 
-def _restates(point: str, lead: str) -> bool:
+def _restates(point: str, lead: str, least: int = 1, words: float = 0.0) -> bool:
     """A point that gives again the lead's own figures in fewer words («Целевой показатель по выручке — 2,4 млрд ₽ в
     год» under «К концу 2027 года … 3 000 клиентов и 2,4 млрд ₽ выручки в год»)."""
     figs = {f for f in _figs(point) if not re.fullmatch(r"(?:19|20)\d{2}", f)}
-    return bool(lead) and bool(figs) and figs <= _figs(lead) and _overlap(point, lead) >= KB_RETELL
+    return bool(lead) and len(figs) >= least and figs <= _figs(lead) and _overlap(point, lead) >= (words or KB_RETELL)
 
 
-def kb_tidy(slides: list[TopicSlide]) -> list[dict]:
+def kb_tidy(slides: list[TopicSlide], asks: bool = True) -> list[dict]:
     """A deck written from the person's documents, tidied: a point that repeats a statement of an earlier slide or the
     lead of any other slide goes (the fact lives where it is the lead: «1 240 клиентов» four times, «14 → 5 дней» three
     times — qa5 06; «Казахстан — запуск в 1 кв. 2027» on «Планы» and on «Зарубежные рынки» — qa5 kb); a takeaway that
@@ -919,7 +936,7 @@ def kb_tidy(slides: list[TopicSlide]) -> list[dict]:
         keep: list[str] = []
         for pt in s.points:
             if (any(_overlap(pt, x) >= KB_REPEAT for x in seen + others) or any(_overlap(pt, x) >= KB_REPEAT for x in keep + [s.lead])
-                    or _restates(pt, s.lead)):
+                    or _restates(pt, s.lead) or any(_restates(pt, x, 2, KB_RETELL_TWO) for x in seen + others)):
                 done.append({"slide": k, "kind": "repeat", "text": pt})
                 continue
             keep.append(pt)
@@ -935,15 +952,35 @@ def kb_tidy(slides: list[TopicSlide]) -> list[dict]:
                 s.takeaway = ""
         seen += [x for x in [s.lead, *s.points, s.takeaway] if x]
     if final > 0:
-        done += _kb_closing(slides, final)
+        done += _kb_closing(slides, final, asks)
     return done
 
 
-def _kb_closing(slides: list[TopicSlide], final: int) -> list[dict]:
+def _kb_closing(slides: list[TopicSlide], final: int, asks: bool = True) -> list[dict]:
     """The closing slide: the deck's conclusions (the takeaways of the slides before it, spread over the deck) and its
-    own points that ask, plan or warn; a point with a new figure that does neither goes."""
+    own points that ask, plan or warn; a point with a new figure that does neither goes. When the input asks for
+    nothing, a request the model wrote («Совету директоров предлагается утвердить…») goes too: the documents' plans
+    stay (qa6)."""
     s = slides[final]
     done: list[dict] = []
+    if not asks:
+        if s.lead and _KB_ASK_RE.search(s.lead):
+            keep = [x for x in re.split(r"(?<=[.!?])\s+", s.lead) if x and not _KB_ASK_RE.search(x)]
+            done.append({"slide": final + 2, "kind": "closing_invented_ask", "text": s.lead})
+            s.lead = " ".join(keep)
+        gone = [pt for pt in s.points if _KB_ASK_RE.search(pt)]
+        s.points = [pt for pt in s.points if pt not in gone]
+        done += [{"slide": final + 2, "kind": "closing_invented_ask", "text": pt} for pt in gone]
+        if s.takeaway and _KB_ASK_RE.search(s.takeaway):
+            done.append({"slide": final + 2, "kind": "closing_invented_ask", "text": s.takeaway})
+            s.takeaway = ""
+        if re.search(r"просим|предлагаем", s.title or "", re.I):
+            s.title = KB_ASKLESS_TITLE
+    # the closing states conclusions: a table, a chart or key figures on it are the facts of the slides before or new
+    # ones (live qa6: the investments and the sales staff as a table became the last slide's «Инвестиции … и штат»)
+    if s.table is not None or s.chart is not None or s.numbers:
+        done.append({"slide": final + 2, "kind": "closing_no_table", "text": s.title})
+        s.table, s.chart, s.numbers = None, None, []
     said = " ".join(_body(x) + " " + (x.takeaway or "") for x in slides[:final])
     own: list[str] = []
     for pt in s.points:
@@ -951,7 +988,12 @@ def _kb_closing(slides: list[TopicSlide], final: int) -> list[dict]:
             own.append(pt)
         else:
             done.append({"slide": final + 2, "kind": "closing_new_fact", "text": pt})
-    outs = [x.takeaway for x in slides[:final] if x.takeaway]
+    # (a recommendation the input does not make — «…потребует пересмотра ценовой политики» — is no conclusion of it)
+    outs = [x.takeaway for x in slides[:final] if x.takeaway and (asks or not _ADVICE_RE.search(x.takeaway))]
+    if not asks:
+        gone = [pt for pt in own if _ADVICE_RE.search(pt)]
+        own = [pt for pt in own if pt not in gone]
+        done += [{"slide": final + 2, "kind": "closing_invented_ask", "text": pt} for pt in gone]
     picks: list[str] = []
     if outs:
         want = min(FINAL_CONCLUSIONS, len(outs), max(0, FINAL_POINTS - len(own)))
@@ -1208,7 +1250,8 @@ def write_topic_deck(
     if kb is not None:
         # the person's documents: the deck ends with its conclusion and request; no stock pictures of business people
         # beside their figures unless the request asks for pictures (qa5 06, 10)
-        if mode.reason != "kb_data" and kb_final(plan):  # (a data deck's knowledge part: the data story has its summary)
+        asks_ok = kb_asks(" ".join([mode.topic, *mode.theses, *plan_items]), kb)  # (a plan's «что просим у правления» asks)
+        if mode.reason != "kb_data" and kb_final(plan, asks_ok):  # (a data deck's knowledge part: the data story has its summary)
             res.edits.append({"slide": len(plan.slides) + 1, "kind": "final_added", "text": plan.slides[-1].title})
         if not _PICTURE_ASK_RE.search(mode.topic):
             for ps in plan.slides:
@@ -1272,7 +1315,7 @@ def write_topic_deck(
     # 4b. the knowledge base: every figure of the deck must be in its documents (or in the person's request); a fact
     # said once in the deck; a «timeline» of one vague year is a list
     if kb is not None:
-        tidied = kb_tidy(slides)
+        tidied = kb_tidy(slides, asks=kb_asks(" ".join([mode.topic, *mode.theses, *plan_items]), kb))
         if tidied:
             res.edits.extend(tidied)
         gone = kb_figure_check(slides, kb, given=" ".join([mode.topic, *mode.theses, *plan_items]))

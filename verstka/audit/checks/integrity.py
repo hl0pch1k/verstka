@@ -156,6 +156,10 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
         if osl is None:
             continue
         wanted = wanted_strings(osl, ctx.outline)
+        if osl.content.table and any(e.chart is not None for e in s.elements) and not any(e.table is not None for e in s.elements):
+            # the plan's table drawn as a chart: its column heads are the chart's legend and axis, not lines (qa6)
+            heads = set(osl.content.table.columns)
+            wanted = [w for w in wanted if w not in heads]
         if not wanted:
             continue
         have = slide_text_norm(s)

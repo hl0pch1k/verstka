@@ -153,11 +153,15 @@ def test_a_true_figure_of_the_named_file_is_accepted(sales):
     assert _by_file(st2.outline, "Каналы продаж.json").headline != "Партнёры дают лишь 9% выручки"
 
 
-def test_a_step_about_the_tail_in_hours_is_accepted(sales):
+def test_a_step_the_input_does_not_propose_is_refused(sales):
+    # qa6: the closing steps are the input's own («Что дальше: …» of the files) — a step about the data's tail is the
+    # model's, however true its figure
     st = _told(sales, SALES_BRIEF, {"next_steps": [
-        "Удержать темп роста в IV квартале за счёт партнёрского канала", "Сократить хвост обращений дольше 10 часов"]})
+        "Удержать темп роста в IV квартале за счёт партнёрского канала", "Развивать регионы с быстрым ростом выручки — Казань и Краснодар",
+        "Сократить хвост обращений дольше 10 часов"]})
     steps = next(s for s in st.outline.slides if s.id == "next-steps")
-    assert [i.title for i in steps.content.items][1] == "Сократить хвост обращений дольше 10 часов"
+    assert [i.title for i in steps.content.items] == ["Удержать темп роста в IV квартале за счёт партнёрского канала", "Развивать регионы с быстрым ростом выручки — Казань и Краснодар"]
+    assert any(r["to"] == "Сократить хвост обращений дольше 10 часов" and not r["accepted"] for r in st.rephrased if r["what"] == "next_step")
     assert 10.0 in _figures(_by_file(st.outline, "Время ответа поддержки.csv"))
 
 
