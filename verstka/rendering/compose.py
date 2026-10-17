@@ -1284,6 +1284,7 @@ class Composer:
         self._boost = 0
         if self._notes and self._notes[1] is not None and self._conclusion_spot(n0) is None:
             self._rehouse_conclusion(comp, area, n0, (o0, w0, notes0), boost_used)
+        self._balance(comp, n0, area)
         self._draw_notes(n0)
         self.warnings.extend(self.cv.clamp_warnings())
 
@@ -1396,6 +1397,59 @@ class Composer:
         self._compose_body(comp, area)
         self._boost = 0
         self.warnings = w_first
+
+    # a block that still takes less than BALANCE_LOW of its area after every growth stands at the area's optical middle:
+    # BALANCE_TOP of the air over it, the rest under it — not in the top third over an empty foot (owner, 17.10:
+    # «низ пустой»; the audit's bottom_empty)
+    BALANCE_LOW = 0.6
+    BALANCE_TOP = 0.4
+    _NO_BALANCE = ("chart", "chart_text", "chart_pair", "code", "formula")
+
+    def _balance(self, comp: str, n0: int, area: Bbox) -> None:
+        from verstka.rendering.deck import element_bbox, set_element_pos
+
+        if comp in self._NO_BALANCE or getattr(self, "_dense", False) or len(self.cv.tree) <= n0:
+            return
+        if comp == "table" and self._coverage(n0, area) > 0.6:
+            return  # a table near the wall's size (`FILL_MAX`) stays under its heading: moved, it measures as a wall
+        bottom = self._content_bottom(n0)
+        if bottom is None:
+            return
+        tops = [b[1] for b in (element_bbox(el) for el in list(self.cv.tree)[n0:]) if b and b[2] > 0 and b[3] > 0]
+        top = min(tops) if tops else area.y
+        k = self.kit
+        floor = area.y2
+        notes = getattr(self, "_notes", None)
+        if notes and notes[1] is not None:
+            # the conclusion keeps its reserved place at the foot: the block stands in the middle of what is over it
+            floor = min(floor, notes[1]["y_max"] - int(k.vgap * 1.2))
+        room = floor - area.y
+        if room <= int(0.15 * k.H) or bottom - area.y >= self.BALANCE_LOW * room or top > area.y + int(0.02 * k.H):
+            return
+        dy = int((floor - bottom) * self.BALANCE_TOP)
+        if dy <= int(0.02 * k.H):
+            return
+        els = [(el, element_bbox(el)) for el in list(self.cv.tree)[n0:]]
+        els = [(el, b) for el, b in els if b and b[2] > 0 and b[3] > 0]
+        # never down onto the template's art the area leaves room beside (a light bulb at the foot of the slide, at its
+        # right): the block goes as far down as it stays as clear of it as it was
+        try:
+            from verstka.rendering.layers import art_layers, painted_share
+
+            arts = art_layers(self.slide, skip=[el for el, _b in els])
+        except Exception:  # noqa: BLE001 - unread art: the block stays where it was set
+            return
+
+        def on_art(d: int) -> float:
+            return sum(painted_share(a, Bbox(x=b[0], y=b[1] + d, w=b[2], h=b[3])) for a in arts for _el, b in els)
+
+        base = on_art(0)
+        for d in (dy, int(dy * 0.66), int(dy * 0.33)):
+            if d > int(0.02 * k.H) and on_art(d) <= base + 0.01:
+                for el, b in els:
+                    set_element_pos(el, y=b[1] + d)
+                self.warnings.append("a short block set at the optical middle of its area")
+                return
 
     FILL_MAX = 0.8  # the share of the safe area past which a slide reads as a wall of content (the audit's fill_ratio)
 
@@ -1605,7 +1659,7 @@ class Composer:
                 with self._lines_under(area, lines) as main:
                     self.process(main, items)
             else:
-                self.bullets(area, self._running())
+                self._text_block(area, self._running())
         elif comp == "agenda" or kind == PatternKind.agenda:
             self.agenda(area, self._items() or [SlideItem(title=b) for b in c.bullets])
         elif comp in ("comparison", "two_column") or (kind in (PatternKind.comparison, PatternKind.two_column) and comp not in ("cards",)):
@@ -1614,14 +1668,14 @@ class Composer:
                 with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
                     self.columns(main, items)
             else:
-                self.bullets(area, self._running())
+                self._text_block(area, self._running())
         elif comp in ("cards",) or kind in (PatternKind.cards, PatternKind.team):
             items = self._items()
             if items:
                 with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
                     self.cards(main, items)
             else:
-                self.bullets(area, self._running())
+                self._text_block(area, self._running())
         elif comp == "quote" and c.quote:
             self.quote(area, c.quote, c.quote_author)
         elif comp == "statement" or (not c.bullets and not c.items and len(c.paragraphs) == 1 and len(c.paragraphs[0]) <= 260):
@@ -1635,7 +1689,10 @@ class Composer:
                 self.statement(area, text)
         else:
             items = self._items()
-            if c.bullets:
+            lone = [t for t in list(c.bullets) + (list(c.paragraphs) if not intro else []) if t and t.strip()]
+            if len(lone) == 1 and not (c.items or c.columns) and not c.numbers:
+                self._text_block(area, lone)
+            elif c.bullets:
                 self.bullets(area, list(c.bullets) + ([p for p in c.paragraphs] if c.paragraphs and not intro else []))
             elif items:
                 self.cards(area, items)
@@ -2725,6 +2782,8 @@ class Composer:
                 labs = [[self.P(t, ls, colors.muted)] for t in labels]
                 if max(para_lines(lp[0], _pt(lw)) for lp in labs) > 3:
                     continue
+                if not self.fits_width(labels, ls, False, lw):
+                    continue  # a label's word wider than its column breaks in the middle («Тренировоч / ный зал»)
                 rows_h = [max(fig_h, self.h(lp, lw)) for lp in labs]
                 # (rows of the columns stand level: a row is as tall as its tallest cell)
                 level = [max(rows_h[r + c * per] for c in range(cols) if r + c * per < n) for r in range(per)]
@@ -2901,14 +2960,36 @@ class Composer:
                     self.cv.line(x + marker_w, y + row_pad, x + text_w, y + row_pad, k.colors.divider, 0.75)
                     y += 2 * row_pad
 
+    def _text_block(self, area: Bbox, texts: list[str]) -> None:
+        """The slide's running lines: a list — or, when there is one thesis only, no list: a marker and a hairline over
+        one line read as a list that lost its rows over an empty slide (Pencil, Lights). A short thesis is the slide's
+        message, set large (`statement`; a figure that carries it, `big_number`); a longer one a paragraph that grows
+        to its area."""
+        texts = [t for t in texts if t and t.strip()]
+        if len(texts) != 1:
+            self.bullets(area, texts)
+            return
+        text = texts[0].strip()
+        hero = single_figure(text)
+        if hero is not None:
+            self.big_number(area, NumberCallout(value=hero[0], label=hero[1]), extra=[], others=[])
+        elif len(text) <= 260:
+            self.statement(area, text)
+        else:
+            self.paragraphs(area, [text])
+
     def paragraphs(self, area: Bbox, texts: list[str]) -> None:
         k = self.kit
         total = sum(len(t) for t in texts)
         width = min(area.w, int(area.w * 0.78))
-        for size in (k.lead, k.body, k.small_text) if total <= 500 else (k.body, k.small_text):
+        # a short text grows with its room: up to the second heading size while it takes at most three quarters of the
+        # area (never a step over the slide's heading), else the lead, the body and the small size while it fits
+        top = [x for x in k.sizes if k.lead + 0.05 < x <= k.h2 + 0.05 and (not k.head_size or x <= self._under_heading() + 0.05)][::-1] if total <= 600 else []
+        ladder = top + list(dict.fromkeys((k.lead, k.body, k.small_text) if total <= 500 else (k.body, k.small_text)))
+        for size in ladder:
             paras = [self.P(t, size, k.colors.text, space_after=size * 0.8) for t in texts]
             hh = self.h(paras, width)
-            if hh <= area.h:
+            if hh <= (area.h * 0.75 if size in top else area.h):
                 break
         self.cv.text(Bbox(x=area.x, y=self._place_v(area, hh, fill_top=True), w=width, h=hh), paras, name="Text")
 
@@ -2970,14 +3051,32 @@ class Composer:
                 self.warnings.append("code: the explanation does not fit its column at the small size")
             self.cv.text(Bbox(x=box.x, y=box.y, w=box.w, h=min(hh, box.h)), tp, name="Code note")
 
+    def _lone_run(self) -> int:
+        """How many slides right before this one also show one thesis alone (`_lone_thesis`): the run's position."""
+        slides = list(self.outline.slides)
+        i = next((j for j, x in enumerate(slides) if x.id == self.o.id), None)
+        n = 0
+        while i is not None and i - n - 1 >= 0 and _lone_thesis(slides[i - n - 1]):
+            n += 1
+        return n
+
     def statement(self, area: Bbox, text: str) -> None:
-        """One message — an ask, a conclusion: large type, figures in the accent colour, an accent bar or panel."""
+        """One message — an ask, a conclusion: large type, figures in the accent colour, an accent bar or panel. A
+        statement right after another one takes the other form (the panel of the template's card, else centred under a
+        short accent rule): three slides of one bar and one paragraph in a row read as one slide three times."""
         k = self.kit
-        panel = self.strategy == "visual" and bool(k.card.fill or k.card.proto is not None)
+        has_card = bool(k.card.fill or k.card.proto is not None)
+        panel = self.strategy == "visual" and has_card
+        centred = False
+        if self._lone_run() % 2 == 1:
+            if panel or not has_card:
+                panel, centred = False, True
+            else:
+                panel = True
         colors = k.card.colors if panel else k.colors
         width = int(area.w * (0.9 if panel else (0.86 if area.w > 0.6 * k.W else 1.0)))
         pad = int(0.06 * k.H) if panel else 0
-        bar = 0 if panel else _emu(max(k.hpt * 0.011, 4))
+        bar = 0 if (panel or centred) else _emu(max(k.hpt * 0.011, 4))
         inset = bar + int(k.gap * 1.2) if bar else 0
         top = k.statement
         if k.head_size:
@@ -2993,6 +3092,15 @@ class Composer:
                 break
         block_h = hh + 2 * pad
         y0 = self._place_v(area, block_h)
+        if centred:
+            # under a short accent rule, the words centred on the area's axis
+            x0 = area.x + (area.w - width) // 2
+            rule_w, rule_h = _emu(k.hpt * 0.08), max(_emu(k.hpt * 0.007), _emu(2.5))
+            self.cv.rect(Bbox(x=area.x + (area.w - rule_w) // 2, y=y0, w=rule_w, h=rule_h), k.colors.accent, name="Accent rule")
+            for p_ in paras:
+                p_.align = "ctr"
+            self.cv.text(Bbox(x=x0, y=y0 + rule_h + int(k.vgap * 0.8), w=width, h=hh), paras, name="Statement")
+            return
         if panel:
             self.cv.card(Bbox(x=area.x, y=y0, w=width, h=block_h), k.card)
         elif bar:
@@ -4303,6 +4411,18 @@ class Composer:
                 self.bullets(below, rest)
 
     # ---- data ----------------------------------------------------------------------------------------------------
+    def _table_readable(self) -> float:
+        """The least size of a table's text on this slide (`tables.readable_table_pt`), 0 without it."""
+        try:
+            from verstka.rendering.tables import readable_table_pt
+        except ImportError:  # (the charts and tables module of another round: no threshold of its own)
+            return 0.0
+        try:
+            r = float(readable_table_pt(self.kit.H, self.kit.manifest.tokens.typography))
+        except Exception:  # noqa: BLE001
+            return 0.0
+        return r
+
     def table(self, area: Bbox, table: TableData) -> None:
         """A native table measured for its content (tables.measure_table): one size, columns by content, rows that
         grow to fill about half the area; a note or the caption under it."""
@@ -4327,10 +4447,23 @@ class Composer:
         # take the template's steps under the body size, down to the floor of that setting (the dense pass's, else the
         # small size or 2.2 %, whichever is less), snapped up to a size the template sets: never a size between two of
         # its steps (VK Tech: 8.1 pt is no size of the template)
-        resetting = bool(getattr(self, "_dense", False) or getattr(self, "_rehousing", False) or getattr(self, "_floor_2pct", False))
+        # (the last level of a table grown into a wall over the slide steps a size down too: `_tight`)
+        resetting = bool(getattr(self, "_dense", False) or getattr(self, "_rehousing", False) or getattr(self, "_floor_2pct", False) or getattr(self, "_tight", 0) >= 3)
+        # the readable threshold of a table's text (tables.readable_table_pt — the chart labels' too): no ladder of a
+        # usual setting goes under it (Progress: 8 pt cells, the template's small step, on a 446 pt slide); the dense
+        # pass a point under it at most
+        read = self._table_readable()
         floor = min(reg_floor, k.small)
         if getattr(self, "_dense", False):
             floor = min(floor, self._dense_floor(running=False))
+        # (the template's own step just under the threshold — within 15 % of it — still reads: a ten-row table at 10 pt
+        # with its conclusion on the slide reads better than one at 11.5 pt with the conclusion said aloud; Progress's
+        # 8 pt on a 446 pt slide does not)
+        below = [x for x in k.sizes if read * 0.85 - 0.05 <= x < read - 0.05]
+        read = max(below) if below else read
+        # a table set again — denser, or above its conclusion's room — keeps its lines and its conclusion on the slide
+        # rather than its size: down to 0.8 of the threshold, never to the template's tiniest step (Progress: 8 pt)
+        floor = max(floor, read * 0.8) if resetting else max(floor, read)
         floor = min((x for x in k.sizes if x >= floor - 0.05), default=floor)
 
         def regular(t: TableData, deck: bool = False) -> list[float]:
@@ -4342,8 +4475,11 @@ class Composer:
             small_table = len(t.rows) + 1 <= 5 and len(t.columns) <= 4
             lead = [k.lead] if (small_table or boost >= 1) and k.lead > k.body and (not k.head_size or k.lead <= 0.7 * k.head_size) else []
             mids = [x for x in k.sizes if k.body + 0.05 < x < k.lead - 0.05] if boost >= 1 else []
-            low = reg_floor if deck else min(reg_floor, k.small)
-            return [s for s in sorted({*lead, *mids, k.body, k.small}, reverse=True) if s >= low - 0.05] or [k.small]
+            low = max(reg_floor if deck else min(reg_floor, k.small), read)
+            # (the template's steps between the threshold and the body size: the small step under the threshold no longer
+            # in the ladder, a table that does not hold at the body size takes the next step down, not none)
+            near = [x for x in k.sizes if read - 0.05 <= x < k.body - 0.05 and x > k.small + 0.05] if read > k.small + 0.05 else []
+            return [s for s in sorted({*lead, *mids, *near, k.body, k.small}, reverse=True) if s >= low - 0.05] or [max(k.body, read) if k.body >= read - 0.05 else read]
 
         def steps_for(t: TableData) -> list[float]:
             """The regular ladder with the template's steps under the body size, down to the setting's floor."""
@@ -4608,7 +4744,8 @@ class Composer:
         take = squash(self.o.takeaway)
         take = take[:1].upper() + take[1:]
         n0 = len(self.cv.tree)
-        tall_h = int(area.h * 0.92)
+        # (a data file's chart takes the area's whole height: its plot is what the slide is for)
+        tall_h = area.h if self.o.data is not None else int(area.h * 0.92)
         gap = k.gap * 2
         # the least frame of a data chart (or any scatter): a column beside it may not leave it narrower than its plot
         # needs (`charts.min_frame_width`; qa4 N-H3 — a scatter a fifth of the slide wide beside half a slide of nothing)
@@ -4631,7 +4768,7 @@ class Composer:
                 # with their shares in one sentence ran past the column into the source line): it takes its strip under
                 # the chart, as the other variants set it; the column keeps the lines, else the chart the whole width
                 area = self._takeaway_to_strip(area)
-                tall_h = int(area.h * 0.92)
+                tall_h = area.h if self.o.data is not None else int(area.h * 0.92)
                 aside = False
                 self.warnings.append("the conclusion set under the chart: too long for the column beside it")
                 if not side_texts and takeaway is None:
@@ -4718,7 +4855,7 @@ class Composer:
             # the slide's conclusion too long for the column beside the chart at every size: its strip under the chart
             # (as `_text_column`'s compact twin above); the column keeps the lines, else the chart takes the width
             area = self._takeaway_to_strip(area)
-            tall_h = int(area.h * 0.92)
+            tall_h = area.h if self.o.data is not None else int(area.h * 0.92)
             aside, takeaway = False, None
             show_side = bool(side_texts)
             self.warnings.append("the conclusion set under the chart: too long for the column beside it")
@@ -4758,6 +4895,8 @@ class Composer:
         shows what else it has — the conclusion the column was to hold goes back to its strip. A data file's chart
         whose rows do not fit is shown as the same data in a table (the data layer's table option)."""
         self._undo(n0)
+        if getattr(self.o, "data", None) is not None and "строки диаграммы" in err and self._rows_rescue(n0, area, err):
+            return
         if self._takeaway_aside():
             area = self._takeaway_to_strip(area)
         if getattr(self.o, "data", None) is not None and "строки диаграммы" in err:
@@ -4768,6 +4907,51 @@ class Composer:
                 self.warnings.append(f"{err}: the data shown as a table")
                 return
         self.warnings.append(f"chart failed: {err[:120]}; shown as {self._chart_fallback(area)}")
+
+    def _rows_rescue(self, n0: int, area: Bbox, err: str) -> bool:
+        """A data file's bars whose rows the frame cannot hold at the readable size: before the same data turns into a
+        table (another chart type for the same data set on this template — the ТЗ wants one), the chart takes the
+        conclusion's room under it — the conclusion leads the chart in a bold line under the heading, else it is said
+        aloud — and is drawn again in the whole height down to the footnote. True when the chart now stands."""
+        notes = getattr(self, "_notes", None)
+        if not notes or notes[1] is None:
+            return False
+        m = re.search(r"нужно (\d+(?:[.,]\d+)?) pt", err)
+        need = _emu(float(m.group(1).replace(",", "."))) if m else 0
+        foot_box, plan, full = notes
+        k = self.kit
+        bottom = full.y2 - ((foot_box[0].h + int(k.vgap * 0.8)) if foot_box else 0)
+        room = Bbox(x=area.x, y=area.y, w=area.w, h=bottom - area.y)
+        if room.h <= area.h or (need and room.h < need):
+            return False
+        c = self.o.content
+        side = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
+        take = squash(self.o.takeaway)
+        notes_text = getattr(self.o, "notes", None)
+        for lead in ((True, False) if take else (False,)):
+            self._undo(n0)
+            self._notes = (foot_box, None, full)
+            a = self._lead_line(room, take) if lead else room
+            if need and a.h < need:
+                continue
+            with self._lines_under(a, side) as main:
+                err2 = self._chart_block(Bbox(x=main.x, y=main.y, w=main.w, h=main.h), c.chart, prominent=False, center=True)
+            if err2 is None:
+                if lead:
+                    self.warnings.append("the conclusion leads the chart: its rows need the height of the conclusion's strip")
+                else:
+                    said = self._said()
+                    try:
+                        if said and said not in (self.o.notes or ""):
+                            self.o.notes = (f"{said} " + (self.o.notes or "")).strip()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self.warnings.append("the conclusion moved to the speaker notes: the chart's rows need its room")
+                return True
+        self._undo(n0)
+        self._notes = notes
+        self._restore_notes(notes_text)
+        return False
 
     TABLE_ROWS = 10  # the organizers' limit: a table on a slide never shows more rows than this
 
@@ -5313,7 +5497,7 @@ class Composer:
                 return 0
             series = resolve_series(spec, self.outline)
             cats = [str(x) for x in (series[0].categories if series else spec.categories)]
-            font = float(self._chart_style().font_size_pt or 10.8)
+            font = self._chart_font()
             horizontal = kind in ("bar", "stacked_bar")
             # (a scatter's plot is near-square: 12 lines of type at the least — its own measure, never a line's: the
             # scatter of c01 compact stood in a frame cut for a line, a fifth of the slide wide — qa4 N-H3)
@@ -5339,12 +5523,25 @@ class Composer:
                 return 0
             series = resolve_series(spec, self.outline)
             cats = [str(x) for x in (series[0].categories if series else spec.categories)]
-            font = float(self._chart_style().font_size_pt or 10.8)
+            font = self._chart_font()
             horizontal = kind in ("bar", "stacked_bar")
             pt = min_frame_width(kind, 1 if (kind == "scatter" or horizontal) else max(len(cats), 1), font, y_title=bool(spec.y_title) and not horizontal)
         except Exception:  # noqa: BLE001 - no measure: no demand
             return 0
         return _emu(pt)
+
+    def _chart_font(self) -> float:
+        """The size a chart's labels are set at on this slide, for its least frame: the deck's chart size, never under the
+        readable threshold the chart module holds them to (`charts.readable_floor`) — measured under it, a sample's
+        chart place passed that the chart then did not fit at the threshold (VK Tech science: 183 pt for 200)."""
+        font = float(self._chart_style().font_size_pt or 10.8)
+        try:
+            from verstka.rendering.charts import readable_floor
+
+            font = max(font, float(readable_floor(self.slide, self.kit.manifest.tokens.typography)))
+        except Exception:  # noqa: BLE001 - (the chart module of another round: its size as it is)
+            pass
+        return font
 
     def _chart_style(self):
         from verstka.rendering.charts import chart_text_capped
@@ -5772,6 +5969,16 @@ _BEFORE_CAT_RE = re.compile(r"(?i)^\s*(сейчас|было|до\b|текущ|�
 _AFTER_CAT_RE = re.compile(r"(?i)(цел[ьи]|план|прогноз|после|стало|через|будет|к\s+\d|target|goal|after|forecast)")
 
 
+def _lone_thesis(o: OutlineSlide) -> bool:
+    """The slide shows one thesis alone (set as a statement by the composer): one line of text, nothing else."""
+    c = o.content
+    if o.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote):
+        return False
+    if c.items or c.columns or c.numbers or c.chart is not None or c.table is not None or c.quote or (c.formula or "").strip() or c.code is not None:
+        return False
+    return len([t for t in list(c.bullets) + list(c.paragraphs) if t and t.strip()]) == 1
+
+
 def _amount_text(v: float, unit: str) -> str:
     """315000 → «315 000 ₽», 13.3 → «13,3»: a part's amount as the brief writes it."""
     n = f"{int(round(v)):,}".replace(",", " ") if abs(v - round(v)) < 1e-9 else f"{v:g}".replace(".", ",")
@@ -5911,8 +6118,14 @@ def table_deltas(table: TableData) -> list[tuple[str, str, str]]:
             r = (b - a) / abs(a)
             if abs(r) < 0.05:
                 continue
-            value = (f"+{r * 100:.0f}%" if r > 0 else f"−{abs(r) * 100:.0f}%")
-            size = abs(r)
+            if b == 0 or abs(r) > 3.0:
+                # a share of a base that went to nothing or grew from almost nothing says little («−100%» for 36 → 0,
+                # «+2600%» for 1 → 27): the change itself, in the table's own units
+                d = b - a
+                value = (f"+{d:g}" if d > 0 else f"−{abs(d):g}").replace(".", ",")
+            else:
+                value = (f"+{r * 100:.0f}%" if r > 0 else f"−{abs(r) * 100:.0f}%")
+            size = min(abs(r), 3.0)
         else:
             continue
         out.append((size, value, row[0].strip(), f"{row[1].strip()} → {row[2].strip()}"))
