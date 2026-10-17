@@ -197,3 +197,41 @@ def test_a_refusal_reply_ends_with_one_period():
 
     assert _refused_reply("«Таблица» не подходит: 512 строк не показать.") == "Не получилось: «Таблица» не подходит: 512 строк не показать."
     assert _refused_reply("Слайда 12 нет").endswith("нет.")
+
+
+# ── short conclusions beside the chart: the main facts, never every category ─────────────────────────────────────────
+def test_a_caption_says_its_main_facts_and_keeps_what_the_gaps_mean():
+    from verstka.data.story import short_caption
+
+    assert short_caption("Прямые продажи — 46%, Партнёры — 28%, Маркетплейс — 17%, Онлайн — 9%") == "Прямые продажи — 46%, Партнёры — 28%."
+    long_ = ("С 2005 по 2025 год: Scopus — с 42 до 381 статьи, РИНЦ — с 255 до 867 статей. РИНЦ: максимум 985 статей в 2019 году, "
+             "затем ниже. За 2016 год данных нет.")
+    got = short_caption(long_)
+    assert len(got) <= 140 and got.endswith("За 2016 год данных нет.") and "максимум 985" not in got
+    nps = "NPS: IV кв. 2024 — 41, III кв. 2026 — 52 (+11 п. за 7 кварталов). За II кв. 2025 и II кв. 2026 данных нет — на графике разрывы, а не ноль."
+    assert short_caption(nps) == nps  # («IV кв. 2024» is no end of a sentence)
+
+
+def test_data_slides_carry_short_captions_and_the_full_one_in_the_notes(sales, science):
+    for tables, brief in ((sales, SALES_BRIEF), (science, SCIENCE_BRIEF)):
+        for s in _data(build_data_story(Brief(text=brief), tables).outline):
+            assert s.takeaway is None or len(s.takeaway) <= 160, s.takeaway
+    o = build_data_story(Brief(text=Q1), sales).outline
+    ch = _by_file(o, "Каналы продаж.json")
+    if ch.takeaway and "Онлайн" not in ch.takeaway:
+        assert "Онлайн — 9%" in ch.notes and "полностью" in ch.rationale
+
+
+def test_a_rewording_that_lists_every_category_is_refused(sales):
+    reg = _by_file(build_data_story(Brief(text=SALES_BRIEF), sales).outline, "Регионы.xlsx")
+    listed = "Москва — 1 433 млн ₽, Санкт-Петербург — 612 млн ₽, Екатеринбург — 318 млн ₽"
+    st = _told(sales, SALES_BRIEF, {"headlines": [{"id": reg.id, "headline": listed}]})
+    assert _by_file(st.outline, "Регионы.xlsx").headline != listed
+    assert any(r["to"] == listed and "перечень" in (r["why"] or "") for r in st.rephrased)
+
+
+def test_a_list_after_an_intro_keeps_its_first_two_with_one_period():
+    from verstka.data.story import short_caption
+
+    got = short_caption("Больше всего — Прикладная информатика. Всего 2 425 чел.: платное — 1 290 чел., бюджет — 840 чел., целевое — 295 чел.")
+    assert got == "Больше всего — Прикладная информатика. Всего 2 425 чел.: платное — 1 290 чел., бюджет — 840 чел."

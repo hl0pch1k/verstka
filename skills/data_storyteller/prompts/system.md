@@ -25,13 +25,15 @@ What to return (JSON only, all texts in Russian):
 - context: up to five short lines that restate the brief's context (not its instructions to you, not its requests
   «покажи», «сравни»); an empty list when the brief has no context beyond its goals. Only when the draft has context.
 - headlines: for every data slide, {"id": the slide's id, "headline": the conclusion}. Up to 100 characters, one
-  sentence, no period at the end, the main finding first. Keep the draft's headline when it is already good — return it
-  as it is.
+  sentence, no period at the end, the main finding first: the one or two facts that matter most (the leader, the
+  biggest change) — never every category in a row. Keep the draft's headline when it is already good — return it as
+  it is.
 - summary_title: the summary slide's headline — the deck's main conclusion in one line, said from its two strongest
   conclusions («Выручка растёт быстрее числа клиентов; Москва даёт 41% выручки»); never a label that names no finding
   («Четыре главных вывода», «Ключевые итоги года»); no new numbers.
 - summary: one conclusion for each draft summary conclusion, in the same order, each about the same data slide as the
-  draft line it replaces (the numbers of that slide only); keep a draft line as it is when it is already good.
+  draft line it replaces (the numbers of that slide only), up to 140 characters, its one or two main facts — never a
+  list of every category; keep a draft line as it is when it is already good.
 - next_steps: two or three next steps, each one short imperative sentence about the business («Сократить хвост
   обращений дольше двух часов»); no numbers unless they are facts. A step must stand on something: what the files'
   own text proposes («Что дальше: …» — take its steps first) or a weak spot the data shows (a long tail, a decline).

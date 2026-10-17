@@ -60,6 +60,9 @@ CONTEXT_LINES = 5
 MAX_TITLE = 90
 MAX_HEADLINE = 120
 MAX_LINE = 160
+# a conclusion beside a chart says its one or two main facts (the leader, the biggest change), never every category:
+# a 300-character list beside a Forestbird chart ran over its source line (qa4)
+MAX_CAPTION = 140
 
 # the story's order after the goals: dynamics → comparison → shares → distribution → quality of data → reference
 _TASK_RANK = {"kpi": 0, "dynamics": 1, "comparison": 2, "shares": 3, "distribution": 4, "relationship": 5, "reference": 8}
@@ -334,7 +337,8 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
     head = tidy_text(plan.headline or plan.plain_headline, series_names)
     if part > 1:
         head = f"{head.rstrip('. ')} (продолжение)"
-    caption = tidy_text(plan.caption, series_names) if plan.caption else None
+    full = tidy_text(plan.caption, series_names) if plan.caption else None
+    caption = short_caption(full)
     if isinstance(body, list):
         body = [n.model_copy(update={"label": tidy_text(n.label, [])}) for n in body]
     slide = OutlineSlide(
@@ -344,10 +348,10 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
         content=_content_of(body),
         takeaway=caption if part >= total else None,
         footnote=plan.source or None,
-        rationale=_rationale(plan),
+        rationale=_rationale(plan) + (f" Подпись на слайде — главное; полностью: {full}" if caption != full else ""),
         alternatives=_alternatives(plan),
-        notes=_notes(plan) if part == 1 else "",
-        data=slide_data_of(plan, part, table).model_copy(update={"prepared": prepared_of(body, caption)}),
+        notes="\n".join(x for x in (_notes(plan), full if caption != full else "") if x) if part == 1 else "",
+        data=slide_data_of(plan, part, table).model_copy(update={"prepared": prepared_of(body, full)}),
     )
     if not data_text_ok(slide.headline, slide):
         # the story says what the audit accepts: a headline whose number the data checks would refuse gives way to the
@@ -356,6 +360,38 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
         log.warning("data story: headline «%s» fails the data check — «%s» instead", slide.headline, alt or plan.plain_headline)
         slide.headline = upper_first(alt) if alt else (plan.plain_headline or slide.headline)
     return slide
+
+
+_CAPTION_SENT_RE = re.compile(r"(?<=[.!?…])\s+(?=[«\"A-ZА-ЯЁ])")  # (never after «кв.» before a year: «IV кв. 2024»)
+_GAP_SAID_RE = re.compile(r"(?i)данных\s+нет|нет\s+данных|пропуск|пропущ|разрыв|не\s+проводил|не\s+собирал")
+_LIST_PART_RE = re.compile(r"^\s*[^—:,;]{1,60}\s*[—:]\s*[+\-−–]?\d")
+
+
+def short_caption(text: Optional[str], limit: int = MAX_CAPTION) -> Optional[str]:
+    """A data slide's caption as the slide sets it: its first sentences up to about `limit` characters, a list of three
+    and more «name — value» kept to its first two (the leader and the next) — never every category (qa4: a
+    300-character list beside the chart). The full caption stays in the notes and «Почему так»."""
+    if not text:
+        return text
+    t = re.sub(r"[ \t\r\n]+", " ", text).strip()  # (the no-break spaces of «III кв. 2026», «1 290 чел.» stay)
+    sents: list[str] = []
+    for sent in _CAPTION_SENT_RE.split(t):
+        parts = [x for x in re.split(r",\s+", sent.rstrip(".")) if x.strip()]
+        if len(parts) >= 3 and sum(1 for x in parts if _LIST_PART_RE.match(x.split(": ")[-1])) >= 3:
+            sent = ", ".join(parts[:2])
+            sent += "" if sent.endswith(".") else "."  # («840 чел.» ends it already)
+        sents.append(sent)
+    # the first sentence, then what the chart's gaps mean («За 2016 год данных нет»), then the rest — while it is short
+    keep = {0}
+    for k in sorted(range(1, len(sents)), key=lambda k: (not _GAP_SAID_RE.search(sents[k]), k)):
+        if len(" ".join(sents[j] for j in sorted(keep | {k}))) <= limit:
+            keep.add(k)
+    res = " ".join(sents[j] for j in sorted(keep))
+    if len(res) > limit + 20:
+        cut = res[: limit + 1]
+        k = max(cut.rfind(", "), cut.rfind(" — "), cut.rfind("; "))
+        res = (cut[:k] if k >= limit // 2 else cut.rsplit(" ", 1)[0]).rstrip(",;:—– ") + "."
+    return res
 
 
 _PERIOD_GLUE = [
@@ -1119,6 +1155,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             why = "число " + ", ".join(_num(n) for n in bad[:3]) + " не из фактов данных"
         elif new.lower() == (s.data.plain_headline or "").lower():
             ok, why = False, "это тема, а не вывод"
+        elif source.lists(new, s):
+            ok, why = False, "перечень категорий, а не вывод"  # (the leader and the biggest change, not every category)
         elif is_description(new) and not is_description(s.headline):
             ok, why = False, "это описание чисел, а не вывод"
         elif source.wrong_category(new, s):
@@ -1148,7 +1186,7 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             cards = [(it, by_slide.get(c.get("slide") or ""), c.get("kind")) for it, c in zip(summary.content.items, story.cards)]
         else:
             cards = [(it, _item_slide(it, data_slides, summary_slides), "conclusion") for it in summary.content.items]
-        lines = [clean(x, MAX_LINE) for x in w.summary][:4]
+        lines = [clean(x, MAX_CAPTION) for x in w.summary][:4]
         taken: set[str] = set()
         for x in [x for x in lines if x]:
             src, why = source.of(x)
@@ -1158,6 +1196,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
                 src, why = None, "о файле, которого нет среди выводов итога"
             if src is not None and is_description(x) and kind != "answer":
                 src, why = None, "это описание чисел, а не вывод"
+            if src is not None and kind != "answer" and source.lists(x, src):
+                src, why = None, "перечень категорий, а не вывод"
             if src is not None and kind == "weak" and not _BOTTLENECK_SAID_RE.search(x):
                 # a weak spot the brief asks about stays a weak spot, not a success (qa4 S3)
                 src, why = None, "узкое место, о котором спрашивает бриф, сказано как успех"
@@ -1185,7 +1225,7 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             if ok:
                 summary.headline = sh
                 used = True
-    steps = [clean(x, MAX_LINE) for x in w.next_steps][:3]
+    steps = [clean(x, MAX_CAPTION) for x in w.next_steps][:3]
     steps = [x for x in steps if x]
     good_steps = []
     explained = _explained(story.notes)
@@ -1258,7 +1298,7 @@ def _trim_table(entries: list, k: int, plan: DatasetPlan) -> None:
         s.headline = base if j == 0 else f"{base.rstrip('. ')} (продолжение)"
         s.data.part = (j + 1, len(kept))
         s.footnote = f"{plan.source} · {what}" if plan.source else what.capitalize()
-        s.takeaway = (plan.caption or None) if j == len(kept) - 1 else None
+        s.takeaway = (short_caption(plan.caption) or None) if j == len(kept) - 1 else None
         s.notes = first.notes if j == 0 else ""
         if j == 0 and e.role == "part":
             e.role, e.keep = parts[0].role, parts[0].keep
@@ -1442,6 +1482,12 @@ class _Attribution:
 
     def values(self, s: OutlineSlide) -> list[float]:
         return list(self.extra.get(s.id, ((), {}, {}))[0])
+
+    def lists(self, line: str, s: OutlineSlide) -> bool:
+        """The line names three and more of the slide's categories: a list of every category, not its one or two
+        main facts (qa4: a 300-character list beside the chart)."""
+        low = line.lower()
+        return len({c.lower() for c in self.cats.get(s.id, []) if c and len(c) >= 3 and c.lower() in low}) >= 3
 
     def wrong_category(self, line: str, s: OutlineSlide) -> bool:
         """A figure of a file's cell said of another row than its own («Партнёры — 9%», where 9% is Онлайн's)."""

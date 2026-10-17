@@ -1,5 +1,5 @@
 name: data_storyteller
-version: 1.2.0
+version: 1.2.1
 role: llm
 description: >
   Writes the connecting text of a deck built from data files (verstka/data/story.py): the deck's title and subtitle,
@@ -17,6 +17,8 @@ params:
   temperature: 0.2
   max_tokens: 1800
 changelog:
+  - "1.2.1: conclusions say their one or two main facts (the leader, the biggest change), never every category; summary
+    lines up to 140 characters."
   - "1.2.0: qa4 (2026-10-17): a question brief is answered first — the title answers its main question, the summary's
     conclusions answer each question; the summary's headline is a conclusion, never «Четыре главных вывода»; next
     steps only from the files' own proposal or a weak spot of the data."
