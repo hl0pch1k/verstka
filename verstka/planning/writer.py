@@ -128,6 +128,8 @@ class WriterMode:
     private_hint: bool = False
     language: str = "ru"
     reason: str = ""
+    # the person's plan (one slide per item, in order) when the deck is written from their knowledge base
+    plan: list[str] = field(default_factory=list)
 
 
 def writer_mode(brief: Brief | str) -> WriterMode:
@@ -5089,6 +5091,8 @@ class WriterResult:
     numbered: list = field(default_factory=list)  # per numbered cut: [[number, page, sentence]] (what the citations point at)
     subkind: Optional[str] = None  # a history's story: "conflict" | "event" | "culture" (history_subkind)
     moved: list = field(default_factory=list)  # sentences the cross-slide chronology moved: {"text", "from", "to", "why"}
+    basis: str = "wikipedia"  # where the facts come from: "wikipedia" | "kb" (the person's knowledge base)
+    kb: Optional[dict] = None  # the knowledge base the text is written from: {"id", "name", "docs": [{"id", "title", "url"}]}
 
     @property
     def written(self) -> bool:
@@ -5102,7 +5106,7 @@ class WriterResult:
             "removed": len(self.removed), "checked": self.checked, "model_label": self.model_label,
             "seconds": self.seconds.get("total", 0.0), "short_by": self.short_by,
             "pages": self.pages_used, "sources": [{k: x[k] for k in ("text", "page", "url", "sentence")} for x in self.sources],
-            "genders": self.genders,
+            "genders": self.genders, "basis": self.basis, "kb": self.kb,
         }
 
     def summary(self) -> dict:
@@ -5110,6 +5114,8 @@ class WriterResult:
         return {
             "mode": self.mode, "status": self.status, "kind": self.kind, "subkind": self.subkind, "skills": self.skills, "model": self.model,
             "reference": {"source": "wikipedia", "lang": self.lang, "pages": self.pages} if self.pages else None,
+            "knowledge": {"id": (self.kb or {}).get("id"), "name": (self.kb or {}).get("name"), "docs": len((self.kb or {}).get("docs") or []),
+                          "sources": len(self.sources)} if self.kb else None,
             "slides": self.slides, "asked": self.asked, "removed": len(self.removed), "checked": self.checked,
             "continuation": self.continuation, "seconds": self.seconds, "tokens": self.tokens, "reason": self.reason or None,
         }
@@ -5120,6 +5126,7 @@ class WriterResult:
             "version": 1, "mode": self.mode, "status": self.status, "kind": self.kind, "subkind": self.subkind, "topic": self.topic, "theses": self.theses,
             "skills": self.skills, "model": self.model, "model_label": self.model_label, "seconds": self.seconds, "tokens": self.tokens,
             "reference": {"source": "wikipedia", "lang": self.lang, "pages": self.pages, "cut_chars": self.reference_chars} if self.pages else None,
+            "knowledge": self.kb, "basis": self.basis,
             "answers": self.answers, "removed": self.removed, "edits": self.edits, "overruled": self.overruled, "continuation": self.continuation, "salvaged": self.salvaged,
             "sources": self.sources, "pages_used": self.pages_used, "anchor": self.anchor or None, "genders": self.genders,
             "numbered": self.numbered, "moved": self.moved,
@@ -5148,6 +5155,12 @@ def attribution(res: WriterResult) -> str:
     Юрий Алексеевич» из Википедии»), else the topic. It starts with ATTRIBUTION_PREFIX, the marker a figures check of
     the notes skips (a title may have digits: «Восток-1»)."""
     pages = [p.get("title") for p in (res.pages_used or []) if p.get("title")]
+    if getattr(res, "basis", "") == "kb" and res.kb:
+        docs = pages or [d.get("title") for d in (res.kb.get("docs") or []) if d.get("title")]
+        word = "документу" if len(docs) == 1 else "документам"
+        where = f" по {word} {_titles_ru(docs[:6])}" + (" и другим" if len(docs) > 6 else "") if docs else ""
+        return (f"{ATTRIBUTION_PREFIX} по базе знаний «{res.kb.get('name') or 'База знаний'}»{where}. Источник каждого факта — "
+                "в заметках слайда. Проверьте факты перед выступлением.")
     if not pages and (res.source or {}).get("title"):
         pages = [res.source["title"]]
     if pages:

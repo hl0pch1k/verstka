@@ -334,6 +334,7 @@ def generate_variants(
     picture_reuse: Optional[dict[str, list[dict]]] = None,
     eyes: Optional[bool] = None,
     source_pictures: Optional[Path] = None,
+    knowledge_id: Optional[str] = None,
 ) -> GenerateResult:
     """`writer`: writer mode (planning/writer.py) — a brief that is only a topic («История VK», «презентация про
     вторую мировую войну») gets its text written by the agent before planning (the model's text, checked against the
@@ -405,7 +406,8 @@ def generate_variants(
     if use_agent and models_on and writer is not False:
         # writer mode: a topic without material of its own gets its text written first (no plain report() here: the
         # build screen maps «plan: …» to the analyst; the writer's own events put it on «Автор»)
-        writer_res = _write_text(brief, skills, rec, budget_end, progress, agent_raw, workspace_root, force=writer is True)
+        writer_res = _write_text(brief, skills, rec, budget_end, progress, agent_raw, workspace_root, force=writer is True,
+                                 knowledge_id=knowledge_id)
         if writer_res is not None:
             fact_warnings.extend(writer_res.warnings)
             if writer_res.written:
@@ -882,10 +884,29 @@ def _brand_warnings(template_id: str, workspace_root, have: list[str]) -> list[s
     return [w for w in branded_warnings(template_id, workspace_root) if w not in have]
 
 
-def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], progress: Optional[ProgressFn], raw: list, workspace_root, *, force: bool = False):
+def _knowledge(knowledge_id: Optional[str], root: Path):
+    """The person's knowledge base as the writer's reference (verstka/knowledge), None when there is none or it is
+    empty."""
+    if not knowledge_id:
+        return None
+    from verstka.knowledge.reference import KbReference
+    from verstka.knowledge.store import KnowledgeBase
+
+    kb = KnowledgeBase.open(root, knowledge_id)
+    if kb is None:
+        log.warning("knowledge base %s not found", knowledge_id)
+        return None
+    ref = KbReference(kb)
+    return None if ref.empty else ref
+
+
+def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], progress: Optional[ProgressFn], raw: list, workspace_root, *, force: bool = False,
+                knowledge_id: Optional[str] = None):
     """Writer mode's phase (planning/writer.py) when the brief is a topic: None when writer mode does not apply (a
     brief with material, the writer switched off). Never raises: a failure is a result the pipeline builds around (the
-    skeleton or the user's own text, as before)."""
+    skeleton or the user's own text, as before). With a knowledge base (`knowledge_id`) the writer takes its facts from
+    the person's documents, and a plan without material of its own («1. Итоги… 2. Клиенты… 3. Планы…») is written
+    from the base too — one slide per item."""
     from verstka.ingest.workspace import default_workspace_root
     from verstka.planning.writer import load_config, write_deck, writer_mode
 
@@ -893,10 +914,22 @@ def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], pr
         cfg = load_config()
         if not (cfg.get("enabled", True) or force):
             return None
+        root = Path(workspace_root) if workspace_root else default_workspace_root()
+        kb = _knowledge(knowledge_id, root)
         mode = writer_mode(brief)
+        if mode.kind == "off" and kb is not None:
+            from verstka.planning.topic_writer import kb_plan_mode
+
+            mode = kb_plan_mode(brief, mode)
         if mode.kind == "off":
             return None
-        root = Path(workspace_root) if workspace_root else default_workspace_root()
+        if kb is not None:
+            from verstka.planning.topic_writer import write_topic_deck
+
+            return write_topic_deck(
+                brief, mode, skills, providers, budget_end=budget_end, progress=_event_sink(progress), raw=raw,
+                cache_dir=root / "cache" / "reference", config=cfg, knowledge=kb,
+            )
         if str(cfg.get("engine", "v2")) == "v2":
             # v2 (planning/topic_writer.py): the must-know facts planned first, every slide written on its own, the
             # coverage and the facts checked
@@ -927,4 +960,33 @@ def _mark_written(o: DeckOutline, res) -> DeckOutline:
     if o.slides and line not in (o.slides[0].notes or ""):
         notes = (o.slides[0].notes or "").strip()
         o.slides[0].notes = f"{notes}\n\n{line}" if notes else line
+    if getattr(res, "basis", "") == "kb" and res.sources:
+        _kb_notes(o, res.sources)
     return o
+
+
+KB_NOTE_SHARE = 0.6  # the share of a statement's words a slide must say to be its source's slide
+
+
+def _kb_notes(o: DeckOutline, sources: list[dict]) -> None:
+    """Each slide's notes name where its facts come from in the person's knowledge base («Источники: «Отчёт Q3»,
+    раздел «Выручка», стр. 2; …») — the statements of the writer's text the slide says (by their words: the slide may be
+    laid out in other words than the text)."""
+    from verstka.knowledge.reference import KbSource, sources_line
+    from verstka.knowledge.text import tokens
+
+    for osl in o.slides:
+        if (osl.notes or "").find("Источник") >= 0:
+            continue
+        have = set(tokens(" ".join([osl.headline or "", osl.subtitle or "", osl.takeaway or "", osl.content.model_dump_json()])))
+        got: list[KbSource] = []
+        for x in sources:
+            want = set(tokens(x.get("text") or ""))
+            if not want or len(want & have) < KB_NOTE_SHARE * len(want):
+                continue
+            got.append(KbSource(doc=x.get("doc") or "", title=x.get("page") or "", name="", url=x.get("url") or None,
+                                place=x.get("place") or "", fragment=x.get("fragment") or "", text=""))
+        line = sources_line(got)
+        if line:
+            notes = (osl.notes or "").strip()
+            osl.notes = f"{notes}\n\n{line}" if notes else line

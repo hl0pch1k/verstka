@@ -1,5 +1,5 @@
 name: topic_fact_check
-version: 1.1.0
+version: 1.2.0
 role: llm
 description: >
   Writer mode, step 3 (verstka/planning/topic_writer.py): a subject expert reads every statement of the written deck
@@ -15,3 +15,4 @@ params:
 changelog:
   - "1.0.0: writer mode v2 (2026-10-08): the v1 deck on integrals said the first publication was in 1675 (Leibniz published in 1684)"
   - "1.1.0: formulas as typeset LaTeX, each with its explanation in words; math and technical topics are decks of formulas, worked examples and their explanation (2026-10-08)"
+  - "1.2.0: knowledge base fragments as the truth (`source: kb`) (2026-10-17)"

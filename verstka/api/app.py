@@ -94,6 +94,20 @@ def max_text_bytes() -> int:
     return _env_mb("VERSTKA_MAX_TEXT_MB", 15)
 
 
+# «Из файла» — документ DOCX / PDF, и база знаний: документы (по одному, папкой или архивом) и ссылки на публичные страницы
+def max_document_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_DOC_MB", 25)
+
+
+def max_knowledge_upload_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_KB_UPLOAD_MB", 100)
+
+
+_KB_DOCS_PATH_RE = re.compile(r"^/api/knowledge/[A-Za-z0-9_-]{1,64}/documents$")
+_MAX_KB_FILES = 60  # файлов в одном запросе к базе знаний (папка)
+_MAX_DOC_MARKDOWN = 60_000  # символов текста документа, которые встают в поле «О чём презентация»
+
+
 _MAX_DATA_FILES = 10  # файлов с данными за один запрос
 _MAX_DATA_TABLES = 30  # таблиц (листов, ключей JSON, таблиц в тексте) из одного запроса
 # строк одной таблицы, которые читаются в набор: дальше — «Прочитаны первые 200 000 строк из 640 000». Профиль и
@@ -132,6 +146,12 @@ def _upload_cap(path: str) -> Optional[tuple[int, str]]:
     if path == "/api/templates":
         limit = max_upload_bytes()
         return limit + _SLACK, f"Файл больше {_mb(limit)} МБ — уменьшите картинки в шаблоне или удалите лишние слайды"
+    if path == "/api/documents":
+        limit = max_document_bytes()
+        return limit + _SLACK, f"Документ больше {_mb(limit)} МБ — оставьте в нём только нужные разделы"
+    if _KB_DOCS_PATH_RE.match(path):
+        limit = max_knowledge_upload_bytes()
+        return limit + _SLACK, f"Документы больше {_mb(limit)} МБ за один раз — добавляйте их частями"
     return None
 
 
@@ -274,6 +294,8 @@ class GenerateRequest(BaseModel):
     dataset_ids: list[str] = Field(default_factory=list)
     brandbook_id: Optional[str] = None
     brand_priority: BrandPriority = "brand"
+    # база знаний (id из POST /api/knowledge): агент пишет текст по её документам — каждый факт с источником
+    knowledge_id: Optional[str] = None
 
 
 class PictureBody(BaseModel):
@@ -803,6 +825,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         progress=progress,
         pictures=req.pictures,
         image_provider=image_provider() if req.pictures is not False else None,
+        knowledge_id=req.knowledge_id,
     )
     from verstka.data.story import stamp_steps
 
@@ -938,7 +961,8 @@ def _brand_line(stage: Any) -> str:
 def _request_options(req: GenerateRequest) -> dict:
     """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
     return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from,
-            "dataset_ids": list(req.dataset_ids), "brandbook_id": req.brandbook_id, "brand_priority": req.brand_priority}
+            "dataset_ids": list(req.dataset_ids), "brandbook_id": req.brandbook_id, "brand_priority": req.brand_priority,
+            "knowledge_id": req.knowledge_id}
 
 
 def _generation_job(gid: str, gdir: Path, req: GenerateRequest, data: Optional[GenerationData] = None) -> Callable[[Job], dict]:
@@ -1404,6 +1428,8 @@ def _read_tables(name: str, data: bytes, several: bool) -> list[Table]:
     from verstka.data.readers import DataReadError, read_bytes
 
     prefix = f"«{name}»: " if several else ""
+    if _ext_of(name) in _DOC_DATA_EXTS:
+        return _document_tables(name, data, prefix)
     try:
         tables = read_bytes(name, data)
     except DataReadError as e:
@@ -1415,6 +1441,31 @@ def _read_tables(name: str, data: bytes, several: bool) -> list[Table]:
     if not tables:
         raise HTTPException(400, prefix + ("н" if prefix else "Н") + "е нашёл таблицу в файле")
     return tables
+
+
+_DOC_DATA_EXTS = (".docx", ".docm", ".pdf", ".doc", ".rtf", ".odt")
+
+
+def _document_tables(name: str, data: bytes, prefix: str = "") -> list[Table]:
+    """The tables of figures of a DOCX / PDF document as data files (the second stage's path: each table with its
+    caption, read as a table in a text by verstka/data/readers.py). The tables of words stay in the document's text."""
+    from verstka.data.readers import DataReadError
+    from verstka.ingest.documents import DocumentError, document_tables
+
+    other = ". Таблицу можно приложить и как CSV, XLSX, JSON"
+    try:
+        return document_tables(name, data)
+    except DocumentError as e:
+        msg = str(e)
+        if "нет таблиц" in msg:
+            raise HTTPException(400, prefix + (msg[:1].lower() + msg[1:] if prefix else msg))
+        raise HTTPException(400, prefix + msg + other)
+    except DataReadError as e:
+        msg = str(e).strip() or "таблицы документа не читаются"
+        raise HTTPException(400, prefix + (msg[:1].lower() + msg[1:] if prefix else msg))
+    except Exception:  # noqa: BLE001 - a reader's slip on a broken file: said in words
+        log.warning("document not read: %s", name, exc_info=True)
+        raise HTTPException(400, f"Не удалось прочитать «{name}» — проверьте, что файл не повреждён{other}")
 
 
 @app.post("/api/datasets")
@@ -1508,6 +1559,158 @@ def delete_dataset(did: str) -> dict:
         raise HTTPException(409, f"Этот файл с данными использует {who} — он остаётся на сервере, пока она есть" if len(decks) == 1
                             else f"Этот файл с данными используют {who} — он остаётся на сервере, пока они есть")
     return {"deleted": store.delete_dataset(did)}
+
+
+# ------------------------------------------------------------------ «Из файла»: документ DOCX / PDF → текст и данные
+
+
+@app.post("/api/documents")
+def upload_document(file: UploadFile = File(...)) -> dict:
+    """Документ DOCX или PDF (а также DOC, RTF, ODT, MD, TXT) → его текст Markdown для поля «О чём презентация»:
+    заголовки «#», абзацы, списки, таблицы слов. Таблицы с цифрами — не в тексте: `data_tables` говорит, сколько их,
+    а сам файл, отправленный в /api/datasets, даёт по карточке данных на таблицу. Скан без текстового слоя, защищённый
+    паролем или повреждённый файл — 400 с причиной."""
+    from verstka.ingest.documents import DocumentError, read_document
+
+    name = data_file_name(file.filename, "документ")
+    limit = max_document_bytes()
+    data = file.file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, f"«{name}» больше {_mb(limit)} МБ — оставьте в документе только нужные разделы")
+    if _ext_of(name) not in _DOC_TEXT_EXTS:
+        raise HTTPException(400, f"Файл «{name}» не подойдёт — нужен документ DOCX или PDF (или текст .txt, .md)")
+    try:
+        doc = read_document(name, data)
+    except DocumentError as e:
+        raise HTTPException(400, str(e))
+    except Exception:  # noqa: BLE001 - a reader's slip on a broken file: said in words
+        log.warning("document not read: %s", name, exc_info=True)
+        raise HTTPException(400, f"Не удалось прочитать «{name}» — проверьте, что файл не повреждён")
+    text = doc.markdown(data_tables=False)
+    full = doc.markdown()
+    cut = False
+    if len(text) > _MAX_DOC_MARKDOWN:
+        text = text[:_MAX_DOC_MARKDOWN].rsplit("\n\n", 1)[0].rstrip() + "\n"
+        cut = True
+    warnings = list(doc.warnings) + (["документ длинный — в поле встало его начало"] if cut else [])
+    return {**doc.summary(), "markdown": text, "full_markdown": full[:_MAX_DOC_MARKDOWN * 2], "warnings": warnings}
+
+
+_DOC_TEXT_EXTS = (".docx", ".docm", ".dotx", ".pdf", ".doc", ".rtf", ".odt", ".md", ".markdown", ".txt")
+
+
+# ------------------------------------------------------------------ база знаний
+
+
+def _kb(kid: str):
+    from verstka.knowledge.store import KnowledgeBase
+
+    kb = KnowledgeBase.open(store.root, kid)
+    if kb is None:
+        raise HTTPException(404, "База знаний не найдена — создайте её снова")
+    return kb
+
+
+class KnowledgeCreate(BaseModel):
+    name: str = Field(default="", max_length=120)
+
+
+class KnowledgeLink(BaseModel):
+    url: str = Field(..., max_length=2000)
+
+
+@app.post("/api/knowledge")
+def create_knowledge(req: Optional[KnowledgeCreate] = None) -> dict:
+    """Новая пустая база знаний (документы и ссылки добавляются следующими запросами)."""
+    from verstka.knowledge.store import KnowledgeBase
+
+    return KnowledgeBase.create(store.root, (req.name if req else "") or "").summary()
+
+
+@app.get("/api/knowledge")
+def list_knowledge() -> list[dict]:
+    from verstka.knowledge.store import list_bases
+
+    return list_bases(store.root)
+
+
+@app.get("/api/knowledge/{kid}")
+def get_knowledge(kid: str) -> dict:
+    return _kb(kid).summary()
+
+
+@app.delete("/api/knowledge/{kid}")
+def delete_knowledge(kid: str) -> dict:
+    _kb(kid).delete()
+    return {"deleted": True}
+
+
+@app.post("/api/knowledge/{kid}/documents")
+def add_knowledge_documents(kid: str, files: Optional[list[UploadFile]] = File(None)) -> dict:
+    """Документы в базу: DOCX, PDF, MD, TXT, HTML — по одному, папкой (много файлов) или архивом .zip. Каждый читается,
+    режется на фрагменты и индексируется локально. Что не прочиталось — в `skipped` с причиной; база — в `base`."""
+    kb = _kb(kid)
+    uploads = [f for f in files or [] if f is not None]
+    if not uploads:
+        raise HTTPException(400, "Выберите документы: DOCX, PDF, MD или TXT")
+    if len(uploads) > _MAX_KB_FILES:
+        raise HTTPException(413, f"За один раз — до {_MAX_KB_FILES} файлов, а выбрано {len(uploads)}. Добавьте остальные следующим шагом")
+    limit = max_document_bytes()
+    added: list[dict] = []
+    skipped: list[dict] = []
+    for f in uploads:
+        name = data_file_name(f.filename, "документ")
+        data = f.file.read(max(limit, 100 * 1024 * 1024 if _ext_of(name) == ".zip" else limit) + 1)
+        if _ext_of(name) != ".zip" and len(data) > limit:
+            skipped.append({"name": name, "reason": f"больше {_mb(limit)} МБ"})
+            continue
+        got = kb.add_file(name, data)
+        added += got.docs
+        skipped += got.skipped
+    if not added and skipped and len(uploads) == 1 and len(skipped) == 1:
+        raise HTTPException(400, f"«{skipped[0]['name']}»: {skipped[0]['reason']}")
+    return {"added": added, "skipped": skipped, "base": kb.summary()}
+
+
+@app.post("/api/knowledge/{kid}/links")
+def add_knowledge_link(kid: str, req: KnowledgeLink) -> dict:
+    """Публичная страница в базу: одна страница по ссылке (http/https, без входа, до 5 МБ и 12 с, без обхода сайта)."""
+    from verstka.knowledge.store import KnowledgeError
+
+    kb = _kb(kid)
+    try:
+        got = kb.add_url(req.url)
+    except KnowledgeError as e:
+        raise HTTPException(400, str(e))
+    return {"added": got.docs, "skipped": got.skipped, "base": kb.summary()}
+
+
+@app.delete("/api/knowledge/{kid}/documents/{doc_id}")
+def delete_knowledge_document(kid: str, doc_id: str) -> dict:
+    kb = _kb(kid)
+    if not kb.remove(doc_id):
+        raise HTTPException(404, "Документа нет в базе")
+    return {"deleted": True, "base": kb.summary()}
+
+
+@app.get("/api/knowledge/{kid}/documents/{doc_id}")
+def get_knowledge_document(kid: str, doc_id: str) -> dict:
+    kb = _kb(kid)
+    d = kb.doc(doc_id)
+    if d is None:
+        raise HTTPException(404, "Документа нет в базе")
+    return {**d, "markdown": kb.text_md(doc_id) or ""}
+
+
+@app.get("/api/knowledge/{kid}/search")
+def search_knowledge(kid: str, q: str = "", k: int = 8) -> dict:
+    """Поиск по базе (BM25 по основам слов): фрагменты с документом и местом — так их видит агент."""
+    from verstka.knowledge.reference import KbReference
+
+    ref = KbReference(_kb(kid))
+    hits = ref.search.top(q[:2000], max(1, min(30, k)))
+    return {"query": q, "hits": [{"doc": f.doc, "title": ref.title_of(f.doc), "place": f.place(), "label": ref.label(f), "text": f.text[:1200], "score": round(sc, 3)}
+                                 for f, sc in hits]}
 
 
 class GoalsRequest(BaseModel):
@@ -2050,6 +2253,14 @@ def create_generation(req: GenerateRequest) -> dict:
             raise HTTPException(422, "План слайдов не прочитан: " + _validation_message(e))
     elif not _brief_from_request(req).text.strip() and not req.dataset_ids:
         raise HTTPException(422, "Текст презентации пуст")
+    if req.knowledge_id:
+        from verstka.knowledge.store import KnowledgeBase
+
+        kb = KnowledgeBase.open(store.root, req.knowledge_id)
+        if kb is None:
+            raise HTTPException(404, "Базы знаний больше нет на сервере — добавьте документы снова")
+        if not kb.docs:
+            req.knowledge_id = None  # пустая база: собираем как без неё
     # вторая ступень: файлы с данными и брендбук должны быть на сервере (и брендбук — уже разобран)
     req.dataset_ids = list(dict.fromkeys(req.dataset_ids))
     try:
@@ -2173,7 +2384,22 @@ def explain_slide(gid: str, strategy: str, index: int) -> dict:
     outline = DeckOutline.model_validate(raw)
     plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
     gdir = vdir.parent
-    return {"index": index, "text": _explain_text(raw, outline, plan, manifest, index, _current_agent(raw, read_agent_events(gdir), strategy, _edits_of(vdir))["critic"])}
+    text = _explain_text(raw, outline, plan, manifest, index, _current_agent(raw, read_agent_events(gdir), strategy, _edits_of(vdir))["critic"])
+    src = _notes_sources(outline, index)
+    if src:
+        text = f"{text}\nФакты слайда — из базы знаний. {src}"
+    return {"index": index, "text": text}
+
+
+_SOURCES_LINE_RE = re.compile(r"(?:^|\n)\s*(Источники?: [^\n]+)")
+
+
+def _notes_sources(outline: DeckOutline, index: int) -> str:
+    """The slide's «Источники: …» line its notes keep (a deck written from the knowledge base), "" when none."""
+    if not (1 <= index <= len(outline.slides)):
+        return ""
+    m = _SOURCES_LINE_RE.search(outline.slides[index - 1].notes or "")
+    return m.group(1).strip() if m else ""
 
 
 def _explain_text(raw: Optional[dict], outline: DeckOutline, plan: LayoutPlan, manifest, index: int, critic: list[dict]) -> str:

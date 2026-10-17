@@ -757,6 +757,104 @@ def _subject_title(subject: str) -> str:
     return H.cap_first(subject)
 
 
+# ------------------------------------------------------------------ the knowledge base as the source
+
+KB_MIN_RELEVANCE = 1.0  # the base's best fragment scores at least this for the request: it knows the topic
+KB_PLAN_CHARS = 11000
+KB_SLIDE_CHARS = 3200
+_NO_FIGURE_CHECK = ("f", "m")  # formulas: their digits are not facts of a document
+
+
+_PLAN_ITEM_RE = re.compile(r"^\s*(?:(?:слайд|slide)\s*№?\s*\d{1,2}\s*[.:)—–-]?|\d{1,2}\s*[.)]|[-–—•*·])\s*(?P<t>\S.*)$", re.I)
+PLAN_MAX_FIGURES = 4  # a plan with more figures than this brings material of its own: it is laid out as written
+
+
+def plan_items(text: str) -> tuple[str, list[str]]:
+    """(the deck's topic, the plan's items) of a plan the person wrote — a numbered or bulleted list, «Слайд N: …»,
+    the lines of a letter (planning/plan_form.py when it reads the text). An item keeps its own words (the author's
+    asks included: the planner takes them as the slide's form, never as text)."""
+    from verstka.planning.brief_structure import _front_matter
+
+    _, body = _front_matter(text or "")
+    try:
+        from verstka.planning.plan_form import as_slides
+
+        pf = as_slides(body)
+    except Exception:  # noqa: BLE001 - the simple reading below
+        pf = None
+    if pf is not None and pf.items:
+        items = [" — ".join(x for x in [it.title, " ".join(ln.strip() for ln in it.lines if ln.strip() and not ln.strip().startswith("|"))] if x)
+                 for it in pf.items]
+        return (pf.title or ""), [i for i in items if i]
+    head = ""
+    items: list[str] = []
+    for ln in body.splitlines():
+        if not ln.strip():
+            continue
+        m = _PLAN_ITEM_RE.match(ln)
+        if m:
+            items.append(" ".join(m.group("t").split()).strip(" .;"))
+        elif not items and not head:
+            head = H.strip_end(ln.strip().lstrip("#").strip())
+        elif items:
+            items[-1] = f"{items[-1]} — {ln.strip()}"
+    return head, items
+
+
+def kb_plan_mode(brief: Brief, mode: WriterMode) -> WriterMode:
+    """With a knowledge base, a plan without material of its own («1. Итоги квартала 2. Клиенты 3. Планы» — at most
+    PLAN_MAX_FIGURES figures, no table) is written from the base: one slide per item, in order. A text with material
+    stays as it is (faithful mode)."""
+    if mode.kind != "off" or mode.reason not in ("list", "specs", "sentences") and not mode.reason.startswith(("sentences", "words")):
+        return mode
+    from verstka.knowledge.text import figures
+
+    text = brief.text or ""
+    if sum(1 for ln in text.splitlines() if ln.strip().startswith("|")) >= 2:
+        return mode
+    head, items = plan_items(text)
+    if len(items) < 2:
+        return mode
+    body_figs = figures(re.sub(r"слайд\s*\d+|^\s*\d{1,2}[.)]", " ", text, flags=re.I | re.M))
+    if len(body_figs) > PLAN_MAX_FIGURES:
+        return mode
+    topic = head or (brief.title_hint or "") or items[0]
+    return WriterMode("topic", topic=topic, theses=[], private_hint=mode.private_hint, language=mode.language, reason="kb_plan", plan=items[:MAX_CONTENT])
+
+
+def kb_figure_check(slides: list[TopicSlide], kb: Any, given: str = "") -> list[dict]:
+    """The statements with a figure no document of the base states (nor the person's request): out of the deck.
+    Returns what went ({"slide", "id", "text", "why"})."""
+    issues: list[FactIssue] = []
+    gone: list[dict] = []
+    for st in statements(slides):
+        field_ = st["id"].split(".", 1)[1]
+        if re.match(r"[a-z]+", field_).group(0) in _NO_FIGURE_CHECK:
+            continue
+        bad = kb.unsupported(st["text"], given)
+        if bad:
+            issues.append(FactIssue(id=st["id"], problem="figure not in the knowledge base", fix=""))
+            gone.append({"slide": int(st["id"][1:].split(".")[0]), "id": st["id"], "text": st["text"],
+                         "why": "в базе знаний нет " + ", ".join(sorted(bad))})
+    if issues:
+        apply_fixes(slides, issues)
+    return gone
+
+
+def kb_sources(slides: list[TopicSlide], kb: Any) -> list[dict]:
+    """Every statement's source in the base: {"slide", "text", "page" (the document), "url", "sentence" (the place and
+    the fragment), "doc", "place", "fragment"}; a statement no fragment supports has none."""
+    out: list[dict] = []
+    for st in statements(slides):
+        src = kb.source_of(st["text"])
+        if src is None:
+            continue
+        out.append({"slide": int(st["id"][1:].split(".")[0]), "id": st["id"], "text": st["text"], "page": src.title, "url": src.url or "",
+                    "sentence": (f"{src.place}: " if src.place else "") + " ".join(src.text.split())[:400],
+                    "doc": src.doc, "place": src.place, "fragment": src.fragment})
+    return out
+
+
 def write_topic_deck(
     brief: Brief,
     mode: WriterMode,
@@ -769,9 +867,16 @@ def write_topic_deck(
     cache_dir: Any = None,
     config: Optional[dict] = None,
     transport: Any = None,
+    knowledge: Any = None,
 ) -> WriterResult:
     """The writer phase v2 (see the module's docstring). Never raises: a failure is a result with status «failed»
-    (the caller builds the person's text as it is)."""
+    (the caller builds the person's text as it is).
+
+    `knowledge`: the person's knowledge base (verstka/knowledge/reference.KbReference). When it knows the topic it is
+    the deck's source of facts in place of Wikipedia: the plan and every slide are written from its fragments, every
+    figure is checked against its documents (a statement with a figure none of them states goes), the fact check
+    reads the fragments, and every statement keeps the fragment it comes from (`sources`: the slide's notes and
+    «Почему так» name the document and the place)."""
     t0 = time.monotonic()
     cfg = config or {}
     res = WriterResult(mode=mode.kind, topic=mode.topic, theses=list(mode.theses), lang=mode.language)
@@ -830,18 +935,37 @@ def write_topic_deck(
     bound = providers.with_deadline(deadline) if hasattr(providers, "with_deadline") else providers
 
     subject = topic_subject(mode.topic)
+    plan_items = list(getattr(mode, "plan", None) or [])
     asked = int(brief.slide_count or DEFAULT_SLIDES)
+    if plan_items and not brief.slide_count:
+        asked = len(plan_items) + 1  # the person's plan: one slide per item
     content_n = max(MIN_CONTENT, min(MAX_CONTENT, asked - 1))
     res.asked = content_n + 1
     rcfg = cfg.get("reference") or {}
-    ref_on = bool(rcfg.get("enabled", True)) and not mode.private_hint
-    emit(f"ищу материалы по теме «{H.strip_end(subject)[:80]}»." if ref_on else f"пишу текст по теме «{H.strip_end(subject)[:80]}».")
+    # the knowledge base: the deck's source when it knows the topic (its documents are the person's own: a topic about
+    # «наш проект» is no longer private to the writer)
+    kb = knowledge if knowledge is not None and not getattr(knowledge, "empty", True) else None
+    kb_query = " ".join([subject, *mode.theses, *plan_items])
+    if kb is not None:
+        score = kb.relevance(kb_query)
+        if score < KB_MIN_RELEVANCE:
+            res.warnings.append(f"knowledge: the base does not know the topic (best score {score:.2f})")
+            emit(f"в базе знаний «{kb.name}» нет ничего о теме — пишу по открытым источникам.")
+            kb = None
+    ref_on = bool(rcfg.get("enabled", True)) and not mode.private_hint and kb is None
+    if kb is not None:
+        res.basis = "kb"
+        res.kb = {"id": kb.kb.id, "name": kb.name, "docs": [{"id": k, "title": kb.title_of(k), "url": d.get("url")} for k, d in kb.docs.items()]}
+        emit(f"беру факты из базы знаний «{kb.name}»: {ru_count(len(kb.docs), 'документ', 'документа', 'документов')}, "
+             f"{ru_count(len(kb.frags), 'фрагмент', 'фрагмента', 'фрагментов')}.")
+    else:
+        emit(f"ищу материалы по теме «{H.strip_end(subject)[:80]}»." if ref_on else f"пишу текст по теме «{H.strip_end(subject)[:80]}».")
 
     # 1. the topic's kind, its articles, the reference
     kind: Optional[str] = None
     reference = None
     tr = time.monotonic()
-    if not mode.private_hint:
+    if not mode.private_hint and kb is None:
         try:
             r = skills.run("topic_reference", bound, {"topic": subject, "lang": mode.language})
             usage(r)
@@ -872,6 +996,10 @@ def write_topic_deck(
             keep_raw("topic_reference", error=e)
             res.warnings.append(f"reference: {type(e).__name__} ({str(e)[:120]})")
     res.kind = kind or res.kind or "other"
+    if kb is not None and res.kind in ("private", "other"):
+        from verstka.planning.writer import guess_kind
+
+        res.kind = guess_kind(subject)
     res.seconds["reference"] = round(time.monotonic() - tr, 2)
     texts = reference.full_texts if reference is not None else []
     paras = paragraphs(texts)
@@ -886,12 +1014,16 @@ def write_topic_deck(
     # 2. the plan: the cover, the must-know facts, the slides
     tp = time.monotonic()
     ref_plan = (reference.cut if reference is not None else "")[:REF_PLAN_CHARS]
+    if kb is not None:
+        ref_plan = kb.cut(kb_query, KB_PLAN_CHARS)
+    source = "kb" if kb is not None else "wiki"
     plan: Optional[TopicPlan] = None
     for attempt in range(2):
         try:
             r = skills.run("topic_planner", bound, {
                 "request": mode.topic, "subject": subject, "language": "русский" if mode.language == "ru" else "English",
-                "slides": content_n, "theses": mode.theses, "reference": ref_plan, "reference_title": main.title if main else "",
+                "slides": content_n, "theses": mode.theses, "reference": ref_plan,
+                "reference_title": kb.name if kb is not None else (main.title if main else ""), "source": source, "plan_items": plan_items,
             })
             usage(r)
             keep_raw("topic_planner", r)
@@ -931,7 +1063,8 @@ def write_topic_deck(
                 r = skills.run("topic_slide_writer", bound, {
                     "deck_title": plan.title, "subject": subject, "language": "русский" if mode.language == "ru" else "English",
                     "plan": plan_rows, "n": k, "title": ps.title, "goal": ps.goal, "form": ps.form, "picture": ps.picture,
-                    "facts": facts, "reference": relevant(paras, query, REF_SLIDE_CHARS),
+                    "facts": facts, "source": source,
+                    "reference": kb.relevant(query, KB_SLIDE_CHARS) if kb is not None else relevant(paras, query, REF_SLIDE_CHARS),
                 })
                 usage(r)
                 keep_raw("topic_slide_writer", r)
@@ -966,6 +1099,16 @@ def write_topic_deck(
     if put:
         res.edits.extend({"slide": p["slide"], "kind": "must_fact", "text": p["fact"]} for p in put)
 
+    # 4b. the knowledge base: every figure of the deck must be in its documents (or in the person's request)
+    if kb is not None:
+        gone = kb_figure_check(slides, kb, given=" ".join([mode.topic, *mode.theses, *plan_items]))
+        res.removed.extend(gone)
+        if gone:
+            emit(f"сверил цифры с базой знаний — убрал {ru_count(len(gone), 'утверждение', 'утверждения', 'утверждений')}, "
+                 "цифр которых в документах нет.")
+        else:
+            emit("сверил цифры с базой знаний — все они есть в документах.")
+
     # 5. the fact check, in batches side by side, when there is time
     tc = time.monotonic()
     stmts = statements(slides)
@@ -979,7 +1122,8 @@ def write_topic_deck(
             q = " ".join(s["text"] for s in batch)
             try:
                 r = skills.run("topic_fact_check", bound, {
-                    "deck_title": plan.title, "subject": subject, "statements": batch, "reference": relevant(paras, q, REF_CHECK_CHARS),
+                    "deck_title": plan.title, "subject": subject, "statements": batch, "source": source,
+                    "reference": kb.relevant(q, REF_CHECK_CHARS, k=16) if kb is not None else relevant(paras, q, REF_CHECK_CHARS),
                 })
                 usage(r)
                 keep_raw("topic_fact_check", r)
@@ -1006,9 +1150,12 @@ def write_topic_deck(
         check_formulas(slides)
         dedupe_points(slides)
         order_timelines(slides)
+        if kb is not None:
+            # a correction must not bring a figure the base does not state
+            res.removed.extend(kb_figure_check(slides, kb, given=" ".join([mode.topic, *mode.theses, *plan_items])))
         res.removed.extend(c for c in changed if c["after"] is None)
         res.overruled.extend(c for c in changed if c["after"] is not None)
-        res.checked = "reference" if paras else "model"
+        res.checked = "knowledge" if kb is not None else "reference" if paras else "model"
         if len(failed) == len(batches):
             # the check did not answer: the text is as written — never «no errors found»
             res.check_state = "failed"
@@ -1022,11 +1169,18 @@ def write_topic_deck(
         res.check_skipped = "no_time" if stmts else "empty"
     res.seconds["check"] = round(time.monotonic() - tc, 2)
 
-    # 6. the text
+    # 6. the text; with the knowledge base every statement keeps the fragment it comes from
     text = render_text(plan, slides)
     res.text = text
     res.slides = len(slides)
-    res.sources = []
+    res.sources = kb_sources(slides, kb) if kb is not None else []
+    if kb is not None:
+        used = list(dict.fromkeys(x["doc"] for x in res.sources))
+        res.pages_used = [{"title": kb.title_of(d), "url": (kb.docs.get(d) or {}).get("url") or ""} for d in used]
+        res.source = {"title": kb.name, "url": ""}
+        n_src = len(res.sources)
+        n_all = len(statements(slides))
+        emit(f"у {n_src} из {n_all} утверждений указан источник в базе знаний — документ и место; они в заметках слайдов.")
     # a topic deck informs: never a pitch of a product (the person's purpose stays for a company or a market)
     purpose = brief.purpose if res.kind in ("company", "market") else "other"
     res.brief = Brief(

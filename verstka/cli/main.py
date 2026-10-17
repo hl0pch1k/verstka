@@ -119,9 +119,11 @@ def generate(
     data: Optional[list[str]] = typer.Option(None, "--data", "-d", help="Data files (CSV, XLSX, JSON, TXT/MD with a table) or a folder of them; repeat --data for several, or give one comma-separated value: the deck becomes a data story"),
     brand: Optional[str] = typer.Option(None, "--brand", help="Brandbook: tokens JSON, PDF guideline, a folder or .zip with logos, or a Figma link — the deck is laid out on the template's branded copy"),
     brand_priority: str = typer.Option("brand", "--brand-priority", help="brand (the brandbook wins over the template) | template (the brand only adds what the template lacks)"),
+    kb: Optional[list[str]] = typer.Option(None, "--kb", help="Knowledge base: an id from the workspace, or documents (DOCX, PDF, MD, TXT), folders, .zip archives and public page links — the writer takes the deck's facts from them, each with its source; repeat --kb for several"),
 ) -> None:
-    """Generate three layout variants (or one) from a template and a brief (and data files, a brandbook), audit,
-    autofix and export them."""
+    """Generate three layout variants (or one) from a template and a brief (and data files, a brandbook, a knowledge
+    base), audit, autofix and export them. The brief may be a DOCX or PDF document: its text (headings, lists, tables
+    of words) is the brief, its tables of figures become data files."""
     from verstka.pipeline.generate import generate_variants
     from verstka.planning.brief import load_brief
     from verstka.schemas.outline import DeckOutline
@@ -152,7 +154,14 @@ def generate(
     use_models = not no_llm
     providers = _providers(models, use_models or audit_models)
     skills = SkillsRegistry.load() if (use_models or audit_models) else None
-    brief_obj = load_brief(brief) if brief else None
+    brief_obj = None
+    if brief and Path(brief).suffix.lower() in _DOC_BRIEF_EXTS:
+        brief_obj, doc_tables = _document_brief(Path(brief))
+        if doc_tables and not data:
+            data = [str(brief)]  # its tables of figures: the deck becomes a data story told by the document's text
+            console.print(f"Документ «{Path(brief).name}»: текст — бриф, {ru_count(doc_tables, 'таблица с цифрами', 'таблицы с цифрами', 'таблиц с цифрами')} — данные")
+    elif brief:
+        brief_obj = load_brief(brief)
     if brief_obj is not None and slides:
         brief_obj.slide_count = int(slides)
     if brief_obj is not None and cfg.get("audience"):
@@ -207,6 +216,7 @@ def generate(
             pictures=False if (no_llm and no_vlm) else None,
             image_provider=_image_provider(models) if models and not (no_llm and no_vlm) else None,
             progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"),
+            knowledge_id=_knowledge_base(list(kb or []) or [str(x) for x in (cfg.get("kb") or [])], workspace),
         )
     from verstka.data.story import stamp_steps
 
@@ -266,11 +276,73 @@ def _data_files(items: list[str]) -> list[Path]:
     return list(dict.fromkeys(out))
 
 
+_DOC_BRIEF_EXTS = (".docx", ".docm", ".pdf", ".doc", ".rtf", ".odt")
+
+
+def _document_brief(path: Path):
+    """A DOCX / PDF brief: (its text as the brief, how many tables of figures it has)."""
+    from verstka.ingest.documents import DocumentError, read_document
+    from verstka.planning.brief import parse_brief_text
+
+    try:
+        doc = read_document(path.name, path.read_bytes())
+    except DocumentError as e:
+        raise typer.BadParameter(f"--brief: {e}")
+    return parse_brief_text(doc.markdown(data_tables=False)), len(doc.data_tables)
+
+
+def _knowledge_base(items: list[str], workspace: Optional[Path]) -> Optional[str]:
+    """--kb values → the id of the knowledge base: an id of the workspace's base as it is, else a new base of the
+    documents, folders, archives and links given."""
+    if not items:
+        return None
+    from verstka.ingest.workspace import default_workspace_root
+    from verstka.knowledge.store import KnowledgeBase, KnowledgeError
+
+    root = Path(workspace) if workspace else default_workspace_root()
+    if len(items) == 1 and KnowledgeBase.open(root, items[0]) is not None:
+        return items[0]
+    base = KnowledgeBase.create(root, "База знаний")
+    for item in items:
+        for part in [x.strip() for x in str(item).split(",") if x.strip()]:
+            if part.startswith(("http://", "https://")):
+                try:
+                    got = base.add_url(part)
+                except KnowledgeError as e:
+                    console.print(f"[yellow]--kb: {part} — {e}[/yellow]")
+                    continue
+            else:
+                p = Path(part)
+                files = sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p] if p.is_file() else []
+                if not files:
+                    raise typer.BadParameter(f"--kb: «{part}» не найден")
+                got = None
+                for f in files:
+                    r = base.add_file(f.name, f.read_bytes())
+                    for sk in r.skipped:
+                        console.print(f"[yellow]--kb: «{sk['name']}» — {sk['reason']}[/yellow]")
+                    got = r
+            if got is not None:
+                for d in got.docs:
+                    console.print(f"База знаний: «{d['title']}» — {ru_count(d['fragments'], 'фрагмент', 'фрагмента', 'фрагментов')}")
+    if not base.docs:
+        raise typer.BadParameter("--kb: ни один документ не прочитан")
+    console.print(f"База знаний {base.id}: {ru_count(len(base.docs), 'документ', 'документа', 'документов')}")
+    return base.id
+
+
 def _read_data(items: list[str]):
     from verstka.data.readers import DataReadError, read_file
+    from verstka.ingest.documents import DocumentError, document_tables
 
     tables = []
     for f in _data_files(items):
+        if f.suffix.lower() in _DOC_BRIEF_EXTS:
+            try:
+                tables += document_tables(f.name, f.read_bytes())
+            except (DocumentError, DataReadError) as e:
+                raise typer.BadParameter(f"--data: «{f.name}» — {e}")
+            continue
         try:
             tables += read_file(f)
         except DataReadError as e:
@@ -314,6 +386,33 @@ def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path
     for w in branded_warnings(tid, root):
         console.print(f"[yellow]брендбук:[/yellow] {w}")
     return TemplateWorkspace.open(tid, root).source
+
+
+@app.command(name="kb")
+def knowledge(
+    items: list[str] = typer.Argument(..., help="Documents (DOCX, PDF, MD, TXT, HTML), folders, .zip archives, public page links"),
+    name: str = typer.Option("База знаний", "--name", help="The base's name"),
+    search: Optional[str] = typer.Option(None, "--search", "-q", help="Search the base right away"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w"),
+) -> None:
+    """Build a knowledge base in the workspace from documents and links (local index, no embeddings); prints its id for
+    `generate --kb <id>`."""
+    from verstka.ingest.workspace import default_workspace_root
+    from verstka.knowledge.reference import KbReference
+    from verstka.knowledge.store import KnowledgeBase
+
+    kid = _knowledge_base(items, workspace)
+    root = Path(workspace) if workspace else default_workspace_root()
+    kbase = KnowledgeBase.open(root, kid)
+    if name and kbase is not None:
+        m = kbase.meta()
+        m["name"] = name
+        kbase._write_meta(m)
+    if search and kbase is not None:
+        ref = KbReference(kbase)
+        for f, sc in ref.search.top(search, 5):
+            console.print(f"[bold]{sc:.2f}[/bold] {ref.label(f)}\n  {' '.join(f.text.split())[:300]}")
+    console.print(kid)
 
 
 @app.command()
