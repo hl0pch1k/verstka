@@ -622,6 +622,11 @@ def metric_phrase(name: Optional[str], mtype: str = "number") -> Optional[Phrase
         if mtype == "money" and is_participle(first):
             st = first[:-1] + ("н" if first.endswith("но") else "")
             return Phrase(base, st + "ого" + rest, st + "ому" + rest, st + "ых" + rest, st + "ым" + rest, base, "n")
+        if is_participle(first) and rest and not re.match(r"^\s(?:на|в|во|по|за|с|со|из|к|от|до|для|у|о|об)\b", rest):
+            # «Куплено мест» — «купленных мест», а не «покупок мест» (слово колонки — места, не покупки)
+            st = re.sub(r"(ж|щ)денн$", r"\1дённ", first[:-1] + ("н" if first.endswith("но") else ""))
+            gen = st + "ых" + rest
+            return Phrase("Число " + gen, gen, "числу " + gen, "чисел " + gen, "числам " + gen, "Числа " + gen, "n")
         gen = _PARTICIPLE_NOUN.get(first) or (_participle_gen_pl(first) if is_participle(first) else _active_gen_pl(first))
         if gen is None:
             return None

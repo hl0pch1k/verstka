@@ -278,4 +278,5 @@ def test_huge_money_is_scaled():
     t = _t("Капитализация.csv", [["Компания", "Капитализация, руб."], ["Сбербанк", 7345000000000],
                                  ["Роснефть", 5120000000000], ["Яндекс", 1590000000000]])
     p = _plan(t)
-    assert "трлн ₽" in _sp(p.headline) and not re.search(r"\d{4}\s?\d{3}\s?\d{3}", _sp(p.headline)), p.headline
+    assert "трлн ₽" in _sp(p.caption) and not re.search(r"\d{4}\s?\d{3}\s?\d{3}", _sp(p.headline + " " + p.caption)), \
+        (p.headline, p.caption)

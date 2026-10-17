@@ -185,6 +185,14 @@ def test_goal_naming_one_row_follows_that_row():
     assert _sp(b[1].headline) == "Численность разработки выросла на 6,3% за квартал", b[1].headline
 
 
+def test_goal_naming_a_column_in_its_own_words():
+    """«У кого самая большая просрочка свыше 90 дней?»: «просрочки» в колонках нет, но «свыше 90 дней» — имя колонки;
+    ответ — по ней, величина названа по таблице («задолженности свыше 90 дней»), а не «свышя 90 дней»."""
+    (t, p), = _conv3("31", "A")
+    assert p.task.goal and _sp(p.headline) == "ЗАО «Ладога Логистик» — больше половины задолженности свыше 90 дней: 64%"
+    assert not any("не подходит" in r for r in p.task.reasons)
+
+
 # ── формулировки ──────────────────────────────────────────────────────────────────────────────────────────────────
 def test_wording_of_round_9():
     (t, p), = _conv3("21")  # доли единицы — в процентах
@@ -198,14 +206,14 @@ def test_wording_of_round_9():
     (t, p), = _conv3("38")  # баллы команд не складывают в «всего 508»: сравнение по итогу
     assert p.task.task == "comparison" and _sp(p.headline) == "«Нейроны» впереди: 84,5, «404» — 55,5"
     (t, p), = _conv3("17")  # колонка-год — «выручки за 2025 год», годы не складывают как категории
-    assert _sp(p.headline) == "Облачная платформа — 56% выручки за 2025 год: 16,2 из 28,9 млрд ₽"
+    assert _sp(p.headline) == "Облачная платформа — больше половины выручки за 2025 год: 56%"
     assert "Сумма" not in (chart_spec_of(p, t).y_title or "")
     (t, p), = _conv3("14")  # причастие «Утверждено» — со словом
-    assert _sp(p.headline) == "Облачная инфраструктура — 37% утверждённого бюджета"
+    assert _sp(p.headline) == "Облачная инфраструктура — крупнейшая доля утверждённого бюджета: 37%"
     (t, p), = _conv3("05", "A")  # больше свободных мест — не «впереди»
     assert _sp(p.headline) == "Больше всего — VK WorkSpace Диск: 213, меньше всего — Вики: 9"
     (t, p), = _conv3("34")  # ряд «На начало месяца» — не подлежащее
-    assert _sp(p.headline).startswith("Численность на начало месяца: +6% за 5 месяцев")
+    assert _sp(p.headline).startswith("Численность на начало месяца выросла на 6% за 5 месяцев")
     (t, p), = _conv3("07")  # «Доля неудачных изменений» — не колонка роста
     assert "растёт быстрее" not in p.task.reasons[0]
 
@@ -215,7 +223,7 @@ def test_text_table_takes_its_title_line():
     a, b = _conv3("26")
     assert a[0].units[1:] == ["млн ₽", "млн ₽"] and a[0].sheet == "Выручка по продуктам"
     assert b[0].units[1:] == ["чел.", "чел."] and b[0].sheet == "Численность команды на конец квартала"
-    assert _sp(a[1].headline) == "Облако — 63% выручки за II кв. 2026: 1 415 из 2 246 млн ₽"
+    assert _sp(a[1].headline) == "Облако — больше половины выручки за II кв. 2026: 63%"
 
 
 def test_forecasts_stay_apart_from_actuals():
@@ -238,6 +246,28 @@ def test_residual_row_is_never_the_leader():
     (t, p), = _conv3("08")
     assert _sp(p.headline) == "ТехноСофт приносит 19% выручки"
     assert chart_spec_of(p, t).highlight_index == 0
+
+
+def test_structure_and_share_headlines_state_a_conclusion():
+    """Заголовок структуры — не перечень долей («Платное — 53% приёма, бюджет — 35%»): что преобладает или какая
+    часть крупнейшая. Ни один заголовок обоих наборов-примеров и корпуса conv3 не описание чисел (правило аудита)."""
+    from verstka.data.story import is_description
+
+    heads = []
+    for folder in (SALES, SCIENCE):
+        files = [p for p in sorted(folder.iterdir()) if p.suffix.lower() in {".csv", ".xlsx", ".json", ".txt"}]
+        tables = [t for p in files for t in read_file(p)]
+        heads += [(p.profile.file, p.headline, p.task.task) for p in plan_datasets(tables, "")]
+    for key in ("04", "09", "15", "16", "20", "39"):
+        for which in ("nb", "B"):
+            heads += [(t.file, p.headline, p.task.task) for t, p in _conv3(key, which)]
+    bad = [(f, h) for f, h, task in heads if task != "kpi" and is_description(h)]
+    assert not bad, bad
+    d: dict[str, str] = {}
+    for f, h, _ in heads:
+        d.setdefault(f, h)  # без цели — первым
+    assert _sp(d["Приём по направлениям.xlsx"]) == "Больше половины приёма — платное: 53%"
+    assert _sp(d["16 Источники трафика сайта, сентябрь.csv"]) == "Поиск — крупнейшая доля визитов: 42%"
 
 
 # ── живая проверка 2: A4 и N-A3 ───────────────────────────────────────────────────────────────────────────────────

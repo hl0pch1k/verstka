@@ -19,7 +19,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from verstka.data.aggregate import MAX_SLIDES, RATE_GOAL, TABLE_ROWS, CatView, Data, KpiItem
-from verstka.data.facts import FactSet, facts_for
+from verstka.data.facts import FactSet, facts_for, plain_headline
 from verstka.data.goals import Goal, goal_ask, goal_focus, goal_match, goals_of, stems_of
 from verstka.data.words import stem_in
 from verstka.data.headline import _labels as headline_labels
@@ -176,10 +176,15 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     # самопроверка: каждое число заголовка и подписи пересчитано по сырым строкам файла; не подтвердилось — тема
     # вместо вывода и подпись только из подтверждённого, причина — в «Почему так»
     labels = _check_labels(fs, d, title)
+    # «Остальные 3» — подпись группы на графике, её цифра — имя, а не число вывода (раунд 9, V2)
+    labels += re.findall(r"[Оо]стальны[ех]\s+\d+(?:\s+[а-яё]+)?", f"{headline} {caption or ''}")
     verdict = verify(table, fs.facts, fs.prov, "" if headline == plain else headline, caption, labels, title,
                      bins=_bins_claim(d, task))
     if not verdict.headline_ok:
         headline = plain
+        if any("— не колонка «" in r for r in verdict.reasons):
+            # отвергнут пересказ имени колонки («покупок мест» при «Куплено мест») — тема её же именем
+            headline = plain = plain_headline(task, d, own=True)
         facts = [f for f in fs.facts if f.id in verdict.ok]
     if not verdict.caption_ok:
         caption = _factual_caption(fs, verdict, labels)
@@ -290,7 +295,13 @@ def _metric_ok(g: Goal, d: Data) -> bool:
         metric = [s_ for s_ in metric if not _CHANGE_METRIC.match(s_)]
     metric = [s_ for s_ in metric if not _STAT_METRIC.match(s_)] or metric[:0]
     # части сложных слов тоже: «воды» — в «Водопотребление», «на человека» — в единице «л/сут на человека»
-    return all(any(_near(s_, w) for w in words) for s_ in metric)
+    if all(any(_near(s_, w) for w in words) for s_ in metric):
+        return True
+    # цель называет колонку своими словами: «просрочка свыше 90 дней» — колонка «Свыше 90 дней» (два слова цели в
+    # одном имени колонки)
+    subj = [x for x in stems_of(g.phrase) if len(x) >= 3] + re.findall(r"\d+", g.phrase)
+    return any(sum(1 for x in subj if any(x == w or _near(x, w) for w in stems_of(c.name) + re.findall(r"\d+", c.name)))
+               >= 2 for c in d.profile.columns if c.role == "metric")
 
 
 def _unmet_reason(g: Goal, d: Data) -> str:

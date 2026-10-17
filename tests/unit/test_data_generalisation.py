@@ -138,7 +138,8 @@ def test_parts_under_one_header_are_a_composition():
         spec = chart_spec_of(p, t)
         assert [s.name for s in spec.series] == ["Бюджет", "Платное", "Целевое"]  # «Всего» — не ряд
         assert spec.categories[0] == "Прикладная информатика"  # порядок — по сумме частей (285)
-        assert _sp(p.headline) == "Платное — 61% приёма, бюджет — 31%"  # 1 030 и 530 из 1 685
+        # структура — вывод, а не перечень долей (раунд 9): что преобладает
+        assert _sp(p.headline) == "Больше половины приёма — платное: 61%"  # 1 030 из 1 685
         donut = chart_spec_of(p, t, option=2)
         assert donut.categories == ["Бюджет", "Платное", "Целевое"] and donut.highlight_index == 1
 
@@ -244,7 +245,7 @@ def test_kpi_compares_only_same_kind():
               ["Объём НИОКР", "1 305 млн ₽", "1 164 млн ₽", "+12%"], ["Отчислено студентов", "412 чел.", "450 чел.", "−8%"]])
     p = _plan(t)
     assert "НИОКР" not in p.headline  # люди не сравниваются с деньгами
-    assert p.headline == "Принято на 1 курс: +6%, отчислено студентов: −8%"
+    assert p.headline == "Принято на 1 курс — на 6% больше, отчислено студентов — на 8% меньше"
     assert len(p.caption) <= 140
     assert [o.kind for o in p.options][:2] == ["kpi_cards", "table"]
     col = next(o for o in p.options if o.kind == "column")
@@ -320,10 +321,10 @@ def test_science_set_end_to_end():
     kinds = [p.options[0].kind for p in plans]
     assert kinds == ["scatter", "stacked_bar", "line", "bar", "histogram", "kpi_cards"]
     heads = [_sp(p.headline) for p in plans]
-    assert heads[1].startswith("Платное — 53%") and "бюджет — 35%" in heads[1]
+    assert heads[1] == "Больше половины приёма — платное: 53%"
     assert heads[2].startswith("Scopus вырос в 9,1 раза за 20 лет") and "РИНЦ — в 3,4 раза" in heads[2]
     assert ("Кафедра", "Институт") in plans[3].profile.hierarchies
-    assert "27%" in heads[3] and "349 из 1 305" in heads[3]
+    assert "больше четверти" in heads[3] and "27%" in heads[3] and "349 млн ₽ из 1 305" in _sp(plans[3].caption)
     assert plans[3].options[0].title == "Ранжированные горизонтальные столбцы по институтам"
     tree = chart_spec_of(plans[3], tables[3], option=2, part=2)
     assert tree.columns[0] == "Институт" and tree.rows[-1][0] == "Итого"
@@ -335,7 +336,7 @@ def test_science_set_end_to_end():
     assert plans[1].options[2].title == "Кольцевая диаграмма по формам обучения"
     assert "3 формы обучения (Бюджет, Платное, Целевое)" in plans[1].task.reasons[0]
     # «Итоги года»: единицы строк, люди сравниваются с людьми
-    assert heads[5] == "Принято на 1 курс: +6%, отчислено студентов: −8%"
+    assert heads[5] == "Принято на 1 курс — на 6% больше, отчислено студентов — на 8% меньше"
     cards = chart_spec_of(plans[5], tables[5])
     assert [c.value for c in cards][:2] == ["2 425 чел.".replace(" ", NB, 1).replace(" чел", NB + "чел"), "74,1"]
     assert cards[4].value == f"1{NB}305{NB}млн ₽"
@@ -356,7 +357,7 @@ def test_row_units_give_each_kpi_its_unit_and_keep_kinds_apart():
     p = _plan(t)
     cards = chart_spec_of(p, t)
     assert [c.value for c in cards] == [f"2{NB}425{NB}чел.", "87%", f"1{NB}305{NB}млн ₽", f"412{NB}чел."]
-    assert p.headline == "Принято на 1 курс: +6%, отчислено: −8%"
+    assert p.headline == "Принято на 1 курс — на 6% больше, отчислено — на 8% меньше"
 
 
 def test_part_columns_and_column_groups_from_the_reader():

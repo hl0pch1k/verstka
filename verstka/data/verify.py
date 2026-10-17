@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Optional, Sequence
 
-from verstka.data.parse import iso_ord, period_parts, quantity, season_name, season_ord
+from verstka.data.parse import forecast_period, iso_ord, period_parts, quantity, season_name, season_ord
 from verstka.data.words import fmt_num, is_participle, stem, stems_of
 from verstka.schemas.data import HeadlineFact, Table
 
@@ -102,6 +102,41 @@ class _Raw:
             if lab and v is not None:
                 out.setdefault(lab, []).append(v)
         return out
+
+
+# вес среднего — своим правилом, не правилом расчёта: колонка-счёт целыми (чеки, заказы, ответы, анкеты…)
+_W_NAME = re.compile(r"чек(?:ов|и)\b|заказ(?:ов|ы)\b|ответ(?:ов|ы|ивших)\b|анкет\b|респондент(?:ов|ы)\b|опрошенн|"
+                     r"визит(?:ов|ы)\b|сесси[йи]\b|звонк(?:ов|и)\b|обращени[йя]\b|покупател(?:ей|и)\b|транзакци[йи]\b|"
+                     r"поездок|посещени[йя]\b|отзыв(?:ов|ы)\b", re.I)
+
+
+def _weight_col(raw: "_Raw", col: int) -> Optional[int]:
+    """Колонка-вес рядом с уровнем: имя счёта и одни целые неотрицательные числа (своя проверка, не расчёта)."""
+    for j, name in enumerate(raw.t.columns):
+        if j == col or not _W_NAME.search(name or "") or _W_NAME.search(raw.t.columns[col] or ""):
+            continue
+        xs = [raw.num(i, j) for i in raw.rows]
+        xs = [x for x in xs if x is not None]
+        if len(xs) >= 2 and all(x >= 0 and float(x).is_integer() for x in xs) \
+                and sorted(xs) != [float(k) for k in range(int(min(xs)), int(min(xs)) + len(xs))]:
+            return j  # (номера строк подряд — это номер, а не счёт)
+    return None
+
+
+def _forecast_in(raw: "_Raw", p: dict) -> Optional[str]:
+    """Прогноз среди фактов: строка с периодом-прогнозом («2026 (прогноз)», «2027П») в ряду или колонка-прогноз
+    («Прогноз 2026») среди колонок-периодов — своим разбором подписей, а не списком пропусков расчёта."""
+    tj = p.get("time")
+    if tj is not None:
+        for i in raw.rows:
+            v = raw.cell(i, tj)
+            if isinstance(v, str) and forecast_period(v) is not None:
+                return v.strip()
+    for j in p.get("cols") or []:
+        name = raw.t.columns[j] if 0 <= j < len(raw.t.columns) else ""
+        if name and forecast_period(name) is not None:
+            return name
+    return None
 
 
 def _wgroups(raw: "_Raw", by: int, col: int, wcol: int, scale: float = 1.0) -> dict[str, float]:
@@ -296,6 +331,12 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             # среднее взвешенное: Σ(вес·значение)/Σвес по строкам категории — своим счётом по сырым ячейкам
             agg = _wgroups(raw, p["by"], p["col"], p["w"], scale)
         else:
+            if p.get("agg") == "mean" and p.get("col") is not None and any(len(v) >= 2 for v in g.values()):
+                # среднее уровня по нескольким строкам категории, а рядом колонка-вес: простое среднее средних —
+                # неверно (Арбат с 900 чеками по 2 100 ₽ не «впереди»)
+                wj = _weight_col(raw, p["col"])
+                if wj is not None:
+                    raise _Fail(f"среднее без веса: в таблице есть «{raw.t.columns[wj]}» — нужно среднее с весом")
             agg = {k: _agg(v, p.get("agg", "sum")) for k, v in g.items()}
         ex = list(agg.values())
         if op == "neg":
@@ -414,10 +455,21 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         val = share if what == "share" else 100 - share if what == "rest" else tot - top
         return val, [top, tot, tot - top, share, 100 - share]
     if op == "series":
+        fc = _forecast_in(raw, p)
+        if fc is not None:
+            raise _Fail(f"прогноз «{fc}» в ряду фактов")
         s = _series(raw, p)
         ks = sorted(s)
         mode = p["mode"]
         fk = _iso_key(p["from"], p["freq"]) if p.get("from") else (ks[0] if ks else None)
+        if mode == "span" and (p.get("own") or p.get("own_cols")):
+            # у каждого ряда свой срок: начало и конец — его первое и последнее значение, а не общий диапазон
+            tk_ = _iso_key(p["to"], p["freq"]) if p.get("to") else (ks[-1] if ks else None)
+            for c in ([p["col"]] if p.get("own") else []) + list(p.get("own_cols") or []):
+                sc = sorted(_series(raw, {**p, "col": c, "cols": None}))
+                if not sc or sc[0] != fk or sc[-1] != tk_:
+                    nm = raw.t.columns[c] if 0 <= c < len(raw.t.columns) else str(c)
+                    raise _Fail(f"у ряда «{nm}» свой срок, а не общий")
         tk = _iso_key(p["to"], p["freq"]) if p.get("to") else (ks[-1] if ks else None)
         if mode == "span":
             if fk is None or tk is None:
@@ -452,6 +504,9 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             raise _Fail("нет значения в начале или в конце")
         return _change(s[fk], s[tk], p["kind"]), [s[fk], s[tk], s[tk] - s[fk]]
     if op == "colseries":
+        fc = _forecast_in(raw, {"cols": p.get("cols")})
+        if fc is not None:
+            raise _Fail(f"колонка-прогноз «{fc}» среди фактов")
         vals = _colseries(raw, p)
         mode = p["mode"]
         if mode == "at":
@@ -689,8 +744,10 @@ def _named_ok(named: str, col_name: str, title: str) -> bool:
     elif is_participle(col_name):
         # «Утверждено» — причастие без слова: слово — из названия файла («бюджета») или «средств» у денег
         have = have + stems_of(title) + ["средств"]
-    elif re.fullmatch(r"(?:19|20)\d\d|.*\b(?:кв\.?|квартал)\s*(?:19|20)\d\d", col_name.strip(), re.I):
-        # колонка-период («2025», «II кв. 2026»): величина — по названию таблицы, «выручки за 2025 год»
+    elif re.fullmatch(r"(?:19|20)\d\d|.*\b(?:кв\.?|квартал)\s*(?:19|20)\d\d", col_name.strip(), re.I) \
+            or re.match(r"^(?:до|свыше|более|менее|от|после|старше|младше|\d+\s*[–—-]\s*\d+)\b", col_name.strip(), re.I):
+        # колонка-период («2025», «II кв. 2026») или интервал («Свыше 90 дней»): величина — по названию таблицы,
+        # «выручки за 2025 год», «задолженности свыше 90 дней»
         have = have + stems_of(title) + ["год", "кв"]
     return all(any(_stem_eq(w, h) for h in have) for w in want)
 

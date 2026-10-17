@@ -375,6 +375,12 @@ def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
         for k, name in enumerate(names[:2]):
             kind, v = c[f"s{k}"]
             when = whens[k] if whens else (c.get("when", "") if k == 0 else "")
+            p0_ = phrase(name)
+            if k == 0 and p0_ is not None and p0_.sure and not is_period_name(name) and not is_event_name(name):
+                # первый ряд — подлежащее («Численность на начало месяца выросла на 6%»): вывод, а не перечень
+                up, how = _move(kind, v, unit)
+                parts.append(f"{name} {verb('grow' if up else 'fall', p0_.gender)} {how} {when}".strip())
+                continue
             parts.append(f"{name if k == 0 else _mid(name)}: {_signed_move(kind, v, unit)} {when}".strip())
         return ", ".join(p_.strip() for p_ in parts), c.get("caption")
     for k, name in enumerate(names[:2]):
@@ -443,6 +449,17 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         k, n = int(_f(fs, "below_target").value), int(_f(fs, "of").value)
         names = join_and(miss[:3]) + (" и другие" if k > 3 else "")
         return f"{side} {tg} — {k} из {n}: {names}", c.get("caption")
+    lo_f, hi_f = _f(fs, "last_value"), _f(fs, "leader_value")
+    if c.get("ask_min") and lo_f is not None and hi_f is not None and c.get("last_label"):
+        # «с каким утверждением согласны меньше всего»: ответ — последний, первым; лидер — для сравнения
+        u = c.get("unit_short")
+        low, top = {"temp": ("Холоднее всего", "теплее всего"), "price": ("Дешевле всего", "дороже всего"),
+                    "slow": ("Быстрее всего", "медленнее всего"), "long": ("Быстрее всего", "дольше всего"),
+                    "delay": ("Меньше всего", "дольше всего"), "rate": ("Ниже всего", "выше всего")
+                    }.get(c.get("wording", ""), ("Меньше всего", "больше всего"))
+        note = f" «{lower_first(c['min_note'])}»" if c.get("min_note") else ""
+        return (f"{low}{note} — {c['last_label']}: {fmt_value(lo_f.value, u)}, {top} — {c['leader']}: "
+                f"{fmt_value(hi_f.value, u)}"), c.get("caption")
     leader = c["leader"]
     pl = "pl" if c.get("lead_plural") or is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
@@ -450,13 +467,20 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
     m: Optional[Phrase] = c.get("metric")
     if share is not None and m is not None:
         # «даёт» — про выручку и доход; расходы, люди, штуки — просто доля: «Продажи — 38% сотрудников»
-        if c.get("gives"):
-            head = f"{leader} {verb('give', pl, past=False)} {fmt_pct(share.value)}% {m.low.gen}"
-        else:
-            head = f"{leader} — {fmt_pct(share.value)}% {m.low.gen}"
         lv, total = _f(fs, "leader_value"), _f(fs, "total")
-        if not grow_leader and lv is not None and total is not None:
-            head += f": {fmt_num(lv.value)} из {fmt_value(total.value, c.get('unit_short'))}"
+        of = (f"{fmt_num(lv.value)} из {fmt_value(total.value, c.get('unit_short'))}"
+              if not grow_leader and lv is not None and total is not None else "")
+        if c.get("gives"):
+            head = f"{leader} {verb('give', pl, past=False)} {fmt_pct(share.value)}% {m.low.gen}" + (f": {of}" if of else "")
+        else:
+            # доля без «даёт» — тоже вывод, а не «Подольск — 40% отгрузок»: какая это часть целого
+            wn, major = fraction_words(share.value, "nom"), _major(share.value)
+            part = wn or (lower_first(major) if major else "больше всех")
+            # «из скольких» — в подписи: заголовок короче
+            if part == "больше всех":
+                head = f"{leader} — больше всех: {fmt_pct(share.value)}% {m.low.gen}"
+            else:
+                head = f"{leader} — {part} {m.low.gen}: {fmt_pct(share.value)}%"
     elif _f(fs, "leader_value") is not None:
         lv = _f(fs, "leader_value")
         u = c.get("unit_short")
@@ -517,11 +541,20 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
         if p0 is None or len(parts) < 2 or p1 is None:
             return c.get("plain", ""), c.get("caption")
         w = f" {whole.low.gen}" if whole is not None else ""
+        a0, a1 = _part_low(parts[0]), _part_low(parts[1])
         if c.get("rows_dat"):
-            # ответы по шкале: доли — средние по строкам, и это сказано
-            return (f"В среднем по {c['rows_dat']}: {lower_first(parts[0])} — {fmt_pct(p0.value)}%, "
-                    f"{lower_first(parts[1])} — {fmt_pct(p1.value)}%"), c.get("caption")
-        return f"{parts[0]} — {fmt_pct(p0.value)}%{w}, {lower_first(parts[1])} — {fmt_pct(p1.value)}%", c.get("caption")
+            # ответы по шкале: доли — средние по строкам, и это сказано; вывод — что преобладает, а не перечень
+            major = _major(p0.value)
+            if major:
+                return (f"{major} ответов в среднем по {c['rows_dat']} — {a0}: {fmt_pct(p0.value)}%"), c.get("caption")
+            return (f"Больше всего в среднем по {c['rows_dat']} — {a0}: {fmt_pct(p0.value)}%, затем {a1} — "
+                    f"{fmt_pct(p1.value)}%"), c.get("caption")
+        # структура — вывод, а не перечень долей: что преобладает («Больше половины приёма — платное: 53%») или какая
+        # часть крупнейшая и насколько
+        major = _major(p0.value)
+        if major:
+            return f"{major}{w} — {a0}: {fmt_pct(p0.value)}%", c.get("caption")
+        return (f"{parts[0]} — крупнейшая часть{w}: {fmt_pct(p0.value)}%, {a1} — {fmt_pct(p1.value)}%"), c.get("caption")
     leader = c["leader"]
     pl = "pl" if is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
@@ -532,10 +565,10 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
     words = fraction_words(p)
     v = verb("bring" if c.get("money") else "give", pl, past=False)
     if whole is not None and not c.get("gives"):
-        # расходы, люди, штуки — доля без «приносит»: «Фонд оплаты труда — две трети расходов: 66%»
-        wn = fraction_words(p, "nom")
-        return (f"{leader} — {wn} {whole.low.gen}: {fmt_pct(p)}%" if wn else
-                f"{leader} — {fmt_pct(p)}% {whole.low.gen}"), c.get("caption")
+        # расходы, люди, штуки — доля без «приносит»: «Фонд оплаты труда — две трети расходов: 66%»; без слов доли —
+        # «крупнейшая доля» или «основная часть», а не голое «Поиск — 42% визитов»
+        wn = fraction_words(p, "nom") or (lower_first(_major(p)) if _major(p) else "крупнейшая доля")
+        return f"{leader} — {wn} {whole.low.gen}: {fmt_pct(p)}%", c.get("caption")
     if whole is not None:
         if words:
             head = f"{leader} {v} {words} {whole.low.gen} — {fmt_pct(p)}%"
@@ -544,6 +577,39 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
     else:
         head = f"{leader} — крупнейшая доля: {fmt_pct(p)}%"
     return head, c.get("caption")
+
+
+def _more(v: float, unit: Optional[str]) -> str:
+    """Изменение словами сравнения: «на 6% больше», «на 2 п.п. ниже», «на 120 чел. меньше»."""
+    u = unit or ""
+    if u == "%":
+        amount = f"{fmt_pct(abs(v))}%"
+    else:
+        amount = fmt_num(abs(v)) + (f"\u00a0{u}" if u else "")
+    if u in ("п.п.", "п."):
+        return f"на {amount} {'выше' if v >= 0 else 'ниже'}"
+    return f"на {amount} {'больше' if v >= 0 else 'меньше'}"
+
+
+def _major(p: float) -> Optional[str]:
+    """Преобладающая часть словами (именительный, начало фразы): «Больше половины», «Две трети», «Основная часть»;
+    до половины — None (тогда говорят «крупнейшая часть»)."""
+    if p >= 85:
+        return "Подавляющая часть"
+    if p >= 70:
+        return "Основная часть"
+    if p >= 66:
+        return "Две трети"
+    if p > 50.5:
+        return "Больше половины"
+    if p >= 49.5:
+        return "Половина"
+    return None
+
+
+def _part_low(name: str) -> str:
+    """Имя части внутри фразы: «Платное» → «платное», «В работе» → «в работе»; аббревиатура и латиница — как есть."""
+    return lower_first(name) if re.match(r"^[А-ЯЁ](?:[а-яё]|\s)", name) else name
 
 
 def _distribution(fs: FactSet) -> tuple[str, Optional[str]]:
@@ -663,8 +729,10 @@ def _kpi(fs: FactSet) -> tuple[str, Optional[str]]:
         sa = fmt_signed(c["a_signed"], c.get("a_unit") or "")
         sb = fmt_signed(c["b_signed"], c.get("b_unit") or "")
         if c.get("a_participle") or c.get("b_participle"):
-            # «Принято на 1 курс: +6%, отчислено студентов: −8%» — с причастием не говорят «принято выросло»
-            return f"{a_name}: {sa}, {lower_first(c.get('b_name', ''))}: {sb}", c.get("caption")
+            # с причастием не говорят «принято выросло» — и не перечисляют «принято: +6%»: «Принято на 1 курс — на 6%
+            # больше, отчислено студентов — на 8% меньше»
+            return (f"{a_name} — {_more(c['a_signed'], c.get('a_unit'))}, {lower_first(c.get('b_name', ''))} — "
+                    f"{_more(c['b_signed'], c.get('b_unit'))}"), c.get("caption")
         if c["a_signed"] > 0 and c["b_signed"] > 0 and b_gen:
             cmp_word = "быстрее" if c["a_signed"] > c["b_signed"] else "медленнее" if c["a_signed"] < c["b_signed"] else None
             if cmp_word:
@@ -675,7 +743,7 @@ def _kpi(fs: FactSet) -> tuple[str, Optional[str]]:
                     f"{verb('fall', gb, past=False)}: {sa} и {sb}"), c.get("caption")
         return f"{a_name}: {sa}, {lower_first(c.get('b_name', ''))}: {sb}", c.get("caption")
     if a is not None and c.get("a_participle"):
-        return f"{a_name}: {fmt_signed(c['a_signed'], c.get('a_unit') or '')}", c.get("caption")
+        return f"{a_name} — {_more(c['a_signed'], c.get('a_unit'))}", c.get("caption")
     if a is not None:
         ga = c.get("a_gender", "m")
         v = verb("grow" if c["a_signed"] > 0 else "fall", ga)

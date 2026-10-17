@@ -279,3 +279,107 @@ def test_plan_drops_a_false_claim_with_the_reason(monkeypatch):
     p = plan_dataset(profile_table(t), t)
     assert p.headline == p.plain_headline
     assert any(r.startswith(DOWN) and "быстрее всех" in r for r in slide_data_of(p).task.reasons)
+
+
+# ── раунд 9: веса, сроки рядов, прогноз, «Остальные N», тема по имени колонки ─────────────────────────────────────────
+W4 = [["Магазин", "Месяц", "Чеков, шт.", "Средний чек, ₽"],
+      ["Арбат", "Июль 2026", 6000, 1000], ["Арбат", "Август 2026", 6200, 1020], ["Арбат", "Сентябрь 2026", 900, 2100],
+      ["Тверская", "Июль 2026", 3000, 1300], ["Тверская", "Август 2026", 3100, 1320], ["Тверская", "Сентябрь 2026", 2900, 1350],
+      ["Сокол", "Июль 2026", 2500, 1250], ["Сокол", "Август 2026", 2400, 1260], ["Сокол", "Сентябрь 2026", 2600, 1240]]
+
+
+def test_conv3_never_downgraded_numbers_and_claims():
+    """40 таблиц третьей проверки сходимости (без цели, с целью-вопросом и с целью-командой): ни число, ни утверждение
+    не понижены, и каждый факт подтверждён своими строками."""
+    import tests.unit.test_data_factcheck as tf
+
+    bad = []
+    for key, files, brief_a, brief_b in tf.corpus_conv3():
+        tables = [t for n, x in files for t in read_bytes(n, x)]
+        for brief in ("", brief_a, brief_b):
+            for t, p in zip(tables, plan_datasets(tables, brief)):
+                if any(DOWN in r or "Подпись не подтвердилась" in r for r in p.task.reasons):
+                    bad.append((key, brief, p.task.reasons))
+                fs, v = _recheck(t, p)
+                if v.failed:
+                    bad.append((key, brief, v.failed))
+    assert not bad, bad[:5]
+
+
+def test_mean_of_means_without_the_weight_is_caught():
+    """F2: средний чек по магазину за три месяца — простое среднее (Арбат 1 373 ₽ «впереди») при колонке «Чеков» —
+    проверка своим правилом находит вес и не подтверждает; среднее с весом (Тверская 1 323 ₽) подтверждается."""
+    t = _t("Средний чек магазинов.csv", W4)
+    simple = HeadlineFact(id="leader_value", text="Арбат — 1 373 ₽", value=1373.3, unit="₽", kind="leader")
+    prov = {"leader_value": {"op": "cat", "col": 3, "by": 0, "keys": ["Арбат"], "agg": "mean", "rank": "max",
+                             "tol": 0.051}}
+    v = verify(t, [simple], prov, "Арбат впереди: 1 373 ₽", None, ["Арбат"])
+    assert not v.headline_ok and "среднее без веса" in v.failed["leader_value"]
+    p = plan_datasets([t], "Сравните магазины по среднему чеку")[0]
+    assert _sp(p.headline) == "Тверская впереди: 1 323 ₽, Арбат — 1 085 ₽", p.headline
+    fs, v = _recheck(t, p)
+    assert not v.failed and v.headline_ok
+
+
+def test_shared_period_for_series_with_their_own_is_caught():
+    """F1: когорты заканчиваются в разные месяцы — общий срок «за 5 месяцев» у всех неверен: у ряда свой срок."""
+    import tests.unit.test_data_factcheck as tf
+
+    files = next(fs_ for k, fs_, _, _ in tf.corpus_conv3() if k == "10")
+    t = read_bytes(*files[0])[0]
+    p = plan_datasets([t], "")[0]
+    fs, v = _recheck(t, p)
+    assert not v.failed and "span_of_1" in fs.prov
+    wrong = dict(fs.prov)
+    wrong["span_of_1"] = {**fs.prov["span_of_1"], "to": fs.prov["span_of_0"]["to"]}  # срок первого ряда — второму
+    f = next(x for x in fs.facts if x.id == "span_of_1")
+    v = verify(t, [f], wrong, "", None)
+    assert "свой срок" in v.failed["span_of_1"]
+
+
+def test_forecast_inside_the_actuals_is_caught():
+    """M7: строка «2026 (прогноз)» в ряду фактов («в 3 раза за 5 лет») и колонка «Прогноз 2026» среди колонок-годов —
+    проверка узнаёт прогноз по подписи сама и не подтверждает; без прогноза — подтверждает."""
+    import tests.unit.test_data_factcheck as tf
+
+    probes = dict(tf.corpus_conv3_probes())
+    t = read_bytes("v2.csv", probes["v2 Выручка компании по годам.csv"])[0]
+    p = plan_datasets([t], "")[0]
+    fs, v = _recheck(t, p)
+    assert not v.failed and _sp(p.headline) == "Выручка выросла в 2,3 раза за 4 года"
+    ch = next(x for x in fs.facts if x.id == "ratio")
+    planted = {"ratio": {**fs.prov["ratio"], "skip": [], "to": "2026"}}
+    v = verify(t, [ch], planted, "", None)
+    assert "прогноз «2026 (прогноз)»" in v.failed["ratio"]
+    t1 = read_bytes("v1.csv", probes["v1 Выручка по направлениям, млрд руб.csv"])[0]
+    p1 = plan_datasets([t1], "Покажите рост выручки.")[0]
+    fs1, v1 = _recheck(t1, p1)
+    assert not v1.failed
+    f1 = next(x for x in fs1.facts if x.id == "change")
+    planted = {"change": {**fs1.prov["change"], "cols": list(fs1.prov["change"]["cols"]) + [4]}}
+    assert "колонка-прогноз «Прогноз 2026»" in verify(t1, [f1], planted, "", None).failed["change"]
+
+
+def test_residual_count_is_a_label_and_the_plain_title_keeps_the_column_name():
+    """V2: цифра в «Остальные 3» — имя группы, подпись с ней не понижается. V3: самопроверка отвергла пересказ
+    имени колонки — тема называет колонку её именем («Куплено мест по продуктам»), а не тем же пересказом."""
+    import tests.unit.test_data_factcheck as tf
+
+    for key in ("09", "05"):
+        files = next(fs_ for k, fs_, _, _ in tf.corpus_conv3() if k == key)
+        t = read_bytes(*files[0])[0]
+        p = plan_datasets([t], "")[0]
+        assert not any("не подтвердил" in r for r in p.task.reasons), (key, p.task.reasons)
+    files = next(fs_ for k, fs_, _, _ in tf.corpus_conv3() if k == "09")
+    t = read_bytes(*files[0])[0]
+    assert "Остальные 3 (Сибирский, Дальневосточный и Северо-Кавказский) — 12%" in _sp(plan_datasets([t], "")[0].caption)
+    files = next(fs_ for k, fs_, _, _ in tf.corpus_conv3() if k == "05")
+    t = read_bytes(*files[0])[0]
+    p = plan_datasets([t], "")[0]
+    assert _sp(p.headline) == "VK Teams — четверть купленных мест: 25%", p.headline
+    d = data_of(p, t)
+    assert plan_mod.plain_headline("comparison", d, own=True) == "Куплено мест по продуктам"
+
+
+def _sp(s: str) -> str:
+    return " ".join((s or "").replace(" ", " ").split())

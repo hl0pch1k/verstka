@@ -186,9 +186,12 @@ def _metric_title(m: Measure) -> str:
     return re.sub(r"\s*,[^,]*$", "", subject_of(m.name, m.type)[0]).strip() or m.name
 
 
-def plain_headline(task: TaskKind, d: Data) -> str:
-    """Заголовок-описание (тема, не вывод): «Выручка по месяцам», «Выручка по регионам», «Список клиентов»."""
+def plain_headline(task: TaskKind, d: Data, own: bool = False) -> str:
+    """Заголовок-описание (тема, не вывод): «Выручка по месяцам», «Выручка по регионам», «Список клиентов».
+    `own` — величина своим именем колонки («Куплено мест по продуктам»): самопроверка отвергла пересказ имени
+    («покупок мест»), и тема его не повторяет."""
     m = d.main
+    title_of = (lambda x: re.sub(r"\s*,[^,]*$", "", x.name).strip() or x.name) if own else _metric_title
     if task == "dynamics" and d.time is not None and len(d.time.series) >= 2 and not d.time.dim:
         return file_title(d.profile.file, d.profile.sheet)  # несколько рядов — тема по файлу, а не по первому ряду
     if task == "dynamics" and d.time is not None and d.time.from_columns:
@@ -197,11 +200,11 @@ def plain_headline(task: TaskKind, d: Data) -> str:
         by = {"month": "месяцам", "quarter": "кварталам", "year": "годам", "week": "неделям", "day": "дням",
               "hour": "часам"}.get(d.time.freq)
         if by:
-            return f"{_metric_title(m)} по {by}"
-    if task == "comparison" and m is not None and d.cats is not None:
+            return f"{title_of(m)} по {by}"
+    if task in ("comparison", "shares") and m is not None and d.cats is not None and (task == "comparison" or own):
         p = phrase(d.cats.dim)
         if p is not None and p.sure:
-            return f"{_metric_title(m)} по {p.low.dat_pl}"
+            return f"{title_of(m)} по {p.low.dat_pl}"
     if task == "reference" and d.entity:
         p = phrase(d.entity)
         if p is not None and p.sure:
@@ -1190,9 +1193,11 @@ def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
     same = len({(F, L) for _, F, L, _, _ in items}) == 1
     F0, L0 = (items[0][1], items[0][2]) if same else (f0, l0)
     if same:
+        cols_ = [x.j for x in d.parallel if d.series_names.get(x.name, x.name) in names and x.j >= 0]
         fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
                f"От {period_gen(tv.periods[0])} до {period_gen(tv.periods[-1])}.",
-               prov=_ptime(d, tv, "span", frm=tv.periods[f0], to=tv.periods[l0]))
+               prov={**_ptime(d, tv, "span", frm=tv.periods[f0], to=tv.periods[l0]),
+                     **({"own_cols": cols_} if not tv.from_columns and not tv.dim else {})})
     else:
         # у рядов разные сроки (когорты, факт и прогноз): у каждого — свой период и своё «за N месяцев»
         whens = []
@@ -1200,7 +1205,8 @@ def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
             mm = next((x for x in d.parallel if d.series_names.get(x.name, x.name) == sv.name), tv.measure)
             fs.add(f"span_of_{k}", L - F, "count", count_words(L - F, pw[0], pw[1], pw[2]), None,
                    f"{sv.name}: от {period_gen(tv.periods[F])} до {period_gen(tv.periods[L])}.",
-                   prov=_ptime(d, tv, "span", frm=tv.periods[F], to=tv.periods[L], col=mm))
+                   prov={**_ptime(d, tv, "span", frm=tv.periods[F], to=tv.periods[L], col=mm),
+                         **({"own": True} if not tv.from_columns and mm.j >= 0 else {})})
             whens.append(f"за {count_words(L - F, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период")
         fs.ctx["whens"] = whens
     _time_structure(d, tv, fs)
@@ -1294,6 +1300,20 @@ def _period_metric(d: Data, m: Measure) -> Optional[Phrase]:
                   f"{lo.dat_pl} за {per}", f"{lo.nom_pl} за {per}", noun.gender)
 
 
+def _bucket_metric(d: Data, m: Measure) -> Optional[Phrase]:
+    """Колонка — интервал («Свыше 90 дней», «До 30 дней», «31–60 дней»): величина — по названию таблицы и интервал —
+    «задолженности свыше 90 дней», а не «свышя 90 дней»."""
+    name = (split_unit(m.name)[0] or m.name).strip()
+    if not re.match(r"^(?:до|свыше|более|менее|от|после|старше|младше|\d+\s*[–—-]\s*\d+)\b", name, re.I):
+        return None
+    noun = _data_noun(d)
+    if noun is None:
+        return None
+    lo, tail = noun.low, lower_first(name) if not name[:1].isdigit() else name
+    return Phrase(f"{lo.nom} {tail}", f"{lo.gen} {tail}", f"{lo.dat} {tail}", f"{lo.gen_pl} {tail}",
+                  f"{lo.dat_pl} {tail}", f"{lo.nom_pl} {tail}", noun.gender)
+
+
 def _title_whole(d: Data) -> Optional[Phrase]:
     """Целое по названию датасета для безликой метрики («Сумма»): «Структура расходов» → «расходов», «Расходы 2026» →
     «расходов»."""
@@ -1383,7 +1403,9 @@ _STAT_NAME = re.compile(r"^(?:p\d{2,3}(?:[.,]\d)?|перцентиль\b.*|пр�
 _WORSE = re.compile(r"ошибк|отток|брак|дефект|просроч|опоздан|брошен|жалоб|возврат|авари|дтп|примес|загрязн|концентрац|выброс|"
                     r"расход\s+топлив|(?:^|[^а-яё])расход(?:[^а-яё]|$)|"
                     # простаивает и не используется: больше свободных мест — не «впереди», а переплата
-                    r"свободн|простаива|(?:^|[^а-яё])просто[йя]|неиспольз|незанят|пустующ", re.I)
+                    r"свободн|простаива|(?:^|[^а-яё])просто[йя]|неиспольз|незанят|пустующ|"
+                    # невыполненное: «В работе», «В очереди», «Не решено» — больше не значит «впереди»
+                    r"^в\s+работе|^в\s+очереди|не\s*решен|^открыт|эскалир", re.I)
 _RATE = re.compile(r"ставк|годовых|коэффициент|уровень|(?:^|\s)уровн|норм[аы]\s+прибыл|доходност|процентн", re.I)
 _CLOCK_LAB = re.compile(r"^\s*\d{1,2}:\d{2}\s*$")
 # порядковые группы-интервалы: «0–4», «70 и старше», «до 30», «100+» (а не «5-А», «1 курс»)
@@ -1460,7 +1482,8 @@ def _comparison(d: Data) -> FactSet:
     generic = m is not None and (_GENERIC.match(re.sub(r"\s*,.*$", "", m.name).strip()) is not None
                                  or is_total_label(m.name))
     if m is not None:
-        ph = _period_metric(d, m) or _with_noun(d, m.name, metric_phrase(m.name, m.type), m.type == "money")
+        ph = _period_metric(d, m) or _bucket_metric(d, m) or _with_noun(d, m.name, metric_phrase(m.name, m.type),
+                                                                         m.type == "money")
         if generic or m.j in (-3, -4):
             # «Сумма», «Итого за год», итог перекрёстной таблицы — целое по названию датасета: «выручки», «заказов»
             ph = _title_whole(d) or ph
@@ -1592,6 +1615,10 @@ def _comparison(d: Data) -> FactSet:
         labels.append(blab)
     if d.ask == "total" and m is not None and m.additive and cv.total:
         fs.ctx["ask_total"] = True
+    if d.ask == "min" and m is not None:
+        fs.ctx["ask_min"] = True
+        if len(d.parallel) >= 2 or len(d.measures) >= 3:
+            fs.ctx["min_note"] = re.sub(r"\s*,[^,]*$", "", m.name).strip()  # какая из величин рядом
     if d.ask == "mean" and m is not None and not m.additive:
         # «какой средний NPS по всем продуктам»: одно среднее по строкам файла — с весом, если он есть (NPS — по
         # числу ответов), а не среднее средних
@@ -1828,7 +1855,13 @@ def _composition(d: Data) -> FactSet:
     labels = [totals[k][0] for k in order]
     rows100 = _rows_of_100(d, g)
     # строки по 100 (ответы по шкале): доля части — среднее по строкам, целое — не «опроса», а сами ответы
-    fs.ctx.update(composition=True, parts=labels, whole=None if rows100 else _dataset_whole(d), labels=list(labels))
+    whole_p = None if rows100 else _dataset_whole(d)
+    tm = d.total_metric
+    if not rows100 and tm is not None and not _GENERIC.match(re.sub(r"\s*,.*$", "", tm.name).strip()) \
+            and not is_total_label(tm.name):
+        # целое — колонка-итог частей («Цена с НДС» = цена без НДС + НДС): «цены с НДС», а не «тарифов»
+        whole_p = metric_phrase(re.sub(r"\s*,.*$", "", tm.name).strip(), tm.type) or whole_p
+    fs.ctx.update(composition=True, parts=labels, whole=whole_p, labels=list(labels))
     gj = [x.j for x in g]
     sk = _skip(d)
     for r, k in enumerate(order):
@@ -1861,7 +1894,9 @@ def _composition(d: Data) -> FactSet:
             fs.ctx["labels"] = list(labels) + [best[0]]
     elif cv is not None:
         lead = cv.labels[0] if cv.ranked else None
-        if lead:
+        # «Всего 77 653 ₽/мес.» по ценам тарифов или «всего 508 баллов» команд — сумма уровней смысла не имеет
+        summable = all(x.additive for x in g) and not any(re.search(r"балл|очк|оценк", x.name, re.I) for x in g)
+        if lead and summable:
             # после «Всего N:» — со строчной, как внутри фразы («решено — 7 322»), кроме имён и аббревиатур
             caption = [f"Больше всего — {lead}.", f"Всего {fmt_value(whole, unit)}: "
                        + ", ".join(f"{_inner(totals[k][0])} — {fmt_value(totals[k][1], unit)}" for k in order) + "."]
@@ -1929,7 +1964,9 @@ def _shares(d: Data) -> FactSet:
         top, rest, rest_label = _doughnut_split(cv.labels, shares)
         top = sorted(top, key=lambda k: (-shares[k], k))
         named = [cv.labels[k] for k in rest if not is_other_label(cv.labels[k])]
-        tail = f"{rest_label}" + (f" (в том числе {join_and(named[:4])}{' и другие' if len(named) > 4 else ''})"
+        # «в том числе» — когда названы не все; названы все — просто перечень: «Остальные 3 (Сибирский, …)»
+        incl = "в том числе " if len(named) < len(rest) or len(named) > 4 else ""
+        tail = f"{rest_label}" + (f" ({incl}{join_and(named[:4])}{' и другие' if len(named) > 4 else ''})"
                                   if named and is_other_label(rest_label) else "")
         fs.add("rest_share", round(sum(shares[k] for k in rest), 1), "share", f"{tail} — "
                f"{fmt_pct(sum(shares[k] for k in rest))}%", "%", "Доля всех, кто не вошёл в пять крупнейших.",
