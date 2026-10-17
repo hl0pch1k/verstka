@@ -129,3 +129,52 @@ def test_a_drawing_of_many_outlines_is_a_subject_and_a_few_shapes_are_decor():
 
     assert _subject_drawing(ctx_with(40)) is not None
     assert _subject_drawing(ctx_with(5)) is None
+
+
+# ── ordinary decks (live QA, fidelity report): key figures large, no near-empty cards ────────────────────────────────
+def _fake_ctx(slide, W, H, **kw):
+    from verstka.schemas.common import PatternKind
+
+    base = dict(slide=slide, W=W, H=H, kind=PatternKind.cards, typo=SimpleNamespace(primary_family=None, size_for=lambda role, default=0.0: {"h1": 24.0}.get(role, default)),
+                els={str(k): sh._element for k, sh in enumerate(slide.shapes)})
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_a_key_figure_never_lands_in_a_small_card_heading():
+    from verstka.rendering.clone import _kpi_room
+    from verstka.schemas.common import SlotRole
+    from verstka.schemas.outline import NumberCallout, SlideContent, SlideItem
+
+    def ctx_with(size: float):
+        slot = SimpleNamespace(role=SlotRole.card_title, group_id="g", style=SimpleNamespace(size_pt=size), shape_id="t1")
+        return SimpleNamespace(oslide_content=SlideContent(numbers=[NumberCallout(value="18%", label="Сотрудников")]), slots=lambda *roles: [],
+                               slot_of={"t1": slot}, typo=SimpleNamespace(size_for=lambda role, default=0.0: 24.0))
+
+    group = SimpleNamespace(id="g", member_shape_ids=[["t1"]])
+    items = [SlideItem(title="18%", text="Сотрудников", number="18%")]
+    with pytest.raises(RuntimeError, match="крупной цифры"):
+        _kpi_room(ctx_with(13.2), group, items, numbers_in_cells=False)
+    _kpi_room(ctx_with(28.0), group, items, numbers_in_cells=False)  # a heading slot at the figure's size takes it
+    _kpi_room(ctx_with(13.2), group, items, numbers_in_cells=True)  # the cards' own figure slots take it
+
+
+def test_tall_cards_two_thirds_empty_are_no_place_for_the_content():
+    from verstka.rendering.clone import _cards_not_empty
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    W, H = int(prs.slide_width), int(prs.slide_height)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    cells = []
+    for k, text in enumerate(["Практика", "Наставники"]):
+        card = slide.shapes.add_shape(1, Emu(int((0.05 + 0.47 * k) * W)), Emu(int(0.4 * H)), Emu(int(0.43 * W)), Emu(int(0.5 * H)))
+        tb = slide.shapes.add_textbox(Emu(int((0.07 + 0.47 * k) * W)), Emu(int(0.43 * H)), Emu(int(0.39 * W)), Emu(int(0.45 * H)))
+        tb.text_frame.text = text
+        cells.append([tb._element])
+    with pytest.raises(RuntimeError, match="почти пустыми"):
+        _cards_not_empty(_fake_ctx(slide, W, H), cells)
+    for c in cells:  # a card filled with its text
+        tb = next(sh for sh in slide.shapes if sh._element is c[0])
+        tb.text_frame.text = "\n".join(["Каждый модуль заканчивается проектом на реальных данных"] * 7)
+    _cards_not_empty(_fake_ctx(slide, W, H), cells)

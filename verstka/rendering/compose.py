@@ -2522,6 +2522,9 @@ class Composer:
         right_h = self.h(right_paras, rw) if right_paras else 0
         block_h = max(left_h, right_h)
         y0 = self._place_v(area, block_h)
+        # the figure's box (its line's room over the letters included) starts inside the area, never over the heading
+        # (VK Tech: «4,8 из 5» at 166 pt — its box ran up over «Студенты оценивают…»)
+        y0 = max(y0, min(area.y + tg, area.y2 - block_h))
         self.cv.text(Bbox(x=area.x - lsb, y=y0 - tg, w=left_w + lsb, h=fig_h), [fig], anchor="b", name="Figure")
         self.cv.text(Bbox(x=area.x, y=y0 + fig_h - tg + int(k.vgap * 0.4), w=int(left_w * 0.92), h=lab_h), label, name="Label")
         if right_paras:

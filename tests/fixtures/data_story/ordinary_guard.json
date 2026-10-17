@@ -1,5 +1,5 @@
 {
- "_note": "Ordinary (non-data) decks before the data stage's rendering rules (reviewer's shim run over the pre-09946b7 clone/synth/compose/charts/outline): kind, mode, pattern, composition per slide.",
+ "_note": "Ordinary (non-data) decks before the data stage's rendering rules (reviewer's shim run over the pre-09946b7 clone/synth/compose/charts/outline): kind, mode, pattern, composition per slide. Updated 2026-10-17 (live QA): key figures are never set in a card's small heading slot (VK Education p26–p28, WorkSpace p6) — those stat_row slides are composed, and the deck's variety gives their samples to other slides.",
  "decks": {
   "workspace/charts": {
    "template_id": "1b8883114486c69d",
@@ -409,9 +409,9 @@
      ],
      [
       "stat_row",
-      "clone",
-      "p6",
-      null
+      "synth",
+      null,
+      "stat_row"
      ],
      [
       "cards",
@@ -433,9 +433,9 @@
      ],
      [
       "two_column",
-      "synth",
-      null,
-      "two_column"
+      "clone",
+      "p6",
+      null
      ],
      [
       "process",
@@ -507,14 +507,14 @@
      ],
      [
       "two_column",
-      "clone",
-      "p16",
-      null
+      "synth",
+      null,
+      "two_column"
      ],
      [
       "process",
       "clone",
-      "p4",
+      "p8",
       null
      ],
      [
@@ -562,9 +562,9 @@
      ],
      [
       "stat_row",
-      "clone",
-      "p26",
-      null
+      "synth",
+      null,
+      "stat_row"
      ],
      [
       "cards",
@@ -631,14 +631,14 @@
      [
       "bullets",
       "clone",
-      "p26",
+      "p7",
       null
      ],
      [
       "stat_row",
-      "clone",
-      "p7",
-      null
+      "synth",
+      null,
+      "stat_row"
      ],
      [
       "cards",
@@ -710,14 +710,14 @@
      ],
      [
       "stat_row",
-      "clone",
-      "p28",
-      null
+      "synth",
+      null,
+      "stat_row"
      ],
      [
       "cards",
       "clone",
-      "p28",
+      "p26",
       null
      ],
      [
@@ -735,7 +735,7 @@
      [
       "two_column",
       "clone",
-      "p26",
+      "p28",
       null
      ],
      [

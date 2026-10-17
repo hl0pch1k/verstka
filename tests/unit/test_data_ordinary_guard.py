@@ -67,3 +67,20 @@ def test_an_ordinary_deck_is_laid_out_as_before(key, analysed, tmp_path):
             got.append([osl.kind.value if osl else None, s.mode, s.pattern_id, s.composition])
         assert got == GUARD[key]["variants"][v.strategy], (key, v.strategy)
         assert not any(osl.data is not None for osl in v.outline.slides)
+
+
+def test_a_big_figure_stays_under_its_heading(analysed, tmp_path):
+    """Live QA (VK Education, «Студенты оценивают программу на 4,8 из 5»): the large figure's box ran up over the
+    heading — the audit's overlap error. Its box starts under the heading now."""
+    root, tids = analysed
+    if "education" not in tids:
+        pytest.skip("the VK Education template is not available (VERSTKA_FIXTURES_DIR)")
+    o = DeckOutline.model_validate({"title": "Программа", "slides": [
+        {"id": "t", "kind": "title", "headline": "Программа data-инженеров"},
+        {"id": "b", "kind": "big_number", "headline": "Студенты оценивают программу на 4,8 из 5",
+         "content": {"numbers": [{"value": "4,8 из 5", "label": "Оценка программы студентами"}]}},
+    ]})
+    res = generate_variants(root / "templates" / tids["education"] / "source.pptx", outline=o, out_dir=tmp_path / "out", workspace_root=root,
+                            use_llm=False, use_vlm=False, render_images=False, audit=True, autofix=False, exports=[], pictures=False, eyes=False)
+    for v in res.variants:
+        assert not [i for i in v.audit.issues if i.slide == 2 and i.check_id == "overlap"], v.strategy

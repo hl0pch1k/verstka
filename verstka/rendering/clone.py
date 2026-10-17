@@ -1443,6 +1443,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     comp_roles = {ctx.role_of.get(sid) for g, _ in companions for cell in g.member_shape_ids for sid in cell}
     numbers_in_cells = SlotRole.number in src_roles or SlotRole.number in comp_roles
     numeric_items = any(i.number for i in items)
+    _kpi_room(ctx, group, items, numbers_in_cells)
     if not use_ordinals and not numeric_items and not text_only:
         # the sample numbers its cells (1, 2, 3 … or 01, 02 …): the numbered steps are its design and count the items
         # (an empty number box leaves with its connectors and the figure falls apart — LCT p25)
@@ -1602,7 +1603,73 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
             ctx.fill_slot(slot, [ParagraphSpec(item.number)], min_ratio=0.35)
     if overflow:
         _fill_standalone_items(ctx, overflow)
+    if not text_only:
+        _cards_not_empty(ctx, cells)
     return True
+
+
+def _kpi_room(ctx: _SlideCtx, group, items: list[SlideItem], numbers_in_cells: bool) -> None:
+    """Key figures (the slide's `numbers`) need the template's large figure size: a sample whose cards have no place for
+    a figure — it would stand in a heading slot set for a card's title (VK Tech's icon cards p26–p28: «18%» at 13 pt) —
+    is no place for them (RuntimeError: the renderer takes another sample or composes the figures large). The floor is
+    three quarters of the template's slide-heading size."""
+    c = getattr(ctx, "oslide_content", None)
+    if c is None or not c.numbers or not items or items[0].number != c.numbers[0].value or numbers_in_cells:
+        return
+    if any(s.group_id != group.id for s in ctx.slots(SlotRole.number)):
+        return  # the sample's own figure slots take them (a big_number sample)
+    first = [ctx.slot_of.get(sid) for sid in group.member_shape_ids[0]]
+    heads = [x for x in first if x is not None and x.role == SlotRole.card_title] or [x for x in first if x is not None and x.role in _BODY_ROLES]
+    size = max((x.style.size_pt or 0.0) for x in heads) if heads else 0.0
+    floor = 0.75 * ctx.typo.size_for("h1", 24.0)
+    if size and size < floor:
+        raise RuntimeError(f"в карточках образца нет места для крупной цифры: она встала бы в {size:.0f} pt, нужно от {floor:.0f}")
+
+
+def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
+    """Tall cards the slide fills to less than a third of their height (ЛЦТ p24: two white cards with a figure and a
+    line at their top, two thirds empty) are no place for the content: RuntimeError, the renderer takes another sample
+    or composes the slide."""
+    from verstka.rendering.clone_check import ink_box
+
+    if getattr(ctx, "kind", None) not in (PatternKind.cards, PatternKind.two_column, PatternKind.comparison, PatternKind.stat_row):
+        return  # (an agenda's short lines in its tall cards are the template's agenda)
+    # the plates the slide draws (a card is the cell's own filled shape or the panel laid under its text)
+    panels = []
+    for e in ctx.els.values():
+        if e.getparent() is None or is_nested(e) or etree.QName(e).localname != "sp" or not _has_fill(e):
+            continue
+        b = element_bbox(e)
+        if b and b[2] > 0 and b[3] > 0 and b[2] * b[3] < 0.6 * ctx.W * ctx.H:
+            panels.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    shares = []
+    for cell in cells:
+        els = [e for e in (cell or []) if e.getparent() is not None and not is_nested(e)]
+        texts = [element_bbox(e) for e in els if etree.QName(e).localname == "sp" and shape_text(e).strip()]
+        texts = [Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) for b in texts if b and b[2] > 0 and b[3] > 0]
+        if not texts:
+            return
+        cx = sum(b.x + b.w / 2 for b in texts) / len(texts)
+        cy = min(b.y for b in texts) + 1
+        under = [b for b in panels if b.x <= cx <= b.x2 and b.y <= cy <= b.y2]
+        if not under:
+            return  # no card drawn: lines on the ground, nothing to fill
+        card = min(under, key=lambda b: b.area)
+        if card.h < 0.25 * ctx.H:
+            return  # a short card is filled by a line or two
+        inks = []
+        for e in els:
+            if etree.QName(e).localname != "sp" or not shape_text(e).strip():
+                continue
+            ib = ink_box(e, ctx.typo.primary_family)
+            if ib is not None and card.intersection(ib) > 0:
+                inks.append(ib)
+        if not inks:
+            return
+        top, bottom = min(b.y for b in inks), max(b.y2 for b in inks)
+        shares.append((bottom - top) / card.h)
+    if shares and len(shares) >= 2 and max(shares) < 0.36:  # (about a third: the ink measure runs a little tall)
+        raise RuntimeError(f"карточки образца остались бы почти пустыми: текст занимает {max(shares):.0%} их высоты")
 
 
 def _top_align_rows(ctx: _SlideCtx, els: list[etree._Element]) -> None:
@@ -6369,6 +6436,7 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
     ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
     ctx.oslide_content = c
     ctx.data_slide = oslide.data is not None
+    ctx.kind = oslide.kind
     ctx.verbatim = bool(oslide.verbatim)
     if not _is_bookend(oslide):
         # the sample's own largest empty stretch, before anything is taken off: the gate compares the slide with it;

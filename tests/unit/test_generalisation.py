@@ -236,7 +236,10 @@ def test_empty_frames_become_container_slots_and_take_text(tmp_path):
     containers = [s for s in p.slots if s.container]
     assert len(containers) == 3 and p.repeat_groups, [(s.role.value, s.container) for s in p.slots]
     assert all(s.style.color_hex and s.style.color_hex != "FFFFFF" for s in containers)
-    oslide = OutlineSlide(id="s1", kind=PatternKind.cards, headline="Три шага", content=SlideContent(items=[SlideItem(title=f"Шаг {i}", text=f"Описание шага {i}") for i in (1, 2)]))
+    # (each card filled to more than a third of its height: tall cards left two thirds empty are no place for the
+    # content — `clone._cards_not_empty`)
+    more = " Команда собирает данные, проверяет их и готовит отчёт для руководства." * 4
+    oslide = OutlineSlide(id="s1", kind=PatternKind.cards, headline="Три шага", content=SlideContent(items=[SlideItem(title=f"Шаг {i}", text=f"Описание шага {i}." + more) for i in (1, 2)]))
     ws = TemplateWorkspace.open(m.template_id, tmp_path / "ws")
     b = DeckBuilder(ws.source)
     slide, warnings = render_clone(b, LayoutSlide(outline_id="s1", mode="clone", pattern_id=p.id), oslide, p, m, ws, DeckOutline(title="t", slides=[oslide]))
