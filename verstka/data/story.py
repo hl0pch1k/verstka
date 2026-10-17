@@ -1269,14 +1269,15 @@ def _merge_usage(a: dict, b: dict) -> dict:
     return out
 
 
-def stamp_usage(result: Any, stats: list, scope: str) -> None:
+def stamp_usage(result: Any, stats: Optional[list], scope: str, usage: Optional[dict] = None) -> None:
     """Model calls made before the pipeline (the brandbook's read, the template's analysis) added to each variant's
-    run manifest usage (qa3 E4: `by_skill` listed only the generation's own skills)."""
-    if not stats:
+    run manifest usage (qa3 E4: `by_skill` listed only the generation's own skills). `usage`: totals already counted
+    (the API's brandbook job keeps them beside the brandbook)."""
+    if not stats and not usage:
         return
     from verstka.pipeline.generate import call_totals
 
-    usage = {"scope": scope, **call_totals(list(stats))}
+    usage = {**(usage or {}), "scope": scope} if usage else {"scope": scope, **call_totals(list(stats or []))}
     for v in getattr(result, "variants", []) or []:
         path = Path(v.out_dir) / "run_manifest.json"
         try:

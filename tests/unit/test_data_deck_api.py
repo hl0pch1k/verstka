@@ -284,6 +284,45 @@ def test_the_logos_are_copied_before_the_brandbook_can_go(api, tmp_path):
     assert (branded_info(copy_id, root) or {}).get("base_template_id") == tid
 
 
+def test_the_brandbooks_model_calls_count_in_the_decks_usage(api, monkeypatch):
+    """qa3 E4 in the API: the brandbook is read by its own job — its model calls are kept beside the brandbook and go
+    into the usage of the deck laid out with it (run_manifest.usage), as the CLI's run counts them."""
+    from types import SimpleNamespace
+
+    import verstka.brand.read as R
+    from verstka.providers.registry import ProviderRegistry
+
+    class Vlm:
+        name, model = "fake", "fake-vlm"
+
+        def complete(self, messages, **kw):
+            return SimpleNamespace(usage=SimpleNamespace(prompt_tokens=120, completion_tokens=30, cost_rub=0.4), model="fake-vlm", attempts=1)
+
+    real = R.read_brandbook
+
+    def read(source, providers=None, **kw):
+        providers.get("vlm").complete([{"role": "user", "content": "палитра"}], skill="BrandbookRead")
+        return real(source, providers=None, **{**kw, "skills": None, "use_vlm": False})
+
+    monkeypatch.setattr(R, "read_brandbook", read)
+    monkeypatch.setattr(A, "providers", lambda: ProviderRegistry(roles={"vlm": Vlm()}))
+    monkeypatch.setattr(A, "_vlm_configured", lambda: True)
+    monkeypatch.setattr(A, "skills", lambda: None)
+    c, store, root, tid = api
+    parts = [("files", (f"Брендбук/logos/{p.name}", p.read_bytes())) for p in sorted((BRAND / "logos").glob("*.png"))]
+    parts.append(("files", ("Брендбук/tokens.json", (BRAND / "tokens.json").read_bytes())))
+    r = c.post("/api/brandbooks", files=parts, data={"use_models": "true"})
+    assert r.status_code == 200, r.text
+    assert _wait(r.json()["job_id"]).status == "done"
+    bid = r.json()["brandbook_id"]
+    kept = json.loads((store.brandbook_dir(bid) / A.BRAND_USAGE).read_text(encoding="utf-8"))
+    assert kept["calls"] == 1 and kept["by_skill"]["BrandbookRead"]["tokens_in"] == 120
+    gid, gen = _generate(c, tid, _upload(c), strategies=["structured"], brandbook_id=bid)
+    rm = json.loads((store.generation_dir(gid) / "structured" / "run_manifest.json").read_text(encoding="utf-8"))
+    assert rm["usage"]["by_skill"]["BrandbookRead"]["tokens_out"] == 30 and rm["usage"]["calls"] >= 1
+    assert rm["usage"]["cost_rub"] == pytest.approx(0.4)
+
+
 def test_fixes_and_chat_edits_check_data_figures_against_the_data_not_the_brief(api):
     """«Исправить слайд» and the chat's edits audit the variant with the brief (generation.json): the figures of the data
     slides and of the summary come from the files — `figure_not_in_brief` must not flag them."""

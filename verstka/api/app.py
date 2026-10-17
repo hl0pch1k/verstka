@@ -778,6 +778,17 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
     from verstka.data.story import stamp_steps
 
     stamp_steps(res, steps)  # the brandbook and the data story: part of the run's time (timings_s.brand / .data, total)
+    if data.brand is not None and req.brandbook_id:
+        # the brandbook's read (its own job) — its model calls are part of this deck's usage (qa3 E4)
+        bdir_ = store.brandbook_dir(str(req.brandbook_id))
+        try:
+            brand_usage = json.loads((bdir_ / BRAND_USAGE).read_text(encoding="utf-8")) if bdir_ is not None and (bdir_ / BRAND_USAGE).exists() else None
+        except (OSError, ValueError):
+            brand_usage = None
+        if brand_usage:
+            from verstka.data.story import stamp_usage
+
+            stamp_usage(res, None, "brand", usage=brand_usage)
     if story is not None:
         from verstka.data.story import stamp_variants
 
@@ -1686,6 +1697,9 @@ def _brand_opened(source: Path | str) -> Optional[tuple[str, dict]]:
     return None
 
 
+BRAND_USAGE = "usage.json"  # the brandbook read's model calls (call_totals), beside the brandbook
+
+
 @app.post("/api/brandbooks")
 def upload_brandbook(
     file: Optional[UploadFile] = File(None),
@@ -1725,10 +1739,14 @@ def upload_brandbook(
             if opened is not None:
                 events.step("open", *opened)
             p = providers() if use_vlm else None
+            stats: list = []  # the read's model calls: they count in the usage of every generation that uses the brandbook
             try:
+                from verstka.pipeline.generate import _recording
+
+                p_rec = _recording(p.with_deadline(time.monotonic() + 150), stats)[0] if p is not None else None
                 # the steps come as the reader finishes them (a PDF's — before the model, which reads up to two minutes)
                 spec = read_brandbook(
-                    source, providers=p.with_deadline(time.monotonic() + 150) if p is not None else None, skills=skills() if use_vlm else None,
+                    source, providers=p_rec, skills=skills() if use_vlm else None,
                     use_vlm=use_vlm, assets_dir=bdir, on_step=events,
                 )
             except BrandReadError:
@@ -1737,6 +1755,10 @@ def upload_brandbook(
                 log.warning("brandbook not read: %s", source, exc_info=True)
                 raise ValueError("Не удалось прочитать брендбук — проверьте файл или загрузите токены JSON") from e
             spec.id = bid
+            if stats:
+                from verstka.pipeline.generate import call_totals
+
+                (bdir / BRAND_USAGE).write_text(json.dumps(call_totals(stats), ensure_ascii=False, indent=2), encoding="utf-8")
             events.finish(spec)
             manifest, conflicts = _conflicts_with(spec, template_id, bdir)
             if not marker.exists() or not store.write_brandbook(bid, spec):
