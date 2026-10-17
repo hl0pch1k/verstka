@@ -4,8 +4,8 @@
 //   lg 1024–1279 — небольшой ноутбук, планшет лёжа: поля и колонка номера плотнее, номер рядом с названием;
 //   md 768–1023 — планшет: номер шага над названием, всё, что справа от названия, — строкой под ним;
 //   sm до 768 — телефон: одна колонка, разделы шапки — за кнопкой меню, касания не меньше 44 px, текст не мельче 16 px.
-// CSS повторяет те же границы: `(max-width: 1279.98px)` — стопка, `(max-width: 1023.98px)` — md и уже,
-// `(max-width: 767.98px)` — телефон (дробная граница: при масштабе окна ширина бывает нецелой).
+// CSS повторяет те же границы в синтаксисе диапазонов: `(width < 1280px)` — стопка, `(width < 1024px)` — md и уже,
+// `(width < 768px)` — телефон, `(width >= 1280px)` — компьютер (без щели между границами при нецелой ширине окна).
 import { useSyncExternalStore } from "react";
 
 export type Tier = "xl" | "lg" | "md" | "sm";
@@ -31,9 +31,9 @@ export const helperBeside = (t: Tier): boolean => t === "xl";
 
 /** Запросы ступеней — те же, что в CSS. */
 export const TIER_QUERY = {
-  xl: `(min-width: ${TIER_XL}px)`,
-  lg: `(min-width: ${TIER_LG}px)`,
-  md: `(min-width: ${TIER_MD}px)`,
+  xl: `(width >= ${TIER_XL}px)`,
+  lg: `(width >= ${TIER_LG}px)`,
+  md: `(width >= ${TIER_MD}px)`,
 } as const;
 
 /** Ступень по ответам запросов (ширина окна — та же, что видят правила CSS). */
@@ -69,4 +69,10 @@ export function useTier(): Tier {
 /** Колода стопкой. */
 export function useStack(): boolean {
   return isStack(useTier());
+}
+
+/** Телефон (уже 768): разделы — за кнопкой меню, раскладки по доскам M-create, M-build, M-result. */
+export const isPhone = (t: Tier): boolean => t === "sm";
+export function usePhone(): boolean {
+  return isPhone(useTier());
 }

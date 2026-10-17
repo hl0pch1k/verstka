@@ -75,7 +75,7 @@
 /* полный вид (разметка R-aside не меняется): сетка результата сужает правую колонку вместе с колодой, слайд опускается на 24 px
    и не выше свободного места (143 = листание 40 + отступ 16 + лента 87); уведомление и колонка гаснут, колонка едет со своей
    колонкой сетки и не сжимается. Раскрытое уведомление держит действия видимыми — прячем их вместе со слоем (Tab) */
-@media (min-width: 1280px){
+@media (width >= 1280px){
   .hp-wrap .ra-note{transition:transform 160ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   .hp-nar .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear 240ms}
@@ -155,7 +155,7 @@ a.p2-rbl:hover{color:#0B1220}
 .hp-nar .hp-in.hp-snap{transition:none}
 .hp-pcol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:320px;min-width:0;min-height:0;overflow-y:auto;scrollbar-width:none}
 .hp-pcol::-webkit-scrollbar{display:none}
-@media (min-width: 1280px){
+@media (width >= 1280px){
   .hp-nar .ra-two.hp-wide{grid-template-columns:minmax(0,1fr) 320px !important}
   .hp-nar .ra-two.fx-out{transition:opacity 120ms var(--ease),grid-template-columns 520ms var(--ease),column-gap 520ms var(--ease)}
   .hp-nar .ra-two.fx-in{transition:opacity 240ms var(--ease)}
@@ -170,7 +170,7 @@ a.p2-rbl:hover{color:#0B1220}
 }
 /* правило V2 «колонка проявляется за 160 мс через 80 мс» — о возвращении полного вида при закрытии помощника; свои
    сменщики колонки при закрытом помощнике (панель замечаний, колонка «Изображение») ходят своими ходами (result.css) */
-@media (min-width: 1280px){
+@media (width >= 1280px){
   .hp-closed .ra-two > aside.rm-col{transition:opacity 240ms var(--ease)}
   .hp-closed .ra-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
   .hp-closed .ra-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}

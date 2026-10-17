@@ -13,7 +13,7 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { useRise } from "../result/useRise";
-import { useTier } from "../shell/tier";
+import { usePhone } from "../shell/tier";
 import { Layer, lsDelay } from "./Layer";
 import { Scrim } from "./Scrim";
 
@@ -129,7 +129,7 @@ export function TplPreviewLayer() {
 
   const single = templates.length <= 1;
   // телефон: «Удалить» и «Разбор» — одной строкой над «Выбрать шаблон» (layers.css), подпись короче; полное имя — для чтения с экрана
-  const phone = useTier() === "sm";
+  const phone = usePhone();
   return (
     <>
       <Scrim open={open} onClose={close} label="Закрыть «Слайды шаблона»" z={8} />

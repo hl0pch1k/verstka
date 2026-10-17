@@ -1,6 +1,7 @@
 /* Основа «Слоёв». Базовый блок стилей эталона — docs/design/sloi/boards/V2.dc.html, <helmet><style>: от body{margin:0}
- * до конца блока @media (max-width: 900px), иконка-слои p2-lic, мягкий край p2-fade, логотип (p2-brand, p2-bars, p2-lbar*)
- * и подсказка-печать (p2-taw, p2-tph, p2-caret). Перенесено дословно, классы не переименованы. */
+ * до блока узкого окна (его место заняла колода стопкой — styles/stack.css), иконка-слои p2-lic, мягкий край p2-fade,
+ * логотип (p2-brand, p2-bars, p2-lbar*) и подсказка-печать (p2-taw, p2-tph, p2-caret). Перенесено дословно, классы не
+ * переименованы. */
 body{margin:0}
 a{color:#0A0F1F}a:hover{color:#1E40AF}
 .p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
-  latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, shortPlaceholder, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
+  latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
 } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
@@ -288,9 +288,9 @@ test("U2, V2: несвежесть не от помощника не «ожив�
 });
 
 test("подсказка поля на телефоне: длинные — короче на месте, остальные как есть", () => {
-  assert.equal(shortPlaceholder("Вопрос или текст презентации", true), "Вопрос или текст");
-  assert.equal(shortPlaceholder("Вопрос или текст презентации", false), "Вопрос или текст презентации");
-  assert.equal(shortPlaceholder("Что поменять на слайде 3?", true), "Слайд 3: что поменять?");
-  assert.equal(shortPlaceholder("Что поменять на слайде 12?", false), "Что поменять на слайде 12?");
-  assert.equal(shortPlaceholder("Вопрос о сборке", true), "Вопрос о сборке");
+  assert.equal(placeholderFor({ screen: "create", deck: false, slide: 1, short: true }), "Вопрос или текст");
+  assert.equal(placeholderFor({ screen: "create", deck: false, slide: 1 }), "Вопрос или текст презентации");
+  assert.equal(placeholderFor({ screen: "result", deck: true, slide: 12, short: true }), "Слайд 12: что поменять?");
+  assert.equal(placeholderFor({ screen: "result", deck: true, slide: 12 }), "Что поменять на слайде 12?");
+  assert.equal(placeholderFor({ screen: "build", deck: false, slide: 1, short: true }), "Вопрос о сборке");
 });

@@ -18,9 +18,10 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { useSwap } from "../kit/useSwap";
 import { useStale } from "../shell/StaleLine";
-import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, noteView, placeholderFor, shortPlaceholder, typeset, type FeedJob, type FeedNote } from "./chat";
+import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
 import { useHelperChat } from "./useHelperChat";
-import { useTier } from "../shell/tier";
+import { layerOpen } from "../shell/sheets";
+import { usePhone } from "../shell/tier";
 
 const LINE = 24;
 const PAD = 16;
@@ -133,8 +134,8 @@ export function HelperPlate() {
     template: !!templateId, fixable,
   });
   // телефон: поле уже — подсказка «Вопрос или текст презентации» короче на месте (по замеру поля 246 px при 390)
-  const phone = useTier() === "sm";
-  const placeholder = shortPlaceholder(placeholderFor({ screen: ui.screen, deck, slide: selectedSlide }), phone);
+  const phone = usePhone();
+  const placeholder = placeholderFor({ screen: ui.screen, deck, slide: selectedSlide, short: phone });
 
   // новое в открытой ленте всплывает само (p2-in); что было до открытия — входит каскадом вместе с плитой
   const openedAt = useRef(0);
@@ -172,7 +173,7 @@ export function HelperPlate() {
 
   const close = () => dispatch({ type: "set", patch: { helper: false } });
   // Esc вне полей и слоёв (фокус на странице) тоже закрывает помощника — если поверх колоды ничего не открыто
-  const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete || ui.pattern !== null);
+  const layered = layerOpen(ui);
   useEffect(() => {
     if (!open || layered) return;
     const onKey = (e: globalThis.KeyboardEvent) => {

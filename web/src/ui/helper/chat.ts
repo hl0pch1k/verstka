@@ -297,17 +297,11 @@ export function introFor(c: { building: boolean; deck: boolean }): string {
 }
 
 /** Подсказка в поле: на результате — про открытый слайд (G-helper «Что поменять на слайде 3?»). */
-export function placeholderFor(c: { screen: Screen; deck: boolean; slide: number }): string {
+/** Подсказка поля помощника по экрану. `short` — телефон: в строке поля при 360 px — 200 px, и длинные подсказки не
+ *  помещаются (по замеру Manrope 16: «Вопрос или текст презентации» 238, «Что поменять на слайде 12?» 215) — короче,
+ *  смысл тот же («Вопрос или текст» 134, «Слайд 12: что поменять?» 190). */
+export function placeholderFor(c: { screen: Screen; deck: boolean; slide: number; short?: boolean }): string {
   if (c.screen === "build") return "Вопрос о сборке";
-  return c.screen === "result" && c.deck ? `Что поменять на слайде ${c.slide}?` : "Вопрос или текст презентации";
-}
-
-/** Подсказка поля на телефоне (`phone`): в строке поля при 360 — 200 px, и длинные подсказки не помещаются (по замеру
- *  Manrope 16: «Вопрос или текст презентации» 238, «Что поменять на слайде 12?» 215) — короче на месте, смысл тот же
- *  («Вопрос или текст» 134, «Слайд 12: что поменять?» 190); остальные — как есть. */
-export function shortPlaceholder(p: string, phone: boolean): string {
-  if (!phone) return p;
-  if (p === "Вопрос или текст презентации") return "Вопрос или текст";
-  const m = /^Что поменять на слайде (\d+)\?$/.exec(p);
-  return m ? `Слайд ${m[1]}: что поменять?` : p;
+  if (c.screen === "result" && c.deck) return c.short ? `Слайд ${c.slide}: что поменять?` : `Что поменять на слайде ${c.slide}?`;
+  return c.short ? "Вопрос или текст" : "Вопрос или текст презентации";
 }
