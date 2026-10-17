@@ -296,6 +296,9 @@ class GenerateRequest(BaseModel):
     brand_priority: BrandPriority = "brand"
     # база знаний (id из POST /api/knowledge): агент пишет текст по её документам — каждый факт с источником
     knowledge_id: Optional[str] = None
+    # «Подобрать шрифты» (verstka/brand/fontpick.py): шаблон со стандартными шрифтами получает пару под свой характер
+    # (копия шаблона, шрифты встроены в PPTX); шаблон со своим шрифтом и брендбук со шрифтами — как есть
+    pick_fonts: bool = True
 
 
 class PictureBody(BaseModel):
@@ -755,6 +758,39 @@ def _generation_data(req: GenerateRequest) -> GenerationData:
     return data
 
 
+def _fonted_template_id(template_id: str, req: GenerateRequest, data: GenerationData, progress, steps: dict):
+    """(the template the deck is laid out on, the font decision): a template set in standard fonts gets a pair picked
+    for its character — its copy with the fonts embedded (verstka/brand/fontpick.py, cached); the switch off, a
+    brandbook with fonts or the template's own font — the template as it is. «Собрать ещё раз» on a copy with fonts
+    picks for its base (the switch off: the base itself). Never raises: the template as it is."""
+    from verstka.brand.fontpick import fonted_template, fonts_info
+
+    tf = time.monotonic()
+    try:
+        info = fonts_info(template_id, store.root)
+        if info and info.get("base_template_id") and store.manifest(str(info["base_template_id"])) is not None:
+            template_id = str(info["base_template_id"])
+        if req.pick_fonts:
+            progress("Шрифты: подбираю шрифты под шаблон", 0.02)
+        brand_fonts = bool(data.brand is not None and data.brand.fonts)  # a brandbook with fonts is stronger than the pick
+        tid, choice = fonted_template(template_id, enabled=req.pick_fonts, brand_fonts=brand_fonts, workspace_root=store.root,
+                                      progress=lambda stage, frac: progress(f"Шрифты: {stage}", 0.02 + 0.03 * float(frac or 0.0)))
+        return tid, choice
+    except Exception:  # noqa: BLE001 - the deck is built on the template as it is
+        log.warning("fonts not picked for %s", template_id, exc_info=True)
+        return template_id, None
+    finally:
+        steps["fonts"] = time.monotonic() - tf
+
+
+def _fonts_meta(choice: Any, pick: bool) -> Optional[dict]:
+    """generation.json `fonts`: the pair and the reason («Почему так», the «Оформление» card)."""
+    if choice is None:
+        return None
+    return {"applied": bool(choice.apply), "heading": choice.heading, "body": choice.body, "character": choice.character,
+            "reason": choice.reason, "pick": pick}
+
+
 def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: str, gdir: Path, progress, use_models: bool):
     """(the data story's outline with the knowledge base's slides beside it, the writer's result of that part or None)
     — never raises: the data deck stays."""
@@ -796,6 +832,8 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         template_id = _branded_template_id(req, data, gdir, progress)
         manifest = store.manifest(template_id) or manifest
         steps["brand"] = time.monotonic() - tb
+    template_id, font_choice = _fonted_template_id(template_id, req, data, progress, steps)
+    manifest = store.manifest(template_id) or manifest
     brief = None
     kb_writer = None  # the knowledge base's part of a data deck (verstka/knowledge/with_data.py)
     outline = None
@@ -915,6 +953,9 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         },
         "planner": generation_planner([{"planner": planners[v.strategy]} for v in res.variants], use_models=use_models, supplied=supplied),
     }
+    fonts = _fonts_meta(font_choice, req.pick_fonts)
+    if fonts:
+        meta["fonts"] = fonts
     if getattr(res, "writer", None) is None and kb_writer is not None:
         res.writer = kb_writer  # the knowledge base's part of a data deck: in one place with every writer's text
     if getattr(res, "writer", None) is not None:
@@ -994,7 +1035,7 @@ def _request_options(req: GenerateRequest) -> dict:
     """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
     return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from,
             "dataset_ids": list(req.dataset_ids), "brandbook_id": req.brandbook_id, "brand_priority": req.brand_priority,
-            "knowledge_id": req.knowledge_id}
+            "knowledge_id": req.knowledge_id, "pick_fonts": req.pick_fonts}
 
 
 def _generation_job(gid: str, gdir: Path, req: GenerateRequest, data: Optional[GenerationData] = None) -> Callable[[Job], dict]:
@@ -1121,7 +1162,10 @@ def list_checks() -> list[dict]:
 
 @app.get("/api/templates")
 def list_templates() -> list[dict]:
-    return store.list_templates()
+    from verstka.brand.fontpick import fonts_info
+
+    # a copy with picked fonts is a cache of builds (like a branded copy): not a template of the library
+    return [t for t in store.list_templates() if not fonts_info(str(t.get("template_id") or ""), store.root)]
 
 
 @app.post("/api/templates")
@@ -2426,7 +2470,19 @@ def explain_slide(gid: str, strategy: str, index: int) -> dict:
     src = _notes_sources(outline, index)
     if src:
         text = f"{text}\nФакты слайда — из базы знаний. {src}"
+    fonts = meta.get("fonts") if isinstance(meta.get("fonts"), dict) else None
+    if fonts and fonts.get("reason"):
+        text = f"{text}\n{fonts_line(fonts)}"
     return {"index": index, "text": text}
+
+
+def fonts_line(fonts: dict) -> str:
+    """«Шрифты: Lora / Nunito — <причина>» or «Шрифты шаблона сохранены — <причина>»."""
+    reason = str(fonts.get("reason") or "").strip()
+    if fonts.get("applied") and fonts.get("heading"):
+        pair = fonts["heading"] if fonts.get("heading") == fonts.get("body") or not fonts.get("body") else f"{fonts['heading']} / {fonts['body']}"
+        return f"Шрифты: {pair}" + (f" — {reason[:1].lower() + reason[1:]}" if reason else ".")
+    return f"Шрифты шаблона сохранены — {reason[:1].lower() + reason[1:]}" if reason else "Шрифты шаблона сохранены."
 
 
 _SOURCES_LINE_RE = re.compile(r"(?:^|\n)\s*(Источники?: [^\n]+)")

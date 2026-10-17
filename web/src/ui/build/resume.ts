@@ -74,6 +74,8 @@ export function requestOf(g: GenerationMeta): GenerateRequest {
     ...(g.brandbook_id ? { brandbook_id: g.brandbook_id, brand_priority: g.brand_priority ?? "brand" } : {}),
     // база знаний: «Собрать ещё раз» — по тем же документам
     ...(g.knowledge_id ? { knowledge_id: g.knowledge_id } : {}),
+    // «Подобрать шрифты» — как собирали (старые презентации — по умолчанию сервера)
+    ...(typeof g.pick_fonts === "boolean" ? { pick_fonts: g.pick_fonts } : {}),
   };
 }
 

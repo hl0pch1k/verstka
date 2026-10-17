@@ -11,7 +11,7 @@ import { fileSafe } from "../../lib/plain";
 import { variantRev, withRev } from "../../lib/rev";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
-import type { BrandSpec, Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
+import type { BrandSpec, FontsInfo, Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
 import { brandPalette, brandStrip, dataKind } from "../create/dataRules";
 import { fileIcon, type DsIconName } from "../create/dsKit";
 import type { IconName } from "../kit/icons";
@@ -79,23 +79,40 @@ export function docLine(template: string, total: number, when: string, brand: st
  *  брендбуком, что важнее при расхождении (метка), палитра брендбука плиткой. «Брендбук важнее» — шрифт заголовков
  *  бренда с заменой и акцент бренда (из BrandSpec, `brand`; нет его — без подробностей); «шаблон важнее» — при
  *  расхождении как в шаблоне; без брендбука — палитра, шрифт и сетка шаблона. Ни файлов, ни брендбука — карточки нет. */
-export interface LookView { tag: string; text: string; palette: string[] | null }
-export function lookCard(g: Pick<GenerationMeta, "dataset_ids" | "brandbook" | "brand_priority">, o: { template: string; font: string | null; brand: BrandSpec | null }): LookView | null {
+export interface LookView { tag: string; text: string; palette: string[] | null; fonts?: { text: string; title: string } | null }
+
+/** Строка о шрифтах колоды (generation.json `fonts`): «Шрифты: Lora / Nunito» (подобраны), «Шрифты шаблона сохранены
+ *  (фирменные)», «Шрифты — из брендбука», «Подбор шрифтов выключен»; подсказка — причина. */
+export function fontsLine(f: FontsInfo | null | undefined): { text: string; title: string } | null {
+  if (!f) return null;
+  const title = (f.reason ?? "").trim();
+  if (f.applied && f.heading) {
+    const pair = !f.body || f.body === f.heading ? f.heading : `${f.heading} / ${f.body}`;
+    return { text: `Шрифты: ${pair}`, title };
+  }
+  if (f.pick === false) return { text: "Подбор шрифтов выключен — шрифты шаблона", title };
+  if (/брендбук/i.test(title)) return { text: "Шрифты — из брендбука", title };
+  return { text: "Шрифты шаблона сохранены (фирменные)", title };
+}
+
+export function lookCard(g: Pick<GenerationMeta, "dataset_ids" | "brandbook" | "brand_priority" | "fonts">, o: { template: string; font: string | null; brand: BrandSpec | null }): LookView | null {
   const brand = deckBrand(g);
+  const fonts = fontsLine(g.fonts);
   if (!brand) {
-    if (!g.dataset_ids?.length) return null;
-    return { tag: "по шаблону", text: `Палитра, ${o.font ? `шрифт ${o.font}` : "шрифты"} и сетка — из шаблона ${o.template}`, palette: null };
+    if (fonts?.text.startsWith("Шрифты:")) return { tag: "шрифты подобраны", text: `Палитра и сетка — из шаблона ${o.template}`, palette: null, fonts };
+    if (!g.dataset_ids?.length && !fonts) return null;
+    return { tag: "по шаблону", text: `Палитра, ${o.font ? `шрифт ${o.font}` : "шрифты"} и сетка — из шаблона ${o.template}`, palette: null, ...(fonts && { fonts }) };
   }
   const head = `${o.template} и ${brand}`;
   const palette = o.brand ? brandPalette(o.brand) : null;
-  if (g.brand_priority === "template") return { tag: "шаблон важнее", text: `${head}: при расхождении — как в шаблоне`, palette: palette?.length ? palette : null };
+  if (g.brand_priority === "template") return { tag: "шаблон важнее", text: `${head}: при расхождении — как в шаблоне`, palette: palette?.length ? palette : null, ...(fonts && { fonts }) };
   const font = o.brand?.fonts.find((f) => f.role === "heading");
   const accent = o.brand?.colors.find((c) => c.role === "accent");
   const parts = [
     font ? `заголовки — ${font.family}${font.fallback && font.fallback !== font.family ? `, замена — ${font.fallback}` : ""}` : null,
     accent ? `акцент ${accent.hex.toUpperCase()}` : null,
   ].filter(Boolean);
-  return { tag: "брендбук важнее", text: parts.length ? `${head}: ${parts.join("; ")}` : head, palette: palette?.length ? palette : null };
+  return { tag: "брендбук важнее", text: parts.length ? `${head}: ${parts.join("; ")}` : head, palette: palette?.length ? palette : null, ...(fonts && { fonts }) };
 }
 
 /** Шаблон презентации для людей (строка под названием, полоса 01): у колоды с брендбуком она свёрстана на
@@ -385,6 +402,7 @@ export function deckPreset(g: GenerationMeta): ComposerPreset {
   if (g.dataset_ids !== undefined) preset.datasetIds = g.dataset_ids;
   if (g.brandbook_id !== undefined) preset.brandbookId = g.brandbook_id;
   if (g.brand_priority) preset.brandPriority = g.brand_priority;
+  if (typeof g.pick_fonts === "boolean") preset.pickFonts = g.pick_fonts;
   return preset;
 }
 

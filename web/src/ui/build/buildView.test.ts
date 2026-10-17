@@ -200,3 +200,10 @@ test("полоса 03: «Сборка завершена» — только у �
   assert.equal(buildStripText(gen({ variants: [] }), null), null);
   assert.equal(buildStripText(null, null), null);
 });
+
+test("шрифты подбираются до плана: заголовок «Подбираю шрифты…», потом — обычные фазы", () => {
+  const picking = fold({ ...start, status: "running" }, msg("Шрифты: ставлю шрифты Lora / Nunito", 0.03));
+  assert.equal(view(picking).title, "Подбираю шрифты…");
+  const later = fold(picking, ANALYST);
+  assert.ok(view(later).title !== "Подбираю шрифты…");
+});

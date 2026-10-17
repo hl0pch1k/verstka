@@ -106,3 +106,14 @@ test("данные и база знаний: «Графики — по 2 фай�
   const g = { ...meta({ brief: "План", dataset_ids: ["a", "b"], writer }), variants: [] } as Generation;
   assert.equal(sourceText(g, null), "Графики — по 2 файлам данных, остальное агент написал по базе знаний «Квартал»");
 });
+
+test("«Оформление»: подобранная пара шрифтов с причиной; шаблон со своим шрифтом — «шрифты шаблона сохранены»", async () => {
+  const { lookCard, fontsLine } = await import("./resultView");
+  const o = { template: "Piano", font: null, brand: null };
+  const picked = lookCard({ ...meta({}), fonts: { applied: true, heading: "Lora", body: "Nunito", reason: "Природные мотивы — антиква с мягким гротеском." } } as never, o);
+  assert.equal(picked?.tag, "шрифты подобраны");
+  assert.deepEqual(picked?.fonts, { text: "Шрифты: Lora / Nunito", title: "Природные мотивы — антиква с мягким гротеском." });
+  assert.equal(fontsLine({ applied: false, reason: "У шаблона свой шрифт (Play) — оформление по шаблону, шрифты не меняются." })?.text, "Шрифты шаблона сохранены (фирменные)");
+  assert.equal(fontsLine({ applied: false, reason: "Подбор шрифтов выключен", pick: false })?.text, "Подбор шрифтов выключен — шрифты шаблона");
+  assert.equal(fontsLine(null), null);
+});

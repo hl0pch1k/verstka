@@ -436,6 +436,8 @@ export interface GenerationMeta {
   brandbook_id?: string | null;
   brand_priority?: BrandPriority;
   knowledge_id?: string | null;
+  pick_fonts?: boolean;
+  fonts?: FontsInfo | null;
   /** Брендбук приложен: `template_id` — брендированная копия шаблона (на ней свёрстана колода), исходный — здесь. */
   base_template_id?: string | null;
   /** Имена файлов с данными и брендбука для людей (generation.json `datasets`, `brandbook`). */
@@ -590,7 +592,12 @@ export interface GenerateRequest {
   brand_priority?: BrandPriority;
   /** База знаний (POST /api/knowledge): агент пишет текст по её документам, у каждого факта — источник. */
   knowledge_id?: string | null;
+  /** «Подобрать шрифты» (verstka/brand/fontpick.py). */
+  pick_fonts?: boolean;
 }
+
+/** Шрифты колоды (generation.json `fonts`): подобранная пара или почему шрифты шаблона остались. */
+export interface FontsInfo { applied: boolean; heading?: string | null; body?: string | null; character?: string | null; reason: string; pick?: boolean }
 export interface GenerateResponse { job_id: string; generation_id: string }
 
 // ── «Из файла» — документ, и база знаний

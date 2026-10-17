@@ -710,8 +710,18 @@ def generate_variants(
     # LibreOffice once per deck, all decks at once: the PDF export and the slide previews come from the same PDF
     report("export: pdf, html, slide previews", 0.86)
 
+    fonted = _fonts_choice(manifest.template_id, workspace_root)
+
     def _finish(v: dict) -> dict:
         te = time.time()
+        if fonted:
+            # the deck on a copy with picked fonts carries them (idempotent: an embedded family is never doubled)
+            try:
+                from verstka.brand.fontembed import embed_fonts
+
+                embed_fonts(v["vdir"] / "deck.pptx")
+            except Exception:  # noqa: BLE001 - the deck stays as rendered
+                log.warning("fonts not embedded into %s", v["vdir"], exc_info=True)
         want_images = (render_images or audit) and (v.get("pictures_changed") or not (v["audit"] is not None and v["audit"].slide_images))
         v["exports"], v["images"], w, v["render_ok"] = render_outputs(v["vdir"], manifest, v["outline"].title, exports, images=want_images)
         v["warnings"].extend(w)
@@ -768,7 +778,8 @@ def generate_variants(
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
             usage=_usage_of(gen_stats),
-            extra={"warnings": v["warnings"] + _brand_warnings(manifest.template_id, workspace_root, v["warnings"]), "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v), **({"eyes": eyes_seen[name]} if name in eyes_seen else {})},
+            extra={"warnings": v["warnings"] + _brand_warnings(manifest.template_id, workspace_root, v["warnings"]), "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v), **({"eyes": eyes_seen[name]} if name in eyes_seen else {}),
+                   **({"fonts": fonted} if fonted else {})},
         )
         write_run_manifest(vdir / "run_manifest.json", rm)
         result.variants.append(vr)
@@ -879,6 +890,17 @@ def _pictures_extra(v: dict) -> dict:
     from verstka.images.fill import summary
 
     return {"pictures": summary(recs)}
+
+
+def _fonts_choice(template_id: str, workspace_root) -> Optional[dict]:
+    """The picked fonts of the template the deck is laid out on (a copy with fonts, verstka/brand/fontpick.py): its
+    pair and reason for run_manifest and «Почему так»; None — the template's own fonts."""
+    try:
+        from verstka.brand.fontpick import fonts_info
+
+        return (fonts_info(template_id, workspace_root) or {}).get("choice") or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _brand_warnings(template_id: str, workspace_root, have: list[str]) -> list[str]:

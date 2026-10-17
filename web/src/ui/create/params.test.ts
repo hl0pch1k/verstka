@@ -20,7 +20,7 @@ const IMG = { configured: true, enabled: true };
 
 test("черновик: по умолчанию — 12 слайдов, все варианты, модель пишет; взгляд и изображения — как решат модель и сервер", () => {
   assert.deepEqual(readParams(undefined), PARAMS0);
-  assert.deepEqual(PARAMS0, { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: null, pictures: null });
+  assert.deepEqual(PARAMS0, { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: null, pictures: null, fonts: true });
   // выбор человека из черновика остаётся, не тронутое — null
   assert.deepEqual([readParams({ eyes: false, pictures: true }).eyes, readParams({ eyes: false, pictures: true }).pictures], [false, true]);
   assert.deepEqual([readParams({}).eyes, readParams({}).pictures], [null, null]);
@@ -89,7 +89,7 @@ test("запрос: поля сборки; взгляд дизайнера с м
   assert.deepEqual(req(), {
     template_id: "t1", brief: "История VK", audience: null, purpose: "product", slides: 12,
     strategies: ["structured", "visual", "compact"], use_models: true, audit_models: false, eyes: true, pictures: true,
-    autofix: true, exports: ["pdf", "html"], improved_from: undefined,
+    autofix: true, exports: ["pdf", "html"], improved_from: undefined, pick_fonts: true,
   });
 });
 test("запрос: аудитория, свой тип презентации, выбранные варианты", () => {
@@ -254,4 +254,12 @@ test("база знаний с документами — её id в запро�
   assert.equal(req({ knowledge: { knowledge_id: "kb1" } }).knowledge_id, "kb1");
   assert.equal("knowledge_id" in req({ knowledge: {} }), false);
   assert.equal("knowledge_id" in req({}), false);
+});
+
+test("«Подобрать шрифты»: по умолчанию включён, в запросе — pick_fonts; черновик и «Изменить текст» его несут", () => {
+  assert.equal(req({}).pick_fonts, true);
+  assert.equal(req({ params: P({ fonts: false }) }).pick_fonts, false);
+  assert.equal(readParams({ fonts: false }).fonts, false);
+  assert.equal(readParams({}).fonts, true);
+  assert.equal(presetParams(P(), { pickFonts: false }).fonts, false);
 });

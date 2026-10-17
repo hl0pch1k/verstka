@@ -119,6 +119,7 @@ def generate(
     data: Optional[list[str]] = typer.Option(None, "--data", "-d", help="Data files (CSV, XLSX, JSON, TXT/MD with a table) or a folder of them; repeat --data for several, or give one comma-separated value: the deck becomes a data story"),
     brand: Optional[str] = typer.Option(None, "--brand", help="Brandbook: tokens JSON, PDF guideline, a folder or .zip with logos, or a Figma link — the deck is laid out on the template's branded copy"),
     brand_priority: str = typer.Option("brand", "--brand-priority", help="brand (the brandbook wins over the template) | template (the brand only adds what the template lacks)"),
+    pick_fonts: bool = typer.Option(True, "--pick-fonts/--no-pick-fonts", help="Pick a font pair for a template set in standard fonts (Arial, Calibri…): a copy of the template with the fonts embedded; a template with its own font is left as it is"),
     kb: Optional[list[str]] = typer.Option(None, "--kb", help="Knowledge base: an id from the workspace, or documents (DOCX, PDF, MD, TXT), folders, .zip archives and public page links — the writer takes the deck's facts from them, each with its source; repeat --kb for several"),
 ) -> None:
     """Generate three layout variants (or one) from a template and a brief (and data files, a brandbook, a knowledge
@@ -176,6 +177,9 @@ def generate(
             tb = time.monotonic()
             template = _branded(template, brand, brand_priority, workspace, providers, skills, use_vlm=not no_vlm and use_models, use_llm=use_models, status=status, stats=brand_stats)
             steps["brand"] = time.monotonic() - tb
+        tf = time.monotonic()
+        template = _fonted(template, workspace, enabled=bool(cfg.get("pick_fonts", pick_fonts)), brand_fonts=_brand_has_fonts(brand), status=status)
+        steps["fonts"] = time.monotonic() - tf
         if data and outline_obj is None:
             from verstka.data.story import build_data_story
 
@@ -293,6 +297,39 @@ def _data_files(items: list[str]) -> list[Path]:
 
 
 _DOC_BRIEF_EXTS = (".docx", ".docm", ".pdf", ".doc", ".rtf", ".odt")
+
+
+def _fonted(template: Path, workspace: Optional[Path], *, enabled: bool, brand_fonts: bool, status=None) -> Path:
+    """The template the deck is laid out on: its copy with a picked font pair when it is set in standard fonts
+    (verstka/brand/fontpick.py); else the template itself."""
+    from verstka.analysis.manifest import analyze_template
+    from verstka.brand.fontpick import fonted_template
+    from verstka.ingest.workspace import TemplateWorkspace
+
+    root = Path(workspace) if workspace else _default_root()
+    try:
+        m = analyze_template(template, workspace_root=root, use_llm=False, use_vlm=False)
+        tid, ch = fonted_template(m.template_id, enabled=enabled, brand_fonts=brand_fonts, workspace_root=root,
+                                  progress=(lambda stage, frac: status.update(f"[шрифты] {stage}")) if status is not None else None)
+    except Exception as e:  # noqa: BLE001 - the template as it is
+        console.print(f"[yellow]Шрифты не подобраны ({str(e)[:120]}) — шаблон как есть[/yellow]")
+        return template
+    console.print(f"Шрифты: {ch.heading} / {ch.body} — {ch.reason}" if ch.apply else f"Шрифты: {ch.reason}")
+    return TemplateWorkspace.open(tid, root).source if tid != m.template_id else template
+
+
+def _brand_has_fonts(brand: Optional[str]) -> bool:
+    """A brandbook given (its fonts are stronger than the pick): a tokens JSON names its fonts; a PDF or a folder —
+    assumed to (it is read later, on the branded copy)."""
+    if not brand:
+        return False
+    p = Path(str(brand))
+    if p.suffix.lower() == ".json" and p.is_file():
+        try:
+            return bool(json.loads(p.read_text(encoding="utf-8")).get("fonts"))
+        except (OSError, ValueError, AttributeError):
+            return True
+    return True
 
 
 def _default_root() -> Path:

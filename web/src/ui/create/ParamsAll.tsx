@@ -146,9 +146,10 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
     { id: "cp-sw1", name: "Модель пишет тексты слайдов", hint: pp.writesHint, sw: pp.writes, onToggle: pp.toggleWrites },
     { id: "cp-sw2", name: "Модель проверяет слайды по картинке", hint: "Посмотрит на каждый новый слайд", sw: pp.eyes, onToggle: pp.toggleEyes },
     { id: "cp-sw3", name: "Генерировать изображения", hint: pp.imagesHint, sw: pp.pictures, onToggle: pp.togglePictures },
+    { id: "cp-sw4", name: "Подобрать шрифты", hint: pp.fontsHint, sw: pp.fonts, onToggle: pp.toggleFonts },
   ];
   const swRow = useRef<HTMLDivElement>(null);
-  const swh = useSwitchHeights(swRow, [g.tight, wrap, pp.writesHint, pp.imagesHint]);
+  const swh = useSwitchHeights(swRow, [g.tight, wrap, pp.writesHint, pp.imagesHint, pp.fontsHint]);
   const vars = {
     "--pp-r1w": g.r1Wide, "--pp-r1n": g.r1Narrow,
     // коробки не ниже доски: 104 в широкой раскладке, 164 в узкой (V2 `--pp-swh`); выше — когда текст длиннее
@@ -264,7 +265,7 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
           ))}
         </div>
       ) : (
-        <div ref={swRow} className="p2-params p2-stag" style={{ ...GRID3, marginTop: 32, transitionDelay: "280ms" }}>
+        <div ref={swRow} className="p2-params p2-stag pp-sw4" style={{ ...GRID3, gridTemplateColumns: `repeat(${switches.length}, minmax(0, 1fr))`, marginTop: 32, transitionDelay: "280ms" }}>
           {switches.map((it) => <SwitchBox key={it.id} it={it} narrow={narrow} />)}
         </div>
       )}

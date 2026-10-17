@@ -245,6 +245,8 @@ export interface ComposerPreset {
   eyes?: boolean | null;
   /** «Генерировать изображения» as the deck was built (null: the server's default). */
   pictures?: boolean | null;
+  /** «Подобрать шрифты» as the deck was built. */
+  pickFonts?: boolean;
   strategies?: string[];
   /** «Улучшить готовую»: the deck this text was read from (its audit stays the «было» of the next build). */
   improvedFrom?: ImprovedFrom | null;

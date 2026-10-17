@@ -225,7 +225,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
     );
     return (
       <div key={epoch} className={cls("p2-two bd-two bd-mob", (leaving || retry) && "bd-out")} style={vars}>
-        <Phases phase={view.phase} morph={morph} data={view.data} />
+        <Phases phase={view.phase} morph={morph} data={view.data} fonts={!!view.fonts} />
         {clockRow(<span className={cls("bd-stp", failed && "bd-stp-err")}>{view.step}</span>)}
         <div role="tablist" aria-label="Что показать" className="bd-tabs p2-in" onKeyDown={tabKey} style={{ animationDelay: "120ms" }}>
           {tabBtn("board", "Раскадровка")}
@@ -244,7 +244,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   return (
     <div key={epoch} className={cls("p2-two bd-two", morph.tight && "bd-tight", (leaving || retry) && "bd-out")}
       style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652, ...vars }}>
-      <Phases phase={view.phase} morph={morph} data={view.data} />
+      <Phases phase={view.phase} morph={morph} data={view.data} fonts={!!view.fonts} />
       <div className="bd-body" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
         {clockRow()}
         <div style={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>

@@ -63,6 +63,8 @@ export interface RoleView {
 export interface VariantView { name: string; status: string | null; done: boolean; tip: string }
 
 export interface BuildView {
+  /** Сервер подбирает шрифты шаблона (строки «Шрифты: …» до плана): заголовок «Подбираю шрифты…». */
+  fonts?: boolean;
   phase: BuildPhase;
   title: string;
   /** Сборка с файлами данных: фаза аналитика — «Изучаю данные», роль — «Аналитик данных». */
@@ -105,6 +107,9 @@ export interface BuildViewOptions {
 export const DATA_STAGE = "Изучаю данные";
 export const DATA_ROLE = { title: "Аналитик данных", hint: "изучает файлы: природа данных, задача, график" } as const;
 /** Заголовок фазы: у сборки с данными аналитик изучает данные (а не читает текст). */
+/** Заголовок фазы, пока сервер подбирает шрифты шаблона (app.py `_fonted_template_id`: строки «Шрифты: …»). */
+export const FONTS_STAGE = "Подбираю шрифты…";
+const FONTS_LINE = /^Шрифты:/;
 export const stageTitle = (phase: BuildPhase, data = false): string => (data && phase === "analyst" ? DATA_STAGE : STAGE_TITLE[phase]);
 /** Какую фазу заголовок показывает следующей после `shown`, когда сборка дошла до `phase`: обычно — её саму (быстрые
  *  промежуточные не показываются, фаза держится Phases `DWELL_MS`); у сборки с данными (`data`) — сперва «Изучаю данные»,
@@ -346,7 +351,9 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
 
   return {
     phase,
-    title: stageTitle(phase, data),
+    // шрифты подбираются до плана (первый раз — ~3 с): строка сервера «Шрифты: …», фаз агента ещё нет
+    title: phase === "queued" && FONTS_LINE.test(job.message ?? "") ? FONTS_STAGE : stageTitle(phase, data),
+    fonts: phase === "queued" && FONTS_LINE.test(job.message ?? ""),
     data,
     clock: job.endedAt === null ? "—" : clockText(((job.endedAt ?? now) - job.startedAt) / 1000),
     progress: queued ? null : done ? 1 : clamp01(job.progress),

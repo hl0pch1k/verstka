@@ -14,13 +14,15 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { bindShort } from "../../lib/typo";
 import { cls } from "../kit/cls";
-import { PHASE_ROLL, phaseStep, stageTitle, type BuildPhase } from "./buildView";
+import { FONTS_STAGE, PHASE_ROLL, phaseStep, stageTitle, type BuildPhase } from "./buildView";
 import { phaseFit, phaseLines, type BuildMorph } from "./columns";
 
 const DWELL_MS = 1100;
 
-export function Phases({ phase, morph, data = false }: {
+export function Phases({ phase, morph, data = false, fonts = false }: {
   phase: BuildPhase; morph: BuildMorph;
+  /** Подбираются шрифты (до плана): фаза очереди — «Подбираю шрифты…» (короче «Готовлюсь к сборке» — её клетки хватает). */
+  fonts?: boolean;
   /** Сборка с файлами данных: фаза аналитика — «Изучаю данные» (buildView `stageTitle`). */
   data?: boolean;
 }) {
@@ -44,8 +46,9 @@ export function Phases({ phase, morph, data = false }: {
       <div className="p2-phs p2-in" style={{ position: "relative", flex: 1, minWidth: 0, height: 48, animationDelay: "40ms" }}>
         {PHASE_ROLL.map((p, i) => {
           const f = phaseFit(p, morph.font, morph.cell, data);
-          const [l1, l2] = f.two ? phaseLines(p, data) : ["", ""];
-          const t = bindShort(stageTitle(p, data));
+          const own = p === "queued" && fonts;
+          const [l1, l2] = f.two ? (own ? [FONTS_STAGE, ""] : phaseLines(p, data)) : ["", ""];
+          const t = bindShort(own ? FONTS_STAGE : stageTitle(p, data));
           return (
             <span key={p} className={cls("p2-ph bd-ph", i === at ? "p2-ph-on" : i < at ? "p2-ph-past" : "p2-ph-next")} aria-hidden="true"
               style={{ "--phs": f.scale } as CSSProperties}>
@@ -58,7 +61,7 @@ export function Phases({ phase, morph, data = false }: {
             </span>
           );
         })}
-        <h1 className="p2-sr" aria-live="polite">{stageTitle(shown, data)}</h1>
+        <h1 className="p2-sr" aria-live="polite">{shown === "queued" && fonts ? FONTS_STAGE : stageTitle(shown, data)}</h1>
       </div>
     </div>
   );

@@ -23,7 +23,7 @@ import { useDeckWrap } from "../deck/useDeckFit";
 import { ctaShort, paramsRow } from "./morph";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
-  summaryLine, paramsBrief, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
+  summaryLine, paramsBrief, fontsHint, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
   type HeadLine, type ImagesInfo, type SlidesView, type SwitchView, type VariantCard,
 } from "./params";
 
@@ -46,8 +46,9 @@ export interface ParamsPlate {
   step(delta: number): void;
   cards: VariantCard[];
   toggle(name: string): void;
-  writes: SwitchView; eyes: SwitchView; pictures: SwitchView;
-  toggleWrites(): void; toggleEyes(): void; togglePictures(): void;
+  writes: SwitchView; eyes: SwitchView; pictures: SwitchView; fonts: SwitchView;
+  toggleWrites(): void; toggleEyes(): void; togglePictures(): void; toggleFonts(): void;
+  fontsHint: string;
   writesHint: string; imagesHint: string;
   summary: string;
   /** Название выбранного шаблона (в сводке телефона — жирным); шаблона нет — null. */
@@ -185,7 +186,8 @@ export function useParamsPlate(): ParamsPlate {
   const pictures: SwitchView = { on: picturesOn(params, images), disabled: !images.configured, title: images.configured ? undefined : "Модель изображений не подключена" };
 
   return {
-    slides, step, cards, toggle, writes, eyes, pictures,
+    slides, step, cards, toggle, writes, eyes, pictures, fonts: { on: params.fonts, disabled: false },
+    toggleFonts: () => setParams((p) => ({ ...p, fonts: !p.fonts })), fontsHint: fontsHint(params.fonts),
     toggleWrites: () => setParams((p) => ({ ...p, useModels: !p.useModels })),
     toggleEyes: () => setParams((p) => nextEyes(p, modelOn)),
     togglePictures: () => setParams((p) => nextPictures(p, images)),

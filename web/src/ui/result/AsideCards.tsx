@@ -123,7 +123,7 @@ function WhyCard({ text, file, slide, k, onOpen }: { text: string; file: AsideCa
 
 function LookCard({ l, late }: { l: LookView; late: boolean }) {
   const [entered] = useState(late);
-  const k = `${l.tag}|${l.text}|${(l.palette ?? []).join(",")}`;
+  const k = `${l.tag}|${l.text}|${(l.palette ?? []).join(",")}|${l.fonts?.text ?? ""}`;
   const swapped = useChanged(k);
   return (
     <div className={entered ? "ra-card ra-card-static ds-look ra-xf" : "ra-card ra-card-static ds-look"}>
@@ -132,6 +132,12 @@ function LookCard({ l, late }: { l: LookView; late: boolean }) {
         {l.palette && <span className="bb-tile ds-tile" aria-hidden="true">{l.palette.map((hex, i) => <span key={i} style={{ background: hex }} />)}</span>}
         <span style={{ minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" }}>{l.text}</span>
       </span>
+      {l.fonts && (
+        <span className="ra-fonts" title={l.fonts.title}>
+          <span className="ra-fonts-t">{l.fonts.text}</span>
+          {l.fonts.title && <span className="ra-fonts-r">{l.fonts.title}</span>}
+        </span>
+      )}
     </div>
   );
 }

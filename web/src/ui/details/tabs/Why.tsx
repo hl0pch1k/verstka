@@ -22,7 +22,7 @@ import { Spinner } from "../../kit/Spinner";
 import { Tx } from "../../kit/Tx";
 import { useSwap } from "../../kit/useSwap";
 import { liveWork, variantLiveJob } from "../../result/slideJob";
-import { ownsKeys, slideForKey } from "../../result/resultView";
+import { fontsLine, ownsKeys, slideForKey } from "../../result/resultView";
 import { useStale } from "../../shell/StaleLine";
 import { dataWhyCap } from "../dataWhy";
 import { miniColors } from "../miniChart";
@@ -109,6 +109,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
   const { selectedSlide, setSelectedSlide, setActiveStrategy, strategyTitle, dispatch, ui, liveJobs } = useApp();
   const w = whyView(g, v, Math.min(Math.max(1, selectedSlide), Math.max(1, v.slides.length || v.outline?.slides.length || 1)), deck.manifest, strategyTitle, SOURCE[deck.state]);
   const n = w.n;
+  const fonts = fontsLine(g.fonts);
   const rev = variantRev(v);
   // слайд с данными: профиль, задача, варианты визуализации — свои колонки (объяснение сервера не нужно)
   const slide = v.outline?.slides[n - 1] ?? null;
@@ -170,6 +171,14 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
               : ex.error ? <ErrorLine text={ex.error} style={{ marginTop: 16 }} />
                 : <Tx tx="w-why" style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Дизайнер не оставил объяснения для этого слайда.</Tx>}
           {w.dl.length > 0 && <WhyTerms dl={w.dl} />}
+          {fonts && (
+            <>
+              <h4 className="dw-sub" style={{ marginTop: 24 }}>Шрифты колоды</h4>
+              <ul className="dw-kb">
+                <li title={fonts.title}><Icon name="file-text" size={16} /><span><b style={{ fontWeight: 700 }}>{fonts.text}</b>{fonts.title ? ` — ${fonts.title}` : ""}</span></li>
+              </ul>
+            </>
+          )}
           {w.kb.length > 0 && (
             <>
               <h4 className="dw-sub" style={{ marginTop: 24 }}>Факты — из базы знаний</h4>

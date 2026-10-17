@@ -16,10 +16,11 @@ import type { GenerateRequest, ImproveSource, Notice, StrategyInfo } from "../..
  *  - `strategies`: выбранные варианты; пусто — все.
  *  - `purpose`: значение `PURPOSES` или `OWN` («Свой вариант…»: тип — `ownPurpose`).
  *  - `eyes`: «Модель проверяет слайды по картинке» — взгляд дизайнера; null — не трогали: как модель (`eyesOn`).
- *  - `pictures`: «С изображениями»; null — не трогали: как у сервера (`picturesOn`). */
+ *  - `pictures`: «С изображениями»; null — не трогали: как у сервера (`picturesOn`).
+ *  - `fonts`: «Подобрать шрифты» — шаблону со стандартными шрифтами пара под его характер (по умолчанию включён). */
 export interface Params {
   slides: number | null; strategies: string[]; audience: string; purpose: string; ownPurpose: string;
-  useModels: boolean; eyes: boolean | null; pictures: boolean | null;
+  useModels: boolean; eyes: boolean | null; pictures: boolean | null; fonts: boolean;
 }
 
 /** «Свой вариант…» в списке типов. */
@@ -27,7 +28,7 @@ export const OWN = "own";
 
 /** По умолчанию — как V2: 12 слайдов, все варианты, тип «Продукт», модель пишет тексты; взгляд дизайнера — как модель,
  *  изображения — как у сервера. */
-export const PARAMS0: Params = { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: null, pictures: null };
+export const PARAMS0: Params = { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: null, pictures: null, fonts: true };
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Math.round(n)));
 const isPurpose = (v: unknown): v is string => v === OWN || PURPOSES.some((p) => p.value === v);
@@ -42,7 +43,7 @@ export function readParams(raw: unknown): Params {
   const strategies = Array.isArray(d.strategies) && d.strategies.every((x) => typeof x === "string") ? (d.strategies as string[]) : [];
   return {
     slides, strategies, audience: str(d.audience), purpose: isPurpose(d.purpose) ? d.purpose : PARAMS0.purpose, ownPurpose: str(d.ownPurpose),
-    useModels: bool(d.useModels, PARAMS0.useModels), eyes: choice(d.eyes), pictures: choice(d.pictures),
+    useModels: bool(d.useModels, PARAMS0.useModels), eyes: choice(d.eyes), pictures: choice(d.pictures), fonts: bool(d.fonts, PARAMS0.fonts),
   };
 }
 
@@ -136,6 +137,7 @@ export function paramsBrief(writes: boolean, pictures: boolean): string {
   return `${writes ? "тексты пишет модель" : "ваш текст дословно"} · ${pictures ? "с изображениями" : "без изображений"}`;
 }
 export const writesHint = (on: boolean) => (on ? "Сокращает и переформулирует текст под слайды" : "Ваш текст дословно: только раскладка по слайдам шаблона");
+export const fontsHint = (on: boolean) => (on ? "Пара под характер шаблона; свой шрифт шаблона не меняется" : "Шрифты шаблона как есть");
 export const imagesHint = (on: boolean) => (on ? "По описаниям в тексте, в палитре шаблона" : "Места под изображения останутся свободными");
 
 // ── «Изменить текст»: параметры собранной презентации
@@ -161,6 +163,7 @@ export function presetParams(p: Params, preset: ComposerPreset): Params {
   // взгляд «как у модели» (сервер решал сам) — так же и в параметрах, а не прежний выбор человека
   else if (preset.eyes === null) out.eyes = null;
   if (preset.pictures !== undefined) out.pictures = preset.pictures;
+  if (typeof preset.pickFonts === "boolean") out.fonts = preset.pickFonts;
   return out;
 }
 
@@ -207,6 +210,7 @@ export function buildRequest(i: RequestInput): GenerateRequest {
     audit_models: false,
     eyes: (eyesOn(p, i.modelOn) || !!src) && i.modelOn,
     pictures: i.images.configured ? picturesOn(p, i.images) : null,
+    pick_fonts: p.fonts,
     autofix: true,
     exports: ["pdf", "html"],
     improved_from: src ? { name: src.name, slides: src.slides, template_id: src.template_id, audit: src.audit ?? null } : undefined,
