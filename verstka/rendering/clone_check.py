@@ -839,11 +839,6 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         why = _marks_trouble(slide, oslide, marks, chrome, manifest)
         if why:
             return why
-    # a key figure leads its label (qa4 L3 / NEW-L2: 1.6 times its size at the least) — the clone has set the pair
-    # as large as the sample's frames allow (`clone._figure_floor`): a sample that cannot is no place for the figures
-    fig_trouble = figure_trouble(slide, oslide, skip=chrome)
-    if fig_trouble:
-        return fig_trouble
     # figures squeezed far below the sample's own (VK Tech p42: two display figures, three of ours set at a label's
     # size in narrowed cells): the sample's point — the big number — is lost
     nums = {s.shape_id: (s.style.size_pt or 0.0) for s in pattern.slots if s.role == SlotRole.number and (s.style.size_pt or 0.0) >= 20}
@@ -1062,6 +1057,12 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         want = max(1.6 * body, 0.7 * typo.size_for("h1", body * 2))
         if fig_sizes and max(fig_sizes) < want - 0.05:
             return f"figures set at {max(fig_sizes):g} pt — a figure reads at {want:.0f} pt and more"
+    # a key figure leads its label (qa4 L3 / NEW-L2: 1.6 times its size at the least) and stands with it — the clone
+    # has set the pair as large as the sample's frames allow (`clone._figure_floor`): a sample that cannot is no place
+    # for the figures
+    fig_trouble = figure_trouble(slide, oslide, skip=chrome)
+    if fig_trouble:
+        return fig_trouble
     # two texts laid over each other: a card title that took a second line runs into the text under it (LCT p11
     # with a third card: «На входе — шаблон и текст» over «Verstka использует…») — unless the sample set them so
     clash = _texts_over_each_other(slide, tree, chrome, typo.primary_family, native=set(native))
