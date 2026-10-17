@@ -64,7 +64,6 @@
 .bd-li{transition:transform 520ms var(--ease)}
 .p2-fade.bd-roll{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%)}
 .bd-out{opacity:0;transition:opacity 240ms var(--ease)}
-@media (max-width: 900px){.bd-errbox{position:relative !important;inset:auto !important;margin-top:24px}}
 
 /* ── дополнения «Слоёв» */
 /* фаза в заголовке: типографика .p2-ph доски (у неё — в style). Кегль — от ширины окна, один в обеих раскладках
@@ -84,7 +83,6 @@
 .bd-two > .p2-hrow{grid-area:1 / 1}
 .bd-two > .bd-body{grid-area:2 / 1}
 .bd-two > aside{grid-area:1 / 2 / 3 / 3}
-@media (max-width: 900px){.bd-acts{flex-wrap:wrap}}
 
 /* ── Колода, суженная помощником (V2 версии 100, блок «Сборка: колонка агента 416 → 320, зазор 48 → 24; фаза остаётся в
    своей клетке и мельчает той же кривой…» — дословно, кроме отмеченного «сайт:»). Плита перестраивается вместе с
@@ -94,7 +92,7 @@
    остаются; сегменты плотнее), «Не получилось» — поля 48 → 24, «Как думает агент» 20 → 18 px, зазор 16 → 8. Мысли агента,
    подсказки очереди и причина ошибки — стопки из двух копий (hp-tx, create.css; сайт: ширины копий — постоянные, в px).
    Что зависит от ширины окна — columns.ts `buildMorph`, переменными на `.bd-two` (BuildPlate). */
-@media (min-width: 901px){
+@media (min-width: 1280px){
   .bd-two{grid-template-columns:minmax(0,1fr) 416px !important;column-gap:48px !important;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
   /* сайт: колонка агента в узкой раскладке — `--bd-an` (320; в тесной колоде — 288) */
   .hp-nar .bd-two{grid-template-columns:minmax(0,1fr) var(--bd-an,320px) !important;column-gap:24px !important;transition-duration:520ms}
@@ -155,4 +153,48 @@
   .bd-sht .bf-lb{justify-items:start;width:var(--lw,auto);overflow:clip;transition:width 340ms var(--ease)}
   .hp-nar .bd-sht .bf-lb{width:var(--ln,auto);transition-duration:520ms}
   .bd-sht .bf-lb > *{white-space:nowrap}
+}
+
+/* ═══ Колода стопкой (окно уже 1280, styles/stack.css): «Сборка». Плита 03 — по высоте содержимого: фаза, часы и полоса,
+   раскадровка целиком (без прокрутки внутри), «Как думает агент» — колонкой справа (lg) или под раскадровкой (md,
+   телефон), тоже целиком. Фазы сменяют друг друга на месте (одна клетка сетки — по самой длинной, переносятся) ═══ */
+@media (max-width: 1279.98px){
+  .bd-two{grid-template-columns:minmax(0,1fr) 300px !important;grid-template-rows:auto auto !important;column-gap:32px !important;height:auto !important}
+  .bd-two > .p2-hrow{align-items:flex-start !important}
+  .bd-two .p2-phs{display:grid;height:auto;min-height:48px;align-items:center}
+  .bd-two .p2-ph{position:static;grid-area:1 / 1;white-space:normal;font-size:24px;line-height:32px}
+  .bd-two .bd-board{overflow:visible !important;flex:none !important}
+  .bd-two .bd-board > .p2-g4{grid-template-columns:repeat(var(--sbc,3),minmax(0,1fr)) !important}
+  .bd-two .bd-sbh{height:auto !important;flex-wrap:wrap;row-gap:12px}
+  .bd-two .bd-sbl{white-space:normal !important}
+  .bd-two > aside{height:auto !important;margin-top:8px}
+  .bd-two > aside > div:last-child{display:grid;flex:none !important}
+  .bd-two > aside > div:last-child > ol{position:static !important;grid-area:1 / 1;overflow:visible !important;-webkit-mask-image:none !important;mask-image:none !important;animation:none !important}
+  .bd-two .bk-log > li{transform:none !important}
+  .bd-two .bk-note,.bd-two .bk-cf{white-space:normal}
+  .bd-two .bk-rrow{flex-wrap:wrap;height:auto;min-height:28px}
+  .bd-two .bd-line{-webkit-line-clamp:4}
+  /* «Не получилось» — в той же клетке, что раскадровка (она гаснет), коробка во всю её высоту — как на компьютере */
+  .bd-body > div:last-child{display:grid !important;flex:none !important}
+  .bd-body > div:last-child > *{grid-area:1 / 1}
+  .bd-errbox{position:relative !important;inset:auto !important;margin-top:24px;padding:32px 24px !important;align-self:stretch;min-height:360px}
+  /* подписи эскизов раскадровки — до двух строк, не наезжают на следующий ряд */
+  .bd-board .p2-sbf + div{height:auto !important;min-height:20px;align-items:flex-start !important}
+  .bd-board .bk-cf{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  /* «Как думает агент»: шаг — строкой под заголовком, если рядом не помещается */
+  .bd-two > aside > .hq-bdh{flex-wrap:wrap;height:auto !important;min-height:64px;row-gap:4px}
+  .bd-two > aside > .hq-bdh > span{white-space:normal !important}
+  .bd-acts{flex-wrap:wrap}
+  .bd-two .pp-busy{flex-wrap:wrap;white-space:normal}
+}
+@media (max-width: 1023.98px){
+  .bd-two{grid-template-columns:minmax(0,1fr) !important}
+  .bd-two > .p2-hrow{flex-direction:column;align-items:flex-start !important;gap:4px !important}
+  .bd-two > aside{grid-area:3 / 1 !important;margin-top:32px}
+}
+@media (max-width: 767.98px){
+  .bd-two{--sbc:2}
+  .bd-two .p2-ph{font-size:22px;line-height:30px}
+  .bd-two .bd-segs{flex-wrap:wrap;border-radius:24px !important}
+  .bd-acts > *{flex:1 1 100%}
 }
