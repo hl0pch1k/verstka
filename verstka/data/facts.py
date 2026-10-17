@@ -19,8 +19,9 @@ import numpy as np
 
 from verstka.data.aggregate import (
     NICE_MINUTES, RATE_COLUMN, TO_MINUTES, CatView, Data, KpiItem, Measure, TimeView, is_index, is_other_label,
+    stem_hits,
 )
-from verstka.data.parse import is_total_label, period_str, quantity, split_unit
+from verstka.data.parse import is_total_label, period_str, quantity, season_name, split_unit
 from verstka.data.units import _num as _num_cell
 from verstka.data.words import (
     PERIOD_WORDS, Phrase, count_dat, count_gen, count_words, duration_gen, duration_text, each_unit, file_title, fmt_num, fmt_pct,
@@ -91,7 +92,8 @@ def _pcat(d: Data, m: Optional[Measure], dim: str, keys: list[str], rank: Option
         agg = "wmean"  # среднее взвешенное — тем же весом, что у графика (число чеков, ответов)
     out = {"op": "cat", "col": None if m is None else m.j, "by": _col_of(d, dim), "keys": keys, "agg": agg,
            "w": w.j if w is not None else None,
-           "skip": _skip(d), "scale": m.scale if m is not None else 1.0, "rank": rank, "exclude": list(exclude),
+           "skip": sorted(set(_skip(d)) | set(d.cat_typos(m, _col_of(d, dim)))), "scale": m.scale if m is not None else 1.0,
+           "rank": rank, "exclude": list(exclude),
            "named": named, "col_name": m.name if m is not None else None}
     pl = d.panel_latest
     if pl is not None and m is not None and (m.stock or (not m.additive and w is None)) and _col_of(d, dim) != d.time_col:
@@ -139,6 +141,105 @@ def _ptime(d: Data, tv: TimeView, mode: str, frm: Optional[str] = None, to: Opti
             "col": m.j if m.j >= 0 else None, "cols": [x.j for x in cols] if cols else None, "agg": agg,
             "by": by, "cat": (_col_of(d, tv.dim), cat) if cat is not None else None, "skip": _skip_t(d, m),
             "scale": m.scale if m.j >= 0 else 1.0, "mode": mode, "from": frm, "to": to, "kind": kind}
+
+
+def _dynamics_named_cat(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
+    """Цель называет одну категорию длинного ряда («тариф «Базовый»»): изменение её ряда от первого периода к
+    последнему — «Базовый: −14% за 3 квартала, с 1 240 до 1 064»."""
+    subj = [x for x in d.subject if len(x) >= 4]
+    hits = [sv for sv in tv.series if any(same_stem(x, w) for x in subj for w in stems_of(sv.name) if len(w) >= 4)]
+    if len(hits) != 1 or len(tv.series) < 2:
+        return False
+    sv = hits[0]
+    idx = [k for k, v in enumerate(sv.values) if v is not None]
+    if len(idx) < 2:
+        return False
+    F, L = idx[0], idx[-1]
+    a_, b_ = float(sv.values[F]), float(sv.values[L])  # type: ignore[arg-type]
+    if a_ <= 0:
+        return False
+    unit = m.unit_text
+    pf, pl = tv.periods[F], tv.periods[L]
+    pct = (b_ / a_ - 1) * 100
+    pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
+    span = L - F
+    fs.add("cat_first", round(a_, 1) if abs(a_) < 100 else round(a_), "total", f"{sv.name} — {fmt_value(a_, unit)}",
+           unit, f"«{sv.name}», {period_text(pf)}.", prov=_ptime(d, tv, "at", to=pf, cat=sv.name))
+    fs.add("cat_last", round(b_, 1) if abs(b_) < 100 else round(b_), "total", f"{sv.name} — {fmt_value(b_, unit)}",
+           unit, f"«{sv.name}», {period_text(pl)}.", prov=_ptime(d, tv, "at", to=pl, cat=sv.name))
+    fs.add("cat_change", round_pct(abs(pct)), "change", fmt_signed(round_pct(pct), "%"), "%",
+           f"«{sv.name}»: {period_text(pl)} к {period_text(pf)}.",
+           prov={**_ptime(d, tv, "change", frm=pf, to=pl, kind="pct", cat=sv.name), "tol": 0.51})
+    fs.add("cat_span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None, "Периодов между концами ряда.",
+           prov=_ptime(d, tv, "span", frm=pf, to=pl, cat=sv.name))
+    fs.ctx["named_cat"] = (sv.name, pct, count_words(span, pw[0], pw[1], pw[2]))
+    fs.ctx["unit_short"] = unit
+    fs.ctx.setdefault("labels", []).extend([sv.name, period_text(pf), period_text(pl)])
+    fs.ctx["caption"] = _short([f"{sv.name}: с {fmt_value(a_, unit, 'gen')} ({period_text(pf)}) до "
+                                f"{fmt_value(b_, unit, 'gen')} ({period_text(pl)})."])
+    return True
+
+
+def _period_totals(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
+    """Итог названного месяца (и сравнение с другим названным): «за ноябрь — 21 340 тыс. ₽, на 28% больше, чем за
+    октябрь». Месяц — полный в файле (каждый день есть) — иначе сумма занижена и вывода нет."""
+    tj = d.time_col
+    if tj is None:
+        return False
+    sums: dict[str, float] = {}
+    days: dict[str, set] = {}
+    skip = set(_skip_t(d, m))
+    for i in d.rows_idx:
+        if i in skip or m.values[i] is None:
+            continue
+        iso = period_str(str(d.cell(i, tj)))
+        if not iso or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", iso[:10]):
+            return False  # не дни — не итог месяца по строкам
+        k = iso[:7]
+        sums[k] = sums.get(k, 0.0) + float(m.values[i])  # type: ignore[arg-type]
+        days.setdefault(k, set()).add(iso[:10])
+    keys = []
+    for mon in d.ask_periods:
+        ks = [k for k in sums if int(k[5:7]) == mon]
+        if not ks:
+            return False
+        keys.append(max(ks))  # месяц без года — последний такой в файле
+    import calendar
+    for k in keys:
+        if len(days[k]) < calendar.monthrange(int(k[:4]), int(k[5:7]))[1]:
+            return False  # неполный месяц — сумма занижена
+    unit = m.unit_text
+    base_p = {"op": "series", "time": tj, "freq": "month", "week_src": False, "ax_start": None, "w": None,
+              "col": m.j, "cols": None, "agg": "sum", "by": None, "cat": None, "skip": sorted(skip),
+              "scale": m.scale, "kind": None}
+    k0 = keys[0]
+    v0 = sums[k0]
+    fs.add("period_total", round(v0, 1) if abs(v0) < 100 else round(v0), "total",
+           f"За {period_acc(k0)} — {fmt_value(v0, unit)}", unit, f"Сумма колонки «{m.name}» за {period_acc(k0)}.",
+           prov={**base_p, "mode": "at", "to": k0, "tol": 0.051 if abs(v0) < 100 else 0.51})
+    fs.ctx["period_total"] = k0
+    fs.ctx["unit_short"] = unit
+    fs.ctx.setdefault("labels", []).append(period_text(k0))
+    fs.add("period_days", len(days[k0]), "count", count_words(len(days[k0]), "день", "дня", "дней"), None,
+           "Дней месяца в файле — все.", prov={"op": "count", "what": "value", "value": len(days[k0])})
+    cap = [f"Сумма по дням: в файле все {count_words(len(days[k0]), 'день', 'дня', 'дней')} месяца."]
+    if len(keys) >= 2 and keys[1] != k0 and sums[keys[1]] > 0:
+        k1 = keys[1]
+        v1 = sums[k1]
+        pct = (v0 / v1 - 1) * 100
+        fs.add("period_base", round(v1, 1) if abs(v1) < 100 else round(v1), "total",
+               f"За {period_acc(k1)} — {fmt_value(v1, unit)}", unit, f"Сумма колонки «{m.name}» за {period_acc(k1)}.",
+               prov={**base_p, "mode": "at", "to": k1, "tol": 0.051 if abs(v1) < 100 else 0.51})
+        fs.add("period_change", round_pct(abs(pct)), "change", f"{fmt_signed(round_pct(pct), '%')}", "%",
+               f"{period_text(k0)} к {period_dative(k1) or period_text(k1)}.",
+               prov={**base_p, "mode": "change", "from": k1, "to": k0, "kind": "pct", "tol": 0.51})
+        fs.ctx["period_base"] = k1
+        fs.ctx["period_up"] = pct >= 0
+        fs.ctx["labels"].append(period_text(k1))
+        base_name = re.sub(r"\s+\d{4}$", "", period_text(k1))
+        cap = [f"{upper_first(base_name)} — {fmt_value(v1, unit)}."] + cap
+    fs.ctx["caption"] = _short(cap)
+    return True
 
 
 def _one_dot(s: str) -> str:
@@ -329,6 +430,11 @@ def _dynamics(d: Data) -> FactSet:
         return fs
     if tv.from_columns:
         m = tv.measure  # ось из колонок-периодов: ряд — сумма по строкам, названный по датасету
+    if d.ask == "total" and d.ask_periods and m is not None and m.additive and not tv.from_columns \
+            and _period_totals(d, tv, m, fs):
+        return fs  # «сколько всего заработали за ноябрь и как это соотносится с октябрём»: итог месяца и к базе
+    if tv.dim and m is not None and d.subject and _dynamics_named_cat(d, tv, m, fs):
+        return fs  # «правда ли тариф «Базовый» теряет абонентов»: ряд названной категории, а не всех
     part = _goal_part(d, tv)
     if part is not None:
         # цель называет одну часть («покажите снижение критичных инцидентов» → ряд «Критичные (P1)»): вывод — о ней
@@ -876,7 +982,11 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
     if max(ys) - min(ys) <= 1e-9 * max(1.0, abs(max(ys))):
         return False  # ряд постоянный: «держится на уровне», а не «без тренда»
     t = _mann_kendall(ys) * 2 / 1.96  # в единицах прежнего порога: |t| ≥ 2 — тренд выражен (|z| ≥ 1,96)
-    if abs(t) >= 2 and not small:
+    b_ts, a_ts = _theil_sen(idx, ys)
+    # концы ряда против выраженного тренда (последняя неделя — два дня с высоким расходом, а ряд падает): первая и
+    # последняя точки — не вывод, вывод — средние первых и последних периодов
+    contra = abs(t) >= 2 and (ys[-1] - ys[0]) * b_ts < 0
+    if abs(t) >= 2 and not small and not contra:
         return False
     k = max(3, len(idx) // 6)
     if tv.freq == "day" and len(idx) >= 14:
@@ -901,7 +1011,6 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
     gauge = _gauge(m, unit)
     # разница средних в пределах шума (две стандартные ошибки разности) — тренда нет; разброс — по MAD остатков от
     # прямой Тейла — Сена, его не раздувает один всплеск
-    b_ts, a_ts = _theil_sen(idx, ys)
     sd = _robust_sd([y - (a_ts + b_ts * x) for x, y in zip(idx, ys)]) if len(ys) > 2 else 0.0
     noise = 2 * sd * math.sqrt(2 / k)
     if level or gauge or m1 <= 0:
@@ -931,7 +1040,12 @@ def _noisy(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], u
     else:
         # заголовок говорит об изменении средних — подпись не спорит с ним «трендом, которого нет»
         cap = f"{upper_first(means)}; значения колеблются от {fmt_value(lo, unit, 'gen')} до {fmt_value(hi, unit, 'gen')}."
-    fs.ctx["caption"] = _short([cap])
+    gap = ""
+    if tv.missing:
+        # пропуск периода — и здесь: на графике разрыв, а не ноль
+        gap = (f"За {join_and([period_acc(p) for p in tv.missing[:3]])}{' и другие' if len(tv.missing) > 3 else ''} "
+               f"данных нет — на графике разрывы, а не ноль.")
+    fs.ctx["caption"] = _short([cap, gap], must=(gap,) if gap else ())
     return True
 
 
@@ -1311,6 +1425,72 @@ _GROWTH_NAME = re.compile(r"(?:^|[^а-яё])(?:при)?рост|динамик|�
 _DEVIATION_NAME = re.compile(r"план|цел[иья]|норматив|прогноз|бюджет|таргет|target|ориентир", re.I)
 
 
+def _fastest_cols(d: Data, cv: CatView, real: list[int], fs: FactSet, down: bool = False) -> None:
+    """«Какой сервис дорожает быстрее всех» при колонках-месяцах («Июль · Август · Сентябрь · Итого»): темп каждой
+    категории — последняя колонка-период к первой, по ячейкам; лидер — с наибольшим темпом (не с наибольшей суммой)."""
+    from verstka.data.units import _period_name
+
+    dj = _col_of(d, cv.dim)
+    per = [x for x in d.measures if not x.change and not x.mixed and not is_total_label(x.name)
+           and (_period_name(x.name) or season_name((split_unit(x.name)[0] or x.name).strip()))]
+    if dj is None or len(per) < 2 or len({x.unit or "" for x in per}) != 1:
+        return
+    per.sort(key=lambda x: x.j)  # колонки-периоды — слева направо, как в файле
+    m0, m1 = per[0], per[-1]
+    best = None
+    for k in real:
+        lab = cv.labels[k]
+        rows = [i for i in d.rows_idx if d.text(i, dj) == lab]
+        if len(rows) != 1:
+            return  # по строке на категорию — иначе темп категории не из двух ячеек
+        a_, b_ = m0.values[rows[0]], m1.values[rows[0]]
+        if a_ is None or b_ is None or a_ <= 0:
+            continue
+        r = float(b_) / float(a_)
+        if best is None or (r < best[0] - 1e-12 if down else r > best[0] + 1e-12):
+            best = (r, lab, rows[0], float(a_), float(b_))
+    if best is None or (best[0] >= 1 if down else best[0] <= 1):
+        return
+    r, lab, i, a_, b_ = best
+    pa = {"op": "cell", "row": i, "col": m0.j, "scale": m0.scale}
+    pb = {"op": "cell", "row": i, "col": m1.j, "scale": m1.scale}
+    pf = {"op": "colfastest", "by": dj, "a": m0.j, "b": m1.j, "keys": [lab], "skip": _skip(d), "scale": m0.scale,
+          "exclude": [x for x in cv.labels if is_other_label(x)], "down": down}
+    fs.ctx.setdefault("labels", []).extend([m0.name, m1.name])  # «2024 → 2025», «июль → сентябрь» — имена колонок
+    u = m0.unit_text
+    if down:
+        pct = (r - 1) * 100
+        fs.add("decline_max", round_pct(pct), "min", fmt_signed(round_pct(pct), "%"), "%",
+               f"{lab}: {fmt_value(a_, u)} ({m0.name}) → {fmt_value(b_, u)} ({m1.name}) — сильнее всех вниз.",
+               prov={**pf, "kind": "pct", "tol": 0.51})
+        fs.add("fastest_from", a_, "total", f"{lab} — {fmt_value(a_, u)}", u, f"«{m0.name}» у «{lab}».", prov=pa)
+        fs.add("fastest_to", b_, "total", f"{lab} — {fmt_value(b_, u)}", u, f"«{m1.name}» у «{lab}».", prov=pb)
+        fs.ctx["decline"] = (lab, m0.name, m1.name, "pct")
+        fs.ctx.setdefault("labels", []).append(lab)
+        fs.ctx["fastest_caption"] = (f"{lab}: {fmt_value(a_, u)} ({lower_first(m0.name)}) → {fmt_value(b_, u)} "
+                                     f"({lower_first(m1.name)}).")
+        return
+    if r >= 2:
+        rv = round(r, 1)
+        fs.add("growth_max", rv, "change", f"в {fmt_num(rv, 1)} {times_word(rv)}", "раз",
+               f"{lab}: {fmt_value(a_, u)} ({m0.name}) → {fmt_value(b_, u)} ({m1.name}) — быстрее всех.",
+               prov={**pf, "kind": "ratio", "tol": 0.051})
+        kind = "times"
+    else:
+        pct = (r - 1) * 100
+        fs.add("growth_max", round_pct(pct), "change", fmt_signed(round_pct(pct), "%"), "%",
+               f"{lab}: {fmt_value(a_, u)} ({m0.name}) → {fmt_value(b_, u)} ({m1.name}) — быстрее всех.",
+               prov={**pf, "kind": "pct", "tol": 0.51})
+        kind = "pct"
+    fs.add("fastest_from", a_, "total", f"{lab} — {fmt_value(a_, u)}", u, f"«{m0.name}» у «{lab}».", prov=pa)
+    fs.add("fastest_to", b_, "total", f"{lab} — {fmt_value(b_, u)}", u, f"«{m1.name}» у «{lab}».", prov=pb)
+    fs.ctx["fastest_cols"] = (lab, m0.name, m1.name, kind)
+    fs.ctx.setdefault("labels", []).append(lab)
+    fs.ctx["caption"] = None
+    fs.ctx["fastest_caption"] = (f"{lab}: {fmt_value(a_, u)} ({lower_first(m0.name)}) → {fmt_value(b_, u)} "
+                                 f"({lower_first(m1.name)}).")
+
+
 def _growth_measure(cv: CatView) -> Optional[Measure]:
     """Колонка темпа («Рост, %», «Δ к 2024, %»): «растёт быстрее всех» говорят про темп роста, а не про прибавку в
     рублях и не про отклонение от плана («Δ к плану» — не рост). Главная величина сама — изменение: второго «роста»
@@ -1457,6 +1637,15 @@ def _plan_fact(d: Data, cv: CatView) -> FactSet:
            "%", "Ниже всех по исполнению.", prov={**exg, "what": "low", "key": low[0], "tol": 0.51})
     cap = [f"Выше плана — {over} из {len(pairs)}; ниже всех — {low[0]}: {fmt_pct(low[2] / low[1] * 100)}% плана."]
     cost = bool(_COST.search(f"{pl.name} {fa.name} {file_title(d.profile.file, d.profile.sheet)}"))
+    if d.ask == "miss" and not cost:
+        # «какие магазины не выполнили план»: кто ниже плана — по исполнению, от худшего
+        under = sorted([t for t in pairs if t[2] < t[1]], key=lambda t: (t[2] / t[1], t[0]))
+        fs.add("under", len(under), "count", f"Ниже плана — {len(under)}", None,
+               f"Категорий, где факт меньше плана: {', '.join(t[0] for t in under) or 'нет'}.",
+               prov={**exg, "what": "under", "keys": [t[0] for t in under]})
+        fs.ctx["under"] = [t[0] for t in under]
+        if under:
+            cap = [f"Ниже всех — {low[0]}: {fmt_pct(low[2] / low[1] * 100)}% плана; в целом — {fmt_num(ev)}%."]
     if cost and ex > 100.05:
         # расходы сверх плана — перерасход, а не «план исполнен на 104%»; в подписи — у кого сильнее всех
         ov = round(ex - 100, 1)
@@ -1514,6 +1703,8 @@ def _wording(d: Data, cv: CatView, m: Optional[Measure]) -> str:
         return "lead"
     title = file_title(d.profile.file)
     unit = (m.unit_text or "").strip().lower()
+    if re.match(r"(?i)\s*(?:отклонени\w*|откл\.)(?:\s+от\s+плана)?\s*(?:,|$)", m.name) and d.plan_fact is not None:
+        return "plan_dev"  # «Отклонение, %» рядом с планом и фактом: «больше всего сверх плана», а не «впереди»
     if _TEMP.search(m.name) or _TEMP.search(unit) or _TEMP.search(title):
         return "temp"
     # цена и тариф — «дороже/дешевле всего» только по имени или единице самой величины («Тариф, ₽/кВт·ч», «₽/мес.»),
@@ -1610,7 +1801,8 @@ def _comparison(d: Data) -> FactSet:
                "Строка «Итого» в файле." if cv.total_from_row else f"Сумма по колонке «{name}».",
                prov=({"op": "colsum", "cols": [x.j for x in d.matrix], "skip": _skip(d), "scale": m.scale}
                      if m is not None and m.j in (-3, -4) else
-                     {"op": "colsum", "col": m.j, "row": trow, "skip": _skip(d), "scale": m.scale,
+                     {"op": "colsum", "col": m.j, "row": trow, "skip": sorted(set(_skip(d)) | set(cv.dropped)),
+                      "scale": m.scale,
                       **({"only": _pcat(d, m, cv.dim, [])["only"]} if "only" in _pcat(d, m, cv.dim, []) else {})}
                      if m is not None else {"op": "count", "what": "rows", "skip": _skip(d)}))
         caption.append(f"{leader} — {fmt_value(lv, unit)} из {fmt_value(cv.total, unit)}.")
@@ -1672,6 +1864,27 @@ def _comparison(d: Data) -> FactSet:
                        f"Самый быстрый рост — {gl}: {fmt_signed(gv[gk], gu)}. Посчитано по колонке «{g.name}».",
                        prov={**_pcat(d, g, cv.dim, [gl], rank="max", exclude=others_), "agg": "mean"})
                 caption.append(f"{gl}: {fmt_signed(gv[gk], gu)} — быстрее всех.")
+    if d.ask == "fastest" and not fs.ctx.get("growth_leader"):
+        _fastest_cols(d, cv, real, fs)
+    if d.ask == "fastest_down":
+        # «какой сектор сократил потребление сильнее всех»: наибольшее снижение — по колонке темпа или по колонкам-
+        # периодам, а не наибольшее значение
+        if g is not None:
+            gv = cv.extra[g.name]
+            ks = [k for k in real if gv[k] is not None]
+            if ks:
+                gk = min(ks, key=lambda k: (gv[k], k))
+                if gv[gk] < 0:
+                    gl = cv.labels[gk]
+                    gu = g.unit or ("%" if g.type == "percent" else "")
+                    fs.add("decline_max", round_pct(gv[gk]) if gu == "%" else gv[gk], "min",
+                           f"{gl}: {fmt_signed(gv[gk], gu)}", gu or None,
+                           f"Самое сильное снижение — {gl}: {fmt_signed(gv[gk], gu)}. Посчитано по колонке «{g.name}».",
+                           prov={**_pcat(d, g, cv.dim, [gl], rank="min", exclude=others_), "agg": "mean"})
+                    fs.ctx["decline"] = (gl, None, None, "pct")
+                    labels.append(gl)
+        if not fs.ctx.get("decline"):
+            _fastest_cols(d, cv, real, fs, down=True)
     neg = cv.negatives
     if neg:
         dp = phrase(cv.dim)
@@ -1704,7 +1917,10 @@ def _comparison(d: Data) -> FactSet:
         fs.ctx.setdefault("labels", []).append(fs.ctx["period_note"])
     if d.ask == "total" and m is not None and m.additive and cv.total:
         fs.ctx["ask_total"] = True
-    if d.ask == "min" and m is not None:
+    worst_is_min = d.ask == "worst" and m is not None and fs.ctx.get("wording") not in ("slow", "long", "delay") and not (
+        _WORSE.search(m.name) or (fs.ctx.get("wording") == "most" and _WORSE.search(file_title(d.profile.file))))
+    if (d.ask == "min" or worst_is_min) and m is not None:
+        # «хуже всего» у величины, где больше — лучше (OEE, исполнение плана), — последний; у задержки и брака — первый
         fs.ctx["ask_min"] = True
         if m.j in (-3, -4):
             pass  # перекрёстная таблица: как собраны значения — в скобках после числа («в среднем по 8 строкам»)
@@ -1751,8 +1967,21 @@ def _comparison(d: Data) -> FactSet:
     if m is not None and (d.ask or "").startswith(("above:", "below:")):
         dp = phrase(cv.dim)
         dforms = (dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure and dp.gender != "pl" else None
-        th_txt = _threshold(d, [cv.labels[k] for k in real], [cv.values[k] for k in real], m, unit, dforms,
-                            {**_pcat(d, m, cv.dim, []), "op": "above"}, fs, _col_of(d, cv.dim))
+        tm, tcv = m, cv
+        if d.ask_unit == "%" and (m.unit or "") != "%":
+            # порог в процентах («где SLA проседает ниже 90%») — к колонке в процентах, а не к часам решения
+            pcs = [x for x in d.measures if (x.unit or "") == "%" and not x.change]
+            pcs.sort(key=lambda x: -stem_hits(d.subject, x.name))
+            pv = d.cat_view(pcs[0], top=10**6, dim=_col_of(d, cv.dim)) if pcs else None
+            tm, tcv = (pcs[0], pv) if pv is not None else (None, None)
+        if tm is not None and tcv is not None:
+            treal = [k for k in range(tcv.n) if not is_other_label(tcv.labels[k])]
+            th_txt = _threshold(d, [tcv.labels[k] for k in treal], [tcv.values[k] for k in treal], tm, tcv.unit,
+                                dforms, {**_pcat(d, tm, tcv.dim, [], exclude=tuple(x for x in tcv.labels
+                                                                                    if is_other_label(x))),
+                                         "op": "above"}, fs, _col_of(d, tcv.dim))
+        else:
+            th_txt = None
         if th_txt:
             caption.insert(0, th_txt)
     pg = {"op": "count", "what": "groups", "by": _col_of(d, cv.dim), "skip": _skip(d)}
@@ -1770,7 +1999,12 @@ def _comparison(d: Data) -> FactSet:
         fs.add("merged", shown.merged, "count", f"Одной группой — {shown.merged}", None, "Групп в хвосте графика.",
                prov={**pg, "minus": shown.n - 1})
         caption.append(f"Последние {count_words(shown.merged, 'группа', 'группы', 'групп')} — одной: «{shown.labels[-1]}».")
-    fs.ctx["caption"] = _short(caption)
+    if fs.ctx.get("fastest_caption"):
+        caption.insert(0, fs.ctx.pop("fastest_caption"))  # темп лидера — откуда и куда
+    if cv.dropped and m is not None:
+        # опечатка ×100 медианы в сумме категории — сказано, в суммах её нет
+        caption.insert(0, _typo_note(d, m, cv.dropped, fs, d.id_col, "в суммах"))
+    fs.ctx["caption"] = _short(caption, must=(caption[0],) if cv.dropped and m is not None else ())
     return fs
 
 
@@ -1814,6 +2048,16 @@ def _row_targets(d: Data, cv: CatView, m: Optional[Measure], unit: Optional[str]
            "Категорий с величиной и целью.", prov={"op": "count", "what": "rows_list", "rows": rows})
     fs.ctx["misses"] = (side, tg, miss)
     fs.ctx.setdefault("labels", []).extend(miss)
+    if d.ask == "meet":
+        # «какие линии укладываются в норму»: ответ — кто уложился, а не кто нет
+        met = [lab for lab in labs if lab not in miss]
+        fs.add("met_target", len(met), "count", f"В пределах {tg} — {len(met)} из {n}", None,
+               f"Категорий, где «{m.name}» {'не выше' if lower else 'не ниже'} своей «{t_.name}»: "
+               f"{', '.join(met) or 'нет'}.",
+               prov={"op": "rows_gt", "a": t_.j if lower else m.j, "b": m.j if lower else t_.j, "ge": True,
+                     "skip": _skip(d), "keys": met, "by": dj})
+        fs.ctx["met"] = (lower, tg, met)
+        fs.ctx["labels"].extend(met)
     if not k:
         return f"Цель выполнена у всех {n}."
     # в подписи — значения промахов рядом с их целью: заголовок уже назвал, кто не дотянул
@@ -2037,6 +2281,13 @@ def _shares(d: Data) -> FactSet:
     if got is None:
         return fs
     cv, shares = got
+    pl_ = d.panel_latest if d.time_col is not None and cv.dim != d.cols[d.time_col].name else None
+    if pl_ is not None and cv.measure is not None and d.parts_measure is None:
+        # период × категория: доли — за какой период («2025» у остатка, «январь – сентябрь» у потока)
+        mm = cv.measure
+        fs.ctx["period_note"] = period_text(pl_[1]) if (mm.stock or (not mm.additive and d.weight_of(mm) is None)) \
+            else f"{period_text(pl_[2])} – {period_text(pl_[1])}"
+        fs.ctx.setdefault("labels", []).append(fs.ctx["period_note"])
     # по значению, не по месту; «Прочее» — никогда не лидер
     order = sorted(range(len(shares)), key=lambda k: (is_other_label(cv.labels[k]), -shares[k], k))
     k1 = order[0]
@@ -2045,7 +2296,8 @@ def _shares(d: Data) -> FactSet:
     src = cv.measure if d.parts_measure is None else \
         next((m for m in d.measures if m.additive and m is not d.parts_measure), None)
     gives = src is not None and src.type == "money" and bool(_REVENUE.search(src.name))
-    fs.ctx.update(leader=leader, whole=whole, money=money, labels=[leader], gives=gives)
+    fs.ctx.update(leader=leader, whole=whole, money=money, gives=gives)
+    fs.ctx["labels"] = [leader] + list(fs.ctx.get("labels", []))
     p = shares[k1]
     others = [k for k in order[1:]]
     parts = d.parts_measure
@@ -2092,6 +2344,9 @@ def _shares(d: Data) -> FactSet:
         fs.ctx["labels"] = list(fs.ctx["labels"]) + [cv.labels[k] for k in rest]
     else:
         fs.ctx["caption"] = _short([", ".join(f"{cv.labels[k]} — {fmt_pct(shares[k])}%" for k in order[:6]) + "."])
+    if cv.dropped and cv.measure is not None and parts is None:
+        # опечатка ×100 медианы в сумме категории — в подписи, в долях её нет
+        fs.ctx["caption"] = _short([_typo_note(d, cv.measure, cv.dropped, fs, d.id_col, "в долях"), fs.ctx["caption"]])
     return fs
 
 
@@ -2403,6 +2658,33 @@ def _cell_of(d: Data, label: str, m: Measure, j: Optional[int] = None) -> Option
     return {"op": "cell", "row": rows[0], "col": m.j, "scale": m.scale} if len(rows) == 1 else None
 
 
+def _typo_note(d: Data, m: Measure, typos: list[int], fs: FactSet, lab_col: Optional[int], where: str) -> str:
+    """Подпись об опечатке (строка ×100 медианы и больше половины суммы) с фактами для проверки: значение, медиана без
+    неё, во сколько раз больше. `where` — чего в ней нет: «в долях», «в суммах»."""
+    i0 = typos[0]
+    med = float(np.median([v for i, v in enumerate(m.values) if v is not None and i in set(d.rows_idx)
+                           and i not in typos]))
+    v0 = float(m.values[i0])  # type: ignore[arg-type]
+    who = d.text(i0, lab_col) if lab_col is not None else ""
+    if who.isdigit():
+        who = f"Строка № {who}"  # номер строки, а не имя
+    r_ = round(v0 / med) if med else 0
+    fs.add("typo_row", v0, "outliers", f"{who or f'Строка {i0 + 1}'}: {fmt_value(v0, m.unit_text)}", m.unit_text,
+           f"В сто и больше раз больше медианы — похоже на опечатку; {where} её нет.",
+           prov={"op": "cell", "row": i0, "col": m.j, "scale": m.scale})
+    pmed = {"op": "dist", "col": m.j, "stat": "median", "skip": sorted(set(_skip(d)) | set(typos)),
+            "scale": m.scale, "tol": 0.51}
+    fs.add("typo_median", round(med, 1) if abs(med) < 100 else round(med), "median",
+           f"Медиана — {fmt_value(med, m.unit_text)}", m.unit_text, "Медиана без выброса.", prov=pmed)
+    fs.add("typo_ratio", r_, "change", f"в {fmt_num(r_)} {times_word(r_)}", "раз", "Выброс к медиане.",
+           prov={"op": "ratio", "a": {"op": "cell", "row": i0, "col": m.j, "scale": m.scale}, "b": pmed,
+                 "tol": 0.51})
+    if who:
+        fs.ctx.setdefault("labels", []).append(who)
+    return (f"{who or f'Строка {i0 + 1}'} — {fmt_value(v0, m.unit_text)}, в {fmt_num(r_)} "
+            f"{times_word(r_)} больше медианы ({fmt_value(med, m.unit_text)}): похоже на опечатку, {where} её нет.")
+
+
 def _reference(d: Data) -> FactSet:
     fs = FactSet()
     rv = d.ref
@@ -2419,28 +2701,7 @@ def _reference(d: Data) -> FactSet:
     typos = sorted(d.dominant_typos(m))
     if m is not None and typos and rv.top_share is not None:
         # выброс в сто и больше раз больше медианы — в подписи, в долях его нет
-        i0 = typos[0]
-        med = float(np.median([v for i, v in enumerate(m.values) if v is not None and i in set(d.rows_idx)
-                               and i not in typos]))
-        v0 = float(m.values[i0])  # type: ignore[arg-type]
-        who = d.text(i0, rv_lab) if (rv_lab := (d.label if d.label is not None else d.id_col)) is not None else ""
-        if who.isdigit():
-            who = f"Строка № {who}"  # номер строки, а не имя
-        r_ = round(v0 / med) if med else 0
-        fs.add("typo_row", v0, "outliers", f"{who or f'Строка {i0 + 1}'}: {fmt_value(v0, m.unit_text)}", m.unit_text,
-               "В сто и больше раз больше медианы — похоже на опечатку; в долях её нет.",
-               prov={"op": "cell", "row": i0, "col": m.j, "scale": m.scale})
-        pmed = {"op": "dist", "col": m.j, "stat": "median", "skip": sorted(set(_skip(d)) | set(typos)),
-                "scale": m.scale, "tol": 0.51}
-        fs.add("typo_median", round(med, 1) if abs(med) < 100 else round(med), "median",
-               f"Медиана — {fmt_value(med, m.unit_text)}", m.unit_text, "Медиана без выброса.", prov=pmed)
-        fs.add("typo_ratio", r_, "change", f"в {fmt_num(r_)} {times_word(r_)}", "раз", "Выброс к медиане.",
-               prov={"op": "ratio", "a": {"op": "cell", "row": i0, "col": m.j, "scale": m.scale}, "b": pmed,
-                     "tol": 0.51})
-        typo_note = (f"{who or f'Строка {i0 + 1}'} — {fmt_value(v0, m.unit_text)}, в {fmt_num(r_)} "
-                     f"{times_word(r_)} больше медианы ({fmt_value(med, m.unit_text)}): похоже на опечатку, в долях её нет.")
-        if who:
-            fs.ctx.setdefault("labels", []).append(who)
+        typo_note = _typo_note(d, m, typos, fs, d.label if d.label is not None else d.id_col, "в долях")
         sk = sorted(set(sk) | set(typos))
     if m is not None and rv.top_share is not None and rv.n - len(typos) > rv.top_n:
         # суммируемая неотрицательная метрика: доля топ-10 и итог остальных

@@ -162,7 +162,7 @@ def test_threshold_question_names_who_is_past_it():
 
 def test_margin_mean_and_total_questions():
     (t, p), = _conv3("38", "A")
-    assert _sp(p.headline) == "«Нейроны» впереди: 84,5, «404» — 55,5"
+    assert _sp(p.headline) == "«Нейроны» впереди: 84,5, отрыв от второго места — 3,5"  # «с каким отрывом» — ответ
     assert _sp(p.caption) == "Отрыв от второго места («Байтики» — 81) — 3,5."
     (t, p), = _conv3("11", "A")  # «какой средний NPS по всем продуктам»: с весом ответов, сводная строка — не продукт
     assert _sp(p.headline) == "NPS в среднем — 30,1: от 18 (VK WorkSpace) до 55 (Объектное хранилище)", p.headline

@@ -65,29 +65,40 @@ def _relevant(goals: Sequence[Goal], d: Data) -> list[Goal]:
 
 
 def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
-    """«Цель совпала» — только если главная величина цели и есть показанная колонка. Главного слова нет ни в одной
-    колонке — так и сказано («величины «удержание» в колонках нет»), колонку цель не выбирала."""
+    """«Цель совпала» — только если показана та величина, о которой цель: колонка, выбранная по главному слову цели
+    (буквально или по смыслу: «дольше ждут» — срок, «денег» — рубли). Показана другая колонка — так и сказано
+    («показано «Заявлений», а не «Срок рассмотрения, дн.»: …»); главного слова нет ни в одной колонке — тоже
+    («величины «удержание» в колонках нет»). Слово-уточнение цели («по заявлению») в показанной колонке — не довод:
+    оно о предмете, а не о величине."""
     if not decision.goal:
         return decision
-    _, head, _ = goal_focus(decision.goal)
+    metric, head, _ = goal_focus(decision.goal)
+    given = _GIVEN.get(decision.goal)
+    if given is not None:
+        metric, head = list(given.metric) or metric, given.head or head
     if not head:
         return decision
     word = next((w for w in re.findall(r"[а-яёa-z0-9]+", decision.goal.lower()) if w.replace("ё", "е").startswith(head)),
                 head)
     m = d.main
-    metric, _, _ = goal_focus(decision.goal)
-    shown = m is not None and any(stem_in(x, w) for x in [head] + [y for y in metric if len(y) >= 3]
-                                  for w in stems_of(m.name))
+    hm = d.head_measure if d.head == head else None
+    literal = m is not None and any(stem_in(head, w) for w in stems_of(m.name))
+    by_goal = m is not None and (literal or (hm is not None and hm.j == m.j) or d.head_syn(m))
+    quals = m is not None and hm is None and not d.head_in_columns and any(
+        stem_in(x, w) for x in metric if len(x) >= 3 and x != head for w in stems_of(m.name))
     title = any(stem_in(head, w) for w in stems_of(file_title(d.profile.file, d.profile.sheet)))
     focus = d.time.focus if decision.task == "dynamics" and d.time is not None else None
     if focus and any(stem_in(x, w) for x in [head] + [y for y in metric if len(y) >= 4] for w in stems_of(focus)):
         return decision  # цель назвала строку («облачной платформы»): ряд — по ней
     if decision.task == "comparison" and d.matrix_focus_rows and d.matrix_axis == "col":
         return decision  # перекрёстная таблица: колонки сравнены по строке, которую назвала цель (она в заголовке)
-    if shown or (title and not d.head_in_columns):
+    if by_goal or quals or (title and not d.head_in_columns):
         return decision
-    if d.head_in_columns:
-        note = f"Цель «{decision.goal}»: показана «{m.name if m else '—'}», а не величина «{word}» — она в другой колонке."
+    shown = m.name if m is not None else "—"
+    if hm is not None:
+        note = f"Цель «{decision.goal}»: показано «{shown}», а не «{hm.name}»: эта колонка не отвечает на цель."
+    elif d.head_in_columns:
+        note = f"Цель «{decision.goal}»: показано «{shown}», а не «{word}»: величина цели — в другой колонке."
     else:
         note = f"Цель «{decision.goal}»: величины «{word}» в колонках нет — показан главный вывод по данным."
     reasons = [r for r in decision.reasons if not (r.startswith(f"Цель «{decision.goal}»") and ("совпала" in r or
@@ -123,10 +134,32 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
         metric = list(given.metric) or metric
         head = given.head or head
         negate = list(given.negate) or negate
-        ask = given.ask if given.ask in ("fastest", "total", "mean", "margin", "min") or \
+        ask = given.ask if given.ask in ("fastest", "fastest_down", "worst", "total", "mean", "margin", "min", "meet",
+                                         "miss") or \
             (given.ask or "").startswith(("above:", "below:")) else ask
+    if (ask or "").startswith(("above:", "below:")) and _threshold_is_a_name(phrase, profile):
+        ask = None  # «просрочка свыше 90 дней» — колонка «Свыше 90 дней», а не порог
+    pct = re.search(r"(?:выше|больше|ниже|меньше|свыше|более|менее)\s+\d+(?:[.,]\d+)?\s*(?:%|процент)", phrase.lower())
+    pre = tuple(x for x in metric[:metric.index(head)]) if head in metric else None
+    months = tuple(_MONTH_STEMS.index(mm.group(1)) + 1 for mm in _MONTH_RX.finditer(phrase.lower()))
     return Data(table, profile, subject=tuple(stems_of(phrase)), compare=compare, head=head, negate=tuple(negate),
-                qualifiers=tuple(x for x in metric if x != head), ask=ask)
+                qualifiers=tuple(x for x in metric if x != head), ask=ask, ask_unit="%" if pct else None,
+                pre_qualifiers=pre, ask_periods=tuple(dict.fromkeys(months)))
+
+
+def _threshold_is_a_name(phrase: str, profile: DatasetProfile) -> bool:
+    """Число цели — часть имени колонки («свыше 90 дней» — колонка «Свыше 90 дней»), а не порог."""
+    m = re.search(r"(?:выше|больше|ниже|меньше|свыше|более|менее)\s+(\d+(?:[.,]\d+)?)", (phrase or "").lower())
+    if not m:
+        return False
+    return any(re.search(r"(?:выше|больше|ниже|меньше|свыше|более|менее|от|до)\s+" + re.escape(m.group(1)) + r"\b",
+                         c.name.lower()) for c in profile.columns)
+
+
+_MONTH_STEMS = ["январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр",
+                "декабр"]
+# месяц в любой форме: «за ноябрь», «с октябрём», «в мае»
+_MONTH_RX = re.compile(r"\b(январ|феврал|март|апрел|ма(?=[йяеюё]\b)|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*", re.I)
 
 
 def data_of(plan: DatasetPlan, table: Table) -> Data:
@@ -173,8 +206,10 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     if d.ask is None:
         # порог цели («какие серверы загружены выше 80%») — ответ и тогда, когда сравнивать категории нечем
         th_goal = next((g for g in rel if (goal_ask(g.phrase) or "").startswith(("above:", "below:"))), None)
-        if th_goal is not None:
+        if th_goal is not None and not _threshold_is_a_name(th_goal.phrase, profile):
             d.ask = goal_ask(th_goal.phrase)
+            if re.search(r"\d\s*(?:%|процент)", th_goal.phrase):
+                d.ask_unit = "%"
     fs = facts_for(task, d)
     headline, caption = compose(task, fs)
     plain = fs.ctx.get("plain") or title
@@ -313,7 +348,16 @@ def _metric_ok(g: Goal, d: Data) -> bool:
         return True
     words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(
         f"{c.name} {c.unit or ''}" for c in d.profile.columns))
+    # и слова, которые цели считают служебными («Выполнение» — колонка, хотя «выполнение плана» — слово задачи)
+    words += [x for x in (re.sub(r"(?:ием|ием|ией|ию|ия|ие|ий|ем|ом|ам|ой|ы|и|а|е|у|ю|я)$", "", w)
+                          for c in d.profile.columns for w in re.findall(r"[а-яё]{5,}", c.name.lower())) if len(x) >= 4]
     metric = list(g.metric)
+    if g.head and d.head == g.head and any(d.head_syn(x) for x in d.measures):
+        # главное слово найдено по смыслу («дольше ждут» — срок, «денег» — рубли, «загруженная» — посещения):
+        # остальные слова величины проверяем как обычно
+        metric = [s_ for s_ in metric if s_ != g.head]
+        if not metric:
+            return True
     if any(RATE_GOAL.match(s_) for s_ in metric):
         if d.rate_measure is None:
             return False

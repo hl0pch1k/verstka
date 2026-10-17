@@ -14,7 +14,7 @@ from typing import Optional, Sequence
 
 from verstka.data.facts import FactSet
 from verstka.data.words import (
-    PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_pct_any, fmt_signed, fmt_value,
+    period_acc, PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_pct_any, fmt_signed, fmt_value,
     fraction_words, is_event_name, is_period_name, is_plural_value, join_and, lower_first, number_word, phrase, plural, round_pct,
     times_word,
     upper_first, verb,
@@ -86,6 +86,7 @@ def _labels(fs: FactSet) -> list[str]:
             out.append(c[k])
     out += list(c.get("names") or []) + list(c.get("parts") or []) + list(c.get("period_labels") or [])
     out += [lower_first(x) for x in out if isinstance(x, str)]
+    out += [upper_first(x) for x in out if isinstance(x, str)]  # «Ул. Садовая, 3» в начале заголовка — та же подпись
     for k in ("metric", "whole"):
         p = c.get(k)
         if isinstance(p, Phrase):
@@ -149,6 +150,23 @@ def _f(fs: FactSet, fid: str) -> Optional[HeadlineFact]:
 
 def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
+    nc, ch_ = c.get("named_cat"), _f(fs, "cat_change")
+    if nc and ch_ is not None:
+        # цель назвала одну категорию ряда: «Базовый: −14% за 3 квартала»
+        name, pct, span = nc
+        return f"{name}: {fmt_signed(ch_.value if pct >= 0 else -ch_.value, '%')} за {span}", c.get("caption")
+    pt = _f(fs, "period_total")
+    if c.get("period_total") and pt is not None:
+        # «сколько заработали за ноябрь и как это соотносится с октябрём»: итог месяца, потом к базе
+        u = c.get("unit_short")
+        head = f"За {period_acc(c['period_total'])} — {fmt_value(pt.value, u)}"
+        ch = _f(fs, "period_change")
+        if ch is not None and c.get("period_base"):
+            base = period_acc(c["period_base"])
+            if c["period_base"][:4] == c["period_total"][:4]:
+                base = re.sub(r"\s+\d{4}$", "", base)  # тот же год — без года: «чем за октябрь»
+            head += f": на {fmt_pct(ch.value)}% {'больше' if c.get('period_up') else 'меньше'}, чем за {base}"
+        return head, c.get("caption")
     if c.get("years"):
         return _dynamics_years(fs)
     if c.get("target_pair"):
@@ -416,6 +434,18 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         if ex is None or fa is None or pl is None:
             return c.get("plain", ""), c.get("caption")
         ov = _f(fs, "overrun")
+        un, rows_f = _f(fs, "under"), _f(fs, "rows")
+        if c.get("under") is not None and un is not None and rows_f is not None:
+            # «какие магазины не выполнили план»: ответ — кто, а не исполнение в целом
+            names = c["under"]
+            if not names:
+                return f"План выполнили все {fmt_num(rows_f.value)}", c.get("caption")
+            more = " и другие" if len(names) > 3 else ""
+            shown = names[:3]
+            if any("," in x for x in shown):
+                shown = [f"«{x}»" for x in shown]  # «ул. Ленина, 12» в перечне — в кавычках, иначе запятая путает
+            listed = ", ".join(shown) + more if more else join_and(shown)
+            return (f"Не выполнили план — {fmt_num(un.value)} из {fmt_num(rows_f.value)}: {listed}", c.get("caption"))
         if c.get("overrun") and ov is not None:
             # расходы сверх плана: «Перерасход 4,1%: 820 млн ₽ при плане 788»
             return (f"Перерасход {fmt_num(ov.value)}%: {fmt_value(fa.value, c.get('unit_short'))} при плане "
@@ -434,6 +464,21 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
     th = _threshold_head(fs)
     if th:
         return th, c.get("caption")
+    dm = _f(fs, "decline_max")
+    if c.get("decline") and dm is not None:
+        # «кто сократил сильнее всех»: наибольшее снижение, а не наибольшее значение
+        lab, p0, p1, _k = c["decline"]
+        u = "%" if dm.unit == "%" else (dm.unit or "")
+        tail = f" — {lower_first(p0)} → {lower_first(p1)}" if p0 and p1 else ""
+        return f"Сильнее всех снижение — {lab}: {fmt_signed(dm.value, u)}{tail}", c.get("caption")
+    fg = _f(fs, "growth_max")
+    if c.get("fastest_cols") and fg is not None:
+        # «какой сервис дорожает быстрее всех» при колонках-месяцах: темп лидера, а не наибольшая сумма
+        lab, p0, p1, kind = c["fastest_cols"]
+        v = f"в {fmt_num(fg.value, 1)} {times_word(fg.value)}" if kind == "times" else fmt_signed(fg.value, "%")
+        gpl = "pl" if is_plural_value(lab) else "m"
+        return (f"{lab} {verb('grow', gpl, past=False)} быстрее всех: {v} — {lower_first(p0)} → {lower_first(p1)}",
+                c.get("caption"))
     tot, sh = _f(fs, "total"), _f(fs, "leader_share")
     if c.get("ask_total") and tot is not None:
         # «сколько всего отгрузили»: итог — первым, лидер — за ним
@@ -454,7 +499,18 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             head += (f": от {fmt_value(lo0.value, u)} ({c['last_label']}) до {fmt_value(lv0.value, u)} "
                      f"({c['leader']})")
         return head, c.get("caption")
-    if c.get("misses") and c["misses"][2] and _f(fs, "below_target") is not None and _f(fs, "of") is not None:
+    if c.get("met") and _f(fs, "met_target") is not None and _f(fs, "of") is not None:
+        # «какие линии укладываются в норму»: кто уложился — «В пределах нормы — 3 из 6: Линия А, Линия В и Линия Д»
+        lower, tg, met = c["met"]
+        k, n = int(_f(fs, "met_target").value), int(_f(fs, "of").value)
+        if not k:
+            return f"В пределах {tg} — ни одной из {n}", c.get("caption")
+        names = join_and(met[:3]) + (" и другие" if k > 3 else "")
+        return f"{'В пределах' if lower else 'Не ниже'} {tg} — {k} из {n}: {names}", c.get("caption")
+    lo_f0, hi_f0 = _f(fs, "last_value"), _f(fs, "leader_value")
+    min_first = bool(c.get("ask_min") and lo_f0 is not None and hi_f0 is not None and c.get("last_label"))
+    if c.get("misses") and c["misses"][2] and _f(fs, "below_target") is not None and _f(fs, "of") is not None \
+            and not min_first:
         # у каждой строки своя цель, и кто-то до неё не дотянул: это и вывод («Ниже цели SLA — 2 из 7: CDN и Почта»)
         side, tg, miss = c["misses"]
         k, n = int(_f(fs, "below_target").value), int(_f(fs, "of").value)
@@ -469,7 +525,15 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
                     "delay": ("Меньше всего", "дольше всего"), "rate": ("Ниже всего", "выше всего")
                     }.get(c.get("wording", ""), ("Меньше всего", "больше всего"))
         note = f" «{lower_first(c['min_note'])}»" if c.get("min_note") else ""
-        how = f" ({c['matrix_note']})" if c.get("matrix_note") else ""
+        mp: Optional[Phrase] = c.get("metric")
+        if c.get("min_note") and mp is not None and mp.sure and c.get("wording", "lead") in ("lead", "most", "rate"):
+            # какая из величин рядом — словами, а не сырым именем в кавычках: «Ниже всего выполнение — …»,
+            # «Меньше всего брака — …»
+            if (u or "").strip() in ("%", "ppm", "‰", "п.п.") or c.get("wording") == "rate":
+                low, top, note = "Ниже всего", "выше всего", f" {mp.low.nom}"
+            else:
+                low, note = "Меньше всего", f" {mp.low.gen}"
+        how = f" ({c.get('matrix_note') or c.get('period_note')})" if c.get("matrix_note") or c.get("period_note") else ""
         return (f"{low}{note} — {c['last_label']}: {fmt_value(lo_f.value, u)}{how}, {top} — {c['leader']}: "
                 f"{fmt_value(hi_f.value, u)}"), c.get("caption")
     leader = c["leader"]
@@ -489,7 +553,7 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             wn, major = fraction_words(share.value, "nom"), _major(share.value)
             part = wn or (lower_first(major) if major else "больше всех")
             # «из скольких» — в подписи: заголовок короче; «34% всего брака», а не «34% брака» (это не уровень брака)
-            whole = _all_of(m)
+            whole = _all_of(m) + (f" ({c['period_note']})" if c.get("period_note") else "")  # «(2025)»
             if part == "больше всех":
                 head = f"{leader} — больше всех: {fmt_pct(share.value)}% {whole}"
             else:
@@ -508,10 +572,28 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             # две величины рядом по порядковым группам: у каждой своя самая большая группа
             head = (f"{c['first_name']}: больше всего — {leader} ({fmt_value(lv.value, u)}), "
                     f"{_mid(c['second_name'])}: {c['second_leader']} ({fmt_value(second.value, u)})")
+        elif w == "plan_dev" and lv.value > 0:
+            # отклонение от плана: «Больше всего сверх плана — Фасад: +19,6%, ниже плана сильнее всех — Благоустройство:
+            # −7,9%», а не «Фасад впереди»
+            sg = (lambda v_: ("+" if v_ > 0 else "−" if v_ < 0 else "") + fmt_value(abs(v_), u))
+            head = f"Больше всего сверх плана — {leader}: {sg(lv.value)}"
+            neg0 = _f(fs, "negatives")
+            low = last is not None and c.get("last_label") and last.value < 0
+            if neg0 is not None:
+                forms = c.get("neg_forms") or ("категория", "категории", "категорий")
+                head += f"; ниже плана — {count_words(int(neg0.value), *forms)}"
+                if low and int(neg0.value) > 1:
+                    head += f", сильнее всех — {c['last_label']}: {sg(last.value)}"
+                elif low:
+                    head += f": {c['last_label']}, {sg(last.value)}"
+            return head, c.get("caption")
         elif top_w:
             note = c.get("matrix_note") or c.get("stat_name") or c.get("period_note")  # «(сумма Пн–Вс)», «(p50)», «(2025)»
             head = f"{top_w} — {leader}: {fmt_value(lv.value, u)}" + (f" ({note})" if note else "")
-            if last is not None and c.get("last_label"):
+            mg = _f(fs, "margin")
+            if mg is not None:
+                head += f", отрыв от второго места — {fmt_value(mg.value, u)}"  # «с каким отрывом» — ответ в заголовке
+            elif last is not None and c.get("last_label"):
                 head += f", {low_w} — {c['last_label']}: {fmt_value(last.value, u)}"
         else:
             by = f" по {c['by_metric']}" if c.get("by_metric") else ""
@@ -524,7 +606,10 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             head = f"{leader} впереди{fast}{by}: {val(lv.value)}" + (f" ({note})" if note else "")
             if fast:
                 grow_leader = None
-            if last is not None and c.get("last_label"):
+            mg = _f(fs, "margin")
+            if mg is not None and not c.get("signed"):
+                head += f", отрыв от второго места — {fmt_value(mg.value, u)}"  # «с каким отрывом» — ответ в заголовке
+            elif last is not None and c.get("last_label"):
                 head += f", {c['last_label']} — {val(last.value)}"
     else:
         head = c.get("plain", leader)
@@ -581,7 +666,8 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
         # расходы, люди, штуки — доля без «приносит»: «Фонд оплаты труда — две трети расходов: 66%»; без слов доли —
         # «крупнейшая доля» или «основная часть», а не голое «Поиск — 42% визитов»
         wn = fraction_words(p, "nom") or (lower_first(_major(p)) if _major(p) else "крупнейшая доля")
-        return f"{leader} — {wn} {whole.low.gen}: {fmt_pct(p)}%", c.get("caption")
+        pn = f" ({c['period_note']})" if c.get("period_note") else ""  # период × категория: «(2025)»
+        return f"{leader} — {wn} {whole.low.gen}{pn}: {fmt_pct(p)}%", c.get("caption")
     if whole is not None:
         if words:
             head = f"{leader} {v} {words} {whole.low.gen} — {fmt_pct(p)}%"

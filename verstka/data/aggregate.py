@@ -29,7 +29,8 @@ from verstka.data.parse import forecast_period, is_total_label, iso_ord, period_
 from verstka.data.reference import _ref_view, describe_dropped
 from verstka.data.timeaxis import columns_time_view, resample_freq, time_view
 from verstka.data.units import (
-    _CODE, _DRIVER, _EVAL_NAME, _FACT, _ORDINAL_LABEL, _PLAN, INDEX_NAME, NICE_MINUTES, TO_MINUTES, _common_suffix,
+    _CODE, _DRIVER, _EVAL_NAME, _FACT, _ORDINAL_LABEL, _PLAN, INDEX_NAME, NICE_MINUTES, PER_ENTITY, TO_MINUTES,
+    _common_suffix,
     _kind, _num, _parts_ok, _period_key, _period_name, build_measure, is_index, kpi_change, unit_short,
 )
 from verstka.data.views import (
@@ -147,7 +148,7 @@ _LEVEL_GOAL = re.compile(r"^(?:конверс|дол[ьиея]?$|процент|
 RATE_GOAL = re.compile(r"^(?:обеспеченн|уров|частот|плотн|интенсивн|распространенн|заболеваем|смертн|рождаем)", re.I)
 RATE_COLUMN = re.compile(r"(?:^|[\s(/])на\s+(?:1\s*000|1000|10\s*000|100\s*000|100\s*тыс|10\s*тыс|тыс\.?\s*(?:жител|человек|"
                          r"населени)|душу|человека|жителя|\d[\d\s]*(?:жител|человек|населени)|одн(?:ого|у|о)\b|"
-                         r"врача|сотрудника|работника|ученика|студента|пациента)|per\s+capita|‰", re.I)
+                         r"врача|сотрудника|работника|ученика|студента|пациента)|per\s+capita|‰|\bppm\b", re.I)
 
 
 # ── главный объект ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -156,7 +157,8 @@ class Data:
 
     def __init__(self, table: Table, profile: DatasetProfile, subject: tuple[str, ...] = (), compare: bool = False,
                  head: Optional[str] = None, negate: tuple[str, ...] = (), qualifiers: tuple[str, ...] = (),
-                 ask: Optional[str] = None):
+                 ask: Optional[str] = None, ask_unit: Optional[str] = None,
+                 pre_qualifiers: Optional[tuple[str, ...]] = None, ask_periods: tuple[int, ...] = ()):
         self.table = table
         self.profile = profile
         self.subject = subject
@@ -164,7 +166,12 @@ class Data:
         self.head = head
         self.negate = negate
         self.qualifiers = qualifiers
+        # уточнения перед главным словом («свободным местам») могут сами назвать колонку; после него («отклонению от
+        # плана», «решения по заявлению») — дополнение, колонку по нему одному не берут
+        self.pre_qualifiers = qualifiers if pre_qualifiers is None else pre_qualifiers
         self.ask = ask  # «кто растёт быстрее всех» → "fastest": темп каждой категории, а не рост целого
+        self.ask_unit = ask_unit  # единица порога цели: «ниже 90%» — порог в процентах, колонка — тоже в процентах
+        self.ask_periods = ask_periods  # месяцы цели по порядку: «за ноябрь … с октябрём» → (11, 10)
         # сравнение категорий: главная метрика — колонка-итог («Итого за год»), если она есть, а не первая часть
         self.compare = compare
         cols = profile.columns
@@ -404,6 +411,9 @@ class Data:
         varied = [m for m in ms if len(set(m.present)) > 1]
         if varied and len(varied) < len(ms):
             ms = varied
+        by_rank = self._rank_measure(ms)
+        if by_rank is not None:
+            return by_rank  # турнирная таблица: «Место» задано по «Очкам» — они и есть величина, а не «В»
         th = self._title_head
         for pred in (
             lambda m: m.type == "money" and not m.change and not m.mixed and m.additive,
@@ -424,6 +434,32 @@ class Data:
                 if pred(m):
                     return self._rate_over_count(latest(m))
         return ms[0]
+
+    def _rank_measure(self, ms: list[Measure]) -> Optional[Measure]:
+        """Колонка места («Место», «Ранг», «Позиция» — 1…n): величина таблицы — та, по которой места расставлены
+        (убывает с местом без единой инверсии; из таких — с бо́льшим числом разных значений, потом правее)."""
+        rj = next((j for j, c in enumerate(self.cols)
+                   if re.fullmatch(r"(?i)\s*(?:место|ранг|позиция|№\s*места|rank|place|pos\.?)\s*", c.name)), None)
+        if rj is None:
+            return None
+        rows = [(i, _num(self.cell(i, rj))) for i in self.rows_idx]
+        rows = [(i, r) for i, r in rows if r is not None]
+        if len(rows) < 3 or sorted(r for _, r in rows) != list(range(1, len(rows) + 1)):
+            return None
+        order = [i for i, _ in sorted(rows, key=lambda x: x[1])]
+        best = None
+        for m in ms:
+            if m.change or m.mixed:
+                continue
+            vs = [m.values[i] for i in order]
+            if any(v is None for v in vs):
+                continue
+            inv = sum(1 for a_ in range(len(vs)) for b_ in range(a_ + 1, len(vs)) if vs[a_] < vs[b_])  # type: ignore
+            if inv == 0:
+                key = (len(set(vs)), m.j)
+                if best is None or key > best[0]:
+                    best = (key, m)
+        return best[1] if best is not None else None
 
     @cached_property
     def target_pair(self) -> Optional[tuple[Measure, Measure]]:
@@ -489,6 +525,17 @@ class Data:
         tot = sum(float(m.values[i]) for i in self.rows_idx if m.values[i] is not None and m.values[i] > 0)  # type: ignore
         return [i for i in rows if m.values[i] is not None and tot > 0 and float(m.values[i]) > 0.5 * tot]  # type: ignore
 
+    def cat_typos(self, m: Optional[Measure], dj: Optional[int]) -> list[int]:
+        """Опечатки, которых нет в суммах категорий: колонка складывается, строки сложены по категории («Канал» —
+        много пожертвований), а одна строка — больше половины всей суммы и ×100 медианы (1 500 000 ₽ среди сотен)."""
+        if m is None or m.j < 0 or not m.additive or dj is None:
+            return []
+        typos = self.dominant_typos(m)
+        if not typos:
+            return []
+        labs = [self.text(i, dj) for i in self.rows_idx]
+        return sorted(typos) if len(set(x for x in labs if x)) < len([x for x in labs if x]) else []
+
     @cached_property
     def parallel_time_only(self) -> bool:
         """Колонки на оси времени — ряды одного рода («ИТ · Продажи · Маркетинг» по месяцам, «2024 · 2025»): их не
@@ -534,12 +581,36 @@ class Data:
                 out[m.name] = pick
         return out
 
+    def head_syn(self, m: Measure) -> bool:
+        """Колонка по смыслу главного слова цели, а не по букве: «срок» — время (единица дней, часов, минут), «денег» —
+        деньги, «загрузк/нагрузк» — посещения, нагрузка, загрузка."""
+        h = self.head or ""
+        if h == "срок":
+            # «дольше ждут», «быстрее обрабатывает» — длительность: единица времени или «Срок …», «Время …»;
+            # «Доля в срок, %» — не длительность
+            return (m.unit or "") != "%" and (bool(m.time_unit) or bool(
+                re.match(r"(?i)\s*(?:средн\w*\s+|медианн\w*\s+)?(?:срок|время|длительн)", m.name)))
+        if h == "денег":
+            return m.type == "money"
+        if h.startswith(("загрузк", "нагрузк", "загружен")):
+            return bool(re.search(r"(?i)посещен|нагрузк|загрузк|пациент|обращени", m.name))
+        if h.startswith("рейтинг"):
+            return bool(re.search(r"(?i)оценк|балл|рейтинг|звезд", m.name))
+        if h == "аудитор":
+            return bool(re.search(r"(?i)аудитор|\bmau\b|\bdau\b|\bwau\b|пользовател|зрител|слушател|читател", m.name))
+        if h.startswith(("размер", "величин")):
+            # «как распределены пожертвования по размеру» — сама величина, если она в файле одна
+            return len([x for x in self.measures if not x.change]) == 1 and not m.change
+        if h.startswith("процент"):
+            return (m.unit or "") == "%" and not m.change  # «средний процент завершения» — колонка в процентах
+        return False
+
     @cached_property
     def head_in_columns(self) -> bool:
-        """Главное слово величины цели есть в названии какой-нибудь колонки."""
+        """Главное слово величины цели есть в названии какой-нибудь колонки (или колонка по его смыслу)."""
         quals = [x for x in self.qualifiers if len(x) >= 3]
         return bool(self.head) and any(any(stem_in(self.head, w) or any(stem_in(x, w) for x in quals)
-                                           for w in stems_of(m.name)) for m in self.measures)
+                                           for w in stems_of(m.name)) or self.head_syn(m) for m in self.measures)
 
     @cached_property
     def head_measure(self) -> Optional[Measure]:
@@ -550,8 +621,19 @@ class Data:
         # уточнение цели («свободн», «ндс», «средн») конкретнее главного слова: «свободным местам» — «Свободно», хотя
         # слово «мест» — только в «Куплено мест»
         quals = [x for x in self.qualifiers if len(x) >= 3]
+        pre = [x for x in self.pre_qualifiers if len(x) >= 3]
         cands = [m for m in self.measures if any(stem_in(self.head, w) for w in stems_of(m.name))
-                 or any(stem_in(x, w) for x in quals for w in stems_of(m.name))]
+                 or any(stem_in(x, w) for x in pre for w in stems_of(m.name))]
+        syn = [m for m in self.measures if self.head_syn(m)]
+        if syn and (self.head in ("срок", "денег", "рейтинг", "аудитор") or
+                    not any(any(stem_in(self.head, w) for w in stems_of(m.name)) for m in self.measures)):
+            # по смыслу главного слова: «дольше ждут решения по заявлению» — колонка времени, а не «Заявлений»
+            # (уточнение «заявлен» — о предмете, а не о величине); «больше денег» — денежная
+            cands = syn
+        if not cands:
+            # главного слова нет ни в одной колонке («самая большая просрочка свыше 90 дней»): колонку называет
+            # дополнение — «Свыше 90 дней»
+            cands = [m for m in self.measures if any(stem_in(x, w) for x in quals for w in stems_of(m.name))]
         if not cands:
             return None
         title = stems_of(file_title(self.profile.file, self.profile.sheet))
@@ -567,10 +649,23 @@ class Data:
             h = int(any(stem_in(self.head, w) for w in words))  # type: ignore[arg-type]
             sub = sum(1 for x in self.subject if any(stem_in(x, w) for w in words))
             tit = sum(1 for x in title if any(stem_in(x, w) for w in words))
-            return (-neg_bad(m), q, h, sub, tit, not m.change)
+            # по смыслу, без уточнений: «самая загруженная поликлиника» — посещения поликлиники, а не на одного врача
+            whole = not (syn and m in syn and PER_ENTITY.search(m.name.lower()))
+            if self.head in ("срок", "денег", "рейтинг", "аудитор"):
+                # главное слово — по смыслу вопроса («где дольше всего ждут решения по заявлению»): оно решает, а слова
+                # вокруг («заявлен») — о предмете
+                h = int(h or self.head_syn(m))
+                # «больше всего зрителей», «денег» — счёт и сумма, а не доля в процентах
+                return (-neg_bad(m), h, q, sub, tit, not m.change, (m.unit or "") != "%", whole)
+            return (-neg_bad(m), q, h, sub, tit, not m.change, whole)
 
         best = max(score(m) for m in cands)
         top = [m for m in cands if score(m) == best]
+        bases = {re.sub(r"\s*,.*$", "", m.name).strip().lower() for m in top}
+        if len(top) == 2 and len(bases) == 1 and sum(1 for m in top if (m.unit or "") == "%") == 1:
+            # одна величина в рублях и в процентах («Отклонение, млн ₽» и «Отклонение, %»): сравнивают относительную —
+            # этапы разного размера
+            return next(m for m in top if (m.unit or "") == "%")
         return top[0] if len(top) == 1 else None  # ничья и по словам цели, и по файлу — не порядок колонок
 
     @cached_property
@@ -1046,6 +1141,12 @@ class Data:
     def cat_dim(self) -> Optional[int]:
         """Колонка категорий для сравнения: подпись строки (≤ 60, если есть метрика) или измерение с повторами (2–60
         значений). Без метрики сравнивают число строк — подпись, у которой каждая строка своя, для этого не годится."""
+        if self.subject and self.label is not None and self.main is not None:
+            # цель называет разрез с повторами («какие специальности оцениваются хуже всего»): по нему, а не по врачам
+            named = [j for j in self.dims if j != self.label and 2 <= self.cols[j].distinct < self.n
+                     and stems_match(self.subject, self.cols[j].name)]
+            if len(named) == 1:
+                return named[0]
         if self.label is not None and self.n <= 60 and self.main is not None:
             parent = self.parent_of(self.label) if self._rollable else None
             return parent if parent is not None and self.n > MAX_CATS - 4 else self.label
@@ -1099,9 +1200,10 @@ class Data:
         if dj is None:
             return None
         groups: dict[str, list[int]] = {}
+        dropped = self.cat_typos(m, dj)
         for i in self.rows_idx:
             lab = self.text(i, dj)
-            if lab:
+            if lab and i not in dropped:
                 groups.setdefault(lab, []).append(i)
         if len(groups) < 2:
             return None
@@ -1158,8 +1260,10 @@ class Data:
         total = None
         total_row = False
         if m is None or m.additive:
-            # итог: строка «Итого» таблицы или сумма
-            for i in sorted(self.totals):
+            # итог: строка «Итого» таблицы или сумма (с опечаткой в строке «Итого» — сумма без неё); период × категория —
+            # сумма показанного (строк «Итого» по одной на период, и ни одна не итог последнего периода сама по себе)
+            panel = self.time_col is not None and dj != self.time_col
+            for i in (sorted(self.totals) if not dropped and not panel else []):
                 if m is not None and m.j >= 0:
                     tv = _num(self.cell(i, m.j))
                     if tv is not None and tv > 0:
@@ -1200,7 +1304,7 @@ class Data:
         return CatView(
             dim=self.cols[dj].name, labels=labels, values=values, measure=m, extra=extra, extra_measures=extra_ms,
             others=others, ranked=ranked, total=total, total_from_row=total_row, distinct=distinct, aggregated=aggregated,
-            cut=cut, merged=merged, low_label=low[0], low_value=low[1],
+            cut=cut, merged=merged, low_label=low[0], low_value=low[1], dropped=list(dropped),
         )
 
     @cached_property

@@ -446,6 +446,8 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         return float(k), []
     if op == "rows_gt":
         pairs = [(raw.num(i, p["a"]), raw.num(i, p["b"])) for i in raw.rows]
+        if p.get("ge"):
+            return float(sum(1 for a, b in pairs if a is not None and b is not None and a >= b)), []
         return float(sum(1 for a, b in pairs if a is not None and b is not None and a > b)), []
     if op == "colsum":
         if p.get("cols"):
@@ -644,6 +646,25 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         if v is None:
             raise _Fail("пустая ячейка")
         return v, [v]
+    if op == "colfastest":
+        # «дорожает быстрее всех» при колонках-периодах: темп каждой строки — колонка «b» к колонке «a»; названная —
+        # наибольший («Прочее» не в счёт)
+        pool: dict[str, float] = {}
+        for i in raw.rows:
+            lab = raw.text(i, p["by"])
+            a_, b_ = raw.num(i, p["a"], scale), raw.num(i, p["b"], scale)
+            if not lab or lab in p.get("exclude", ()) or is_other_label(lab) or a_ is None or b_ is None or a_ <= 0:
+                continue
+            pool[lab] = b_ / a_
+        keys = p.get("keys", [])
+        if not keys or keys[0] not in pool:
+            raise _Fail(f"нет строки «{keys[0] if keys else '?'}»")
+        if p.get("down") and pool[keys[0]] > min(pool.values()) + 1e-12:
+            raise _Fail(f"«{keys[0]}» снижается не сильнее всех: {min(pool, key=pool.get)}")
+        if not p.get("down") and pool[keys[0]] < max(pool.values()) - 1e-12:
+            raise _Fail(f"«{keys[0]}» растёт не быстрее всех: {max(pool, key=pool.get)}")
+        r = pool[keys[0]]
+        return (r if p.get("kind") == "ratio" else (r - 1) * 100), list(pool.values())
     if op == "cellchange":
         sh = bool(p.get("shown"))
         a, b = raw.num(p.get("prev_row", p["row"]), p["prev"], 1.0, sh), raw.num(p["row"], p["cur"], 1.0, sh)
@@ -668,6 +689,11 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
         what = p.get("what", "exec")
         if what == "over":
             return float(sum(1 for a, b in pairs.values() if b > a)), [ps, fs_]
+        if what == "under":
+            under = {k for k, (a, b) in pairs.items() if b < a}
+            if p.get("keys") is not None and set(p["keys"]) != under:
+                raise _Fail("не те категории ниже плана")
+            return float(len(under)), [ps, fs_]
         if what == "n":
             return float(len(pairs)), [ps, fs_]
         if what == "low":
@@ -858,7 +884,7 @@ def verify(table: Table, facts: Sequence[HeadlineFact], prov: dict[str, dict], h
 # ── утверждения ───────────────────────────────────────────────────────────────────────────────────────────────────
 _LEAD_HEAD = re.compile(
     r"^(?:(?:Больше|Выше|Дольше|Медленнее|Дороже|Теплее)\s+всего\s+—\s+(?P<a>.+?):\s"
-    r"|(?P<b>.+?)\s+(?:впереди|лидирует|лидируют|—\s+первое\s+место|даёт|дают|приносит|приносят)\b"
+    r"|(?P<b>[^(]+?)\s+(?:впереди|лидирует|лидируют|—\s+первое\s+место|даёт|дают|приносит|приносят)\b"
     r"|(?P<c>[^—:]+?)\s+—\s+(?:\d|почти|больше|половин|треть|четверть|две\s+трети))")
 _GROW = re.compile(r"раст(?:ёт|ет|ут)\s+быстрее\s+всех|быстрее\s+всех\s+раст(?:ёт|ет|ут)")
 _ALL_N = re.compile(r"во\s+всех\s+(\d+)")
@@ -892,7 +918,8 @@ def claims_problem(text: str, ok: dict[str, HeadlineFact], prov: dict[str, dict]
         return None
     # кто впереди: названный первым — ключ подтверждённого лидера (наибольшее значение по строкам файла)
     lead = next((ok[k] for k in ("leader_share", "leader_value") if k in ok and _keys_of(prov.get(k))), None)
-    m = None if caption else _LEAD_HEAD.match(t)
+    # «Меньше всего — X», «Ниже всего … — X» — о последнем, а не о лидере (слова в скобках — имя строки, не глагол)
+    m = None if caption or re.match(r"(?:Меньше|Ниже|Быстрее|Дешевле|Холоднее|Реже)\s+всего\b", t) else _LEAD_HEAD.match(t)
     if m is not None and m.group("c") is not None and "leader_share" not in ok:
         m = None  # «X — 31%…» — лидер доли; без доли «X — 5» — не утверждение о первенстве
     if m is not None and m.group("c") is not None and re.match(r"^(?:всего|итого|в среднем|ниже|выше)\b",

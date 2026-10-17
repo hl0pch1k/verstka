@@ -176,6 +176,7 @@ class CatView:
     merged: int = 0  # порядковые группы: последние `merged` — одной группой («60–64 … 85 и старше»)
     low_label: Optional[str] = None  # при `cut`: категория с наименьшим значением из всего списка
     low_value: Optional[float] = None
+    dropped: list[int] = field(default_factory=list)  # строки-опечатки, которых нет в суммах категорий (×100 медианы)
 
     @property
     def n(self) -> int:

@@ -2685,7 +2685,7 @@ T_FLOW = re.compile(r"выручк|доход|расход|затрат|прод
                     r"обращен|опоздан|доставок|предложен|операци|потреблен|учеников|пациент|статей|публикац|посетител|"
                     r"пробег|голос|зрител|сеансов|подписчик|ошибок|ошибк|выплат|кредит|абонемент|уш[лё]", re.I)
 T_LEVEL_TITLE = re.compile(r"курс\w*\s+валют|урожайн|температур|(?:^|\s)цен[аы]?(?:\s|$)|тариф", re.I)
-T_STOCK = re.compile(r"клиент|пользовател|сотрудник|абонент|подписчик|остат|численност|штат", re.I)
+T_STOCK = re.compile(r"клиент|пользовател|сотрудник|абонент|подписчик|остат|численност|штат|ваканс", re.I)
 T_PLAN = re.compile(r"план|утвержд|бюджет|лимит|норматив|прогноз|(?:^|\s)цел[ьи]", re.I)
 T_FACT = re.compile(r"факт|исполн|выполн|освоен|израсход", re.I)
 T_STOP = {"покажи", "покажите", "сравни", "сравните", "как", "что", "это", "между", "есть", "связь", "структуру",
@@ -2799,8 +2799,8 @@ class Raw:
         if not unit and re.fullmatch(r"[А-ЯЁ][а-яё]+(?:ов|ев|ей|ий)", name.strip()) and self.vals(j) \
                 and all(float(v).is_integer() and v >= 0 for v in self.vals(j)):
             return True  # «Рейсов», «Возвратов», «Заказов» целыми — счёт
-        if re.fullmatch(r"(?i)(?:абонент|клиент|пользовател|сотрудник|подписчик)[ыи]", name.strip()):
-            return True  # «Абоненты», «Клиенты» — счёт людей
+        if re.fullmatch(r"(?i)(?:абонент|клиент|пользовател|сотрудник|подписчик)[ыи]|ваканси[ия]|штат", name.strip()):
+            return True  # «Абоненты», «Клиенты», «Вакансии», «Штат» — счёт людей и мест
         if re.fullmatch(r"(?:пн|вт|ср|чт|пт|сб|вс|(?:19|20)\d\d)", name.strip().lower()) and T_FLOW.search(self.title):
             return True  # колонка-день или колонка-год о величине не говорит: «Заказы ресторана по часам» — счёт
         if T_LEVEL_TITLE.search(self.title):
@@ -2826,12 +2826,45 @@ class Raw:
                 tw = [j for j in ms if re.search(r",\s*(?:т|кг|л|шт\.?|м³)$", self.cols[j])]
                 if tw:
                     return tw[0]
-        if goal and re.search(r"быстрее|медленнее|дольше|скорост", goal, re.I):
-            # «кто обрабатывает заказы быстрее» — время, а не число заказов
-            dur = [j for j in ms if re.search(r"врем|срок|длительн", self.cols[j], re.I)
-                   or (self.units[j] or "").strip() in ("мин", "мин.", "ч", "ч.", "дн.", "дн", "с", "сек", "мс")]
+        if goal and re.search(r"быстрее|медленнее|дольше|скорост|\bждут\b|ожидани", goal, re.I) and \
+                not re.search(r"дорожа|дешеве|раст|рост", goal, re.I):
+            # «кто обрабатывает заказы быстрее», «где дольше ждут» — время, а не число заказов и не «доля в срок»
+            dur = [j for j in ms if (self.units[j] or "").strip() != "%" and (
+                re.match(r"(?i)\s*(?:средн\w*\s+)?(?:врем|срок|длительн)", self.cols[j])
+                or (self.units[j] or "").strip() in ("мин", "мин.", "ч", "ч.", "дн.", "дн", "с", "сек", "мс"))]
             if dur:
                 return dur[0]
+        if goal:
+            # цель называет величину своими словами
+            low = goal.lower().replace("ё", "е")
+            pick = None
+            per = re.search(r"на\s+(?:одного\s+|1\s+)?([а-я]{4})", low)
+            if per:
+                # «нагрузка на одного врача» — колонка «… на врача»
+                pick = next((j for j in ms if re.search(r"\bна\s+(?:одного\s+|1\s+)?" + per.group(1), self.cols[j].lower())),
+                            None)
+            if pick is None and re.search(r"загруж|нагрузк", low):
+                vis = [j for j in ms if re.search(r"посещен|нагрузк|загрузк", self.cols[j].lower())]
+                pick = next((j for j in vis if not re.search(r"\bна\s", self.cols[j].lower())), vis[0] if vis else None)
+            if pick is None and re.search(r"\bденег\b|\bденьг|\bзатрат", low):
+                pick = (self.total_col() if task == "comparison" else None) or next(
+                    (j for j in ms if T_MONEY.search(self.units[j] or "")), None)
+            if pick is None and re.search(r"(?:средн\w*|как\w*)\s+рейтинг", low):
+                pick = next((j for j in ms if re.search(r"оценк|балл|рейтинг", self.cols[j].lower())), None)
+            if pick is None and re.search(r"средн\w*\s+(?:процент|дол)", low):
+                pick = next((j for j in ms if (self.units[j] or "").strip() == "%"), None)
+            if pick is None and re.search(r"\bуход|\bуходит|\bушл", low):
+                # «стало ли меньше уходить абонентов» — отток, а не число абонентов
+                pick = next((j for j in ms if re.match(r"(?i)\s*отток", self.cols[j])), None) or next(
+                    (j for j in ms if re.match(r"(?i)\s*ушл|\s*ушедш", self.cols[j])), None)
+            if pick is None and re.search(r"(?:вы|ис)полнени\w*\s+плана", low):
+                # «с выполнением плана» — колонка исполнения («Выполнение, %»), если она есть, а не «План»
+                pick = next((j for j in ms if re.match(r"(?i)\s*(?:вы|ис)полнени|%\s*плана", self.cols[j])), None)
+            if pick is None and re.search(r"отклонени", low):
+                dev = [j for j in ms if re.match(r"(?i)\s*отклонени", self.cols[j])]
+                pick = next((j for j in dev if (self.units[j] or "").strip() == "%"), dev[0] if dev else None)
+            if pick is not None:
+                return pick
         if goal:
             hits = [_hits(goal, self.cols[j]) for j in ms]
             if hits and max(hits) > 0:
@@ -2851,6 +2884,13 @@ class Raw:
                     tied = [j for j in tied if _prefix(goal, self.cols[j]) == best]
                 # равные по словам цели: «по конверсии», «по доле» — процент; иначе («структура выплат») — деньги,
                 # потом то, что складывается
+                # норма и цель — ориентир, а не величина («укладываются в норму по браку» — брак)
+                tied = [j for j in tied if not re.match(r"(?i)\s*(?:норм|норматив|цел[ья]|таргет)", self.cols[j])] or tied
+                base_ = {re.sub(r"\s*,.*$", "", self.cols[j]).strip().lower() for j in tied}
+                rate_ = [j for j in tied if (self.units[j] or "").strip() in ("ppm", "‰", "%")]
+                if len(base_) == 1 and rate_ and len(rate_) < len(tied) and \
+                        not re.search(r"сколько|штук|количеств|число", goal, re.I):
+                    return rate_[0]  # «Брак, шт.» и «Брак, ppm»: «по браку», «уровень брака» — уровень (ppm)
                 if re.search(r"конверс|доле|доли|долю|процент|средн|оценк", goal, re.I):
                     tied.sort(key=lambda j: (not (self.units[j] == "%" or self.types[j] == "percent"), j))
                 else:
@@ -2878,10 +2918,13 @@ class Raw:
         return out
 
     def by_cat(self, dj: int, j: int, add: bool) -> dict[str, float]:
+        labs = [self.text(i, dj) for i in self.rows if self.text(i, dj)]
+        # сумма по категории с повторами без строки-опечатки (×100 медианы и больше половины всей суммы)
+        typo = set(_dominant_typo(self, j)) if add and len(set(labs)) < len(labs) else set()
         groups: dict[str, list[float]] = {}
         for i in self.rows:
             lab, v = self.text(i, dj), self.num[j][i]
-            if lab and v is not None:
+            if lab and v is not None and i not in typo:
                 groups.setdefault(lab, []).append(v)
         return {k: (sum(v) if add else sum(v) / len(v)) for k, v in groups.items()}
 
@@ -2921,7 +2964,32 @@ def _labels(t: Table, prof=None, specs: Optional[dict] = None) -> list[str]:
         if isinstance(b, ChartSpec):
             out += [str(c) for c in b.categories] + [x.name for x in b.series if x.name] + [b.y_title or ""]
             out += [lower_first_(x.name) for x in b.series if x.name] + [lower_first_(b.y_title or "")]
+    # даты и периоды таблицы словами («ноябрь 2025», «6 октября 2025», «2025 год») — имена периода, а не числа
+    for r in t.rows:
+        for v in r:
+            if isinstance(v, str):
+                out += _period_words(v)
+    out += [x[:1].upper() + x[1:] for x in out if x]  # «Ул. Садовая, 3» в начале заголовка — та же подпись
     return [x for x in out if x]
+
+
+_MON_NOM = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь",
+            "декабрь"]
+_MON_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
+            "декабря"]
+
+
+def _period_words(v: str) -> list[str]:
+    m = re.fullmatch(r"\s*((?:19|20)\d\d)(?:-(\d\d)(?:-(\d\d))?)?\s*", v)
+    if not m:
+        return []
+    y, mo, d = m.groups()
+    out = [y, f"{y} год", f"{y} года", f"{y} году"]
+    if mo and 1 <= int(mo) <= 12:
+        out += [f"{_MON_NOM[int(mo) - 1]} {y}", f"{_MON_GEN[int(mo) - 1]} {y}"]
+        if d:
+            out.append(f"{int(d)} {_MON_GEN[int(mo) - 1]} {y}")
+    return out
 
 
 def lower_first_(s: str) -> str:
@@ -3369,6 +3437,26 @@ def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> lis
             real = {k: v for k, v in agg.items() if not OTHER_LAB.match(k)}
             dec = next((k for k in range(0, 7) if abs(round(lv.value, k) - lv.value) < 1e-9), 7)
             tol = min(0.051, 0.5 * 10 ** -dec + 1e-9)  # как записано в факте: 4,86 — до сотых, 413 — до целых
+            if not add and real and not _close(lv.value, max(real.values()), rel=1e-4,
+                                               absol=tol if max(map(abs, real.values())) >= 1 else 1e-9):
+                # уровень по категории с несколькими строками — и среднее с весом счёта рядом («Средняя оценка» и
+                # «Отзывов»): оценка специальности — по отзывам, а не среднее врачей
+                for wj in raw.num:
+                    ws_ = raw.vals(wj)
+                    if wj == j or not ws_ or not all(float(x).is_integer() and x >= 0 for x in ws_):
+                        continue  # вес — счёт (целые неотрицательные: отзывы, чеки, ответы)
+                    acc: dict = {}
+                    for i in raw.rows:
+                        lab_, v_, w_ = raw.text(i, dj), raw.num[j][i], raw.num[wj][i]
+                        if lab_ and v_ is not None and w_:
+                            a_ = acc.setdefault(lab_, [0.0, 0.0])
+                            a_[0] += v_ * w_
+                            a_[1] += w_
+                    agg_w = {k: a_[0] / a_[1] / f for k, a_ in acc.items() if a_[1]}
+                    real_w = {k: v for k, v in agg_w.items() if not OTHER_LAB.match(k)}
+                    if real_w and _close(lv.value, max(real_w.values()), rel=1e-4, absol=tol):
+                        agg, real = agg_w, real_w
+                        break
             if real and _close(lv.value, max(real.values()), rel=1e-4, absol=tol if max(map(abs, real.values())) >= 1
                                else 1e-9):
                 hits.append((j, dj, add, agg, real))
@@ -3402,7 +3490,9 @@ def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> lis
         if not add or any(v < 0 for v in agg.values()):
             bad.append(f"доля или итог у величины, которая не складывается: «{raw.cols[j]}»")
         elif facts.get("leader_share") is not None:
-            tv = next((_raw(raw.t.rows[i][j]) for i in raw.tot_rows if _raw(raw.t.rows[i][j])), None)
+            # период × категория: строк «Итого» по одной на период — целое считается по показанным строкам
+            tv = None if latest_rows else next((_raw(raw.t.rows[i][j]) for i in raw.tot_rows if _raw(raw.t.rows[i][j])),
+                                               None)
             expect = real[leader] / ((tv / (_mult(lv.unit) / _mult(raw.units[j]))) if tv else sum(agg.values())) * 100
             if not _pct_shown(facts["leader_share"].value, expect):
                 bad.append(f"доля лидера {facts['leader_share'].value} против {expect:.2f}")
@@ -3955,8 +4045,8 @@ def _conv4_cases() -> list[tuple[str, list[tuple[str, bytes]], str]]:
     return out
 
 
-# ещё не сходятся (раунд 10, следующая часть — цели): срок вместо числа заявлений (07), шапка «год → штат» (24)
-_CONV4_PENDING = {"07", "24"}
+# ещё не сходятся: пусто (раунд 10 закрыл срок вместо числа заявлений — 07 и шапку «год → штат» — 24)
+_CONV4_PENDING: set[str] = set()
 
 
 @pytest.mark.parametrize("key,files,brief", _conv4_cases(), ids=[k for k, _, _ in _conv4_cases()])

@@ -727,6 +727,8 @@ def _build_table(
     melt_notes: list[str] = []
     melted = _melt_wide(names, units, raw_header, typed_cols, kept_rows, set(totals), row_units,
                         _title_measure(title_rows))
+    if melted is None and column_groups:
+        melted = _melt_groups(names, units, raw_header, typed_cols, kept_rows, set(totals), column_groups)
     if melted is not None:
         names, units, raw_header, out_rows, totals, melt_notes = melted
         row_units, column_groups = [], []
@@ -1174,6 +1176,60 @@ def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[st
                 new_totals.append(len(rows))
             rows.append(head + [pv] + [cols[groups[p][k]][r] for p in prefixes])
     return _dedupe(out_names), out_units, out_raw, rows, new_totals, notes
+
+
+def _melt_groups(names: list[str], units: list[Optional[str]], raw_header: list[str], cols: list[list[Cell]],
+                 kept_rows: list[int], totals: set[int], groups: list[Optional[str]]) -> Optional[tuple]:
+    """Двухуровневая шапка с периодами сверху («2024: Штат · Вакансии | 2025: Штат · Вакансии») → длинная таблица:
+    подписи, «Год» (период), по колонке на величину («Штат», «Вакансии»). Годы в шапке — ось времени, а не часть
+    имени («2025 Штат»). Нужны ≥ 2 периодов одной зернистости с одинаковым набором величин; другие числовые колонки
+    вне групп — таблица остаётся как есть."""
+    per: dict[str, tuple[str, int]] = {}
+    for g in {g for g in groups if g}:
+        iso = period_str(str(g), True, years=True)
+        r = iso_ord(iso) if iso else None
+        if r is None:
+            return None
+        per[g] = r
+    if len(per) < 2 or len({r[0] for r in per.values()}) != 1:
+        return None
+    gran = next(iter(per.values()))[0]
+    order = sorted(per, key=lambda g: per[g][1])
+    subs: dict[str, dict[str, int]] = {g: {} for g in order}
+    for j, g in enumerate(groups):
+        if not g:
+            continue
+        nm = names[j]
+        sub = nm[len(g):].strip(" ,:-—") if nm.startswith(g) else re.sub(rf"\s*{re.escape(g)}\s*", " ", nm).strip()
+        if not sub or sub in subs[g]:
+            return None
+        subs[g][sub] = j
+    keys = list(subs[order[0]])
+    if any(list(subs[g]) != keys for g in order):
+        return None
+    n_rows = len(kept_rows)
+    ids = [j for j, g in enumerate(groups) if not g]
+    for j in ids:
+        vals = [cols[j][kept_rows[i]] for i in range(n_rows) if i not in totals and cols[j][kept_rows[i]] is not None]
+        if vals and sum(1 for v in vals if _is_num(v)) * 2 > len(vals):
+            return None  # числовая колонка вне групп — не подпись
+    if not ids:
+        return None
+    pname = _PERIOD_COLUMN[gran]
+    out_names = [names[j] for j in ids] + [pname] + keys
+    out_units = [units[j] for j in ids] + [None] + [
+        (lambda us: us.pop() if len(us) == 1 else None)({units[subs[g][k]] for g in order}) for k in keys]
+    out_raw = [raw_header[j] for j in ids] + [pname] + keys
+    rows: list[list[Cell]] = []
+    new_totals: list[int] = []
+    for i in range(n_rows):
+        r = kept_rows[i]
+        head = [cols[j][r] for j in ids]
+        for g in order:
+            if i in totals:
+                new_totals.append(len(rows))
+            rows.append(head + [period_iso(gran, per[g][1])] + [cols[subs[g][k]][r] for k in keys])
+    return _dedupe(out_names), out_units, out_raw, rows, new_totals, [_WIDE_NOTE]
 
 
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}(?:T.*)?")
