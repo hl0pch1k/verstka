@@ -23,6 +23,7 @@ import re
 import shutil
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -917,6 +918,7 @@ def fix_slide(
     files are replaced, the previews rendered and the fix logged. Nothing in `vdir` is written before E, so a failure
     leaves the variant as it was."""
     from verstka.api import remarks as RM
+    from verstka.audit import seen_fix as SF
     from verstka.audit.autofix import RERENDER_ACTIONS, autofix_loop, plan_fixes
     from verstka.audit.runner import run_audit
     from verstka.matching.matcher import match_outline
@@ -967,6 +969,15 @@ def fix_slide(
         records.extend(new)
         kept.extend(r for r in new if r.get("action") != "rollback" and r.get("iteration") not in rolled)
         return rep2, outline2, plan2
+
+    def _fix_seen(deck: Path, k: int, codes: set, mf, where: Path, shown: Optional[list] = None) -> SF.SeenFix:
+        """The in-place fixes of the review's `codes` on slide k of `deck`; their records join the history."""
+        pic = SF.slide_picture(deck, k, where) if "low_contrast" in codes else None
+        got = SF.fix_seen(deck, k, codes, mf, pic, shown or ())
+        recs = [{"iteration": 0, "action": "xml", **r} for r in got.records]
+        records.extend(recs)
+        kept.extend(recs)
+        return got
 
     def mark() -> tuple[int, int]:
         return len(records), len(kept)
@@ -1028,9 +1039,21 @@ def fix_slide(
         rep = report
         if ids_xml:
             rep, outline, plan = inplace(report, outline, plan, ids_xml)
-        # what is left of the asked remarks (the model's own remarks stay until the designer has redesigned the slide)
+        # A'. what «Взгляд дизайнера» saw, fixed in place by measuring (audit/seen_fix.py): the text's colour or a plate
+        # where it does not read on the ground the slide shows, a larger size, a box cut short of what it runs into, no
+        # letter-spacing, a smaller size — on a cover too (the designer never lays a frame out again)
+        seen_codes = {c for c in (SF.code_of(r) for r in remarks if r.kind == "model") if c}
+        seen: Optional[SF.SeenFix] = None
+        if seen_codes:
+            voice.plain(f"Правлю то, что увидел дизайнер на слайде {n}", 0.07)
+            shown = [p for p in (vdir / "slides" / f"slide-{n:03d}.jpg",) if p.exists()]  # the preview the person saw
+            seen = _fix_seen(work, n, seen_codes, manifest, scratch / "seen", shown)
+            if seen.records:
+                rep = run_audit(work, manifest, outline, ws, **audit_kw)
+        # what is left of the asked remarks (the model's own remarks stay until the designer has redesigned the slide,
+        # or the rules fixed what they say in place)
         left = [i for i in rep.issues if i.slide == n and RM.is_stage(i) and i.kind != "model" and i.check_id in asked_checks]
-        left += [r for r in remarks if r.kind == "model"]
+        left += [r for r in remarks if r.kind == "model" and not (seen is not None and SF.code_of(r) in seen.cured)]
 
         # B. the designer, when content is at stake
         need_designer = not frame and bool(wishes or any(i.check_id in RM.CONTENT_CHECKS for i in left))
@@ -1130,6 +1153,10 @@ def fix_slide(
                 # composed — a rung that made the slide worse rolled back, the next one tried (two rungs stopped at the
                 # second sample, and a slide whose texts no sample holds was never composed)
                 rep, outline, plan = loop(rep, outline, plan, ids, 3)
+        if seen is not None and seen.cured and (redesigned or rerendered):
+            # the slide laid out again (the designer, another sample) came without the in-place fixes: made again where
+            # they are still due (each fix measures first)
+            _fix_seen(work, n, set(seen.cured), manifest, scratch / "seen_again")
         if not what:
             what = _what_of(kept)
 
@@ -1161,7 +1188,36 @@ def fix_slide(
         report = RM.carry_report_ids(report0, run_audit(final, manifest, final_outline, ws, **audit_kw))
         # the model's remarks cannot be checked again without a model: the other slides keep theirs, and this slide
         # keeps its own unless the designer redesigned it
-        report.issues.extend(i.model_copy(deep=True) for i in report0.issues if i.kind == "model" and (i.slide != n or not redesigned))
+        cured_ids = {r.id for r in remarks if r.kind == "model" and seen is not None and SF.code_of(r) in seen.cured}
+        report.issues.extend(i.model_copy(deep=True) for i in report0.issues if i.kind == "model" and (i.slide != n or not (redesigned or i.id in cured_ids)))
+        # the model looks again at the slide as it is now: a remark it still sees stays (never called fixed on the
+        # rules' word alone); without a vision model the rules' measure stands
+        still_seen: set[str] = set()
+        asked_seen = [r for r in remarks if r.kind == "model"]
+        if use_models and asked_seen and (redesigned or cured_ids):
+            voice.plain(f"Дизайнер смотрит на слайд {n} ещё раз", 0.7)
+            pic = SF.slide_picture(final, n, scratch / "relook")
+            got = SF.relook(pic, n, providers=providers, skills=skills, headline=final_outline.slides[n - 1].headline or "") if pic else None
+            log.info("slide fix: slide %d looked at again — the model sees %s", n, got if got is not None else "nothing (no answer)")
+            if got is not None:
+                # by count: a problem the model still sees is first the remark of its kind the slide kept (one not
+                # asked, one not fixed), then an asked one — the heading moved off the circle is fixed while the card
+                # under the circle is still seen
+                seen_now = Counter(got)
+                held = Counter(SF.code_of(i) for i in report.issues if i.kind == "model" and i.slide == n)
+                have = {i.id for i in report.issues}
+                # a remark about the heading when the heading was what the rules changed is the last to stay
+                titled = seen is not None and seen.titled
+                for r in sorted(asked_seen, key=lambda r: titled and "заголов" in (r.message or "").lower()):
+                    c = SF.code_of(r)
+                    if r.id not in have and seen_now[c] > held[c]:
+                        report.issues.append(r.model_copy(deep=True))
+                        held[c] += 1
+                        still_seen.add(c or "")
+                if still_seen:
+                    voice.agent("check", f"Взгляд дизайнера: на слайде всё ещё {', '.join(SF.seen_words(c) for c in sorted(still_seen))}.", 0.72)
+                else:
+                    voice.agent("check", "Взгляд дизайнера: посмотрел на исправленный слайд — замечание ушло.", 0.72)
         report.applied_fixes = list(report0.applied_fixes) + [{"action": "slide_fix", "slide": n, "outline_id": oid, "result": how}] + records
         report.iterations = report0.iterations
         report.recompute()
@@ -1191,6 +1247,11 @@ def fix_slide(
             elif wishes:
                 # (a wish was given: «попробуйте добавить пожелание» would ask for what the person already did)
                 why = "Пожелание не удалось выполнить — слайд оставлен как был"
+            elif still_seen:
+                said = ", ".join(SF.seen_words(c) for c in sorted(still_seen))
+                why = f"Дизайнер всё ещё видит: {said} — попробуйте другой вариант презентации или пожелание"
+            elif seen is not None and seen.left:
+                why = seen.why_for(frame, _frame_name(osl0.kind.value)[0] if frame else None)
             else:
                 why = "Замечания остались — попробуйте добавить пожелание"
         voice.agent("check", RM.check_line(fixed, remarks, remaining, applied, worse, titles, other=other), 0.8)
