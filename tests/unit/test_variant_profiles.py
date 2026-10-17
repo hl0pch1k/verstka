@@ -359,14 +359,18 @@ def test_a_short_block_grows_to_fill_its_area(env, strategy, monkeypatch):
     monkeypatch.setattr(Composer, "FILL_LOW", 0.0)  # the fill pass off: the block as it was composed first
     plain = _compose(env, s, "cards", strategy, area)
 
-    def bottom(slide):
-        return max(sh.top + sh.height for sh in slide.shapes if sh.name.rsplit(" ", 1)[0] in ("Card", "Card text", "Column", "Index", "Badge"))
+    def block(slide):
+        return [sh for sh in slide.shapes if sh.name.rsplit(" ", 1)[0] in ("Card", "Card text", "Column", "Index", "Badge")]
+
+    def extent(slide):
+        # (the block's own height: a short block stands at the optical middle of its area, `Composer._balance`)
+        return max(sh.top + sh.height for sh in block(slide)) - min(sh.top for sh in block(slide))
 
     def size(slide):
         return max(max(_sizes(sh)) for sh in slide.shapes if sh.name.rsplit(" ", 1)[0] in ("Card text", "Column"))
 
-    p_fill = (bottom(plain) - area.y) / area.h
-    g_fill = (bottom(grown) - area.y) / area.h
+    p_fill = extent(plain) / area.h
+    g_fill = extent(grown) / area.h
     assert p_fill < 0.75, "the block leaves the area half empty when composed at the usual cap"
     assert g_fill > p_fill + 0.1 and size(grown) >= size(plain), (p_fill, g_fill)
     assert g_fill <= 1.0 + 1e-3, "never past the foot of its area"

@@ -1,7 +1,8 @@
 """A free place for the user's own photo («На этом слайде оставь свободное место под фотографию помещения. Фото я добавлю
 самостоятельно»): the brief's sentences are a request, never slide text; the slide keeps its figures and leaves the
 place free — the template's own photo place when a sample slide of the template has one, else a quiet frame beside the
-content; the place is a neutral that reads on its ground and the audit knows it; a slide the deck lost is an error.
+content; the place reads on its ground (a tint of the template's accent, else a neutral) and the audit knows it; a slide
+the deck lost is an error.
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ def test_the_slide_spec_carries_the_photo_and_the_request_is_no_content():
     ],
 )
 def test_the_photo_place_is_a_quiet_neutral_that_reads_on_its_ground(ground, card, surface, text):
+    """(a template without an accent that tints: test_any_template_design has the accent's tint)"""
     from verstka.rendering.synth import PHOTO_FILL_CONTRAST, _photo_fill
 
     kit = SimpleNamespace(card=SimpleNamespace(fill=card), manifest=None)
@@ -97,13 +99,14 @@ def _boxes(slide, W: int, H: int):
         if sh.name == PHOTO_PLACE_NAME:
             place = box
         elif sh.name.startswith("Photo caption"):
-            captions.append((sh.text_frame.text, box))  # the place's own quiet line («Место под изображение»)
+            # the place's own quiet line («Место под изображение») and its pictogram (shapes without words)
+            captions.append((sh.text_frame.text if sh.has_text_frame else "", box))
         elif sh.has_text_frame and sh.text_frame.text.strip():
             texts.append((sh.text_frame.text, box))
     if place is not None:
         # the caption stands inside its place, never outside it
         assert all(not _apart(place, b) and b[0] >= place[0] - 0.005 and b[2] <= place[2] + 0.005 for _, b in captions)
-        assert all(t.startswith("Место под изображение") for t, _ in captions)
+        assert all(t.startswith("Место под изображение") for t, _ in captions if t)
     return place, texts
 
 

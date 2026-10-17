@@ -1123,3 +1123,111 @@ def legend_over_axis_title(ctx: AuditContext) -> list[Issue]:
 def _is_full_slide(o) -> bool:
     f = o.bbox_frac
     return max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0)) >= 0.85
+
+
+BOTTOM_EMPTY = CheckSpec(
+    id="bottom_empty",
+    title="Низ слайда пуст: блок не заполняет свою область",
+    severity="warn",
+    category="layout",
+    description="Содержимое слайда (текст по его строкам, карточки, таблица, диаграмма) стоит в верхней части свободной "
+    "области под заголовком, а ниже пусто: под блоком остаётся больше 42% высоты области и пустота снизу больше пустоты "
+    "сверху на четверть области. Свободная область — от низа заголовка до низа безопасной области шаблона или до верха "
+    "рисунка шаблона, который тянется по ширине слайда у его низа (лента, полоса, орнамент). Не проверяются обложка, "
+    "разделы, цитаты, финальный слайд и слайд с одним крупным числом: там воздух задуман.",
+)
+BOTTOM_EMPTY_EXEMPT = ("title", "section", "thanks", "quote", "big_number", "image_text", "mockup")
+BOTTOM_EMPTY_SHARE = 0.42  # the empty band under the content, of the free area's height
+BOTTOM_EMPTY_LOPSIDED = 0.25  # …and that much more than the air over it (a centred block is balanced, not empty-bottomed)
+
+
+def _slide_kind(ctx: AuditContext, s) -> Optional[str]:
+    if ctx.outline is None or not s.outline_id:
+        return None
+    o = next((x for x in ctx.outline.slides if x.id == s.outline_id), None)
+    if o is None:
+        return None
+    return o.kind.value if hasattr(o.kind, "value") else str(o.kind)
+
+
+def _touches_edge(f, tol: float = 0.012) -> bool:
+    return f.x <= tol or f.y <= tol or f.x2 >= 1.0 - tol or f.y2 >= 1.0 - tol
+
+
+def content_span(ctx: AuditContext, s) -> Optional[tuple[int, int, int, int]]:
+    """(heading bottom, content top, content bottom, floor) in EMU of a content slide: the heading's foot, the ink of the
+    slide's content (text by its lines, cards around it, tables, charts, the slide's own pictures that do not bleed off
+    its edge), and the foot of the free area under it — the safe area's foot, or the top of the template's art that runs
+    across the slide's foot (a band, a ribbon, an ornament). None when the slide has no content under a heading."""
+    from verstka.audit.checks.density import _ink
+
+    W, H = ctx.ir.slide_w, ctx.ir.slide_h
+    safe = ctx.manifest.tokens.spacing.safe_area
+    title = title_element(s)
+    head_bottom = title.bbox.y2 if title is not None and title.bbox_frac.y < 0.4 else int(safe.y * H)
+    if title is not None and title.bbox_frac.y < 0.4:
+        # a heading's box may run far under its letters: its ink
+        head_bottom = min(head_bottom, _ink(title).y2)
+    els = [e for e in s.elements if e is not title and e.bbox.area > 0 and not is_chrome_like(e, ctx.ir, ctx.manifest)]
+    content = []
+    for e in els:
+        if e.type == "text":
+            if e.has_text and e.bbox.y >= head_bottom - int(0.01 * H):
+                content.append(_ink(e))
+        elif e.type in ("chart", "table") or e.formula:
+            content.append(e.bbox)
+        elif e.type == "picture" and not _touches_edge(e.bbox_frac) and e.bbox_frac.area < 0.6:
+            content.append(e.bbox)
+    if not content:
+        return None
+    texts = [b for b in content]
+    # a card or a plate the content's text stands in counts with its text (the frame is part of the block)
+    for e in els:
+        if e.type == "shape" and (e.fill_hex or e.line_hex) and e.bbox_frac.area < 0.6 and not _touches_edge(e.bbox_frac):
+            b = e.bbox
+            if any(b.x <= t.x + t.w // 2 <= b.x2 and b.y <= t.y + t.h // 2 <= b.y2 for t in texts):
+                content.append(b)
+    top = min(b.y for b in content)
+    bottom = max(b.y2 for b in content)
+    floor = int(safe.y2 * H)
+    # the marks at the slide's foot — a page number, a footer line, a logo: small things in its bottom fifth, as the
+    # renderer keeps the content clear of them (`synth._content_bottom_limit`)
+    for o in list(s.elements) + list(s.template_elements):
+        f = o.bbox_frac
+        if f.y >= 0.8 and f.y2 <= 1.01 and f.area < 0.2 and f.h <= 0.15 and o.bbox.y > bottom:
+            floor = min(floor, o.bbox.y - int(0.035 * H))
+    # the template's art across the slide's foot (its layers, or drawn on the slide itself) ends the free area
+    for o in list(s.template_elements) + [e for e in els if e.type in ("picture", "shape") and e.bbox not in content]:
+        f = o.bbox_frac
+        if f.w < 0.4 or f.area >= 0.85 or o.type not in ("picture", "shape", "group", "other"):
+            continue
+        if bottom < o.bbox.y < floor and o.bbox.y > head_bottom + int(0.2 * H):
+            floor = o.bbox.y
+    if floor - head_bottom < int(0.2 * H):
+        return None
+    return head_bottom, top, bottom, floor
+
+
+@check(BOTTOM_EMPTY)
+def bottom_empty(ctx: AuditContext) -> list[Issue]:
+    out: list[Issue] = []
+    n = len(ctx.ir.slides)
+    for s in ctx.ir.slides:
+        kind = _slide_kind(ctx, s)
+        if s.index == 1 or kind in BOTTOM_EMPTY_EXEMPT or (kind is None and s.index == n):
+            continue
+        try:
+            span = content_span(ctx, s)
+        except Exception:  # noqa: BLE001 - a measure never breaks the audit
+            span = None
+        if span is None:
+            continue
+        head, top, bottom, floor = span
+        region = floor - head
+        below, above = floor - bottom, max(top - head, 0)
+        if below > BOTTOM_EMPTY_SHARE * region and below - above > BOTTOM_EMPTY_LOPSIDED * region:
+            used = int(round(100 * (bottom - head) / region))
+            out.append(ctx.new_issue(BOTTOM_EMPTY, s.index, f"содержимое занимает верхние {used}% свободной области, ниже пусто",
+                                     details={"used": round((bottom - head) / region, 2), "empty_below": round(below / region, 2)},
+                                     suggestion="Крупнее текст или другой макет: блок должен занимать 55–80% области под заголовком."))
+    return out

@@ -601,3 +601,50 @@ def timeline_order(ctx: AuditContext) -> list[Issue]:
             out.append(ctx.new_issue(TIMELINE_ORDER, s.index, f"даты идут не по порядку: {shown} («{b[:30]}» после «{a[:30]}»)", details={"order": [t for t, _ in rows]}))
             break
     return out
+
+
+PHOTO_PLACE_EMPTY = CheckSpec(
+    id="photo_place_empty",
+    title="Серая заглушка картинки в готовой колоде",
+    severity="warn",
+    category="integrity",
+    description="На слайде осталось свободное место под картинку («Место для фото»). Место, которое автор просил оставить под "
+    "своё фото, — не ошибка, если оно оформлено как место для фото (оттенок цвета шаблона, пунктирная рамка, подпись): "
+    "это сведение. Серая заглушка без оформления — предупреждение, как и место под картинку, которую должна была "
+    "нарисовать модель, а её нет (генерация выключена, не успела, не ответила): такому слайду нужен макет без места "
+    "под картинку или уместный рисунок шаблона.",
+)
+
+
+def _grey(hex_: Optional[str]) -> bool:
+    if not hex_ or len(hex_) != 6:
+        return False
+    r, g, b = (int(hex_[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    mx, mn = max(r, g, b), min(r, g, b)
+    return mx == 0 or (mx - mn) / mx < 0.12
+
+
+@check(PHOTO_PLACE_EMPTY)
+def photo_place_empty(ctx: AuditContext) -> list[Issue]:
+    from verstka.images.places import is_own
+    from verstka.schemas.outline import PHOTO_PLACE_NAME
+
+    out: list[Issue] = []
+    for s in ctx.ir.slides:
+        places = [e for e in s.elements if e.name == PHOTO_PLACE_NAME and e.type in ("shape", "text")]
+        if not places:
+            continue
+        osl = _outline_slide(ctx, s)
+        c = osl.content if osl is not None else None
+        own = is_own((c.photo_slot or "") if c is not None else "", bool(getattr(c, "photo_own", False))) if c is not None else False
+        for e in places:
+            designed = bool(e.line_hex) and not _grey(e.fill_hex) or (bool(e.line_hex) and _grey(e.fill_hex) and any(x.name.startswith("Photo caption icon") for x in s.elements))
+            if own and designed:
+                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под фото автора оставлено свободным, как он просил", severity="info", bboxes=[e.bbox_frac], element_ids=[e.id]))
+            elif own:
+                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под фото автора — серая заглушка без оформления", bboxes=[e.bbox_frac], element_ids=[e.id],
+                                         suggestion="Оформить место как место для фото: оттенок цвета шаблона, рамка, подпись."))
+            else:
+                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под картинку осталось пустым: картинки нет", bboxes=[e.bbox_frac], element_ids=[e.id],
+                                         suggestion="Макет без места под картинку или рисунок шаблона, который подходит к слайду."))
+    return out
