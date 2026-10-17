@@ -902,11 +902,37 @@ def _branded_template_id(req: GenerateRequest, data: GenerationData, gdir: Path,
     if info and info.get("base_template_id") and store.manifest(str(info["base_template_id"])) is not None:
         base = str(info["base_template_id"])
     brand_dir = _brand_files(data, gdir)
-    progress("brand: применяю брендбук к шаблону", 0.01)
+    progress(_brand_line("применяю брендбук к шаблону"), 0.01)
     return branded_template(
         base, data.brand, data.brand_priority, workspace_root=store.root, brand_dir=brand_dir,
-        progress=lambda stage, frac: progress(f"brand: {stage}", 0.01 + 0.04 * float(frac or 0.0)),
+        progress=lambda stage, frac: progress(_brand_line(stage), 0.01 + 0.04 * float(frac or 0.0)),
     )
+
+
+# the branded copy's analysis steps in words: its lines never read as the build's own («brand: rendered slides» took
+# the build screen to «Раскладываю по макетам» before the data were studied — screencast trial 2)
+_BRAND_STEPS_RU = [
+    (re.compile(r"^loaded cached manifest"), "шаблон уже разобран"),
+    (re.compile(r"^made \d+ sample slides"), "образцы из макетов"),
+    (re.compile(r"^opened package"), "открываю шаблон"),
+    (re.compile(r"^rendered slides?"), "рисую миниатюры слайдов"),
+    (re.compile(r"^extracted shapes"), "читаю фигуры"),
+    (re.compile(r"^extracted \d+ assets"), "собираю картинки"),
+    (re.compile(r"^built tokens"), "цвета и шрифты"),
+    (re.compile(r"^classified slides"), "узнаю типы слайдов"),
+    (re.compile(r"^assembled \d+ patterns"), "собираю образцы"),
+    (re.compile(r"^derived components"), "правила шаблона"),
+    (re.compile(r"^done"), "готово"),
+]
+
+
+def _brand_line(stage: Any) -> str:
+    """A line of the branded copy's preparation: «Брендбук: …» in Russian — never a pipeline message («brand: rendered
+    slides» reads as the layout phase on the build screen, `web/src/lib/agent.ts` phaseOfMessage)."""
+    s = " ".join(str(stage or "").split())
+    if not re.search(r"[а-яё]", s, re.I):
+        s = next((ru for rx, ru in _BRAND_STEPS_RU if rx.search(s)), "готовлю шаблон с брендом")
+    return f"Брендбук: {s[:1].lower() + s[1:]}"
 
 
 def _request_options(req: GenerateRequest) -> dict:

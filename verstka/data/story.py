@@ -823,6 +823,10 @@ def build_data_story(
     tables = list(tables)
     voice = _Voice(progress)
     voice.say(f"Изучаю данные: {count_words(len(tables), 'таблица', 'таблицы', 'таблиц')}", 0.02, log_it=False)
+    # the build screen's «Изучаю данные» runs the whole data work through: the goals, the files, the charts (screencast
+    # trial 2: it flashed for a second after the branded copy)
+    if brief_text.strip() and plans is None:
+        voice.say("Понимаю цели из текста", 0.025, log_it=False)
     intent, intent_stats = None, []
     if goals is None and plans is None and use_llm and skills is not None and providers is not None and _has_llm(providers):
         # the brief's goals understood by the model (one call, every part checked by the code); it fails or says
@@ -835,6 +839,10 @@ def build_data_story(
         goals = intent.goals
         for line in say_goals(intent):
             voice.say(line, 0.03)
+    if plans is None:
+        n_files = len({t.file for t in tables})
+        voice.say(f"Читаю {count_words(n_files, 'файл', 'файла', 'файлов')}", 0.03, log_it=False)
+        voice.say("Выбираю графики", 0.035, log_it=False)
     plans = list(plans) if plans is not None else plan_datasets(tables, brief_text, profiles, goals=goals)
     ids = list(dataset_ids) if dataset_ids is not None else [p.profile.table_id for p in plans]
     order = story_order(plans, brief_text, goals=goals)
