@@ -1430,7 +1430,7 @@ class Composer:
         if dy <= int(0.02 * k.H):
             return
         els = [(el, element_bbox(el)) for el in list(self.cv.tree)[n0:]]
-        els = [(el, b) for el, b in els if b and b[2] > 0 and b[3] > 0]
+        els = [(el, b) for el, b in els if b and (b[2] > 0 or b[3] > 0)]  # (a rule between rows has no height: it moves too)
         # never down onto the template's art the area leaves room beside (a light bulb at the foot of the slide, at its
         # right): the block goes as far down as it stays as clear of it as it was
         try:
@@ -2213,6 +2213,7 @@ class Composer:
         # cards hug their content (the tallest one sets the row): a card is never a half-empty slab — nor shorter than
         # its text (when even the smallest step does not fit the row, the card grows rather than the text hanging out)
         ch = self._grow_to(area.h, rows, k.vgap, content_h)
+        mid = max(0, ch - content_h) // 2  # (a grown card holds its words in its middle, as a tile holds its figure)
         block_h = rows * ch + (rows - 1) * k.vgap
         y0 = self._place_v(area, block_h)
         last_row_n = n - cols * (rows - 1)
@@ -2228,7 +2229,7 @@ class Composer:
             else:
                 # no card style: an accent rule over each item keeps the columns apart
                 self.cv.rect(Bbox(x=box.x, y=box.y, w=box.w, h=max(_emu(2.25), 1)), colors.accent, name="Rule")
-            self._card_content(it, Bbox(x=box.x + pad, y=box.y + pad, w=inner_w, h=ch - 2 * pad), ts, bs, badge, colors, i, title_color, pads[i])
+            self._card_content(it, Bbox(x=box.x + pad, y=box.y + pad + mid, w=inner_w, h=ch - 2 * pad - 2 * mid), ts, bs, badge, colors, i, title_color, pads[i])
 
     def figure_para(self, value: str, size: float, color: str, muted: str) -> tuple[Para, float]:
         """A figure as one line: «31% → 12%» is two figures — the old one small and muted, the new one in the
@@ -2470,6 +2471,8 @@ class Composer:
         a row whose figures fall short is set again with the figures' units set smaller on their baseline (the number
         keeps the size), then as rows of figures with their labels beside; the setting that leads best is kept."""
         n0, w0 = len(self.cv.tree), len(self.warnings)
+        if self._variant_figures(area, numbers, extra):
+            return
         self._split_units = self._force_rows = False
         self._kpis_once(area, numbers, extra)
         short = self._figures_short(n0)
@@ -2506,6 +2509,44 @@ class Composer:
         self._kpis_once(best[2], numbers, extra)
         self._split_units = self._force_rows = False
         self.warnings.append(f"figures only {best[0]:.2f}× their labels: no setting of the area gives them 1.6×")
+
+    def _hero_of(self, numbers: list[NumberCallout]) -> int:
+        """The figure a row of figures is about: the one its heading names (its digits in the headline), else the first."""
+        head = re.sub(r"\s", "", (self.o.headline or "").replace("\u00a0", ""))
+        for i, x in enumerate(numbers):
+            digits = re.sub(r"[^\d,.]", "", x.value)
+            if digits and digits.strip(",.") and digits.strip(",.") in head:
+                return i
+        return 0
+
+    def _variant_figures(self, area: Bbox, numbers: list[NumberCallout], extra: list[str]) -> bool:
+        """The variants show a few figures each in their own way (qa5 №2: the same row of tiles in all three): the
+        visual one leads with the figure the slide is about, large, the others and the lines beside it
+        (`big_number`); the compact one sets them as dense rows — the figure, its label beside it, in one or two columns
+        (`_kpi_rows_plan`); the structured one keeps the row of tiles. Taken when the form fits its area and keeps every
+        figure 1.6 times its label; else the row of tiles. Never beside the user's photo, nor on a dense pass."""
+        n = len(numbers)
+        if getattr(self, "_dense", False) or self.o.content.photo_slot or not 2 <= n <= 6:
+            return False
+        n0, w0 = len(self.cv.tree), len(self.warnings)
+        if self.strategy == "visual" and n <= 4:
+            hero = self._hero_of(numbers)
+            others = [x for i, x in enumerate(numbers) if i != hero]
+            self.big_number(area, numbers[hero], extra=extra, others=others)
+            if not self._overflows(n0, area) and self._figures_short(n0) is None:
+                self.warnings.append("the figures led by the one the slide is about (the visual variant's form)")
+                return True
+        elif self.strategy == "compact" and (n >= 3 or extra):
+            self._force_rows = self._variant_rows = True
+            try:
+                self._kpis_once(area, numbers, extra)
+            finally:
+                self._force_rows = self._variant_rows = False
+            if not self._overflows(n0, area) and self._figures_short(n0) is None:
+                return True
+        self._undo(n0)
+        del self.warnings[w0:]
+        return False
 
     def _figures_short(self, n0: int) -> Optional[float]:
         """The least ratio of a figure's size to its label's among the figures drawn after the first `n0` elements, when
@@ -2647,6 +2688,13 @@ class Composer:
         # size (17 pt under 14 pt labels) — one under the other, each with its label beside it, they read as figures
         photo_rows = bool(self.o.content.photo_slot) and math.ceil(n / cols) >= 2 and fs < hero_min
         force_rows = bool(getattr(self, "_force_rows", False))
+        # tiles so narrow that a label's word breaks at every readable size (four tiles in the column a photo place and
+        # the template's art leave: «Трени / ровоч / ный» in 47 pt) are no tiles: the figures stand in rows, each label
+        # beside its figure on whole words
+        labels_ = [distinct_label(x.value, x.label, self.o.headline) for x in numbers]
+        broken = not any(self.fits_width(labels_, x, False, inner) for x in k.sizes if x >= k.text_floor - 0.05)
+        if broken and not force_rows:
+            force_rows = True
         if not one_line or photo_rows or force_rows:
             # a figure never wraps (G4, Focus s3: «около 615 тыс. тонн» broke over its tile's accent rule): no size of
             # the row sets every figure on one line in its tile — the figures stand one under the other, each with its
@@ -2663,7 +2711,9 @@ class Composer:
                     ey = y0 + plan["h"] + int(k.vgap * 1.4)
                     for gi, pg in enumerate(paras_g):
                         self.cv.text(Bbox(x=area.x + gi * (ew + k.gap), y=ey, w=ew, h=eh), pg, name="Note")
-                self.warnings.append("figures beside the photo place stand one under the other, labels beside" if (photo_rows and one_line) else ("figures stand in rows, labels beside, to lead them 1.6×" if force_rows else "figures too long for a row of tiles stand one under the other, labels beside"))
+                self.warnings.append("figures beside the photo place stand one under the other, labels beside" if (photo_rows and one_line) else (
+                    "figures stand one under the other, labels beside (the compact variant's form)" if getattr(self, "_variant_rows", False) else
+                    ("figures stand in rows, labels beside, to lead them 1.6×" if force_rows else "figures too long for a row of tiles stand one under the other, labels beside")))
                 return
         if not one_line:
             heads = [sp[0] if (stacked and sp) else x.value for x, sp in zip(numbers, splits)]
@@ -2726,12 +2776,15 @@ class Composer:
                     break
         # the tile holds its figure and label, never shorter than them (a label hanging below its card)
         tile_h = self._grow_to(avail.h, rows, k.vgap, content_h + 2 * pad_y) if use_cards else content_h + 2 * pad_y
+        # a tile grown past its figure and label holds them in its middle, one line for the row: a figure pressed to
+        # the top of a tall card over an empty half read as a card the text forgot (qa5 №1)
+        mid = max(0, tile_h - content_h - 2 * pad_y) // 2
         block_h = rows * tile_h + (rows - 1) * k.vgap + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
         y0 = self._place_v(area, int(block_h))
         for i, num in enumerate(numbers):
             r, cidx = divmod(i, cols)
             box = Bbox(x=avail.x + cidx * (cw + gap), y=y0 + r * (tile_h + k.vgap), w=cw, h=tile_h)
-            y = box.y + pad_y
+            y = box.y + pad_y + mid
             if use_cards:
                 self.cv.card(box, st)
             else:
@@ -2745,7 +2798,7 @@ class Composer:
             else:
                 self.cv.text(Bbox(x=box.x + pad - lsb, y=y - tg, w=inner + lsb, h=fig_h), [figs[i]], anchor="b", name="Figure")
             y += fig_h + unit_h - tg + int(k.vgap * 0.35)
-            self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(lab_h, box.y2 - pad_y - y)), [self.P(distinct_label(num.value, num.label, self.o.headline), label_size, colors.muted)], name="Label")
+            self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(lab_h, box.y2 - pad_y - mid - y)), [self.P(distinct_label(num.value, num.label, self.o.headline), label_size, colors.muted)], name="Label")
         if extra_block:
             paras_g, eh, ew = extra_block
             ey = y0 + rows * tile_h + (rows - 1) * k.vgap + int(k.vgap * 1.4)
@@ -2872,30 +2925,54 @@ class Composer:
         fig_h = _emu(fs * max(1.12, k.line))
         fig = self.figure_para(num.value, fs, colors.figure, colors.muted)[0]
         lsb, tg = self._figure_optics(fig, fig_h)
-        label = [self.P(distinct_label(num.value, num.label, self.o.headline), k.lead, colors.text)]
+        # (beside other figures the hero's label is a label as theirs: every figure of the slide leads every label)
+        label = [self.P(distinct_label(num.value, num.label, self.o.headline), k.body if others else k.lead, colors.text)]
         lab_h = self.h(label, int(left_w * 0.92))
         left_h = fig_h - tg + int(k.vgap * 0.4) + lab_h
         right_paras: list[Para] = []
         rw = area.w - left_w - k.gap * 2
+        # the other figures beside the hero: each a figure over its label (shapes of their own, as a row of tiles sets
+        # them — the figure 1.6 times its label), then the slide's lines
+        o_size = k.snap(max(k.h3 * 1.4, FIG_RATIO * k.body), FIG_RATIO * k.body, max(k.display, FIG_RATIO * k.body))
+        o_blocks = []
         for o in others:
-            right_paras.append(self.P(o.value, k.snap(max(k.h3 * 1.4, FIG_RATIO * k.body), FIG_RATIO * k.body, max(k.display, FIG_RATIO * k.body)), colors.accent, bold=k.bold, space_after=2))
-            right_paras.append(self.P(o.label, k.body, colors.muted, space_after=k.body * 1.1))
+            fp = self.P(o.value, o_size, colors.accent, bold=k.bold)
+            lp = self.P(distinct_label(o.value, o.label, self.o.headline), k.body, colors.muted)
+            o_blocks.append((fp, self.h([fp], rw), lp, self.h([lp], rw)))
         size = k.lead if sum(len(t) for t in extra) <= 260 else k.body
         for t in extra:
             right_paras.append(self.P(t, size, colors.text, space_after=size * 0.6, marker="•" if len(extra) > 1 else None, marker_color=colors.accent))
-        right_h = self.h(right_paras, rw) if right_paras else 0
+        o_gap = int(k.vgap * 0.9)
+        o_h = sum(fh + lh for _f, fh, _l, lh in o_blocks) + o_gap * max(len(o_blocks) - (0 if right_paras else 1), 0)
+        right_h = o_h + (self.h(right_paras, rw) if right_paras else 0)
         block_h = max(left_h, right_h)
         y0 = self._place_v(area, block_h)
         # the figure's box (its line's room over the letters included) starts inside the area, never over the heading
         # (VK Tech: «4,8 из 5» at 166 pt — its box ran up over «Студенты оценивают…»)
         y0 = max(y0, min(area.y + tg, area.y2 - block_h))
+        if self.strategy == "visual" and not has_side:
+            # the visual variant's lone figure stands on the area's axis, its label centred under it
+            fw = _emu(self.figure_para(num.value, fs, colors.figure, colors.muted)[1])
+            cx = area.x + (area.w - min(fw, left_w)) // 2
+            fig.align = "l"
+            for p_ in label:
+                p_.align = "ctr"
+            self.cv.text(Bbox(x=cx - lsb, y=y0 - tg, w=min(fw, left_w) + lsb + _emu(4), h=fig_h), [fig], anchor="b", name="Figure")
+            self.cv.text(Bbox(x=area.x + (area.w - int(left_w * 0.92)) // 2, y=y0 + fig_h - tg + int(k.vgap * 0.4), w=int(left_w * 0.92), h=lab_h), label, name="Label")
+            return
         self.cv.text(Bbox(x=area.x - lsb, y=y0 - tg, w=left_w + lsb, h=fig_h), [fig], anchor="b", name="Figure")
         self.cv.text(Bbox(x=area.x, y=y0 + fig_h - tg + int(k.vgap * 0.4), w=int(left_w * 0.92), h=lab_h), label, name="Label")
-        if right_paras:
+        if right_paras or o_blocks:
             x = area.x + left_w + k.gap * 2
             # a hairline divides the figure from its explanation
             self.cv.line(x - k.gap, y0, x - k.gap, y0 + max(left_h, right_h), colors.divider, 1.0)
-            self.cv.text(Bbox(x=x, y=y0 + (max(0, (left_h - right_h) // 2) if right_h < left_h else 0), w=rw, h=right_h), right_paras, name="Explanation")
+            ry = y0 + (max(0, (left_h - right_h) // 2) if right_h < left_h else 0)
+            for fp, fh, lp, lh in o_blocks:
+                self.cv.text(Bbox(x=x, y=ry, w=rw, h=fh), [fp], name="Figure")
+                self.cv.text(Bbox(x=x, y=ry + fh, w=rw, h=lh), [lp], name="Label")
+                ry += fh + lh + o_gap
+            if right_paras:
+                self.cv.text(Bbox(x=x, y=ry, w=rw, h=right_h - o_h), right_paras, name="Explanation")
 
     # ---- lists ---------------------------------------------------------------------------------------------------
     def bullets(self, area: Bbox, texts: list[str], as_list: bool = False) -> None:
@@ -2910,7 +2987,8 @@ class Composer:
             # a visual variant turns theses into cards: each thesis its own block
             self.cards(area, [SlideItem(title=t) for t in texts], badge="index")
             return
-        two_cols = n >= 5 and total > 360 or n >= 7
+        # (the compact variant sets a list of four and more in two columns: its dense form, not the others' long list)
+        two_cols = n >= 5 and total > 360 or n >= 7 or (self.strategy == "compact" and n >= 4 and area.w >= 0.6 * k.W)
         col_gap = k.gap * 2
         cols = 2 if two_cols else 1
         col_w = int((area.w - col_gap * (cols - 1)) / cols)
@@ -3638,7 +3716,9 @@ class Composer:
         plan = None
         if take:
             plan = self._takeaway_plan(take, area.w)
-            if self.o.data is not None and self.o.content.chart is not None and getattr(self, "_comp", None) in ("chart", "chart_text"):
+            if self.o.content.chart is not None and getattr(self, "_comp", None) in ("chart", "chart_text"):
+                # (a chart of the author's plan too: its conclusion strip with a large figure flattened the bars into a
+                # strip over half the slide — qa5 №7)
                 # a chart of a data file keeps the height its plot needs (live QA, H1; `chart_need`): its conclusion
                 # steps down a size or two, then says its first sentence only (the rest is said aloud), rather than
                 # flattening the plot into a strip
@@ -4613,9 +4693,15 @@ class Composer:
         if not fig_sizes:
             return None  # a figure too wide for the column at a callout size: no callouts
         rule_h = _emu(3)
+        labels_ = [lab for _v, lab, st in kpis if not st]
+        states_ = [lab for _v, lab, st in kpis if st]
         for rules in (True, False):
             for lab_size in dict.fromkeys((k.lead, k.body)):
+                if not self.fits_width(labels_, lab_size, False, box.w) or not self.fits_width(states_, k.lead, False, box.w):
+                    continue  # a callout's words broken inside a bound phrase («Вместимость 2 700 посещений»): no column
                 for line_size in dict.fromkeys((k.body, k.small_text)):
+                    if not self.fits_width(lines, line_size, False, box.w - _emu(line_size * 1.1)):
+                        continue
                     for fs in fig_sizes:
                         if figs and fs < FIG_RATIO * lab_size - 0.3:
                             continue  # a callout's figure leads its words: 1.6 times their size (qa4 L3)
