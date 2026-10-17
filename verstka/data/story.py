@@ -107,6 +107,7 @@ class DataStory:
     dataset_ids: list[str] = field(default_factory=list)
     # the text around a table in a text file («Опрос NPS во II квартале не проводился…»): what the files explain
     notes: list[dict] = field(default_factory=list)
+    brief_text: str = ""  # the brief as written (its hash goes into the run manifest)
     log: list[str] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)  # {"file", "sheet", "message"}: datasets with no slide
     dropped: list[str] = field(default_factory=list)  # slides the slide count left out (their headlines)
@@ -355,9 +356,14 @@ def tidy_text(text: Optional[str], names: Sequence[str] = ()) -> str:
     t = text or ""
     for rx, rep_ in _PERIOD_GLUE:
         t = rx.sub(rep_, t)
+    from verstka.data.words import lower_first, phrase
+
     for name in names:
-        if name and len(name) > 1 and name[0].isupper() and not name[1].isupper():
-            t = re.sub(r"(?<=[,:;—–] )" + re.escape(name) + r"\b", name[0].lower() + name[1:], t)
+        # (a common noun only — «Платное», «Бюджет»; a name, Latin or an acronym stays: «Scopus», «РИНЦ», «NPS»)
+        p = phrase(name) if name else None
+        low = lower_first(name) if p is not None and p.sure else name
+        if low != name:
+            t = re.sub(r"(?<=[,:;—–] )" + re.escape(name) + r"\b", low, t)
     return t
 
 
@@ -575,12 +581,76 @@ def _summary_lines(plans: Sequence[DatasetPlan], order: Sequence[int], heads: Op
         if p.slides <= 0 or not head or head == p.plain_headline:
             continue
         out.append((p.plain_headline or p.profile.file, head))
-        if len(out) == 3:
+        if len(out) == 4:
             break
     return out
 
 
-_COUNT_WORD = {1: "Главный вывод", 2: "Два главных вывода", 3: "Три главных вывода"}
+_COUNT_WORD = {1: "Главный вывод", 2: "Два главных вывода", 3: "Три главных вывода", 4: "Четыре главных вывода"}
+
+# the brief asks where it goes wrong («где узкие места», «какие риски»): the summary names a weak spot
+_BOTTLENECK_RE = re.compile(r"(?i)узк\w*\s+мест|проблем|риск|слаб\w*\s+мест|отста|теря|потер")
+
+
+_KEY_FIG_RE = re.compile(r"(?<![\w])([+\-−–]?\d[\d\u00a0\u202f ]*(?:[.,]\d+)?\s?(?:%|п\.\s?п\.|п\.|×|раз[а]?\b|(?:тыс\.|млн|млрд)\s?₽|₽))")
+_ANY_FIG_RE = re.compile(r"(?<![\w\d.,])([+\-−–]\d[\d,]*|\d{2,}[\d\u00a0\u202f ]*)(?![\d])")
+
+
+def key_figure(text: str) -> Optional[str]:
+    """The key figure of a conclusion, as a card sets it large: its first share, change or sum («+23%», «41%», «1 433 млн
+    ₽»), else its first signed figure («+1,9»); never a year. None without one."""
+    t = text or ""
+    for rx in (_KEY_FIG_RE, _ANY_FIG_RE):
+        for m in rx.finditer(t):
+            v = " ".join(m.group(1).split()).strip()
+            if re.fullmatch(r"(?:19|20)\d\d", v):
+                continue
+            return v
+    return None
+
+
+def _summary_pick(plans: Sequence[DatasetPlan], kept: Sequence[int], order: Sequence[int], brief_text: str, heads: dict) -> list[int]:
+    """The datasets whose conclusions make the summary, by weight, not by slide order (live QA, N-S1): the key figures'
+    slide (it says the period's result: «Выручка растёт быстрее числа клиентов»), the brief's goals in the brief's order,
+    and a weak spot when the brief asks for one (a distribution's tail, then a concentration); a conclusion whose
+    figures another card already says is left out (the revenue line's +23% beside the key figures' +23%). Three cards,
+    four when the key figures and a weak spot both stand beside two goals."""
+    def head(k: int) -> str:
+        return heads.get(k, plans[k].headline) or ""
+
+    ok = [k for k in sorted(kept, key=lambda k: order.index(k)) if plans[k].slides > 0 and head(k) and head(k) != plans[k].plain_headline]
+    kpi = [k for k in ok if plans[k].task.task == "kpi"]
+    goals = sorted([k for k in ok if plans[k].task.goal], key=lambda k: ((brief_text or "").lower().find((plans[k].task.goal or "").lower()) % 10_000, order.index(k)))
+    weak: list[int] = []
+    if _BOTTLENECK_RE.search(brief_text or ""):
+        weak = [k for k in ok if plans[k].task.task == "distribution"] + [k for k in ok if plans[k].task.task == "reference"]
+    rest = [k for k in ok if k not in kpi and k not in goals and k not in weak]
+    picked: list[int] = []
+    said: set = set()
+
+    def figures(k: int) -> set:
+        return {round(n, 1) for n in numbers_in(_without_years(head(k), ()) ) if not (1900 <= n <= 2100 and n == int(n))}
+
+    def take(k: int) -> None:
+        f = figures(k)
+        if k in picked or (f and f <= said):
+            return
+        picked.append(k)
+        said.update(f)
+
+    for k in kpi[:1]:
+        take(k)
+    for k in goals:
+        if len(picked) >= (2 if weak else 3) + (1 if kpi and weak else 0):
+            break
+        take(k)
+    for k in weak[:1]:
+        take(k)
+    for k in goals + rest:
+        if len(picked) >= 3:
+            break
+        take(k)
+    return picked[:4]
 
 
 @dataclass
@@ -618,9 +688,9 @@ def build_data_story(
     plans = list(plans) if plans is not None else plan_datasets(tables, brief_text, profiles)
     ids = list(dataset_ids) if dataset_ids is not None else [p.profile.table_id for p in plans]
     order = story_order(plans, brief_text)
-    files = [{"id": i, "file": t.file, "sheet": t.sheet} for i, t in zip(ids, tables)]
+    files = [{"id": i, "file": t.file, "sheet": t.sheet, "sha256": _table_sha(t)} for i, t in zip(ids, tables)]
     notes = [{"file": t.file, "text": " ".join(t.notes.split())[:1500]} for t in tables if (t.notes or "").strip()]
-    story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids, notes=notes)
+    story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids, notes=notes, brief_text=brief_text)
 
     # what the analyst decided, dataset by dataset
     for k in order:
@@ -735,12 +805,15 @@ def build_data_story(
             voice.say(f"Слайдов просили {limit}: без {count_words(len(story.dropped), 'слайда', 'слайдов', 'слайдов')} — {', '.join('«' + h + '»' for h in story.dropped[:4])}{' и др.' if len(story.dropped) > 4 else ''}", 0.08)
 
     kept = {e.plan_index for e in entries if e.plan_index is not None}
-    # the summary's conclusions: the goals' datasets first (what the text asked about), then the story's order
+    # the summary's conclusions: the key figures, the goals (what the text asked about), a weak spot when asked for
     heads = {e.plan_index: e.slide.headline for e in entries if e.plan_index is not None and e.slide.data is not None and e.slide.data.part[0] == 1}
-    lines = _summary_lines(plans, sorted(kept, key=lambda k: (0 if plans[k].task.goal else 1, order.index(k))), heads)
+    lines = _summary_lines(plans, _summary_pick(plans, sorted(kept), order, brief_text, heads), heads)
     if want_summary and lines:
-        items = [SlideItem(title=topic, text=concl) for topic, concl in lines]
-        summary = OutlineSlide(id="summary", kind=PatternKind.cards, headline=_COUNT_WORD.get(len(items), "Главные выводы"), content=SlideContent(items=items), rationale="Три вывода из фактов данных: по одному из главных файлов истории.")
+        # each card leads with its conclusion's key figure, set large (qa3 N-L3: three columns of 9 pt text)
+        items = [SlideItem(title=topic, text=concl, number=key_figure(concl)) for topic, concl in lines]
+        if not all(it.number for it in items):
+            items = [it.model_copy(update={"number": None}) for it in items]  # all cards with a figure, or none
+        summary = OutlineSlide(id="summary", kind=PatternKind.cards, headline=_COUNT_WORD.get(len(items), "Главные выводы"), content=SlideContent(items=items), rationale="Выводы из фактов данных: ключевые цифры, то, о чём спрашивает бриф, и слабое место, когда о нём спрашивают.")
         body_n = len([e for e in entries if e.role != "appendix"])
         entries.insert(body_n, _Entry(summary, "summary", keep=95))
 
@@ -922,6 +995,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             note("summary", "summary", "", x, src is not None, why)
             if src is not None and slot is not None:
                 slot.text = x  # one for one: the conclusion of the same slide, the others stay
+                if slot.number and key_figure(x):
+                    slot.number = key_figure(x)
                 taken.add(src.id)
                 used = True
         sh = clean(w.summary_title, MAX_HEADLINE)
@@ -951,7 +1026,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             good_steps.append(x)
     if len(good_steps) >= 2 and (limit is None or len(o.slides) < limit):
         at = next((k + 1 for k, s in enumerate(o.slides) if s.id == "summary"), len(o.slides))
-        o.slides.insert(at, OutlineSlide(id="next-steps", kind=PatternKind.bullets, headline="Что дальше", content=SlideContent(bullets=good_steps), rationale="Следующие шаги по выводам данных — сформулированы моделью, без новых чисел."))
+        # numbered steps at the template's sizes, not two bullets on an empty slide (qa3 N-L3)
+        o.slides.insert(at, OutlineSlide(id="next-steps", kind=PatternKind.process, headline="Что дальше", content=SlideContent(items=[SlideItem(title=x) for x in good_steps]), rationale="Следующие шаги по выводам данных — сформулированы моделью, без новых чисел."))
         used = True
 
     # the context: the brief's numbers only
@@ -1024,6 +1100,9 @@ _CLAIM_RE = re.compile(
     r"дает|даёт|дают|принос|держ|составля|достиг|получа|укладыва|закрыва|каждый|чем\b|связан|влия|зависит|"
     r"крупнейш|наибольш|наименьш|главн|основн|только|лишь|уже|ещё|еще|подним|опуска|тянут|завыша|занижа)"
 )
+# a past-tense verb («получил», «заняла», «принесли») says something about the numbers (never «-ал», «-ел»: «канал»,
+# «квартал», «отдел» are nouns)
+_PAST_VERB_RE = re.compile(r"(?i)\b[а-яё]{3,}(?:ил|ила|ило|или|ала|али|ела|ели|ула|ули|ял|яла|яли)\b")
 _PAIR_RE = re.compile(r"^\s*[^—:,;]{1,60}\s*[—:]\s*[+\-−–]?\d[^,;]*$")
 
 
@@ -1031,7 +1110,7 @@ def is_description(text: str) -> bool:
     """«Медиана стипендии — 3 590 ₽, среднее — 5 740 ₽»: the line only lists values against names — no verb, no
     comparison — a description of the numbers, not a conclusion about them."""
     t = " ".join((text or "").split())
-    if not t or _CLAIM_RE.search(t):
+    if not t or _CLAIM_RE.search(t) or _PAST_VERB_RE.search(t):
         return False
     parts = [p for p in re.split(r"[,;]\s+(?:а\s+|и\s+)?", t) if p.strip()]
     return bool(parts) and all(_PAIR_RE.match(p) for p in parts)
@@ -1190,6 +1269,32 @@ def _merge_usage(a: dict, b: dict) -> dict:
     return out
 
 
+def stamp_usage(result: Any, stats: list, scope: str) -> None:
+    """Model calls made before the pipeline (the brandbook's read, the template's analysis) added to each variant's
+    run manifest usage (qa3 E4: `by_skill` listed only the generation's own skills)."""
+    if not stats:
+        return
+    from verstka.pipeline.generate import call_totals
+
+    usage = {"scope": scope, **call_totals(list(stats))}
+    for v in getattr(result, "variants", []) or []:
+        path = Path(v.out_dir) / "run_manifest.json"
+        try:
+            rm = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        rm["usage"] = _merge_usage(usage, rm.get("usage") or {})
+        path.write_text(json.dumps(rm, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _table_sha(t: Table) -> str:
+    """The table as read (its columns and rows), hashed: which data a deck was built from (run_manifest.inputs.data)."""
+    import hashlib
+
+    body = json.dumps({"columns": list(t.columns), "rows": [[None if c is None else str(c) for c in r] for r in t.rows]}, ensure_ascii=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
 def stamp_steps(result: Any, seconds: dict) -> None:
     """The steps before `generate_variants` — the brandbook (read, branded copy, its analysis), the data story — in
     each variant's run manifest (`timings_s.brand`, `timings_s.data`) and in its total, so the manifest and the «N s
@@ -1230,6 +1335,14 @@ def stamp_variants(result: Any, story: DataStory, out_dir: Optional[Path] = None
         except (OSError, ValueError):
             continue
         rm["planner"] = planner
+        # what the deck was built from: the brief's text and every data file as read (qa3 N-U2: both were null)
+        inputs = rm.get("inputs") if isinstance(rm.get("inputs"), dict) else {}
+        if story.brief_text and not inputs.get("brief_sha256"):
+            import hashlib
+
+            inputs["brief_sha256"] = hashlib.sha256(story.brief_text.encode("utf-8")).hexdigest()[:16]
+        inputs["data"] = [{"file": f.get("file"), "sheet": f.get("sheet"), "sha256": f.get("sha256")} for f in story.files]
+        rm["inputs"] = inputs
         if usage:
             rm["usage"] = _merge_usage(usage, rm.get("usage") or {})
         extra = rm.get("extra") if isinstance(rm.get("extra"), dict) else None

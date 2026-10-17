@@ -61,18 +61,21 @@ def _by_file(o, file):
 # ── S1: the summary keeps every conclusion; «Что дальше» only with two steps or more ────────────────────────────────
 def test_a_refused_summary_line_keeps_its_own_conclusion(sales):
     det = _summary(build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales))
-    st = _story(sales, SALES_BRIEF, {"summary": ["Выручка выросла на 23% к сентябрю", "Москва даёт 45% выручки",
+    st = _story(sales, SALES_BRIEF, {"summary": ["Выручка растёт быстрее числа клиентов: +23% против +18%", "Москва даёт 45% выручки",
                                                  "Прямые продажи приносят почти половину выручки — 46%"]})
     got = {i.title: i.text for i in _summary(st.outline).content.items}
-    assert len(got) == len(det.content.items) == 3
-    assert got["Выручка по месяцам"] == "Выручка выросла на 23% к сентябрю"  # the model's line, for its own slide
+    assert len(got) == len(det.content.items) == 4
+    assert got["Каналы продаж"] == "Прямые продажи приносят почти половину выручки — 46%"  # the model's line, for its own slide
     assert got["Выручка по регионам"] == next(i.text for i in det.content.items if i.title == "Выручка по регионам")  # kept
     assert any(r["to"] == "Москва даёт 45% выручки" for r in st.rejected)
 
 
 def test_the_summary_headline_says_only_what_its_cards_back(sales):
+    # the key figures' card says it (live QA, N-S1: refused in every run while the cards were the first three slides)
     st = _story(sales, SALES_BRIEF, {"summary_title": "Рост выручки опережает рост клиентской базы"})
-    assert _summary(st.outline).headline == "Три главных вывода"
+    assert _summary(st.outline).headline == "Рост выручки опережает рост клиентской базы"
+    st = _story(sales, SALES_BRIEF, {"summary_title": "Пик выручки пришёлся на декабрь"})  # no card speaks of the months
+    assert _summary(st.outline).headline == "Четыре главных вывода"
     assert any(r["what"] == "summary_title" and "карточках" in r["why"] for r in st.rejected)
     ok = _story(sales, SALES_BRIEF, {"summary_title": "Рост держится на Москве и прямых продажах"})
     assert _summary(ok.outline).headline == "Рост держится на Москве и прямых продажах"
@@ -89,7 +92,7 @@ def test_a_step_about_what_the_files_explain_is_refused(sales):
     st = _story(sales, SALES_BRIEF, {"next_steps": ["Разобрать причины отсутствия данных по NPS во II квартале",
                                                     "Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]}, seen)
     steps = next(s for s in st.outline.slides if s.id == "next-steps")
-    assert steps.content.bullets == ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]
+    assert [i.title for i in steps.content.items] == ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]
     why = next(r["why"] for r in st.rejected if r["what"] == "next_step")
     assert "объясняют сами файлы" in why and "не проводился" in why
     # the model is told what the files say, and asked for the brief's own asks (узкие места)
@@ -135,6 +138,8 @@ def test_periods_and_figures_never_split_and_a_series_name_is_lower_case_mid_sen
     assert tidy_text("принято 1 290 чел.") == f"принято 1 290{nb}чел."
     assert tidy_text("Больше всех: Платное — 1 290 чел.", ["Платное", "Бюджет"]) == f"Больше всех: платное — 1 290{nb}чел."
     assert tidy_text("Платное — 53% приёма", ["Платное"]) == "Платное — 53% приёма"  # the start of a sentence stays
+    # a name, Latin or an acronym keeps its capital (qa3 N-A1: «…год: scopus — с 42 статей»)
+    assert tidy_text("С 2005 по 2025 год: Scopus — с 42 статей, РИНЦ — с 255", ["Scopus", "РИНЦ"]) == "С 2005 по 2025 год: Scopus — с 42 статей, РИНЦ — с 255"
 
 
 def test_a_data_deck_sets_its_periods_together(sales):
@@ -207,3 +212,42 @@ def test_the_brand_path_analyses_with_the_models_when_they_are_on(tmp_path, monk
     assert out == tmp_path / "tpl-brand.pptx"
     assert calls["use_llm"] is use_models and calls["use_vlm"] is use_models
     assert (calls["providers"] is providers) is use_models
+
+
+# ── qa3: summary figures, next steps, the chat on data slides, the run manifest's inputs and usage ─────────────────
+def test_the_summary_cards_lead_with_their_key_figure_and_the_steps_are_numbered(sales):
+    from verstka.data.story import key_figure
+
+    assert key_figure("Выручка растёт быстрее числа клиентов: +23% против +18%") == "+23%"
+    assert key_figure("80% обращений получают ответ за 2 часа") == "80%"
+    assert key_figure("Каждый час подготовки в неделю — около +1,9 к среднему баллу ЕГЭ") == "+1,9"
+    assert key_figure("NPS вырос в 2026 году") is None
+    o = build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales)
+    assert [i.number for i in _summary(o).content.items] == ["+23%", "41%", "46%", "80%"]
+    st = _story(sales, SALES_BRIEF, {"next_steps": ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]})
+    steps = next(s for s in st.outline.slides if s.id == "next-steps")
+    assert steps.kind.value == "process" and [i.title for i in steps.content.items] == ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]
+
+
+def test_an_edit_of_a_data_slide_takes_its_figures_from_the_files():
+    from verstka.api.app import _edit_ack
+
+    req = parse_edit("на слайде 3 оставь в подписи только сравнение с сентябрём 2025 года", 2, 10)
+    assert "только из файлов с данными" in _edit_ack(req, data_slide=True)
+    assert "из вашего текста" in _edit_ack(req)
+
+
+def test_the_run_manifest_names_the_brief_the_data_and_the_brandbooks_calls(sales, tmp_path):
+    from verstka.data.story import stamp_usage, stamp_variants
+
+    st = build_data_story(Brief(text=SALES_BRIEF, slide_count=10), sales)
+    vdir = tmp_path / "structured"
+    vdir.mkdir()
+    (vdir / "run_manifest.json").write_text(json.dumps({"inputs": {"brief_sha256": None, "outline_sha256": "x"}, "usage": {"scope": "generation", "calls": 2, "requests": 2, "tokens_in": 10, "tokens_out": 5, "failed": 0, "cost_rub": None, "by_skill": {"DesignReview": {"calls": 2, "requests": 2, "tokens_in": 10, "tokens_out": 5, "failed": 0, "seconds": 1.0, "cost_rub": None}}}}), encoding="utf-8")
+    res = SimpleNamespace(variants=[SimpleNamespace(out_dir=vdir, timings={})], seconds=1.0)
+    stamp_variants(res, st, tmp_path)
+    stamp_usage(res, [{"skill": "BrandbookRead", "ok": True, "requests": 1, "tokens_in": 100, "tokens_out": 20, "seconds": 3.0}], "brand")
+    rm = json.loads((vdir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert rm["inputs"]["brief_sha256"] and len(rm["inputs"]["data"]) == len(sales)
+    assert all(d["sha256"] and d["file"] for d in rm["inputs"]["data"])
+    assert rm["usage"]["calls"] == 3 and "BrandbookRead" in rm["usage"]["by_skill"] and "DesignReview" in rm["usage"]["by_skill"]

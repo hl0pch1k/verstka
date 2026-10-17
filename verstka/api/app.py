@@ -2672,7 +2672,7 @@ def _is_edit(message: str, intent: str) -> bool:
     return not (intent == "plan" and re.search(r"(покажи|какой|расскажи)\s+(мне\s+)?план", message, re.I))
 
 
-def _edit_ack(req) -> str:
+def _edit_ack(req, data_slide: bool = False) -> str:
     """What the agent says at once, before the job: which change it is making."""
     if req.kind == "undo":
         return "Возвращаю предыдущую версию варианта…"
@@ -2682,7 +2682,9 @@ def _edit_ack(req) -> str:
         return f"Меняю местами слайды {req.slides[0]} и {req.slides[1]}…"
     if req.kind == "move":
         return f"Переношу слайд {req.slides[0]} на место {req.target}…"
-    return f"Понял. Дизайнер переделывает слайд {req.slides[0]}: «{req.text[:120]}». Цифры возьму только из вашего текста…"
+    # (a slide made from a data file takes its figures from the file, not from the person's text)
+    where = "Цифры — только из файлов с данными…" if data_slide else "Цифры возьму только из вашего текста…"
+    return f"Понял. Дизайнер переделывает слайд {req.slides[0]}: «{req.text[:120]}». {where}"
 
 
 def _looks_like_brief(text: str) -> bool:
@@ -2815,7 +2817,10 @@ def chat(req: ChatRequest) -> dict:
                 if r is None:
                     reply = "Этот вариант уже меняется — дождитесь, пока закончу."
                 else:
-                    reply = _edit_ack(parsed)
+                    slides_ = (v.get("outline") or {}).get("slides") or []
+                    n_ = parsed.slides[0] if parsed.slides else None
+                    data_slide = bool(n_ and 1 <= n_ <= len(slides_) and (slides_[n_ - 1] or {}).get("data"))
+                    reply = _edit_ack(parsed, data_slide=data_slide)
                     actions.append({"type": "edit", "job_id": r["job_id"], "strategy": v["strategy"], "generation_id": gen_id, "slide": parsed.slides[0] if parsed.slides else None})
     elif intent == "template":
         m = store.manifest(template_id) if template_id else None

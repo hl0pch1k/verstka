@@ -158,10 +158,11 @@ def generate(
     template = Path(template)
     story = None
     steps: dict = {}  # the steps before the pipeline (brandbook, data story): their seconds go into the run manifest
+    brand_stats: list = []  # the model calls of the brandbook's read and the template's analysis
     with console.status("Generating…") as status:
         if brand:
             tb = time.monotonic()
-            template = _branded(template, brand, brand_priority, workspace, providers, skills, use_vlm=not no_vlm and use_models, use_llm=use_models, status=status)
+            template = _branded(template, brand, brand_priority, workspace, providers, skills, use_vlm=not no_vlm and use_models, use_llm=use_models, status=status, stats=brand_stats)
             steps["brand"] = time.monotonic() - tb
         if data and outline_obj is None:
             from verstka.data.story import build_data_story
@@ -202,6 +203,10 @@ def generate(
     if story is not None:
         steps["data"] = story.seconds
     stamp_steps(res, steps)  # (before the data story's own stamp: that one writes the deck's story beside the manifest)
+    if brand_stats:
+        from verstka.data.story import stamp_usage
+
+        stamp_usage(res, brand_stats, "brand")
     if story is not None:
         from verstka.data.story import stamp_variants
 
@@ -261,7 +266,7 @@ def _read_data(items: list[str]):
     return tables
 
 
-def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path], providers, skills, *, use_vlm: bool, status, use_llm: bool = False) -> Path:
+def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path], providers, skills, *, use_vlm: bool, status, use_llm: bool = False, stats: Optional[list] = None) -> Path:
     """The template's branded copy (verstka/brand/apply.py): the brandbook read (its logos kept in the workspace's
     brandbooks/<hash>/), applied to the analysed template; returns the copy's source.pptx."""
     import hashlib
@@ -272,6 +277,11 @@ def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path
     from verstka.ingest.workspace import TemplateWorkspace, default_workspace_root
 
     root = Path(workspace) if workspace else default_workspace_root()
+    if providers is not None and stats is not None:
+        # the brandbook's read and the template's analysis are model calls of the run too: counted in its usage
+        from verstka.pipeline.generate import _recording
+
+        providers, _ = _recording(providers, stats)
     status.update("[brand] reading the brandbook")
     key = hashlib.sha256(str(Path(brand).resolve() if Path(brand).exists() else brand).encode("utf-8")).hexdigest()[:16]
     assets = root / "brandbooks" / f"cli-{key}"
