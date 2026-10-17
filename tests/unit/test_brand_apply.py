@@ -2057,3 +2057,37 @@ def test_one_corner_keeps_a_grouped_logo_inside_the_slide(tmp_path):
     for name, (x, y, w, h) in _abs_pics(prs.slides[3].slide_layout):
         if name.startswith("Логотип"):
             assert x > W * 0.5 and x + w <= W * 0.99 and y + h <= H * 0.99, (x / W, (x + w) / W)
+
+
+def test_missing_logo_warning_in_cli_output_and_run_manifest(tmp_path, fonts_here, monkeypatch):
+    """Брендбук без файлов логотипа (tokens.json): `verstka generate --brand` печатает предупреждение, и оно же — в
+    `run_manifest.warnings` колоды на брендированной копии."""
+    import verstka.cli.main as cli
+    from verstka.brand.read import NO_LOGO_FILES
+
+    src = FIX / "templates" / "lo_vivid.pptx"
+    printed: list[str] = []
+    monkeypatch.setattr(cli.console, "print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
+
+    class _Status:
+        def update(self, *a, **k):
+            pass
+
+    ws = tmp_path / "ws"
+    copy = cli._branded(src, str(BRAND_EXAMPLE / "tokens.json"), "brand", ws, None, None, use_vlm=False, status=_Status())
+    assert any(NO_LOGO_FILES in line for line in printed), printed
+    _, deck = _deck_in(copy, tmp_path / "out", ws)
+    rm = json.loads((deck.parent / "run_manifest.json").read_text(encoding="utf-8"))
+    assert rm["warnings"].count(NO_LOGO_FILES) == 1
+
+
+def _deck_in(src: Path, out: Path, ws: Path):
+    """Колода без модели по демо-плану (structured) в рабочей папке `ws` (там же брендированная копия)."""
+    from verstka.pipeline.generate import generate_variants
+    from verstka.schemas.outline import DeckOutline
+
+    d = json.loads((ROOT / "tests" / "fixtures" / "outline_demo.json").read_text(encoding="utf-8"))
+    d.pop("_source", None)
+    got = generate_variants(src, outline=DeckOutline.model_validate(d), strategies=["structured"], out_dir=out, workspace_root=ws,
+                            use_llm=False, use_vlm=False, render_images=False, audit=False, autofix=False, exports=[], pictures=False, eyes=False)
+    return got.variants[0], next(out.rglob("deck.pptx"))

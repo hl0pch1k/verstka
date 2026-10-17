@@ -762,7 +762,7 @@ def generate_variants(
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
             usage=_usage_of(gen_stats),
-            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v), **({"eyes": eyes_seen[name]} if name in eyes_seen else {})},
+            extra={"warnings": v["warnings"] + _brand_warnings(manifest.template_id, workspace_root, v["warnings"]), "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v), **({"eyes": eyes_seen[name]} if name in eyes_seen else {})},
         )
         write_run_manifest(vdir / "run_manifest.json", rm)
         result.variants.append(vr)
@@ -873,6 +873,13 @@ def _pictures_extra(v: dict) -> dict:
     from verstka.images.fill import summary
 
     return {"pictures": summary(recs)}
+
+
+def _brand_warnings(template_id: str, workspace_root, have: list[str]) -> list[str]:
+    """A branded copy's warnings (no logo files in the brandbook…) for run_manifest, not already in the variant's."""
+    from verstka.brand.apply import branded_warnings
+
+    return [w for w in branded_warnings(template_id, workspace_root) if w not in have]
 
 
 def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], progress: Optional[ProgressFn], raw: list, workspace_root, *, force: bool = False):

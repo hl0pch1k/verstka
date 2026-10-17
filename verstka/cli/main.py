@@ -294,6 +294,10 @@ def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path
                          use_llm=use_llm, use_vlm=use_vlm, progress=lambda s, f: status.update(f"[brand] analyse: {s}"))
     tid = branded_template(m.template_id, spec, priority, workspace_root=root, brand_dir=assets, progress=lambda s, f: status.update(f"[brand] {s}"))
     console.print(f"Brandbook «{spec.name or Path(brand).name}» → branded copy {tid} (priority: {priority})")
+    from verstka.brand.apply import branded_warnings
+
+    for w in branded_warnings(tid, root):
+        console.print(f"[yellow]brand:[/yellow] {w}")
     return TemplateWorkspace.open(tid, root).source
 
 
