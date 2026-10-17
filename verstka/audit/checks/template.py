@@ -375,6 +375,28 @@ def _line_off_ground(s, e, bg_slide: str, color: str, need: float) -> Optional[t
     return worst
 
 
+def _letter_probes(ctx: AuditContext, s, e) -> list[str]:
+    """The colours under the letters of text `e` read on the deck itself (`layers.letter_grounds`); [] when the deck
+    or the shape cannot be read."""
+    try:
+        if "_deck" not in ctx.__dict__:
+            from pptx import Presentation
+
+            ctx.__dict__["_deck"] = Presentation(str(ctx.ir.source))
+        prs = ctx.__dict__["_deck"]
+        if prs is None:
+            return []
+        from verstka.rendering.deck import slide_shape_elements
+        from verstka.rendering.layers import letter_grounds
+
+        slide = prs.slides[s.index - 1]
+        el = slide_shape_elements(slide).get(str(e.id))
+        return letter_grounds(slide, el, ctx.manifest.tokens.typography.primary_family) if el is not None else []
+    except Exception:  # noqa: BLE001 - the box's estimate then
+        ctx.__dict__.setdefault("_deck", None)
+        return []
+
+
 @check(CONTRAST_LOW)
 def contrast_low(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -400,6 +422,19 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
                 cr = contrast_ratio(color, bg)
             except ValueError:
                 continue
+            if estimated and not e.fill_hex and e.ph_type not in ("title", "ctrTitle"):
+                # a picture or a gradient under the text: read where its letters stand, as the renderer reads it when it
+                # chooses the colour (`layers.letter_grounds`) — the box's mean read a pink glow as the dark purple
+                # around it. The second-worst probe: one probe on a speck is no line. (A heading keeps the template's
+                # own colour on the template's own picture: its box's estimate, as before.)
+                probes = _letter_probes(ctx, s, e)
+                if probes:
+                    try:
+                        crs = sorted((contrast_ratio(color, g), g) for g in probes)
+                    except ValueError:
+                        crs = []
+                    if crs:
+                        cr, bg = crs[1] if len(crs) >= 3 else crs[0]
             size = e.dominant_size or 14.0
             bold = any(r.bold for p in e.paragraphs for r in p.runs if r.text.strip())
             need = 3.0 if size >= 18 or (bold and size >= 14) else 4.5  # WCAG: large text is 18 pt, or 14 pt bold
