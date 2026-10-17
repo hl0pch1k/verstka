@@ -1567,8 +1567,8 @@ def _no_logo_hooks(monkeypatch) -> None:
     import verstka.rendering.synth as sy
 
     for mod in (cl, sy):
-        monkeypatch.setattr(mod, "hold_brand_logos", lambda slide: 0)
-        monkeypatch.setattr(mod, "put_back_brand_logos", lambda slide, warns: (slide, warns))
+        monkeypatch.setattr(mod, "hold_brand_logos", lambda slide, *a, **k: 0)
+        monkeypatch.setattr(mod, "put_back_brand_logos", lambda slide, warns, *a, **k: (slide, warns))
 
 
 def test_generated_deck_keeps_brand_logo_on_cloned_slides(tmp_path, fonts_here, monkeypatch):
@@ -1842,3 +1842,163 @@ def test_status_red_is_kept_unless_the_brand_has_a_danger_colour(tmp_path, fonts
     assert pal.status_red("C9211E") and not pal.status_red("FF0053") and not pal.status_red("FF3985")
     lct = build_custom(tmp_path, "lctred", bg="F3F4F5", text="1C1D22", cards=[("FF0053", "FFFFFF")], theme={"accent1": "FF0053", "accent2": "FC3777"})
     assert pal.hue_dist(pal.hue(ap.brand_plan(lct, _analyze(lct, tmp_path / "ws3"), _brand()).colors.map("FF0053")), pal.hue("0077FF")) <= 8
+
+
+# ============================================================================================== круг 6: живой прогон 2
+
+
+def test_cover_without_any_logo_gets_the_brand_logo(tmp_path, fonts_here):
+    """У шаблона нет своего логотипа (Forestbird): логотип бренда получают и содержательные слайды, и обложка — на
+    том же месте, если оно свободно и там."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    cover = prs.slides.add_slide(prs.slide_layouts[0])
+    cover.shapes.title.text = "Итоги года"
+    cover.placeholders[1].text = "Для правления"
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(s, f"Итоги квартала {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "1F2937")
+        _card(s, int(W * 0.05), "DCE8FD")
+    src = tmp_path / "src" / "nologo.pptx"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    assert any(getattr(p.kind, "value", p.kind) == "title" for p in m.patterns)
+    out = tmp_path / "nologo-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logo_covers >= 1
+    got = Presentation(str(out))
+    first = got.slides[0]
+    logos = [sh for owner in (first, first.slide_layout) for sh in owner.shapes if sh.name.startswith("Логотип")]
+    assert len(logos) == 1 and _ir_collisions(out) == []
+
+
+def test_missing_logo_files_reach_the_brandbook_layer(tmp_path, monkeypatch):
+    """tokens.json без файлов логотипа: предупреждение — в самом брендбуке (`BrandSpec.warnings`) и в расхождениях, и
+    `GET /api/brandbooks/{id}` отдаёт оба — слой «Брендбук» их показывает."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import verstka.api.app as A
+    from verstka.api.store import Store
+    from verstka.brand.read import NO_LOGO_FILES, read_brandbook
+
+    assert NO_LOGO_FILES in read_brandbook(BRAND_EXAMPLE / "tokens.json").warnings
+    store = Store(tmp_path)
+    monkeypatch.setattr(A, "store", store)
+    monkeypatch.setattr(ap, "font_available", lambda f: f == "Play")
+    tid = "cbbe3aa6a21d23ce"
+    d = tmp_path / "templates" / tid
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_bytes(gzip.open(FIX / f"manifest_{tid}.json.gz").read())
+    (d / "source.pptx").write_bytes((FIX / "vktech_short.pptx").read_bytes())
+    c = TestClient(A.app)
+    r = c.post("/api/brandbooks", files={"file": ("Брендбук.json", (BRAND_EXAMPLE / "tokens.json").read_bytes(), "application/json")}, data={"template_id": tid})
+    assert r.status_code == 200, r.text
+    bid, jid = r.json()["brandbook_id"], r.json()["job_id"]
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        job = A.runner.get(jid)
+        if job is not None and job.events and job.events[-1].get("status") in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    assert job.status == "done", job.error
+    got = c.get(f"/api/brandbooks/{bid}?template_id={tid}").json()
+    assert NO_LOGO_FILES in got["brand"]["warnings"]
+    row = next(x for x in got["conflicts"] if x["what"] == "Логотип")
+    assert row["brand"] == "в брендбуке нет файлов логотипа" and row["result"] == "логотип шаблона оставлен"
+
+
+def _gradient_with_marks(path: Path, marks: int, busy: bool = False, dark_marks: bool = False) -> Path:
+    """Фоновая картинка 1600 × 900: ровный градиент (или пёстрое фото) и ряд знаков в верхней полосе справа."""
+    import numpy as np
+
+    h, w = 900, 1600
+    y = np.linspace(0, 1, h)[:, None]
+    x = np.linspace(0, 1, w)[None, :]
+    base = np.stack([60 + 40 * x + 10 * y, 20 + 10 * y + 0 * x, 100 + 30 * x + 0 * y], axis=-1) * np.ones((h, w, 1))
+    if busy:
+        base = np.random.default_rng(3).uniform(0, 255, (h, w, 3))
+    im = Image.fromarray(base.astype("uint8"), "RGB")
+    d = ImageDraw.Draw(im)
+    ink = (20, 20, 20) if dark_marks else (255, 255, 255)
+    for k in range(marks):
+        x0 = 900 + k * 170
+        d.rectangle([x0, 40, x0 + 40, 90], outline=ink, width=4)
+        d.rectangle([x0 + 55, 50, x0 + 130, 62], fill=ink)
+        d.rectangle([x0 + 55, 72, x0 + 115, 82], fill=ink)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    im.save(path)
+    return path
+
+
+def test_partner_marks_baked_into_a_background_are_found_and_erased(tmp_path):
+    """Ряд знаков партнёров, впечатанный в ровный фон (как у ЛЦТ), находится и закрашивается тем же фоном; одиночный
+    знак, пёстрое фото и середина картинки — не трогаются."""
+    import io as _io
+
+    import numpy as np
+
+    from verstka.brand import baked
+
+    four = _gradient_with_marks(tmp_path / "bg4.png", 4).read_bytes()
+    boxes = baked.find_marks(four)
+    assert len(boxes) == 4 and all(b[1] < 0.15 and b[0] > 0.5 for b in boxes)
+    clean = Image.open(_io.BytesIO(baked.erase(four, boxes))).convert("L")
+    ref = Image.open(_io.BytesIO(_gradient_with_marks(tmp_path / "bg0.png", 0).read_bytes())).convert("L")
+    diff = np.abs(np.asarray(clean, dtype=float) - np.asarray(ref, dtype=float))
+    assert diff.max() < 8  # знаков нет, фон — тот же градиент
+    assert baked.find_marks(_gradient_with_marks(tmp_path / "dark.png", 3, dark_marks=True).read_bytes())  # тёмные на светлом — тоже
+    assert baked.find_marks(_gradient_with_marks(tmp_path / "one.png", 1).read_bytes()) == []
+    assert baked.find_marks(_gradient_with_marks(tmp_path / "busy.png", 4, busy=True).read_bytes()) == []
+
+
+def test_partner_marks_go_only_when_the_brand_has_its_own_logo(tmp_path, fonts_here):
+    """Брендбук важнее и у него свои логотипы — знаки партнёров с фоновых картинок копии убраны, и это сказано; при
+    приоритете шаблона и у брендбука без файлов логотипа — остаются."""
+    bg = _gradient_with_marks(tmp_path / "src" / "bg.png", 4)
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _, rid = s.part.get_or_add_image_part(str(bg))
+        _set_slide_bg(s, f'<a:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>')
+        _text(s, f"Итоги {i + 1}", int(W * 0.05), int(H * 0.2), int(W * 0.6), int(H * 0.14), "Georgia", 36, "FFFFFF")
+    src = tmp_path / "src" / "partners.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "p-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.partner_marks == 4 and any("Знаки партнёров шаблона на фоновых картинках убраны: 4 знака" in w for w in res.warnings)
+    from verstka.brand import baked
+
+    pkg = ap.Package(out)
+    assert all(baked.find_marks(pkg.read(media)) == [] for media in baked.background_media(pkg))
+    rows = {c.what: c for c in brand_conflicts(m, _brand(), source=src, brand_dir=_brand_dir(tmp_path))}
+    assert rows["Логотипы партнёров"].result == "убраны с фоновых картинок"
+    for brand, prio in ((_brand(), "template"), (_brand(logos=[]), "brand")):
+        r2 = apply_brand(src, tmp_path / f"keep-{prio}.pptx", brand, manifest=m, priority=prio, brand_dir=_brand_dir(tmp_path))
+        assert r2.partner_marks == 0
+
+
+def test_title_caps_follow_only_a_brandbook_rule(synthetic, fonts_here, tmp_path):
+    """Капс заголовков — оформление шаблона (ЛЦТ): остаётся, пока брендбук о нём молчит; правило «заголовки — без
+    капса» его снимает."""
+    from verstka.schemas.brand import BrandRule
+
+    src, m, bdir = synthetic
+    with zipfile.ZipFile(src) as z:
+        master = z.read("ppt/slideMasters/slideMaster1.xml").decode("utf-8")
+    master = re.sub(r"(<p:titleStyle><a:lvl1pPr[^>]*>(?:(?!</a:lvl1pPr>).)*?<a:defRPr)", lambda mm: mm.group(1) + ' cap="all"', master, count=1, flags=re.S)
+    assert 'cap="all"' in master
+    _zip_put(src, {"ppt/slideMasters/slideMaster1.xml": master.encode("utf-8")})
+    assert ap.caps_rule(_vk_cloud()) is None
+    out = tmp_path / "caps.pptx"
+    apply_brand(src, out, _brand(), manifest=m, brand_dir=bdir)
+    assert 'cap="all"' in _parts(out, r"ppt/slideMasters/slideMaster1\.xml$")["ppt/slideMasters/slideMaster1.xml"]
+    nocaps = _brand(rules=[BrandRule(text="Заголовки — без капса, как в предложении", kind="type")])
+    assert ap.caps_rule(nocaps) is False
+    out2 = tmp_path / "nocaps.pptx"
+    res = apply_brand(src, out2, nocaps, manifest=m, brand_dir=bdir)
+    assert res.caps_changed >= 1 and 'cap="all"' not in _parts(out2, r"ppt/slideMasters/slideMaster1\.xml$")["ppt/slideMasters/slideMaster1.xml"]

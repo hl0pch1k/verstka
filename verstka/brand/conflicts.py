@@ -127,6 +127,12 @@ def brand_conflicts(
         if outcome is not None and outcome.note:
             result = f"{brd}: {outcome.note}"
         add("Логотип", tpl, brd, result, "logo")
-    elif own and not brand.logos:
-        add("Логотип", tpl, "в брендбуке нет файлов логотипа", f"{tpl} оставлен", "logo")
+    if outcome is not None and outcome.partner_marks:
+        from verstka.data.words import plural
+
+        n = outcome.partner_marks
+        add("Логотипы партнёров", f"{n} {plural(n, 'знак', 'знака', 'знаков')} на фоне шаблона", f"только {brd}", "убраны с фоновых картинок", "logo")
+    if not brand.logos:
+        # в брендбуке нет файлов логотипа — видно и в слое «Брендбук», а не только в отчёте копии
+        add("Логотип", tpl if own else "у шаблона нет", "в брендбуке нет файлов логотипа", f"{tpl} оставлен" if own else "без логотипа", "logo")
     return out

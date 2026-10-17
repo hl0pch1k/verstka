@@ -14,7 +14,7 @@ import verstka.brand.folder as folder_mod
 from verstka.brand.common import BrandReadError
 from verstka.brand.figma import figma_key, is_figma_url, normalize_url, read_figma_url
 from verstka.brand.folder import _studio_data, logo_variant_of, rasterize_svg
-from verstka.brand.read import read_brandbook
+from verstka.brand.read import NO_LOGO_FILES, read_brandbook
 import verstka.brand.svg_raster as svg_raster_mod
 from verstka.brand.svg_raster import render_svg
 
@@ -167,7 +167,7 @@ def test_multi_file_tokens_studio_folder_is_merged_before_parsing(tmp_path):
     spec = read_brandbook(root)
     assert _roles(spec) == {"#0055FF": "primary", "#111111": "text", "#FFFFFF": "background", "#FF6A00": "accent"}  # ссылки между файлами раскрыты
     assert spec.fonts == [] or spec.fonts[0].family == "Inter"
-    assert spec.warnings == []  # без «нет ни цветов» от $-файлов и набора со ссылками
+    assert spec.warnings == [NO_LOGO_FILES]  # без «нет ни цветов» от $-файлов и набора со ссылками; файлов логотипа нет
     # отдельно взятый набор со ссылками на другой файл читать нечем — но и молча терять его нельзя
     (root / "broken.json").write_text("{", encoding="utf-8")
     spec = read_brandbook(root)
@@ -181,7 +181,7 @@ def test_dollar_files_are_never_read_on_their_own(tmp_path):
     (root / "tokens.json").write_text('{"color": {"primary": "#0077FF", "text": "#0B1220"}}', encoding="utf-8")
     spec = read_brandbook(root)
     assert _roles(spec) == {"#0077FF": "primary", "#0B1220": "text"} and spec.warnings == [
-        "Шрифтов в брендбуке нет — шрифты останутся из шаблона."]
+        "Шрифтов в брендбуке нет — шрифты останутся из шаблона.", NO_LOGO_FILES]
 
 
 # ---- Figma: ссылки ----------------------------------------------------------------------------------------------------------------------------------------

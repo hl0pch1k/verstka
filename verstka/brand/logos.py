@@ -702,7 +702,9 @@ def has_template_logo(src: Path | str, manifest: Optional[TemplateManifest] = No
         return _HAS_LOGO[mkey]
     try:
         pkg = Package(src)
-        got = any(not lk.duplicate for lk in find_template_logos(pkg, manifest, package_theme(pkg).slots))
+        theme = package_theme(pkg)
+        got = any(not lk.duplicate for lk in find_template_logos(pkg, manifest, theme.slots)) or bool(
+            find_text_logos(pkg, manifest, (theme.major or "", theme.minor or ""), src))
     except Exception as e:  # noqa: BLE001
         log.warning("template logos not found: %s", e)
         got = bool(manifest and any(a.kind == "logo" for a in manifest.assets))
@@ -1468,6 +1470,11 @@ def tree_lines(tree: etree._Element, sw: float) -> list[Box]:
 _LINE_GEOM_RE = re.compile(r"^(?:line|straightConnector\d*|bentConnector\d*|curvedConnector\d*)$")
 
 
+def _bookend_samples(manifest: TemplateManifest) -> list[int]:
+    """Номера образцов-обложек, разделов и финальных слайдов."""
+    return sorted({p.source_slide for p in manifest.patterns if not p.reference and getattr(p.kind, "value", p.kind) in ("title", "section", "thanks")})
+
+
 def _content_samples(manifest: TemplateManifest) -> list[int]:
     """Номера содержательных образцов разбора; у шаблона без них — все образцы."""
     every = [p.source_slide for p in manifest.patterns if not p.reference]
@@ -1521,6 +1528,8 @@ def add_logos(
     split_users: Optional[dict] = None,
     fixed: Optional[tuple] = None,
     taken: frozenset = frozenset(),
+    bookends: bool = False,
+    prefer: Optional[tuple] = None,
 ) -> AddReport:
     """Логотипа в шаблоне нет, а брендбук велит место — логотип бренда на содержательные слайды. Одно место на весь
     шаблон: угол брендбука, если он свободен хотя бы у половины образцов, иначе — запасной угол, свободный у
@@ -1537,7 +1546,8 @@ def add_logos(
     получает логотип в углу брендбука, а эти слайды перечислены в `split` (их переводят на копию макета с логотипом в
     углу шаблона); `split_users` — уже переведённые (их на макете нет), `fixed` — (рамка, угол, вид) из пробного
     решения; `taken` — номера слайдов, где логотип бренда уже виден (логотип шаблона на месте): макет, на котором они
-    стоят, второго логотипа не получает."""
+    стоят, второго логотипа не получает. `bookends` — то же для обложек, разделов и финальных слайдов (и их пустых
+    макетов); `prefer` — (рамка, угол, вид), которую пробовать первой: то же место, что у содержательных слайдов."""
     from verstka.brand.palette import source_ir
     from verstka.data.words import plural
 
@@ -1552,7 +1562,8 @@ def add_logos(
     margin = (brand.margins_px / 1920.0 * sw) if brand.margins_px and 0 < brand.margins_px <= 200 else 0.04 * sw
     order = pkg.slide_order()
     slides = {s.index: s for s in ir.slides}
-    every = [i for i in _content_samples(manifest) if i in slides and 0 < i <= len(order)]
+    pool = _bookend_samples(manifest) if bookends else _content_samples(manifest)
+    every = [i for i in pool if i in slides and 0 < i <= len(order)]
     samples = [i for i in every if i not in exclude]
     rep.samples, rep.shown = len(samples), len(every) - len(samples)
     if not samples:
@@ -1596,7 +1607,11 @@ def add_logos(
     unused: dict[str, tuple[list[Box], list[tuple[Box, etree._Element]]]] = {}
     for lp in sorted(n for n in pkg.names() if re.match(r"^ppt/slideLayouts/slideLayout\d+\.xml$", n)):
         root = pkg.xml(lp)
-        if lp in by_layout or lp in users or lp in title_layouts or lp in skip_layouts or root is None or (root.get("type") or "") in ("title", "secHead"):
+        if lp in by_layout or lp in users or lp in skip_layouts or root is None:
+            continue
+        csld = root.find(f"{{{P}}}cSld")
+        cover_like = lp in title_layouts or (root.get("type") or "") in ("title", "secHead") or bool(_COVER_NAME_RE.search((csld.get("name") if csld is not None else "") or ""))
+        if cover_like != bookends:
             continue
         hard, soft = _layout_obstacles(pkg, lp)
         master = pkg.related(lp, "slideMaster")
@@ -1671,7 +1686,8 @@ def add_logos(
     # содержательных слайдов
     total = len(samples) + 0.25 * len(unused)
     best, best_cov, corner, kind = None, (-1, -1), None, None
-    for cn, kd, c in ([(fixed[1], fixed[2], fixed[0])] if fixed else _candidates(brand.logo_place, w, h, margin, sw, sh)):
+    cands = [(fixed[1], fixed[2], fixed[0])] if fixed else ([(prefer[1], prefer[2], prefer[0])] if prefer else []) + _candidates(brand.logo_place, w, h, margin, sw, sh)
+    for cn, kd, c in cands:
         if corners and cn not in corners:
             continue
         cov = coverage(c)
@@ -1797,6 +1813,8 @@ class LogoOutcome:
     samples: int = 0  # содержательных образцов
     covered: int = 0  # из них с логотипом бренда (заменённым, перенесённым или добавленным)
     note: Optional[str] = None  # место логотипа словами (для расхождений и предупреждений)
+    covers: AddReport = field(default_factory=AddReport)  # логотип бренда на обложках, где логотипа не было
+    partner_marks: int = 0  # знаков партнёров на фоновых картинках шаблона (их копия убирает)
 
 
 _COVER_NAME_RE = re.compile(r"титул|обложк|заставк|cover|title\s*slide|спасибо|thank|финал|final|раздел|section|divider|qr", re.I)
@@ -2054,6 +2072,19 @@ def brand_logos(
             warnings.append(f"Логотип: {out.note}.")
     if dry_run:
         return out
+    # обложки, разделы и финальные слайды без логотипа (у шаблона его не было вовсе, как у Forestbird) — логотип бренда
+    # и туда: сначала то же место, что у содержательных слайдов, иначе свободный угол обложки
+    shown_now = stay_parts | kept_parts | rep.placed
+    books = [i for i in _bookend_samples(manifest) if 0 < i <= len(order)]
+    if brand.logo_place and books:
+        rep_c = add_logos(
+            pkg, manifest, brand, images, [], src, bookends=True, quiet=True,
+            exclude=frozenset(i for i in books if _shows(pkg, order[i - 1], shown_now)),
+            skip_layouts=frozenset(lp for lp in layouts if _shows(pkg, lp, shown_now)) | frozenset(twins.values()),
+            taken=frozenset(i for i in range(1, len(order) + 1) if _shows(pkg, order[i - 1], shown_now)),
+            ignore=ignore, prefer=(rep.box, rep.corner, rep.kind) if rep.box is not None else None,
+        )
+        out.covers = rep_c
     media = Media(pkg)
     missing = False
     for lp, twin in twins.items():
@@ -2107,6 +2138,9 @@ def logo_outcome(src: Path | str, manifest: TemplateManifest, brand: BrandSpec, 
         pkg = Package(src)
         theme = package_theme(pkg)
         got = brand_logos(pkg, manifest, brand, images, [], src, theme.slots, (theme.major or "", theme.minor or ""), dry_run=True)
+        from verstka.brand.baked import partner_marks
+
+        got.partner_marks = sum(len(v) for v in partner_marks(pkg).values())
     except Exception as e:  # noqa: BLE001
         log.warning("logo outcome unavailable: %s", e)
         return None

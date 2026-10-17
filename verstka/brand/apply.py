@@ -38,6 +38,7 @@ from typing import Callable, Optional
 
 from lxml import etree
 
+from verstka.brand.baked import erase_partner_marks
 from verstka.brand.logos import brand_logos, find_template_logos, find_text_logos, load_logo, logo_path
 from verstka.brand.package import A, C, P, Package
 from verstka.brand.palette import (
@@ -60,7 +61,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "6"
+APPLY_VERSION = "8"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -386,6 +387,9 @@ class ApplyResult:
     # логотип шаблона в другом углу, чем велит брендбук: «в шаблоне слева внизу, по брендбуку — справа внизу;
     # поставлен справа внизу» (или «оставлен слева внизу: угол из брендбука занят»)
     logo_note: Optional[str] = None
+    logo_covers: int = 0  # обложек, разделов и финальных слайдов, получивших логотип бренда (у шаблона там его не было)
+    partner_marks: int = 0  # знаков партнёров, убранных с фоновых картинок шаблона
+    caps_changed: int = 0  # стилей заголовков, где капс снят или поставлен по правилу брендбука
     refit: int = 0  # строк образцов, подогнанных после смены шрифта
     warnings: list[str] = field(default_factory=list)
 
@@ -397,6 +401,60 @@ class ApplyResult:
         d = asdict(self)
         d["changed"] = self.changed
         return d
+
+
+_NO_CAPS_RE = re.compile(
+    r"(без|не\s+(?:используйте|набирайте|пишите|ставьте|делайте)[^.;]{0,40}?)\s*(?:капс\w*|заглавн\w*|прописн\w*|caps|верхн\w+\s+регистр\w*)"
+    r"|(?:no|avoid|don'?t\s+use|never\s+use)\s+(?:all[\s-]*)?caps|sentence\s+case"
+    r"|заголовк\w*[^.;]{0,30}(?:строчн\w*|как\s+в\s+предложении)",
+    re.I,
+)
+_CAPS_RE = re.compile(r"заголовк\w*[^.;]{0,30}(?:капс\w*|заглавн\w*|прописн\w*|верхн\w+\s+регистр\w*)|headings?[^.;]{0,30}(?:all\s*caps|uppercase)", re.I)
+
+
+def caps_rule(brand: BrandSpec) -> Optional[bool]:
+    """Что брендбук говорит о капсе заголовков: False — не капсом, True — капсом, None — ничего (стиль шаблона
+    остаётся: капс ЛЦТ — его оформление)."""
+    for r in brand.rules:
+        if getattr(r, "kind", "other") not in ("type", "other"):
+            continue
+        if _NO_CAPS_RE.search(r.text):
+            return False
+        if _CAPS_RE.search(r.text):
+            return True
+    return None
+
+
+def _set_title_caps(pkg: Package, caps: bool) -> int:
+    """Капс заголовков по правилу брендбука: стиль заголовка мастера (`p:titleStyle`) и заголовки макетов и слайдов;
+    число изменённых частей."""
+    done = 0
+    for name in pkg.names():
+        if not re.match(r"^ppt/(?:slides/slide\d+|slideLayouts/slideLayout\d+|slideMasters/slideMaster\d+)\.xml$", name):
+            continue
+        root = pkg.xml(name)
+        if root is None:
+            continue
+        holders = [e for e in root.iter(f"{{{P}}}titleStyle")]
+        for sp in root.iter(f"{{{P}}}sp"):
+            ph = sp.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+            if ph is not None and (ph.get("type") or "") in ("title", "ctrTitle"):
+                holders.append(sp)
+        changed = False
+        for h in holders:
+            for rpr in h.iter(f"{{{A}}}defRPr", f"{{{A}}}rPr", f"{{{A}}}endParaRPr"):
+                if not caps and rpr.get("cap") == "all":
+                    del rpr.attrib["cap"]
+                    changed = True
+            if caps and h.tag == f"{{{P}}}titleStyle":
+                lvl = h.find(f"{{{A}}}lvl1pPr/{{{A}}}defRPr")
+                if lvl is not None and lvl.get("cap") != "all":
+                    lvl.set("cap", "all")
+                    changed = True
+        if changed:
+            pkg.dirty.add(name)
+            done += 1
+    return done
 
 
 def resolve_brand_dir(brand: BrandSpec, brand_dir: Optional[Path | str], workspace_root: Optional[Path | str] = None) -> Optional[Path]:
@@ -474,8 +532,9 @@ def apply_brand(
     if priority == "brand" and images:
         out_logos = brand_logos(pkg, manifest, brand, images, res.warnings, src, slots, fonts_pair)
         res.logos_replaced, res.logos_removed = out_logos.replaced, out_logos.removed
-        rep = out_logos.add
-        res.logos_added, res.logo_layouts, res.logo_place, res.logo_where = rep.added, rep.layouts, rep.place, rep.where
+        rep, cov = out_logos.add, out_logos.covers
+        res.logos_added, res.logo_layouts, res.logo_place, res.logo_where = rep.added + cov.added, rep.layouts + cov.layouts, rep.place, rep.where
+        res.logo_covers = cov.covered
         res.logo_samples, res.logo_covered, res.logo_note = out_logos.samples, out_logos.covered, out_logos.note
     elif not images:
         has_own = bool(find_template_logos(pkg, manifest, slots) or find_text_logos(pkg, manifest, fonts_pair, src))
@@ -484,6 +543,18 @@ def apply_brand(
         elif brand.logo_place or has_own:
             res.warnings.append("В брендбуке нет файлов логотипа — " + ("логотип шаблона оставлен." if has_own else "логотип бренда не поставлен."))
 
+    if priority == "brand" and images:
+        # чужие знаки (партнёры шаблона), впечатанные в фоновые картинки, — не в колоде другого бренда
+        n_marks, n_images = erase_partner_marks(pkg)
+        if n_marks:
+            from verstka.data.words import plural
+
+            res.partner_marks = n_marks
+            res.warnings.append(f"Знаки партнёров шаблона на фоновых картинках убраны: {n_marks} {plural(n_marks, 'знак', 'знака', 'знаков')} "
+                                f"на {n_images} {plural(n_images, 'картинке', 'картинках', 'картинках')}.")
+    caps = caps_rule(brand) if priority == "brand" else None
+    if caps is not None:
+        res.caps_changed = _set_title_caps(pkg, caps)
     res.colors = {f"#{a}": f"#{b}" for (a, b) in sorted(colors)}
     res.font_swaps = {a: b for (a, b) in sorted(fonts)}
     res.changed_parts = pkg.save(out)

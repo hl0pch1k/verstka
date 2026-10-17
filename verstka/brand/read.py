@@ -24,6 +24,7 @@ from verstka.brand.tokens import read_tokens
 from verstka.schemas.brand import BrandSpec
 
 SUPPORTED = ".json, .pdf, .zip, .pptx, .potx, .svg, .png, .jpg, папка или ссылка на Figma"
+NO_LOGO_FILES = "Файлов логотипа в брендбуке нет — логотип останется из шаблона, а где его нет, логотипа не будет."
 _IMAGE_EXT = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 _SINGLE_FILE_EXT = {".pptx", ".potx", ".pptm"} | _IMAGE_EXT
 
@@ -90,5 +91,9 @@ def read_brandbook(source: Path | str, *, providers: Any = None, skills: Any = N
                 raise BrandReadError(f"Формат «{ext or path.name}» для брендбука не подходит. Подойдут: {SUPPORTED}.")
     if not spec.colors and not spec.fonts and not spec.logos:
         raise BrandReadError("Не нашёл в брендбуке ни цветов, ни шрифтов, ни логотипов — проверьте файл.")
+    pdf_without_store = spec.source == "pdf" and assets_dir is None  # логотипы PDF некуда было сложить — не знаем
+    if not spec.logos and not pdf_without_store and NO_LOGO_FILES not in spec.warnings:
+        # (токены говорят «логотип — справа внизу», но файлов нет: человек должен это увидеть в слое «Брендбук»)
+        spec.warnings.append(NO_LOGO_FILES)
     rep.finish(spec)  # шаги, которые чтение ещё не сказало (у PDF все уже сказаны по ходу)
     return spec
