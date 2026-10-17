@@ -65,6 +65,7 @@ class Claim:
     tol: float
     pair: Optional[tuple[float, float]] = None  # «N из M»
     after: str = ""  # the words after «N из M» on the slide (what it counts)
+    hedge: str = ""  # «more» («более половины», «большинство»), «less» («менее трети», «почти половина»), «about», ""
 
 
 def claims(text: str) -> list[Claim]:
@@ -88,7 +89,13 @@ def claims(text: str) -> list[Claim]:
     for m in _FRAC_RE.finditer(t):
         w = m.group(0).lower()
         v = next(x for k, x in _FRAC.items() if w.startswith(k[:6]) or w.startswith(k))
-        out.append(Claim("frac", m.group(0), v, 0.04))
+        before = t[max(0, m.start() - 16): m.start()].lower()
+        hedge = ("more" if re.search(r"(?:более|больше|свыше|сверх)\s+$", before) else
+                 "less" if re.search(r"(?:менее|меньше|почти|не\s+более|не\s+больше)\s+$", before) else
+                 "about" if re.search(r"(?:около|примерно|порядка|приблизительно)\s+$", before) else "")
+        out.append(Claim("frac", m.group(0), v, 0.04, hedge=hedge))
+    for m in re.finditer(r"\bбольшинств\w*", t, re.I):
+        out.append(Claim("frac", m.group(0), 0.5, 0.5, hedge="more"))
     for m in _PCT_RE.finditer(t):
         v = _num(m.group("n"))
         out.append(Claim("pct", m.group(0), v / 100, (0.5 * 10 ** -_decimals(m.group("n"))) / 100 + 1e-9))
@@ -136,9 +143,23 @@ def _units(sent: str) -> dict[float, str]:
     return out
 
 
+def _share_fits(c: Claim, share: float) -> bool:
+    """A share in words against the share counted: «более половины» needs more than 50%, «почти половина» — less than
+    50% and close to it, «половина» — within the words' precision."""
+    if c.hedge == "more":
+        return share > c.value + 1e-9 and (c.text.lower().startswith("большинств") or share - c.value <= 0.2)
+    if c.hedge == "less":
+        return c.value - 0.12 <= share < c.value
+    if c.hedge == "about":
+        return abs(share - c.value) <= 0.06
+    return abs(share - c.value) <= c.tol
+
+
 def supported(c: Claim, brief_text: str, line: str = "") -> bool:
     """The brief says the proportion, or two figures of one of its sentences (of the same measure, in a sentence about
     what the line says) or of one row of its table give it."""
+    if c.kind == "frac" and c.hedge:
+        return _hedged_share(c, brief_text, line)
     sents = _sentences(brief_text)
     low = (brief_text or "").lower().replace("ё", "е")
     if c.kind == "of":
@@ -185,7 +206,33 @@ def supported(c: Claim, brief_text: str, line: str = "") -> bool:
                 elif c.kind in ("frac", "each", "pct"):
                     if abs(lo / hi - c.value) <= c.tol or (c.kind == "pct" and min(abs((hi - lo) / lo - c.value), abs((hi - lo) / hi - c.value)) <= c.tol):
                         return True
-    return False
+    return c.kind == "frac" and _hedged_share(c, brief_text, line)
+
+
+def _hedged_share(c: Claim, brief_text: str, line: str) -> bool:
+    """«Малый бизнес — более половины базы»: the share of the same thing in the brief — its percentage (49,2% — not more
+    than half) or two figures of one fragment — fits the words; the brief's own words («более половины») as written."""
+    low = " ".join((brief_text or "").lower().replace("ё", "е").split())
+    if " ".join(c.text.lower().split()) in low and re.search(rf"(?:более|больше|свыше|менее|меньше|почти|около|примерно)\s+{re.escape(c.text.lower())}", low):
+        return True
+    line_stems = _stems(re.sub(re.escape(c.text), " ", line or "", flags=re.I)) - _CONSTRUCTION
+    found = False
+    for s in _sentences(brief_text):
+        label = (s.strip("| ").split("|") or [""])[0] if s.startswith("|") else s
+        ls = _stems(label)
+        # a table row is the line's when it names the line's subject whole («Средний бизнес», not «Малый бизнес»)
+        if len(line_stems & ls) < (min(2, len(ls)) if s.startswith("|") else 1):
+            continue
+        for m in _PCT_RE.finditer(s):
+            found = True
+            if _share_fits(c, _num(m.group("n")) / 100):
+                return True
+        vals = [v for v in _numbers(s) if v > 0]
+        for i, a in enumerate(vals):
+            for b in vals[i + 1:]:
+                if _share_fits(c, min(a, b) / max(a, b)):
+                    return True
+    return False if found or line_stems else False
 
 
 _WORD_RE = re.compile(r"[а-яёa-z]{4,}", re.I)

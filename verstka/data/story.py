@@ -659,6 +659,43 @@ def _context_lines(brief: Optional[Brief], title_sentence: Optional[str]) -> lis
     return out[: CONTEXT_LINES * MAX_CONTEXT_SLIDES]
 
 
+_WEAK_LABEL_WORDS = {"больше", "меньше", "всего", "более", "менее", "около", "почти", "только"}
+
+
+def _meaningful(words: str) -> bool:
+    return any(len(w) >= 4 and w.lower() not in _WEAK_LABEL_WORDS for w in re.findall(r"[а-яёa-z]+", words or "", re.I))
+
+
+def _card_label(fact_text: str, value: str, topic: str, headline: str = "") -> str:
+    lab = _card_label0(fact_text, value, topic)
+    if lab != topic and not _meaningful(lab.split(" · ")[0]):
+        # «80% — не больше …»: the headline's words around the figure say what it is («обращений получают ответ за 2 часа»)
+        digits = re.sub(r"\D", "", value or "")
+        m = re.search(r"[+\-−–]?\d[\d\u00a0\u202f ]*(?:[.,]\d+)?\s*%?", headline or "")
+        if m and digits and re.sub(r"\D", "", m.group(0)) == digits:
+            rest = " ".join((headline[: m.start()] + " " + headline[m.end():]).split()).strip(" ,—–:")
+            if _meaningful(rest) and len(rest.split()) <= 8:
+                return rest
+        return topic
+    return lab
+
+
+def _card_label0(fact_text: str, value: str, topic: str) -> str:
+    """What a key figure is, in its fact's words: «Нижний Новгород — 198 млн ₽» → «Нижний Новгород · выручка по
+    регионам» — never the file's topic alone beside a figure it does not name (qa5: «198 млн ₽ — Выручка по регионам»
+    for the smallest region)."""
+    t = " ".join((fact_text or "").split())
+    digits = re.sub(r"\D", "", value or "")
+    words = re.sub(r"[+\-−–]?\d[\d\u00a0\u202f ]*(?:[.,]\d+)?\s*(?:%|млн\s?₽|млрд\s?₽|тыс\.\s?₽|₽|млн|млрд|мин|п\.\s?п\.)?", " ", t)
+    words = re.sub(r"\s*[—–:]\s*$|^\s*[—–:]\s*|\(\s*\)", "", " ".join(words.split())).strip(" ,—–:")
+    if not words or not digits or digits not in re.sub(r"\D", "", t):
+        return topic
+    low = topic[:1].lower() + topic[1:] if topic else ""
+    if low and not set(re.findall(r"[а-яё]{4,}", words.lower())) & set(re.findall(r"[а-яё]{4,}", low.lower())):
+        return f"{words} · {low}"
+    return words
+
+
 def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[NumberCallout]:
     """Key figures when no dataset is a set of them: the headline's figure of each of the first datasets (up to four),
     its topic as the label."""
@@ -668,12 +705,17 @@ def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[Numb
         if p.slides <= 0 or p.task.task == "reference" or not p.headline:
             continue
         nums = numbers_in(p.headline)
-        f = next((f for n in nums for f in p.headline_facts if abs(abs(f.value) - n) < 0.5 or abs(round(f.value) - n) < 1e-9), None)
+        cands = [f for n in nums for f in p.headline_facts if abs(abs(f.value) - n) < 0.5 or abs(round(f.value) - n) < 1e-9]
+        # the headline's strongest figure: a change, a share, the leader — the smallest only when nothing else
+        rank = {"change": 0, "share": 1, "leader": 2, "max": 3, "total": 4, "last": 5, "median": 6, "count": 7, "min": 9}
+        f = min(cands, key=lambda x: (rank.get(x.kind, 8), cands.index(x)), default=None)
         if f is None:
             continue
         unit = f.unit if f.unit not in ("раз",) else None
         value = fmt_signed(f.value, unit or "") if f.kind == "change" else fmt_value(f.value, unit)
-        out.append(NumberCallout(value=value, label=p.plain_headline, fact_id=f.id))
+        if any(c.value == value for c in out):
+            continue  # one figure once (two files said the same +23%)
+        out.append(NumberCallout(value=value, label=_card_label(f.text, value, p.plain_headline, p.headline), fact_id=f.id))
         if len(out) == 4:
             break
     return out
@@ -1081,10 +1123,13 @@ def build_data_story(
             data_entries.append(_Entry(s, role, k, keep))
         kpi_done = kpi_done or is_kpi
 
-    if not kpi_done and n_data >= 3:
+    # (a file of key figures — a goal's or not — already says them: no second row of figures, qa5 п. 9)
+    if not kpi_done and n_data >= 3 and not any(plans[k].slides > 0 and plans[k].task.task == "kpi" for k in order):
         cards = _fact_cards(plans, order)
         if len(cards) >= 3:
-            entries.append(_Entry(OutlineSlide(id="key-figures", kind=PatternKind.stat_row, headline="Главное в цифрах", content=SlideContent(numbers=cards), rationale="Главные числа выводов колоды — по одному из каждого файла."), "facts", keep=15))
+            # the heading says the two first figures (never the topic «Главное в цифрах»)
+            head = "; ".join(f"{c.label.split(' · ')[0]} — {c.value}" for c in cards[:2])
+            entries.append(_Entry(OutlineSlide(id="key-figures", kind=PatternKind.stat_row, headline=head or "Главное в цифрах", content=SlideContent(numbers=cards), rationale="Главные числа выводов колоды — по одному из каждого файла."), "facts", keep=15))
     kpi_first = [e for e in data_entries if e.role == "kpi"]
     body = [e for e in data_entries if e.role in ("data", "part")]
     appendix = [e for e in data_entries if e.role == "appendix"]
@@ -1174,15 +1219,25 @@ def build_data_story(
 
     # the model writes the connecting text; every figure it writes is checked
     if use_llm and skills is not None and providers is not None and _has_llm(providers):
+        det_cover = (outline.slides[0].headline, outline.slides[0].subtitle) if outline.slides and outline.slides[0].kind == PatternKind.title else None
         _tell(story, brief, voice, skills, providers, deadline=deadline, limit=limit, tables=tables)
+        _cover_agrees(story.outline, det_cover, voice)
 
     # a plan + data (the experts' «примерная структура + данные»): the slides in the order of the author's plan, its
     # items without data as the author's text, its request last (planning/plan_data.py — the data slides untouched)
     try:
         from verstka.planning.plan_data import follow_plan
 
-        for line in follow_plan(story.outline, brief_text, slide_count=limit):
+        file_notes = [n.get("text") or "" for n in notes]
+        said_plan = follow_plan(story.outline, brief_text, slide_count=limit, notes=file_notes)
+        for line in said_plan:
             voice.say(line, 0.14)
+        if not said_plan:
+            # no plan: the deck still ends on what the input asks for (or says comes next), in its own words
+            from verstka.planning.plan_data import close_with_ask
+
+            for line in close_with_ask(story.outline, brief_text, file_notes):
+                voice.say(line, 0.14)
         outline = story.outline
     except Exception:  # noqa: BLE001 - the story's own order stays
         log.warning("the plan's order not applied to the data story", exc_info=True)
@@ -1191,6 +1246,26 @@ def build_data_story(
     story.log = list(voice.lines)
     story.seconds = time.monotonic() - t0
     return story
+
+
+def _cover_agrees(outline: DeckOutline, det_cover: Optional[tuple], voice: "_Voice") -> None:
+    """The cover's figure is one a slide shows (qa5: «Выручка выросла на 20% за 8 месяцев» on the cover, «+23%» on the
+    slides): a cover the model wrote with a figure no slide says goes back to the checked one."""
+    if det_cover is None or not outline.slides or outline.slides[0].kind != PatternKind.title:
+        return
+    cover = outline.slides[0]
+    nums = [n for n in numbers_in(" ".join([cover.headline or "", cover.subtitle or ""])) if not (1900 <= n <= 2100)]
+    if not nums:
+        return
+    shown = set()
+    for s in outline.slides[1:]:
+        texts = [s.headline or "", s.takeaway or "", s.subtitle or ""] + [x for it in s.content.items for x in (it.title, it.text, it.number or "")] + [n.value for n in s.content.numbers]
+        for t in texts:
+            shown.update(round(v, 2) for v in numbers_in(t))
+    if all(round(n, 2) in shown for n in nums):
+        return
+    cover.headline, cover.subtitle = det_cover
+    voice.say("обложка — проверенный вывод: число обложки модели не совпало ни с одним слайдом", 0.14)
 
 
 def _say_designs(voice: _Voice, outline: DeckOutline) -> None:

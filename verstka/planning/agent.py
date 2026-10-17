@@ -4120,7 +4120,7 @@ def figures_of_items(items: list[SlideItem]) -> Optional[list[NumberCallout]]:
     return out
 
 
-def _table_of_changes(numbers: list[NumberCallout]) -> Optional[TableData]:
+def _table_of_changes(numbers: list[NumberCallout], source: str = "") -> Optional[TableData]:
     """2–5 figures of changes («300 → 330 ₽» · «Средний чек») as a table «Показатель | Сейчас | Цель» (the unit on
     both sides); None when one of them is not a change or has no label."""
     if not 2 <= len(numbers) <= 5:
@@ -4135,7 +4135,16 @@ def _table_of_changes(numbers: list[NumberCallout]) -> Optional[TableData]:
         if unit and not _unit_of_value(a):
             a = f"{a}{unit}" if unit == "%" else f"{a} {unit}"
         rows.append([H.cap_first(H.strip_end(n.label)), a, b])
-    return TableData(columns=["Показатель", "Сейчас", "Цель"], rows=rows)
+    # the ends named as the source tells the change: a plan «Сейчас / Цель», a done change «Было / Стало» or its periods
+    from verstka.planning.brief_structure import change_heads
+
+    from verstka.planning.brief_structure import numbers_of
+
+    want = {round(v, 2) for r in rows for p in r[1:] for v in numbers_of(p)}
+    said = " ".join(x for x in H.split_sentences(" ".join((source or "").split())) or []
+                    if len(want & {round(v, 2) for v in numbers_of(x)}) >= 2)
+    a_head, b_head = change_heads(said) if said else ["Сейчас", "Цель"]
+    return TableData(columns=["Показатель", a_head, b_head], rows=rows)
 
 
 _VAL = r"[+\-−]?\d{1,3}(?:[\s  ]\d{3})*(?:[.,]\d+)?(?:\s?(?:%|₽|руб\.?|рубл(?:ей|я|ь)|тыс\.?\s?₽|млн\s?₽|час(?:а|ов)?|минут[аы]?|дн(?:я|ей)|день))?"
@@ -4390,7 +4399,7 @@ def _reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_
         return s.model_copy(update={"kind": PatternKind.stat_row, "content": new}, deep=True)
     if kind == "table" and c.numbers and not (c.chart or c.table or c.items or c.columns or c.paragraphs) and len(c.bullets) <= 5:
         # changes «300 → 330 ₽» as a table «Показатель | Сейчас | Цель», the list under it: the denser form
-        t = _table_of_changes(c.numbers)
+        t = _table_of_changes(c.numbers, case_text)
         if t is not None:
             new.table, new.bullets = t, list(c.bullets)
             return s.model_copy(update={"kind": PatternKind.table, "content": new}, deep=True)

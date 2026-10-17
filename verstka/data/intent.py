@@ -729,6 +729,12 @@ def _same(a: UnderstoodGoal, b: UnderstoodGoal) -> bool:
     return (a.dataset, a.task, a.metric, a.ask, a.at) == (b.dataset, b.task, b.metric, b.ask, b.at)
 
 
+_PERIOD_WORD_RE = re.compile(
+    r"\b(?:19|20)\d{2}\b|январ|феврал|март|апрел|\bма[йяе]\b|июн|июл|август|сентябр|октябр|ноябр|декабр|квартал|\bкв\.|"
+    r"полугоди|месяц|недел|\bгод|\bлет\b|сезон|\bлет[аоеу]\b|зим|весн|осен|с\s+начала|последн|прошл|текущ|этот\s+год|"
+    r"\b[IV]{1,3}\s*кв|\bQ[1-4]\b|\bH[12]\b|\b\d{1,2}\s*(?:мес|нед|дн)", re.I)
+
+
 def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[Optional[UnderstoodGoal], Optional[str]]:
     """One goal of the model against dataset `k`: (the goal that holds, None) or (None, why it cannot be done)."""
     dropped: list[str] = []
@@ -941,6 +947,12 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
     period = mg.period
     if (period is None or (period.kind or "all") == "all") and ctx.has_time(k):
         period = _season_of(quote, ctx.periods(k)) or period  # «сократилось ли ожидание за лето» — июнь–август
+    if period is not None and (period.kind or "all").strip().lower() != "all" and not _PERIOD_WORD_RE.search(quote or ""):
+        # the goal's own words name no period («покажи рост выручки»): the period the model took from elsewhere in the
+        # brief («за 9 месяцев 2026 года» in its title) is not this goal's — the same data on every run, with or without
+        # the model (qa5: 9 points on one template, 21 on another when the model's call ran out of time)
+        dropped.append("период не назван в цели — данные целиком")
+        period = None
     if period is not None:
         kind = (period.kind or "all").strip().lower()
         if kind not in PERIODS:

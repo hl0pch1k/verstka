@@ -414,3 +414,120 @@ def test_a_wrong_proportion_goes_back_to_the_authors_words():
     assert s.takeaway is None
     # «каждый третий» is no one's: the author's own words of the reports instead
     assert s.content.bullets == ["2 из 140 отчётов используют нестандартные расширения — переписываем", "Загрузка в среднем 23%"]
+
+
+# ------------------------------------------------------------------ round 4: the independent QA (qa5)
+
+
+@pytest.mark.parametrize("text, heads", [
+    ("Просроченная задолженность снизилась с 96 до 61 млн рублей", ["Было", "Стало"]),
+    ("Операционные расходы выросли на 6% к прошлому кварталу", ["Прошлый квартал", "Этот квартал"]),
+    ("Выручка — на 23% больше, чем годом ранее", ["Год назад", "Сейчас"]),
+    ("Цель — поднять средний чек с 300 до 330 рублей", ["Сейчас", "Цель"]),
+])
+def test_the_ends_of_a_change_are_named_as_the_source_tells_it(text, heads):
+    from verstka.planning.brief_structure import change_heads
+
+    assert change_heads(text) == heads
+
+
+def test_the_rules_never_call_a_done_change_a_goal(outlines):
+    for s in outlines["q3_close_letter.md"].slides:
+        if s.content.table is not None:
+            assert "Цель" not in s.content.table.columns, s.content.table.columns
+    deb = next(s for s in outlines["q3_close_letter.md"].slides if (s.section or s.headline) == "Дебиторка")
+    if deb.content.table is not None:
+        assert deb.content.table.columns[1:] == ["Было", "Стало"]
+    # the item's revenue and EBITDA stay on the slide that shows its profitability large
+    first = next(s for s in outlines["q3_close_letter.md"].slides if (s.section or s.headline) == "Общие итоги")
+    assert "1 840" in " ".join(_visible(first))
+
+
+def test_a_figure_is_the_figure_and_a_year_is_no_key_figure():
+    from verstka.planning.meaning import tidy_values
+    from verstka.schemas.outline import NumberCallout
+
+    o = DeckOutline(title="T", slides=[_slide(2, "stat_row", "Расходы", content=SlideContent(numbers=[
+        NumberCallout(value="до 1 428 млн ₽", label="Операционные расходы"), NumberCallout(value="около 74%", label="Загрузка"),
+        NumberCallout(value="2026 г", label="включён в приоритеты четвёртого")]))])
+    tidy_values(o)
+    assert [(n.value, n.label) for n in o.slides[0].content.numbers] == [("1 428 млн ₽", "Операционные расходы"), ("≈ 74%", "Загрузка")]
+    lone = DeckOutline(title="T", slides=[_slide(2, "big_number", "Запуск в I кв. 2027", content=SlideContent(numbers=[NumberCallout(value="2027 г", label="включён в приоритеты четвёртого")]))])
+    tidy_values(lone)
+    assert lone.slides[0].content.numbers == [] and lone.slides[0].kind == PatternKind.bullets
+
+
+def test_the_rest_of_the_table_never_goes_with_a_chart_of_one_column(outlines):
+    sl = outlines["marketing_table.md"].slides
+    chart = next(s for s in sl if s.content.chart is not None)
+    table = next(s for s in sl if s.content.table is not None)
+    assert sl.index(table) == sl.index(chart) + 1 and "Заявки" in table.content.table.columns
+    assert chart.headline.startswith("Стоимость заявки: от 923 ₽")
+
+
+def test_compare_with_the_market_draws_both_figures(outlines):
+    s = next(s for s in outlines["hiring_numbered.md"].slides if (s.section or s.headline) == "Сколько времени занимает найм")
+    assert s.content.chart is not None and s.content.chart.categories == ["У нас", "Рынок"] and s.content.chart.series[0].values == [54.0, 47.0]
+    assert any("41 день" in b for b in s.content.bullets)  # the author's other figures stay beside the chart
+
+
+def test_a_cover_line_repeating_the_title_goes():
+    from verstka.planning.meaning import tidy
+
+    o = DeckOutline(title="Verstka", slides=[_slide(1, "title", "Verstka — цифровой дизайнер презентаций", subtitle="команда «Рекрут 2» · задача № 4 VK Tech",
+                                                    content=SlideContent(paragraphs=["Verstka — цифровой дизайнер презентаций. Команда «Рекрут 2», задача № 4 VK Tech."]))])
+    tidy(o)
+    assert o.slides[0].content.paragraphs == []
+
+
+def test_a_picture_asked_for_is_its_object():
+    from verstka.planning.directives import picture_asks_as_notes
+
+    assert "[Место под изображение: Экран приложения]" in picture_asks_as_notes("Добавь картинку с экраном приложения.")
+
+
+def test_key_figures_of_data_say_what_they_count_and_the_plan_closes_on_its_ask():
+    from verstka.data.readers import read_file
+    from verstka.data.story import build_data_story
+    from verstka.planning.brief import parse_brief_text
+
+    folder = ROOT / "examples" / "data-sales-2026"
+    tables = [t for p in sorted(folder.iterdir()) if p.suffix.lower() in {".csv", ".xlsx", ".json", ".txt"} for t in read_file(p)]
+    plan = ("Закрытие 3 квартала — для финдиректора, примерный план:\n\n- итоги квартала: главные цифры\n- выручка по месяцам, покажи на "
+            "графике что растём\n- регионы — кто тянет, кто отстаёт\n- каналы продаж\n- поддержка: как быстро отвечаем\n- NPS\n- топ клиентов\n"
+            "- что делаем в 4 квартале и что просим у правления\n")
+    slides = build_data_story(parse_brief_text(plan), tables).outline.slides
+    kf = next((s for s in slides if s.id == "key-figures"), None)
+    if kf is not None:
+        assert kf.headline != "Главное в цифрах"
+        assert not any(n.label in ("Выручка по регионам", "Выручка по месяцам") for n in kf.content.numbers)
+    last = slides[-1]
+    assert last.id.startswith("data-plan") and "Удержать темп роста" in " ".join(last.content.bullets)
+    assert not any(s.id.startswith("context") for s in slides)
+
+
+def test_the_authors_table_stays_on_the_deck_when_a_model_charts_one_column():
+    from verstka.planning.meaning import keep_author_tables
+    from verstka.schemas.outline import ChartSpec, InlineSeries
+
+    brief = (PLANS / "marketing_table.md").read_text(encoding="utf-8")
+    chart = ChartSpec(type="column", categories=["Контекст", "Таргет", "Блогеры", "Наружная"], series=[InlineSeries(name="", values=[941, 923, 2000, 1091])])
+    o = DeckOutline(title="T", planned_by="agent", slides=[_slide(1, "title", "T"), _slide(2, "chart", "Заявка у блогеров вдвое дороже", content=SlideContent(chart=chart)),
+                                                         _slide(3, headline="Предложение", content=SlideContent(bullets=["x"]))])
+    keep_author_tables(o, brief)
+    assert [s.kind.value for s in o.slides] == ["title", "chart", "table", "bullets"]
+    assert o.slides[2].content.table.columns[2] == "Заявки"
+
+
+@pytest.mark.parametrize("line, ok", [
+    ("Малый бизнес — более половины базы", False),  # 49,2%
+    ("Малый бизнес — почти половина базы", True),
+    ("Средний бизнес — треть клиентов", True),  # 33,9%
+    ("Средний бизнес — половина клиентов", False),  # not «Малый бизнес» row
+    ("Средний бизнес — большинство клиентов", False),
+])
+def test_a_share_in_words_fits_the_share_of_the_same_thing(line, ok):
+    from verstka.planning.proportions import claims, supported
+
+    brief = "Клиенты по сегментам:\n| Сегмент | Клиентов | Доля |\n|---|---|---|\n| Малый бизнес | 610 | 49,2 % |\n| Средний бизнес | 420 | 33,9 % |\n"
+    assert all(supported(c, brief, line) for c in claims(line)) == ok

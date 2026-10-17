@@ -85,6 +85,8 @@ def _own_words(it) -> bool:
     from verstka.planning.directives import split_directive
 
     text = " ".join(ln for ln in it.lines if not ln.strip().startswith("|"))
+    if H.strip_end(text).lower() == H.strip_end(it.title).lower():
+        return False  # the item is its title alone («Что делаем в 4 квартале и что просим у правления»)
     rest = " ".join(r for r in (split_directive(x)[1] for x in (H.split_sentences(text) or [text])) if r)
     if any(ln.strip().startswith("|") for ln in it.lines):
         return True
@@ -112,7 +114,56 @@ def _text_slides(plan, brief_language: str = "ru") -> dict[int, list[OutlineSlid
     return out
 
 
-def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[int] = None) -> list[str]:
+_NEXT_RE = re.compile(r"^(?:что\s+дальше|дальше|далее|следующ\w+\s+шаг\w*|план\s+на|предлагаем|предлагаю|просим|прошу|нужно\s+решение|решение)\b", re.I)
+
+
+def input_asks(brief_text: str, notes: Optional[list[str]] = None) -> list[str]:
+    """What the input asks for or says comes next, in its own words: the brief's request sentences («Просим утвердить
+    …») and the files' own lines «Что дальше: …», «Предлагаем …» — never a step nobody wrote."""
+    from verstka.planning.agent import brief_asks
+
+    out = [H.strip_end(sn) for _, sn in brief_asks(brief_text or "")]
+    for text in notes or []:
+        for line in (text or "").splitlines():
+            for sn in H.split_sentences(line.strip()) or []:
+                if _NEXT_RE.match(sn.strip()):
+                    out.append(H.strip_end(re.sub(r"^(?:что\s+дальше|дальше|далее)\s*[:—–-]\s*", "", sn.strip(), flags=re.I)))
+    seen, uniq = set(), []
+    for x in out:
+        k = " ".join(x.lower().split())
+        if x and k not in seen:
+            seen.add(k)
+            uniq.append(H.cap_first(x))
+    return uniq
+
+
+def _ask_slide(sid: str, head: str, lines: list[str]) -> OutlineSlide:
+    from verstka.schemas.outline import SlideContent
+
+    return OutlineSlide(id=sid, kind=PatternKind.bullets, headline=head, content=SlideContent(bullets=lines[:4]),
+                        rationale="Финал колоды — то, что просит или предлагает сам вход (бриф, текст файлов), его словами.")
+
+
+def close_with_ask(outline: DeckOutline, brief_text: str, notes: Optional[list[str]] = None) -> list[str]:
+    """A data deck whose brief asks for something («Просим утвердить …») ends on it: a last slide in the brief's own
+    words, after the summary — unless a slide already says it. (The files' «Что дальше» lines are no request of the
+    person's: they close a plan's item that asks for them, follow_plan.)"""
+    asks = input_asks(brief_text, None)
+    if not asks or not outline.slides:
+        return []
+    shown = " ".join(" ".join([s.headline or "", *s.content.bullets, *(it.title + " " + it.text for it in s.content.items)]) for s in outline.slides)
+    asks = [a for a in asks if len(_stems(a) & _stems(shown)) < max(2, 0.7 * len(_stems(a)))]
+    if not asks:
+        return []
+    ids = {s.id for s in outline.slides}
+    head = "Что просим" if any(re.match(r"(?:просим|прошу|утвердить|одобрить|выделить|согласовать)", a, re.I) for a in asks) else "Что дальше"
+    s = _ask_slide(next(x for x in ("ask", "ask-2", "ask-3") if x not in ids), head, asks)
+    tail = [x for x in outline.slides if x.id == "appendix" or (x.data is not None and x.data.part[0] > 1 and x.data.task is not None and x.data.task.task == "reference")]
+    outline.slides = [x for x in outline.slides if x not in tail] + [s] + tail
+    return [f"финал — что просит вход, его словами: «{asks[0][:80]}»"]
+
+
+def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[int] = None, notes: Optional[list[str]] = None) -> list[str]:
     """Puts the data story's slides in the order of the author's plan (see the module); what it did, in Russian (the
     build's log). Leaves the outline as it is when the text is no plan or the plan does not speak of the data."""
     from verstka.planning.plan_form import as_slides
@@ -179,6 +230,19 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
             said.append(f"пункт плана «{it.title}» — слайд из текста автора: данных о нём в файлах нет")
         elif mine:
             said.append(f"пункт плана «{it.title}» — " + ", ".join(f"«{groups[g][0].data.file}»" for g in mine))
+        elif not mine and k == closing and any(x.id == "next-steps" for x in slides):
+            # the story's «Что дальше» (the input's own next steps) is the closing item's slide, under its words
+            ns = next(x for x in slides if x.id == "next-steps")
+            ns.headline = H.cap_first(it.title)
+            summary = [x for x in summary if x is not ns]
+            part.append(ns)
+            said.append(f"пункт плана «{it.title}» — следующие шаги из входа")
+        elif not mine and k == closing and input_asks(brief_text, notes):
+            # the plan's closing item («что просим у правления») with the input's own words for it (the files' «Что дальше: …»)
+            lines = [a for a in input_asks(brief_text, notes) if H.strip_end(a).lower() != H.strip_end(it.title).lower()]
+            if lines:
+                part.append(_ask_slide(f"data-plan-{k + 1}", H.cap_first(it.title), lines))
+                said.append(f"пункт плана «{it.title}» — словами входа: «{lines[0][:60]}»")
         elif not mine:
             said.append(f"пункт плана «{it.title}» — ни файла, ни своего текста: слайда нет")
         used.update(s.id for s in part)

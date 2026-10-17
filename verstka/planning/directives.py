@@ -279,6 +279,12 @@ def picture_asks_as_notes(text: str) -> str:
         def repl(m: re.Match) -> str:
             what = H.strip_end(m.group("what"))
             obj = directive_object(m.group("ask")) or what
+            # «картинка с экраном приложения» → «экран приложения»: what the picture shows, not that it is a picture
+            mm = re.match(r"^(?:картинк|изображени|иллюстраци|рисун)\w*\s+(?:с|со)\s+(?P<w>\S+)(?P<r>.*)$", obj, re.I)
+            if mm:
+                w = mm.group("w")
+                w = w[:-2] if re.search(r"[бвгдзклмнпрстфхцчшщ]ом$", w) else (w[:-3] + "а" if w.endswith("ой") and len(w) > 4 else w)
+                obj = (w + mm.group("r")).strip()
             notes.append(f"[Место под изображение: {H.cap_first(obj)}]")
             return ""
 

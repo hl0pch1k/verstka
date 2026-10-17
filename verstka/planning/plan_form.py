@@ -364,7 +364,9 @@ def _preamble(lines: list[str]) -> tuple[Optional[str], Optional[str], Optional[
             fm = _FOR_RE.search(head)
             if fm:
                 title = head[: fm.start()].strip()
-                subtitle = H.cap_first(fm.group("who"))
+                # «— для финдиректора, примерный план:» — who it is for; the words about the plan itself are no subtitle
+                who = re.sub(r",?\s*(?:вот\s+)?(?:примерн\w+|черновой|краткий)?\s*(?:план|структура|тезисы)\w*\s*:?\s*$", "", fm.group("who"), flags=re.I).strip(" ,:")
+                subtitle = H.cap_first(who)
             else:
                 title = head
             kept.extend(sents[1:])

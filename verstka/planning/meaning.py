@@ -26,7 +26,7 @@ from typing import Optional
 from verstka.planning import heuristics as H
 from verstka.planning.directives import scrub_outline
 from verstka.schemas.common import PatternKind
-from verstka.schemas.outline import DeckOutline, OutlineSlide, TableData
+from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, TableData
 
 log = logging.getLogger(__name__)
 
@@ -214,6 +214,115 @@ def _chart_values(s: OutlineSlide) -> list[list[float]]:
     return [[float(v) for v in x.values if v is not None] for x in ch.series]
 
 
+def keep_table_beside_chart(o: DeckOutline) -> list[str]:
+    """A chart drawn from one column of the author's table (qa5 13: «стоимость заявки по каналам») never costs the rest
+    of the table (расход, заявки): the table with its other columns goes on its own slide right after the chart."""
+    said: list[str] = []
+    out: list[OutlineSlide] = []
+    for s in o.slides:
+        out.append(s)
+        c = s.content
+        if c.chart is None or c.table is None or s.kind == PatternKind.table:
+            continue
+        drawn = {round(v, 2) for x in c.chart.series for v in x.values if v is not None}
+        labels, cols, _ = _columns(c.table)
+        extra = [col for col in cols if {round(v, 2) for v in col.values if v is not None} - drawn]
+        if not extra:
+            continue
+        ids = {x.id for x in o.slides}
+        nid = next(f"{s.id}-t{k}" for k in range(1, 9) if f"{s.id}-t{k}" not in ids)
+        t = c.table
+        c.table = None
+        on_chart = table_conclusion(t, _chart_values(s) or None)
+        if on_chart is not None and _topic(s.headline):
+            s.section = s.section or s.headline
+            s.headline = on_chart[0]
+        got = table_conclusion(t)
+        out.append(OutlineSlide(id=nid, kind=PatternKind.table, headline=got[0] if got else (s.section or s.headline),
+                                section=s.section or s.headline, takeaway=got[1] if got else None,
+                                content=SlideContent(table=t),
+                                continues=s.id, notes=s.notes, rationale="Вся таблица автора — рядом с графиком одной её колонки."))
+        said.append(f"slide {s.id}: the table's other columns ({', '.join(col.name for col in extra)}) on a slide of their own")
+    o.slides = out
+    return said
+
+
+def keep_author_tables(o: DeckOutline, brief_text: str) -> list[str]:
+    """A table the author wrote into the brief is on the deck: when most of its figures are on no slide (a model drew
+    one of its columns — qa5 13: «расход / заявки по каналам» gone), the table goes on a slide of its own right after
+    the slide that shows the most of it."""
+    from verstka.planning.brief_structure import _markdown_tables, numbers_of
+
+    said: list[str] = []
+    try:
+        tables = _markdown_tables(brief_text or "")
+    except Exception:  # noqa: BLE001 - no table read
+        return said
+    for t in tables:
+        cells = {round(v, 2) for row in t.rows for cell in row[1:] for v in numbers_of(cell)}
+        if len(cells) < 4:
+            continue
+
+        def on(sl: OutlineSlide) -> set:
+            c = sl.content
+            vals = set()
+            if c.chart is not None:
+                vals |= {round(float(v), 2) for x in c.chart.series for v in x.values if v is not None}
+            if c.table is not None:
+                vals |= {round(v, 2) for row in c.table.rows for cell in row for v in numbers_of(cell)}
+            vals |= {round(v, 2) for v in numbers_of(_slide_text(sl) + " " + " ".join(n.value for n in c.numbers))}
+            return vals & cells
+
+        shown = set().union(*(on(sl) for sl in o.slides)) if o.slides else set()
+        if len(shown) * 2 > len(cells):
+            continue
+        host = max(o.slides, key=lambda sl: len(on(sl)))
+        if not on(host):
+            continue
+        ids = {x.id for x in o.slides}
+        nid = next(f"{host.id}-t{k}" for k in range(1, 9) if f"{host.id}-t{k}" not in ids)
+        got = table_conclusion(t)
+        new = OutlineSlide(id=nid, kind=PatternKind.table, headline=got[0] if got else (t.caption or host.section or host.headline),
+                           section=host.section, takeaway=got[1] if got else None, content=SlideContent(table=t.model_copy(deep=True)),
+                           continues=host.id, rationale="Таблица автора целиком: на графике — только её часть.")
+        o.slides.insert(o.slides.index(host) + 1, new)
+        said.append(f"slide {nid}: the author's table ({', '.join(t.columns[:4])}) on a slide of its own — the deck showed {len(shown)} of its {len(cells)} figures")
+    return said
+
+
+def keep_figures(o: DeckOutline) -> list[str]:
+    """Without a model, a chart slide never loses the author's figures it does not draw (qa5 02: «аналитика — 41 день,
+    продавца — 23 дня» under a chart of 54 against the market's 47): the sentence of the notes that states them stands
+    beside the chart, as written (two at most, short)."""
+    from verstka.planning.brief_structure import numbers_of
+    from verstka.planning.directives import split_directive
+    from verstka.planning.faithful import sentences
+
+    said: list[str] = []
+    for s in o.slides:
+        c = s.content
+        # (a chart, or one large figure standing for a whole item; a row of figures already shows the item's figures)
+        figure_form = c.chart is not None or (s.kind == PatternKind.big_number and len(c.numbers) == 1)
+        if s.kind in _FRAME or not figure_form or c.bullets or c.paragraphs or not s.notes:
+            continue
+        drawn = " ".join(str(v) for x in c.chart.series for v in x.values) if c.chart is not None else ""
+        shown = {round(v, 2) for v in numbers_of(_slide_text(s) + " " + drawn + " " + " ".join(n.value for n in c.numbers))}
+        add = []
+        for sent in sentences(s.notes):
+            ask, rest = split_directive(sent)
+            line = rest if ask is not None else sent
+            figs = {round(v, 2) for v in numbers_of(line or "")} - {v for v in numbers_of(line or "") if 1900 <= v <= 2100}
+            if line and figs - shown and len(line.split()) <= 22:
+                add.append(H.strip_end(line))
+                shown |= figs
+            if len(add) == 2:
+                break
+        if add:
+            c.bullets = add
+            said.append(f"slide {s.id}: the author's figures the chart does not draw stay beside it")
+    return said
+
+
 def table_conclusions(o: DeckOutline) -> list[str]:
     said: list[str] = []
     for s in o.slides:
@@ -293,12 +402,51 @@ def _counted(value: str, label: str, brief_text: str) -> Optional[str]:
     if len(hits) != 1:
         return None
     words = hits[0].group("w").split()
+    if words[0].lower() in {"человек", "чел", "штук", "шт", "единиц", "раз", "позиций"}:
+        # «пришли 310 человек»: what is counted is said before the figure, in its clause
+        before = re.split(r"[,;:.]\s+|\s[—–]\s", (brief_text or "")[: hits[0].start()])[-1].strip()
+        bw = [w for w in before.split() if not re.search(r"\d", w) or re.fullmatch(r"(?:19|20)\d{2}", w)]
+        if 1 <= len(bw) <= 6 and len(before.split()) <= 6:
+            lab = H.cap_first(before)
+            return None if lab.lower() in (label or "").lower() else lab
+        return None
     stem = words[0].lower()[:5]
     if stem in " ".join((label or "").lower().split()[:2]):
         return None  # the label names what is counted («Новых кладовщиков»)
     while words and words[-1].lower() in {"в", "на", "с", "по", "к", "из", "за", "для", "до", "от"}:
         words.pop()
     return H.cap_first(" ".join(words)) if words else None
+
+
+_VALUE_PREP_RE = re.compile(r"^(?:до|на|с|со|в|к)\s+(?=[+\-−]?\d)", re.I)
+_VALUE_HEDGE = {"около": "≈", "примерно": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
+_YEAR_VALUE_RE = re.compile(r"^(?:19|20)\d{2}(?:\s*(?:г\.?|год\w*))?$", re.I)
+
+
+def tidy_values(o: DeckOutline) -> list[str]:
+    """A large figure is the figure: a preposition is no part of it («до 1 428 млн ₽» → «1 428 млн ₽»), a hedge is its
+    sign («около 74%» → «≈ 74%»), a bare year is no key figure («2026 г» beside a phrase cut short)."""
+    said: list[str] = []
+    for s in o.slides:
+        c = s.content
+        keep = []
+        for n in c.numbers:
+            v = " ".join((n.value or "").split())
+            nv = _VALUE_PREP_RE.sub("", v)
+            m = re.match(r"^(около|примерно|почти|более|свыше|больше|менее|меньше)\s+(?=[+\-−]?\d)", nv, re.I)
+            if m:
+                nv = f"{_VALUE_HEDGE[m.group(1).lower()]} {nv[m.end():]}"
+            if nv != v:
+                said.append(f"slide {s.id}: the figure «{v}» → «{nv}»")
+                n.value = nv
+            if _YEAR_VALUE_RE.match(nv):
+                said.append(f"slide {s.id}: the year «{nv}» is no key figure — dropped")
+                continue
+            keep.append(n)
+        c.numbers = keep
+        if s.kind in (PatternKind.big_number, PatternKind.stat_row) and not keep and not (c.bullets or c.paragraphs or c.items or c.chart or c.table):
+            s.kind = PatternKind.bullets  # (its one figure was a year: the slide says its heading and its words)
+    return said
 
 
 def label_figures(o: DeckOutline, brief_text: str) -> list[str]:
@@ -393,7 +541,7 @@ def _restates_chart(text: str, s: OutlineSlide) -> bool:
     return len(figs) >= 3 and bool(shown) and figs <= shown and len(words) <= 4
 
 
-def conclusion_headlines(o: DeckOutline) -> list[str]:
+def conclusion_headlines(o: DeckOutline, model: bool = False) -> list[str]:
     """A slide headed by its topic («Удержание», «Установки») whose own text states its point with a figure gets that
     sentence as its heading — the author's words as written, moved, not repeated (the topic stays the slide's
     section): its conclusion line, else a sentence of its notes the slide does not show (the author's text laid out
@@ -408,6 +556,8 @@ def conclusion_headlines(o: DeckOutline) -> list[str]:
             s.takeaway = None
         if s.kind in _FRAME or not _topic(s.headline) or _asks(s) or s.kind in (PatternKind.quote,):
             continue
+        if model and len(H.strip_end(s.headline).split()) > 3:
+            continue  # a model's heading stays unless it is a bare topic («Хронология», «Оценки», «Главное в цифрах»)
         pick: Optional[str] = None
         where = ""
         if s.takeaway and _point_ok(s.takeaway):
@@ -498,10 +648,24 @@ def _figures_of(sentence: str) -> list:
 def tidy(o: DeckOutline) -> list[str]:
     """A conclusion line that repeats a line of the slide (or its heading) is said once."""
     said: list[str] = []
+    from verstka.planning.plan_data import _stems as stems
+
     for s in o.slides:
         c = s.content
+        if s.kind == PatternKind.title and (c.paragraphs or c.bullets):
+            # a cover's line that only says its title and subtitle once more (qa5: «Verstka — цифровой дизайнер
+            # презентаций. Команда «Рекрут 2», задача № 4 VK Tech.» under them) goes
+            have = stems(f"{s.headline} {s.subtitle or ''}")
+            for field in ("paragraphs", "bullets"):
+                lines = getattr(c, field)
+                keep = [x for x in lines if not (stems(x) and len(stems(x) & have) >= 0.7 * len(stems(x)))]
+                if len(keep) != len(lines):
+                    said.append(f"slide {s.id}: the cover's line repeating its title went")
+                    setattr(c, field, keep)
         if c.chart is not None and c.chart.title:
             c.chart.title = H.cap_first(c.chart.title)
+        if s.subtitle and " ".join(H.strip_end(s.subtitle).lower().split()) == " ".join(H.strip_end(s.headline or "").lower().split()):
+            s.subtitle = None  # the subtitle said the heading once more
         hd = " ".join(H.strip_end(s.headline or "").lower().split())
         if s.kind not in _FRAME and hd and not _asks(s):
             # «Топ-5 клиентов дали 41% выручки» as the heading and once more as the slide's one line: said once — its
@@ -629,8 +793,8 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
     from verstka.planning.proportions import check_outline
 
     # (the proportions before the tables' conclusions: those are counted from the cells, not said by anyone)
-    for step in (lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
-                 lambda: tidy(o), lambda: conclusion_headlines(o) if o.planned_by not in ("agent", "model") else [],
+    for step in (lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: tidy_values(o), lambda: keep_table_beside_chart(o), lambda: keep_author_tables(o, brief_text), lambda: keep_figures(o) if o.planned_by not in ("agent", "model") else [], lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
+                 lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
                  lambda: lead_figure(o), lambda: ensure_cover(o)):

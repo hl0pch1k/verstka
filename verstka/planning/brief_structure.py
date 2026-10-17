@@ -602,15 +602,34 @@ def _label(phrase: str, after_verb: bool) -> str:
     return H.cap_first(_nominative(phrase) if after_verb else phrase)
 
 
+_PERIOD_PAIRS = (
+    (r"(?:к|по\s+сравнению\s+с|против)\s+(?:прошл|предыдущ)\w*\s+квартал\w*|(?:в|за)\s+(?:прошл|предыдущ)\w*\s+квартал\w*", ["Прошлый квартал", "Этот квартал"]),
+    (r"(?:к|по\s+сравнению\s+с|против)\s+(?:прошл|предыдущ)\w*\s+год\w*|годом\s+ранее|год\s+назад|(?:в|за)\s+(?:прошл|предыдущ)\w*\s+год\w*", ["Год назад", "Сейчас"]),
+    (r"(?:к|по\s+сравнению\s+с|против)\s+(?:прошл|предыдущ)\w*\s+месяц\w*|(?:в|за)\s+(?:прошл|предыдущ)\w*\s+месяц\w*", ["Прошлый месяц", "Этот месяц"]),
+)
+_PLAN_PAIR_RE = re.compile(
+    r"цел[ьи]|план(?!\s+выполнен)|прогноз|ожида|будет|будут|станет|составит|вырастет|вырастут|достигнет|целев|"
+    r"\b(?:поднять|снизить|сократить|увеличить|уменьшить|довести|повысить|вывести)\b|\b(?:увелич|уменьш|сниз|сократ|повыс)ится\b", re.I)
+
+
+def change_heads(context: str) -> list[str]:
+    """The two ends of a change as a table or a chart names them: a plan («поднять с 300 до 330», «вырастет») —
+    «Сейчас / Цель»; a change told as done — by its periods when the text names them («к прошлому кварталу» →
+    «Прошлый квартал / Этот квартал»), else «Было / Стало»."""
+    return _pair_categories(context)
+
+
 def _pair_categories(context: str) -> list[str]:
     low = context.lower()
     if "до и после" in low:
         return ["До", "После"]
     if re.search(r"нынешн|текущ|сейчас|сегодняшн", low) and "прогноз" in low:
         return ["Сейчас", "Прогноз"]
-    if re.search(r"цел[ьи]|план|прогноз|ожида|будет|будут|станет|составит|вырастет|вырастут|достигнет|целев|\w+(?:ить|ять|ать)\b|"
-                 r"\b(?:увелич|уменьш|сниз|сократ|повыс)ится\b", low):
+    if _PLAN_PAIR_RE.search(low):
         return ["Сейчас", "Цель"]
+    for rx, heads in _PERIOD_PAIRS:
+        if re.search(rx, low):
+            return list(heads)
     return ["Было", "Стало"]
 
 
@@ -877,6 +896,8 @@ def _chain(sentence: str, min_items: int = 3) -> Optional[tuple[str, Series]]:
                 before = phrase
             else:
                 ws = before.split()
+                if len(ws) >= 2 and ws[-1].lower() in {"дают", "даёт", "дает", "дали", "дал", "дала", "приносят", "приносит", "составляют", "составляет", "занимают", "занимает"}:
+                    ws = ws[:-1]  # «Рекомендации сотрудников дают 34%»: the label is who gives it
                 verbs = [i for i, w in enumerate(ws) if _is_verb(w)]
                 if verbs and verbs[-1] == len(ws) - 1 and verbs[-1] > 0:
                     before = " ".join(ws[: verbs[-1]])
@@ -1212,6 +1233,51 @@ def _money_sense(what: str, s: Series) -> int:
     return 2 if any(v < 0 for v in s.values) or _RESULT_WORDS_RE.search(s.name or "") else 0
 
 
+_COMPARE_ONE_RE = re.compile(r"^(?:(?:потом|затем|также|и|а)\s+)?(?:сравни|сравните)\s+с\s+(?P<who>[^:]{2,40}?)\s*:\s*(?P<data>.+)$", re.I)
+
+
+def _compare_with_one(block: _Block, reg: _Registry, sentences: list[str], inline: dict[int, str]) -> None:
+    """«Сравни с рынком: по данным hh.ru, у инженеров 47 дней» under «Средний срок закрытия вакансии инженера — 54 дня,
+    …»: one figure to compare with the slide's own figure of the same thing — a chart of the two («У нас» 54, «Рынок»
+    47), never cards without the comparison (qa5 02)."""
+    spec = block.spec
+    if spec is None:
+        return
+    for sent in sentences:
+        m = _COMPARE_ONE_RE.match(sent.strip())
+        if not m:
+            continue
+        nums = list(_NUM_RE.finditer(m.group("data")))
+        if len(nums) != 1:
+            continue
+        theirs = _num(nums[0].group("num"))
+        want = _stems(m.group("data"))
+        best = None
+        for sid in block.series:
+            ser = reg.get(sid)
+            if ser is None:
+                continue
+            for cat, v in zip(ser.categories, ser.values):
+                if _stems(cat) & want and v != theirs:
+                    best = (cat, v, ser)
+                    break
+            if best:
+                break
+        if best is None:
+            continue
+        cat, ours, ser = best
+        w0 = m.group("who").strip().lower()
+        known = {"рынком": "Рынок", "рынками": "Рынок", "конкурентами": "Конкуренты", "конкурентом": "Конкурент", "отраслью": "Отрасль",
+                 "планом": "План", "целью": "Цель", "нормой": "Норма", "средним": "Среднее", "прошлым годом": "Год назад",
+                 "прошлым кварталом": "Прошлый квартал", "бенчмарком": "Бенчмарк"}
+        who = known.get(w0) or H.cap_first(_nominative(re.sub(r"(?<=[бвгдзклмнпрстфхцчшщ])ом$", "", w0))) or "Сравнение"
+        pair = Series(id="", name=H.cap_first(H.strip_end(cat)), categories=["У нас", who], values=[ours, theirs], unit=ser.unit, source_span=sent[:200])
+        sid = reg.add_series(pair)
+        block.series.append(sid)
+        spec.charts.append(ChartRequest(type="column", what=f"сравнение с {m.group('who').strip()}", series_ids=[sid]))
+        inline[len(spec.charts) - 1] = sid
+
+
 def _link_requests(block: _Block, reg: _Registry, inline: dict[int, str], block_numbers: list[float]) -> None:
     """Gives each chart request of the slide its data: the enumeration said in the request itself, else the series of
     this slide it names («средний чек до и после» → «Средний чек»), else the one its kind fits best."""
@@ -1431,6 +1497,7 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
             if st:
                 spec.footnote = H.strip_end(st)
         spec.items = items
+        _compare_with_one(block, reg, sentences, inline)
         _link_requests(block, reg, inline, block_numbers)
         for idx, (cat, value) in starts:
             req = spec.charts[idx]
