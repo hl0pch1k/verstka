@@ -2162,13 +2162,14 @@ def _one_plate_per_list(slide: Slide, added: list, plates: list, pal: "_Palette"
         # the plate holds every text standing on it whole (their boxes, not only their letters: the audit reads a text
         # whose box runs past its plate as text out of its card) — a text it reaches joins the block
         group = list(group)
-        for _ in range(6):
+        px, py = int(0.016 * W), int(0.016 * H)  # (the plate's air around its texts: a text it reaches is on it too)
+        for _ in range(8):
             x0 = min(b[0] for _e, b in group)
             y0 = min(b[1] for _e, b in group)
             x1 = max(b[0] + b[2] for _e, b in group)
             y1 = max(b[1] + b[3] for _e, b in group)
             ids = {id(e) for e, _b in group}
-            more = [(e, b) for e, b in texts if id(e) not in ids and b[0] < x1 and b[0] + b[2] > x0 and b[1] < y1 and b[1] + b[3] > y0]
+            more = [(e, b) for e, b in texts if id(e) not in ids and b[0] < x1 + px and b[0] + b[2] > x0 - px and b[1] < y1 + py and b[1] + b[3] > y0 - py]
             if not more:
                 break
             group += more
@@ -2187,7 +2188,6 @@ def _one_plate_per_list(slide: Slide, added: list, plates: list, pal: "_Palette"
             # (a marker or an accent bar at the rows' left, a rule between them that starts inside the block)
             if mb[1] >= y0 - int(0.01 * H) and mb[1] + mb[3] <= y1 + int(0.01 * H) and x0 - int(0.06 * W) <= mb[0] <= x1 and mb[0] + mb[2] <= x1 + int(0.25 * W):
                 x0, x1 = min(x0, mb[0]), max(x1, mb[0] + mb[2])
-        px, py = int(0.016 * W), int(0.016 * H)
         box = Bbox(x=max(x0 - px, 0), y=max(y0 - py, 0), w=min(x1 + px, W) - max(x0 - px, 0), h=min(y1 + py, H) - max(y0 - py, 0))
         plate = Canvas(slide).rect(box, fill, None, radius_emu=min(_card_radius_emu(manifest), int(0.03 * H)), name="Plate")
         tree = plate.getparent()
