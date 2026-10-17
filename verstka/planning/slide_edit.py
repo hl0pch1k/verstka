@@ -763,6 +763,12 @@ def redesign_slide(
     for t in checked.tables:
         if not any(t.columns == u.columns and t.rows == u.rows for u in grounded.tables):
             grounded.tables.append(t)
+    if style_only(request) and old.kind.value not in FRAME_KINDS and emphasis is None:
+        lost = lost_lines(old, result)
+        if lost:
+            # the check of the figures cut a conclusion the redesign kept (the API's «цифры крупнее» on the summary: «…больше
+            # 120 мин, 3 — больше 10 часов» lost its tail) — a wish about the look never costs a conclusion
+            raise ValueError(f"после проверки цифр в новом варианте пропадал вывод слайда («{lost[0][:60]}»…) — слайд оставлен как был")
     if _visible(result) == _visible(old) and not (photo or drop_photo):
         # never «переделан» for a slide that did not change (N-E4): the reply says what happened instead
         if answered:

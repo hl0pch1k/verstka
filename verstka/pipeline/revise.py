@@ -1106,8 +1106,11 @@ def fix_slide(
         else:
             voice.agent("designer", f"Дизайнер: слайд {n} — правлю оформление по правилам шаблона.", 0.15)
 
-        # C. structural fixes of what is left on the slide, rolled back when worse
-        ids = fixable(rep, xml_only=False)
+        # C. structural fixes of what is left on the slide, rolled back when worse — none after a redesign for a wish
+        # about the look: a shortened text or another sample would undo what was asked and cost the slide's conclusions
+        from verstka.planning.slide_edit import style_only as _style_only
+
+        ids = fixable(rep, xml_only=bool(redesigned and wishes and _style_only(wishes)))
         if ids:
             structural = any(a.action in RERENDER_ACTIONS for acts in plan_fixes(rep, plan, ids).values() for a in acts)
             if structural and not rerendered:
@@ -1172,9 +1175,18 @@ def fix_slide(
         errors_after = sum(1 for i in report.issues if i.slide == n and i.severity == "error")
         worse = errors_after > errors_before
         applied = not worse and slide_changed and (bool(fixed) or bool(wishes))
+        # a wish about the look («цифры крупнее») never costs a conclusion — neither the designer's version nor the
+        # autofix's shortening of it afterwards (qa4 NEW-E1, live: «…больше 120 мин, 3 — больше 10 часов» condensed away)
+        from verstka.planning.slide_edit import lost_lines, style_only
+
+        lost_words = bool(wishes) and style_only(wishes or "") and not frame and bool(lost_lines(osl0, final_outline.slides[n - 1]))
+        if lost_words:
+            applied = False
         why = None
         if not applied:
-            if worse:
+            if lost_words:
+                why = "Сделать крупнее, не потеряв выводы слайда, не получилось — оставил как было"
+            elif worse:
                 why = "Новая версия слайда вышла хуже — оставил как было"
             elif wishes:
                 # (a wish was given: «попробуйте добавить пожелание» would ask for what the person already did)
