@@ -31,6 +31,17 @@ GOAL_VIZ: dict[TaskKind, tuple[VizKind, str]] = {
 }
 
 
+class GoalPeriod(BaseModel):
+    """Период цели: всё («all»), последний («latest»), диапазон («range»: start…end) или сравнение двух («compare»:
+    base — период A или его начало, target — период B или его начало). Периоды — как в данных («2025-06», «2021»)."""
+
+    kind: str = "all"
+    start: Optional[str] = None
+    end: Optional[str] = None
+    base: Optional[str] = None
+    target: Optional[str] = None
+
+
 class Goal(BaseModel):
     """Цель из текста: фраза как в тексте, задача, к которой она ведёт, и предмет (основы слов) для сопоставления."""
 
@@ -52,6 +63,13 @@ class Goal(BaseModel):
     negate: list[str] = Field(default_factory=list)
     # вопрос понят, а задача — нет («Расскажите о продажах»): показан главный вывод по данным, это сказано
     free: bool = False
+    # цель понята снаружи (модель, `verstka/data/intent.py`): поля ниже и вопрос — явные, фразу план не разбирает
+    given: bool = False
+    column: Optional[str] = None  # колонка-величина, точное имя
+    dimension: Optional[str] = None  # колонка-разрез (категории), точное имя
+    categories: list[str] = Field(default_factory=list)  # названные строки или колонки («Москва и Казань»)
+    weight: Optional[str] = None  # среднее с весом по этой колонке
+    period: Optional[GoalPeriod] = None
 
 
 _V = r"(?:покажи(?:те)?|показать|отрази(?:те)?|отразить|продемонстрируй(?:те)?|визуализируй(?:те)?)"

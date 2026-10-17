@@ -283,7 +283,9 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
         if g.unmet:
             notes.append(f"Цель «{g.phrase}» здесь не подходит: {g.unmet}.")
         elif base.get(g.task, 0.0) >= FEASIBLE:
-            if used is None or base[g.task] > base[used.task]:
+            if used is None or (base[g.task] > base[used.task] and not (g.given and used.given)):
+                # цели, понятые моделью, — по порядку брифа (порог — первым): главная — первая осуществимая, а не та,
+                # чья задача сильнее по данным
                 used = g
         elif g.phrase not in feasible_phrases:
             # одна фраза — несколько прочтений («какой регион растёт быстрее»: динамика и сравнение): пометка — только

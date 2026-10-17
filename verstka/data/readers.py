@@ -689,9 +689,38 @@ def _build_table(
     if not keep:
         raise _NoData("В таблице нет значений")
 
+    # счёт матчей текстом («41-18» в колонке «Мячи»): две колонки чисел — «Забито» и «Пропущено», иначе сравнить
+    # команды по забитым нечем
+    renamed: dict[int, str] = {}
+    for pos in range(len(keep) - 1, -1, -1):
+        j = keep[pos]
+        vals = [v for v in typed_cols[pos] if v is not None]
+        hdr = names_units[j][0] or ""
+        halves = [x.strip() for x in re.split(r"\s*/\s*", hdr)] if hdr.count("/") == 1 else []
+        if len(vals) >= 2 and len(halves) == 2 and all(re.fullmatch(r"[А-ЯЁа-яёA-Za-z][\w\s.-]*", x) for x in halves) \
+                and all(v.__class__ is str and _FRACTION.fullmatch(v) for v in vals):
+            # дробь «22/25» под шапкой «Сдали / сдавали» — две колонки чисел: «Сдали» и «Сдавали» (вес среднего)
+            pairs = [_FRACTION.fullmatch(v) if v.__class__ is str else None for v in typed_cols[pos]]
+            typed_cols[pos] = [int(m_.group(1)) if m_ else None for m_ in pairs]
+            typed_cols.insert(pos + 1, [int(m_.group(2)) if m_ else None for m_ in pairs])
+            keep.insert(pos + 1, j)
+            units.insert(pos + 1, None)
+            renamed = {(k + 1 if k > pos else k): v for k, v in renamed.items()}
+            renamed[pos], renamed[pos + 1] = halves[0][:1].upper() + halves[0][1:], halves[1][:1].upper() + halves[1][1:]
+            continue
+        if len(vals) >= 2 and re.search(r"(?i)мяч|гол|шайб", names_units[j][0] or "") and \
+                all(v.__class__ is str and _SCORE.fullmatch(v) for v in vals):
+            pairs = [_SCORE.fullmatch(v) if v.__class__ is str else None for v in typed_cols[pos]]
+            typed_cols[pos] = [int(m_.group(1)) if m_ else None for m_ in pairs]
+            typed_cols.insert(pos + 1, [int(m_.group(2)) if m_ else None for m_ in pairs])
+            keep.insert(pos + 1, j)
+            units.insert(pos + 1, None)
+            renamed = {(k + 1 if k > pos else k): v for k, v in renamed.items()}
+            renamed[pos], renamed[pos + 1] = "Забито", "Пропущено"
+
     names: list[str] = []
     for pos, j in enumerate(keep):
-        name = names_units[j][0]
+        name = renamed.get(pos) or names_units[j][0]
         if not name or name.lower().startswith("unnamed:"):
             name = (first_name if (j == 0 and first_name) else None) or _name_by_values(typed_cols[pos]) \
                 or f"Колонка {pos + 1}"
@@ -1022,6 +1051,8 @@ _DERIVED_COLUMN = re.compile(
     re.IGNORECASE,
 )
 _WIDE_NOTE = "Таблица развёрнута: периоды были в колонках"
+_SCORE = re.compile(r"\s*(\d{1,4})\s*[-–:]\s*(\d{1,4})\s*")
+_FRACTION = re.compile(r"\s*(\d{1,7})\s*/\s*(\d{1,7})\s*")
 _ID_HEADER = re.compile(r"(?:^|[^а-яёa-z])(?:№|n|no|id|ид|код|номер|п/п|артикул)(?:[^а-яёa-z]|$)|№", re.IGNORECASE)
 
 

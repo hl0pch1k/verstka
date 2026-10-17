@@ -148,8 +148,51 @@ def _f(fs: FactSet, fid: str) -> Optional[HeadlineFact]:
     return next((f for f in fs.facts if f.id == fid), None)
 
 
+def _fastest_head(fs: FactSet) -> Optional[str]:
+    """Темп по колонкам-периодам: «GPU-инстансы растут быстрее всех: в 3,1 раза — июль → сентябрь», «Сильнее всех
+    снижение — Строительство: −20% — 2024 → 2025»."""
+    c = fs.ctx
+    dm = _f(fs, "decline_max")
+    if c.get("decline") and dm is not None:
+        lab, p0, p1, _k = c["decline"]
+        u = "%" if dm.unit == "%" else (dm.unit or "")
+        tail = f" — {lower_first(p0)} → {lower_first(p1)}" if p0 and p1 else ""
+        return f"Сильнее всех снижение — {lab}: {fmt_signed(dm.value, u)}{tail}"
+    fg = _f(fs, "growth_max")
+    if c.get("fastest_cols") and fg is not None:
+        lab, p0, p1, kind = c["fastest_cols"]
+        v = f"в {fmt_num(fg.value, 1)} {times_word(fg.value)}" if kind == "times" else fmt_signed(fg.value, "%")
+        gpl = "pl" if is_plural_value(lab) else "m"
+        return f"{lab} {verb('grow', gpl, past=False)} быстрее всех: {v} — {lower_first(p0)} → {lower_first(p1)}"
+    return None
+
+
 def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
+    fh = _fastest_head(fs)
+    if fh:
+        return fh, c.get("caption")
+    lt, lv_ = c.get("latest"), _f(fs, "latest_value")
+    if lt and lv_ is not None:
+        # «сколько ожидаем к декабрю»: значение последнего периода (прогноз — так и назван), рядом — последний факт
+        name, when, is_fc, cur_when = lt
+        u = c.get("unit_short")
+        head = f"{'Прогноз на' if is_fc else 'На'} {when} — {fmt_value(lv_.value, u)}"
+        cv_ = _f(fs, "current_value")
+        if cv_ is not None and cur_when:
+            head += f", сейчас — {fmt_value(cv_.value, cv_.unit)} ({cur_when})"
+        return head, c.get("caption")
+    pc = c.get("period_compare")
+    if pc and _f(fs, "period_change") is not None and _f(fs, "period_b") is not None:
+        # цель сравнивает два периода: B против A («к тому же периоду 2024», «до и после»)
+        name, ch, a_txt, b_txt, yoy, ya, add = pc
+        u = c.get("unit_short")
+        vb, va = _f(fs, "period_b").value, _f(fs, "period_a").value
+        if yoy:
+            return f"{name}: {ch} к тому же периоду {ya} ({b_txt})", c.get("caption")
+        avg = "" if add else " в среднем"
+        return (f"{name}{avg}: {fmt_value(vb, u)} ({b_txt}) против {fmt_value(va, u)} ({a_txt}), {ch}",
+                c.get("caption"))
     nc, ch_ = c.get("named_cat"), _f(fs, "cat_change")
     if nc and ch_ is not None:
         # цель назвала одну категорию ряда: «Базовый: −14% за 3 квартала»
@@ -464,21 +507,9 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
     th = _threshold_head(fs)
     if th:
         return th, c.get("caption")
-    dm = _f(fs, "decline_max")
-    if c.get("decline") and dm is not None:
-        # «кто сократил сильнее всех»: наибольшее снижение, а не наибольшее значение
-        lab, p0, p1, _k = c["decline"]
-        u = "%" if dm.unit == "%" else (dm.unit or "")
-        tail = f" — {lower_first(p0)} → {lower_first(p1)}" if p0 and p1 else ""
-        return f"Сильнее всех снижение — {lab}: {fmt_signed(dm.value, u)}{tail}", c.get("caption")
-    fg = _f(fs, "growth_max")
-    if c.get("fastest_cols") and fg is not None:
-        # «какой сервис дорожает быстрее всех» при колонках-месяцах: темп лидера, а не наибольшая сумма
-        lab, p0, p1, kind = c["fastest_cols"]
-        v = f"в {fmt_num(fg.value, 1)} {times_word(fg.value)}" if kind == "times" else fmt_signed(fg.value, "%")
-        gpl = "pl" if is_plural_value(lab) else "m"
-        return (f"{lab} {verb('grow', gpl, past=False)} быстрее всех: {v} — {lower_first(p0)} → {lower_first(p1)}",
-                c.get("caption"))
+    fh = _fastest_head(fs)
+    if fh:
+        return fh, c.get("caption")
     tot, sh = _f(fs, "total"), _f(fs, "leader_share")
     if c.get("ask_total") and tot is not None:
         # «сколько всего отгрузили»: итог — первым, лидер — за ним
@@ -659,6 +690,12 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
     whole: Optional[Phrase] = c.get("whole")
     if share is None:
         return c.get("plain", leader), c.get("caption")
+    ns = _f(fs, "named_share")
+    if c.get("named") and ns is not None:
+        # цель назвала одну часть: её доля — первой, крупнейшая — для сравнения
+        of = f" {whole.low.gen}" if whole is not None else ""
+        return (f"{c['named']} — {fmt_pct(ns.value)}%{of}, больше всего — {leader}: {fmt_pct(share.value)}%",
+                c.get("caption"))
     p = share.value
     words = fraction_words(p)
     v = verb("bring" if c.get("money") else "give", pl, past=False)

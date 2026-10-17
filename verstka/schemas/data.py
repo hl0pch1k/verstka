@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -204,6 +204,9 @@ class TaskDecision(BaseModel):
     goal: Optional[str] = None
     # баллы всех рассмотренных задач
     scores: dict[TaskKind, float] = Field(default_factory=dict)
+    # цель, понятая снаружи (модель): её поля (`goals.Goal` без фразы — колонка, разрез, категории, вес, период, вопрос)
+    # — чтобы данные слайда и пересборка после перезапуска видели ту же величину, что и план, без разбора фразы
+    spec: Optional[dict[str, Any]] = None
 
 
 class VizOption(BaseModel):

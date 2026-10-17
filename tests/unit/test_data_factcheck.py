@@ -2799,8 +2799,9 @@ class Raw:
         if not unit and re.fullmatch(r"[А-ЯЁ][а-яё]+(?:ов|ев|ей|ий)", name.strip()) and self.vals(j) \
                 and all(float(v).is_integer() and v >= 0 for v in self.vals(j)):
             return True  # «Рейсов», «Возвратов», «Заказов» целыми — счёт
-        if re.fullmatch(r"(?i)(?:абонент|клиент|пользовател|сотрудник|подписчик)[ыи]|ваканси[ия]|штат", name.strip()):
-            return True  # «Абоненты», «Клиенты», «Вакансии», «Штат» — счёт людей и мест
+        if re.fullmatch(r"(?i)(?:абонент|клиент|пользовател|сотрудник|подписчик)[ыи]|ваканси[ия]|штат|забито|"
+                        r"пропущено|сдали|сдавали", name.strip()):
+            return True  # «Абоненты», «Вакансии», «Штат», «Забито» (мячи), «Сдавали» — счёт людей, мест, мячей
         if re.fullmatch(r"(?:пн|вт|ср|чт|пт|сб|вс|(?:19|20)\d\d)", name.strip().lower()) and T_FLOW.search(self.title):
             return True  # колонка-день или колонка-год о величине не говорит: «Заказы ресторана по часам» — счёт
         if T_LEVEL_TITLE.search(self.title):

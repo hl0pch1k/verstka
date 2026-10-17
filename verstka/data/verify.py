@@ -511,6 +511,10 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
                 raise _Fail("такого периода в файле нет")
             return float(int(str(p["to"])[:4])), []
         rng = [s[k] for k in ks if fk is not None and tk is not None and fk <= k <= tk]
+        if mode == "sum":
+            if not rng:
+                raise _Fail("нет значений за периоды")
+            return float(sum(rng)), rng
         if mode in ("max", "min", "mean", "count", "neg", "median"):
             if not rng:
                 raise _Fail("нет значений за периоды")
@@ -817,6 +821,14 @@ def _stem_eq(a: str, b: str) -> bool:
 
 
 # ── проверка плана ────────────────────────────────────────────────────────────────────────────────────────────────
+def recompute(table: Table, prov: dict) -> Optional[float]:
+    """Значение по происхождению — тем же счётом, что и проверка (None — не считается)."""
+    try:
+        return _compute(table, prov)[0]
+    except Exception:  # noqa: BLE001 - нет значения
+        return None
+
+
 def verify(table: Table, facts: Sequence[HeadlineFact], prov: dict[str, dict], headline: str,
            caption: Optional[str], labels: Sequence[str] = (), title: str = "",
            bins: Optional[dict] = None) -> Verdict:
@@ -891,7 +903,8 @@ _ALL_N = re.compile(r"во\s+всех\s+(\d+)")
 _K_OF_N = re.compile(r"(?:^|\s)в\s+(\d+)\s+из\s+(\d+)")
 _BETTER = re.compile(r"лучше\s+всех|лучш(?:ий|ая|ее|ие)\b|лидиру|впереди", re.I)
 # меньше — лучше: ошибки, брак, отток, задержки, время, ставки и цены, преступность, расход
-_LOWER_BETTER = re.compile(r"ошиб|брак|дефект|отток|жалоб|задерж|опозда|просроч|врем[яе]|длительн|минут|пинг|"
+# «время», но не «вовремя» («Доставлено вовремя, %» — больше — лучше)
+_LOWER_BETTER = re.compile(r"ошиб|брак|дефект|отток|жалоб|задерж|опозда|просроч|(?<![а-яё])врем[яе]|длительн|минут|пинг|"
                            r"ставк|цен[аы]|тариф|стоимост|преступн|дтп|авари|расход|потер|убыт|выброс|примес", re.I)
 
 
@@ -925,6 +938,10 @@ def claims_problem(text: str, ok: dict[str, HeadlineFact], prov: dict[str, dict]
     if m is not None and m.group("c") is not None and re.match(r"^(?:всего|итого|в среднем|ниже|выше)\b",
                                                              m.group("c").strip(), re.I):
         m = None  # «Всего — 3 006, больше всего — Подольск» — итог, а не первенство
+    named_keys = _keys_of(prov.get("named_share")) if "named_share" in ok else []
+    if m is not None and named_keys and any(_same_name(n, k) for n in _names(m.group("a") or m.group("b") or
+                                                                           m.group("c") or "") for k in named_keys):
+        m = None  # «СБП — 23% оборота, больше всего — Банковская карта»: названа часть цели, а не лидер
     if lead is not None and m is not None:
         said = m.group("a") or m.group("b") or m.group("c") or ""
         keys = _keys_of(prov.get(lead.id))

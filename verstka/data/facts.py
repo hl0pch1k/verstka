@@ -21,7 +21,7 @@ from verstka.data.aggregate import (
     NICE_MINUTES, RATE_COLUMN, TO_MINUTES, CatView, Data, KpiItem, Measure, TimeView, is_index, is_other_label,
     stem_hits,
 )
-from verstka.data.parse import is_total_label, period_str, quantity, season_name, split_unit
+from verstka.data.parse import is_total_label, iso_ord, period_str, quantity, season_name, split_unit
 from verstka.data.units import _num as _num_cell
 from verstka.data.words import (
     PERIOD_WORDS, Phrase, count_dat, count_gen, count_words, duration_gen, duration_text, each_unit, file_title, fmt_num, fmt_pct,
@@ -57,8 +57,8 @@ class FactSet:
 
 # ── происхождение чисел (для самопроверки, verify.py) ────────────────────────────────────────────────────────────
 def _skip(d: Data) -> list[int]:
-    """Строки, которых нет в данных: итог, ориентиры и прогнозы."""
-    return sorted(set(d.totals) | set(d.benchmarks) | set(d.forecast_rows))
+    """Строки, которых нет в данных: итог, ориентиры, прогнозы и строки вне цели (её период и категории)."""
+    return sorted(set(d.totals) | set(d.benchmarks) | set(d.forecast_rows) | set(d.scoped_out))
 
 
 def _skip_t(d: Data, m: Optional[Measure]) -> list[int]:
@@ -147,7 +147,9 @@ def _dynamics_named_cat(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
     """Цель называет одну категорию длинного ряда («тариф «Базовый»»): изменение её ряда от первого периода к
     последнему — «Базовый: −14% за 3 квартала, с 1 240 до 1 064»."""
     subj = [x for x in d.subject if len(x) >= 4]
-    hits = [sv for sv in tv.series if any(same_stem(x, w) for x in subj for w in stems_of(sv.name) if len(w) >= 4)]
+    hits = [sv for sv in tv.series if sv.name in d.categories] if len(d.categories) == 1 else []
+    hits = hits or [sv for sv in tv.series
+                    if any(same_stem(x, w) for x in subj for w in stems_of(sv.name) if len(w) >= 4)]
     if len(hits) != 1 or len(tv.series) < 2:
         return False
     sv = hits[0]
@@ -177,6 +179,184 @@ def _dynamics_named_cat(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
     fs.ctx.setdefault("labels", []).extend([sv.name, period_text(pf), period_text(pl)])
     fs.ctx["caption"] = _short([f"{sv.name}: с {fmt_value(a_, unit, 'gen')} ({period_text(pf)}) до "
                                 f"{fmt_value(b_, unit, 'gen')} ({period_text(pl)})."])
+    return True
+
+
+def _latest_value(d: Data, fs: FactSet) -> bool:
+    """Цель спрашивает последний период названной колонки («сколько пользователей ожидаем к декабрю» — «MAU прогноз»):
+    её значение в последнем периоде, где оно есть; у прогноза — и последний факт рядом."""
+    tj = d.time_col
+    if tj is None:
+        return False
+    fc = next((x for x in d.forecasts if d.column in (x.name, f"{x.name}, {x.unit or ''}")), None)
+    col = fc or next((x for x in d.measures if d.column in (x.name, f"{x.name}, {x.unit or ''}")), None)
+    if col is None or col.j < 0:
+        return False
+
+    def last_of(mm: Measure) -> Optional[tuple[int, str]]:
+        best = None
+        for i in range(len(d.table.rows)):
+            if i in d.totals or i >= len(mm.values) or mm.values[i] is None:
+                continue
+            iso = period_str(str(d.cell(i, tj)), True, years=True)
+            o = iso_ord(iso) if iso else None
+            if o is not None and (best is None or o[1] > best[0]):
+                best = (o[1], i, iso)
+        return (best[1], best[2]) if best else None
+
+    got = last_of(col)
+    if got is None:
+        return False
+    i, iso = got
+    v = float(col.values[i])  # type: ignore[arg-type]
+    unit = col.unit_text
+    fs.add("latest_value", round(v, 1) if abs(v) < 100 else round(v), "total", f"{period_text(iso)} — {fmt_value(v, unit)}",
+           unit, f"«{col.name}», {period_text(iso)}.", prov={"op": "cell", "row": i, "col": col.j, "scale": col.scale})
+    is_fc = fc is not None or bool(re.search(r"(?i)прогноз|ожида", col.name))
+    fs.ctx["latest"] = (col.name, period_text(iso), is_fc, None)
+    fs.ctx["unit_short"] = unit
+    fs.ctx.setdefault("labels", []).extend([period_text(iso), col.name])
+    cap = []
+    main = d.main
+    if is_fc and (main is None or main is col):
+        # факт рядом с прогнозом: колонка того же имени без «прогноз» («MAU факт» при «MAU прогноз»)
+        w0 = col.name.split()[0].lower()
+        main = next((x for x in d.measures if x is not col and x.name.split()[0].lower() == w0
+                     and not re.search(r"(?i)прогноз|ожида", x.name)), None)
+    if is_fc and main is not None and main is not col and main.j >= 0:
+        cur = last_of(main)
+        if cur is not None:
+            ci, ciso = cur
+            cv = float(main.values[ci])  # type: ignore[arg-type]
+            fs.add("current_value", round(cv, 1) if abs(cv) < 100 else round(cv), "total",
+                   f"{period_text(ciso)} — {fmt_value(cv, main.unit_text)}", main.unit_text,
+                   f"«{main.name}», {period_text(ciso)} — последний факт.",
+                   prov={"op": "cell", "row": ci, "col": main.j, "scale": main.scale})
+            fs.ctx["latest"] = (col.name, period_text(iso), True, period_text(ciso))
+            fs.ctx["labels"].append(period_text(ciso))
+            cap.append(f"Последний факт — {fmt_value(cv, main.unit_text)} ({period_text(ciso)}, «{main.name}»).")
+    fs.ctx["caption"] = _short(cap) if cap else None
+    return True
+
+
+def _gran_of(base: str, target: str) -> Optional[str]:
+    """Единица сравнения периодов цели: год («2024»), месяц («2024-03», «2025-10-01» и «2025-11-01»), день."""
+    if re.fullmatch(r"\d{4}", base) and re.fullmatch(r"\d{4}", target):
+        return "year"
+    if re.fullmatch(r"\d{4}-\d{2}", base) and re.fullmatch(r"\d{4}-\d{2}", target):
+        return "month"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", base) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", target):
+        return "month" if base.endswith("-01") and target.endswith("-01") else "day"
+    return None
+
+
+def _span_text(units: list[str]) -> str:
+    a, b = period_text(units[0]), period_text(units[-1])
+    if a == b:
+        return a
+    ya, yb = units[0][:4], units[-1][:4]
+    if ya == yb and len(units[0]) >= 7:
+        a = re.sub(r"\s+\d{4}$", "", a)  # «январь – август 2025», «1 июля – 14 августа 2025»
+    return f"{a} – {b}"
+
+
+def _period_compare(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
+    """Цель сравнивает два периода (модель: base — A или его начало, target — B или его начало). «Тот же период»
+    прошлого года — по тем же месяцам (кварталам), что есть в B; до и после — A от base до target, B — от target;
+    у потока A и B одной длины. Сумма у потока, среднее (с весом) у уровня, у остатка (штат, абоненты, MAU) — точки:
+    начало A и конец B. Вывод — B против A: «Продано квартир: −20% к тому же периоду 2024 (январь – август 2025)»."""
+    from verstka.data.verify import recompute
+
+    per = d.period or {}
+    base, target = str(per.get("base") or ""), str(per.get("target") or "")
+    g = _gran_of(base, target)
+    tj = d.time_col
+    if g is None or tj is None or m.j < 0 or base >= target:
+        return False
+    isos: list[str] = []
+    for i in d.rows_idx:
+        iso = period_str(str(d.cell(i, tj)), True, years=True)
+        if iso and m.values[i] is not None and re.match(r"\d{4}", iso):
+            isos.append(iso)
+    if not isos:
+        return False
+    native = min(len(x) for x in isos)
+    cut = {"year": 4, "month": 7, "day": 10}[g]
+    by_year = g == "year" and native > 4  # «2025 к 2024» при кварталах или месяцах — те же кварталы обоих лет
+    if by_year:
+        cut = native
+    if native > cut and g != "year":
+        pass  # дни в месяцы: единица — месяц
+    elif native > cut:
+        return False
+    freq = {4: "year", 10: "day"}.get(cut) or ("quarter" if any("Q" in x[:cut] for x in isos) else "month")
+    ks = sorted({x[:cut] for x in isos})
+    b0, t0 = base[:min(cut, len(base))], target[:min(cut, len(target))]
+    if by_year:
+        B = [u for u in ks if u[:4] == target[:4]]
+        A = [u for u in ks if u[:4] == base[:4] and u[4:] in {x[4:] for x in B}]
+        B = [u for u in B if u[4:] in {x[4:] for x in A}]
+        yoy = True
+    else:
+        A = [u for u in ks if b0 <= u < t0]
+        B = [u for u in ks if u >= t0]
+        yoy = g != "year" and b0[4:] == t0[4:] and b0[:4] < t0[:4]
+        if yoy:
+            # «к прошлому году»: те же месяцы (дни) года, что есть в B
+            B = [u for u in B if u[:4] == t0[:4]]
+            A = [u for u in A if u[:4] == b0[:4] and u[4:] in {x[4:] for x in B}]
+            B = [u for u in B if u[4:] in {x[4:] for x in A}]
+        elif m.additive and not m.stock:
+            B = B[:len(A)]
+            A = A[:len(B)]
+    if not A or not B:
+        return False
+    add = m.additive and not m.stock
+    # остаток и аудитория на момент (штат, абоненты, MAU) «с начала года»: начало против конца, а не суммы и средние;
+    # уровень (тариф, цена) «2021 против 2025» — точки этих периодов, а не среднее 2021–2024
+    points = (m.stock or bool(re.search(r"(?i)\b(?:mau|dau|wau)\b", m.name))) and not yoy
+    if points:
+        A, B = A[:1], B[-1:]
+    elif not yoy and not m.additive and b0 in ks and t0 in ks and len(base) == len(target) and not by_year:
+        A, B, points = [b0], [t0], True
+    w = d.weight_of(m) if not m.additive else None
+    pbase = {"op": "series", "time": tj, "freq": freq, "week_src": False, "ax_start": None,
+             "w": w.j if w is not None else None, "col": m.j, "cols": None,
+             "agg": "sum" if m.additive else ("wmean" if w is not None else "mean"), "by": None, "cat": None,
+             "skip": _skip_t(d, m), "scale": m.scale, "kind": None}
+    mode = "sum" if add else "mean"
+    pa = {**pbase, "mode": mode, "from": A[0], "to": A[-1]}
+    pb = {**pbase, "mode": mode, "from": B[0], "to": B[-1]}
+    va, vb = recompute(d.table, pa), recompute(d.table, pb)
+    if va is None or vb is None or va <= 0:
+        return False
+    unit = m.unit_text
+    pct = (vb / va - 1) * 100
+    level_pp = m.type == "percent" or (unit or "").strip() == "%"
+    ra = round(va, 1) if abs(va) < 100 else round(va)
+    rb = round(vb, 1) if abs(vb) < 100 else round(vb)
+    ta, tb = _span_text(A), _span_text(B)
+    what = "сумма" if add else ("значение" if points else "среднее")
+    fs.add("period_a", ra, "total", f"{ta} — {fmt_value(va, unit)}", unit, f"«{m.name}», {ta}: {what}.",
+           prov={**pa, "tol": 0.051 if abs(va) < 100 else 0.51})
+    fs.add("period_b", rb, "total", f"{tb} — {fmt_value(vb, unit)}", unit, f"«{m.name}», {tb}: {what}.",
+           prov={**pb, "tol": 0.051 if abs(vb) < 100 else 0.51})
+    if level_pp:
+        dv = vb - va
+        fs.add("period_change", round(abs(dv), 1), "change", fmt_signed(round(dv, 1), "п.п."), "п.п.",
+               f"{tb} против {ta}.", prov={"op": "change2", "base": pa, "cur": pb, "kind": "abs", "tol": 0.051})
+        ch = fmt_signed(round(dv, 1), "п.п.")
+    else:
+        fs.add("period_change", round_pct(abs(pct)), "change", fmt_signed(round_pct(pct), "%"), "%",
+               f"{tb} против {ta}.", prov={"op": "change2", "base": pa, "cur": pb, "kind": "pct", "tol": 0.51})
+        ch = fmt_signed(round_pct(pct), "%")
+    mp = metric_phrase(m.name, m.type)
+    name = mp.nom if mp is not None and mp.sure else re.sub(r"\s*,.*$", "", m.name)
+    fs.ctx["period_compare"] = (name, ch, ta, tb, yoy, A[0][:4], add or points)
+    fs.ctx["unit_short"] = unit
+    fs.ctx.setdefault("labels", []).extend([ta, tb] + [period_text(u) for u in A + B] + [A[0][:4], B[0][:4]])
+    fs.ctx["caption"] = _short([f"{upper_first(tb)} — {fmt_value(vb, unit)}, {ta} — "
+                                f"{fmt_value(va, unit)}{'' if add or points else ' в среднем'}."])
     return True
 
 
@@ -433,7 +613,22 @@ def _dynamics(d: Data) -> FactSet:
     if d.ask == "total" and d.ask_periods and m is not None and m.additive and not tv.from_columns \
             and _period_totals(d, tv, m, fs):
         return fs  # «сколько всего заработали за ноябрь и как это соотносится с октябрём»: итог месяца и к базе
-    if tv.dim and m is not None and d.subject and _dynamics_named_cat(d, tv, m, fs):
+    if (d.period or {}).get("kind") == "latest" and d.column and _latest_value(d, fs):
+        return fs  # «сколько ожидаем к декабрю»: значение последнего периода названной колонки (и прогноза)
+    if d.ask in ("fastest", "fastest_down") and tv.from_columns and d.cats is not None:
+        # «какой сервис дорожает быстрее всех» при колонках-месяцах: темп каждой строки по колонкам-периодам
+        cv_ = d.cats
+        real_ = [k for k in range(cv_.n) if not is_other_label(cv_.labels[k])]
+        _fastest_cols(d, cv_, real_, fs, down=d.ask == "fastest_down")
+        if fs.ctx.get("fastest_cols") or fs.ctx.get("decline"):
+            cap_ = fs.ctx.pop("fastest_caption", None)
+            fs.ctx["caption"] = _short([cap_] if cap_ else [])
+            fs.ctx.setdefault("unit_short", cv_.unit)
+            return fs
+    if (d.period or {}).get("kind") == "compare" and m is not None and not tv.from_columns \
+            and d.ask not in ("fastest", "fastest_down") and _period_compare(d, tv, m, fs):
+        return fs  # цель сравнивает два периода («после замены шин», «к прошлому году»): A против B
+    if tv.dim and m is not None and (d.subject or d.categories) and _dynamics_named_cat(d, tv, m, fs):
         return fs  # «правда ли тариф «Базовый» теряет абонентов»: ряд названной категории, а не всех
     part = _goal_part(d, tv)
     if part is not None:
@@ -1915,6 +2110,14 @@ def _comparison(d: Data) -> FactSet:
         fs.ctx["period_note"] = period_text(pl[1]) if (m.stock or (not m.additive and d.weight_of(m) is None)) else \
             f"{period_text(pl[2])} – {period_text(pl[1])}"
         fs.ctx.setdefault("labels", []).append(fs.ctx["period_note"])
+    if "period_note" not in fs.ctx and (d.period or {}).get("kind") in ("latest", "range") and d.time_col is not None \
+            and d.scoped_out and cv.dim != d.cols[d.time_col].name:
+        # период цели («тарифы 2025 года»): строки других периодов вне вывода — какой период, сказано
+        isos = sorted({x for x in (period_str(str(d.cell(i, d.time_col)), True, years=True) for i in d.rows_idx) if x})
+        if isos:
+            fs.ctx["period_note"] = period_text(isos[0]) if len(isos) == 1 else \
+                f"{period_text(isos[0])} – {period_text(isos[-1])}"
+            fs.ctx.setdefault("labels", []).append(fs.ctx["period_note"])
     if d.ask == "total" and m is not None and m.additive and cv.total:
         fs.ctx["ask_total"] = True
     worst_is_min = d.ask == "worst" and m is not None and fs.ctx.get("wording") not in ("slow", "long", "delay") and not (
@@ -2309,6 +2512,13 @@ def _shares(d: Data) -> FactSet:
         return {**_as_share(_pcat(d, cv.measure, cv.dim, keys, named=whole.low.gen if whole is not None else None),
                             total_row=_total_row(d, cv.measure) if cv.total_from_row else None), "tol": 0.51}
 
+    if len(d.categories) == 1 and d.categories[0] in cv.labels and d.categories[0] != leader:
+        # цель назвала одну часть («какую долю оборота занимает СБП»): её доля — ответ, лидер — для сравнения
+        kn = cv.labels.index(d.categories[0])
+        fs.add("named_share", round_pct(shares[kn]), "share", f"{cv.labels[kn]} — {fmt_pct(shares[kn])}%", "%",
+               f"Доля «{cv.labels[kn]}».", prov=p_share([cv.labels[kn]]))
+        fs.ctx["named"] = cv.labels[kn]
+        fs.ctx["labels"] = list(fs.ctx.get("labels", [])) + [cv.labels[kn]]
     fs.add("leader_share", round_pct(p), "share", f"{leader} — {fmt_pct(p)}%", "%",
            f"{leader} — {fmt_pct(p)}%, больше любой другой части: "
            + ", ".join(f"{cv.labels[k]} — {fmt_pct(shares[k])}%" for k in others) + ".", prov=p_share([leader]))

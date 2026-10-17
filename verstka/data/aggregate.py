@@ -69,7 +69,7 @@ _COUNT_NAME = re.compile(r"^(?:число|количество|кол-во|ча�
 _TARGET_NAME = re.compile(r"(?:^|[^а-яё])(?:цел[ьи]|целев|норматив|норма|target|таргет|kpi|ориентир)", re.I)
 # счёт, которым взвешивают средние: чеки, заказы, ответы, анкеты, визиты, сессии, звонки, обращения, клиенты
 _WEIGHT_NAME = re.compile(r"чек(?:ов|и)\b|заказ|ответ(?:ов|ы|ивших)|анкет|респондент|опрошен|визит|сессий|сессии|звонк|"
-                          r"обращени|покупател|транзакц|поездок|посещени|отзыв", re.I)
+                          r"обращени|покупател|транзакц|поездок|посещени|отзыв|сдавал|участник", re.I)
 _PER_UNIT = re.compile(r"/\s*(?:\d+[\s\u00a0]*)?([a-zа-яё][a-zа-яё.·²³]*)", re.I)
 
 
@@ -158,7 +158,9 @@ class Data:
     def __init__(self, table: Table, profile: DatasetProfile, subject: tuple[str, ...] = (), compare: bool = False,
                  head: Optional[str] = None, negate: tuple[str, ...] = (), qualifiers: tuple[str, ...] = (),
                  ask: Optional[str] = None, ask_unit: Optional[str] = None,
-                 pre_qualifiers: Optional[tuple[str, ...]] = None, ask_periods: tuple[int, ...] = ()):
+                 pre_qualifiers: Optional[tuple[str, ...]] = None, ask_periods: tuple[int, ...] = (),
+                 column: Optional[str] = None, dimension: Optional[str] = None, categories: tuple[str, ...] = (),
+                 weight: Optional[str] = None, period: Optional[dict] = None):
         self.table = table
         self.profile = profile
         self.subject = subject
@@ -172,6 +174,12 @@ class Data:
         self.ask = ask  # «кто растёт быстрее всех» → "fastest": темп каждой категории, а не рост целого
         self.ask_unit = ask_unit  # единица порога цели: «ниже 90%» — порог в процентах, колонка — тоже в процентах
         self.ask_periods = ask_periods  # месяцы цели по порядку: «за ноябрь … с октябрём» → (11, 10)
+        # цель, понятая моделью: колонка-величина, разрез, названные категории, вес среднего и период — точные имена
+        self.column = column
+        self.dimension = dimension
+        self.categories = tuple(categories)
+        self.weight_name = weight
+        self.period = period or None
         # сравнение категорий: главная метрика — колонка-итог («Итого за год»), если она есть, а не первая часть
         self.compare = compare
         cols = profile.columns
@@ -184,6 +192,11 @@ class Data:
         self.forecast_rows: set[int] = self._forecast_rows()
         self.rows_idx = [i for i in range(len(table.rows))
                          if i not in self.totals and i not in self.benchmarks and i not in self.forecast_rows]
+        # строки вне цели: период цели («за ноябрь», «в 2025») и названные категории («Москва и Казань») — их нет ни
+        # в выводе, ни на графике (и проверка их пропускает)
+        self.scoped_out: set[int] = self._goal_scope(cols, profile)
+        if self.scoped_out:
+            self.rows_idx = [i for i in self.rows_idx if i not in self.scoped_out]
         self.n = len(self.rows_idx)
         self.measures: list[Measure] = [build_measure(self, j, c) for j, c in enumerate(cols) if c.role == "metric"]
         self.measures = [m for m in self.measures if m.present]
@@ -225,6 +238,42 @@ class Data:
                              None)
 
     # ── строки и колонки
+    def _goal_scope(self, cols: list[ColumnProfile], profile: DatasetProfile) -> set[int]:
+        """Строки, которые цель исключает: вне её диапазона периодов («range»), не последнего периода при сравнении
+        категорий («latest»), не названных категорий (две и больше значения одного разреза)."""
+        out: set[int] = set()
+        rows = list(self.rows_idx)
+        tj = next((j for j, c in enumerate(cols) if profile.time_axis and c.name == profile.time_axis.column), None)
+        per = self.period or {}
+        if tj is not None and per.get("kind") in ("range", "latest"):
+            isos = {}
+            for i in rows:
+                v = self.table.rows[i][tj] if tj < len(self.table.rows[i]) else None
+                iso = period_str(str(v), True, years=True) if v is not None else None
+                if iso:
+                    isos[i] = iso
+            if per.get("kind") == "range" and (per.get("start") or per.get("end")):
+                lo, hi = per.get("start") or "", per.get("end") or ""
+                keep = {i for i, x in isos.items() if (not lo or x[:len(lo)] >= lo) and (not hi or x[:len(hi)] <= hi)}
+                if keep and len(keep) < len(isos):
+                    out |= {i for i in isos if i not in keep}
+            elif per.get("kind") == "latest" and self.compare and len(set(isos.values())) >= 2:
+                ords = {i: (iso_ord(x) or (None, 0))[1] for i, x in isos.items()}
+                last = max(ords.values())
+                out |= {i for i, o in ords.items() if o != last}
+        cats = [c for c in self.categories if c]
+        if len(cats) >= 2:
+            cands = [j for j, c in enumerate(cols) if c.name == self.dimension] + \
+                [j for j, c in enumerate(cols) if c.role in ("dimension", "text", "id") and c.name != self.dimension]
+            for j in cands:
+                vals = {str(self.table.rows[i][j]).strip() for i in rows if j < len(self.table.rows[i])
+                        and self.table.rows[i][j] is not None}
+                hit = [c for c in cats if c in vals]
+                if len(hit) >= 2:
+                    out |= {i for i in rows if str(self.table.rows[i][j]).strip() not in hit}
+                    break
+        return out if len(out) < len(rows) else set()
+
     def _forecast_rows(self) -> set[int]:
         """Строки-прогнозы: период-прогноз в колонке времени («2026П», «2026 (прогноз)») или колонка статуса
         («Тип», «Статус»: Факт / Прогноз / План / Оценка) — всё, что не «факт», не факт."""
@@ -357,6 +406,14 @@ class Data:
         ms = self.measures
         if not ms:
             return None
+        if self.column:
+            # колонку назвала цель (модель) — точное имя: она и есть величина
+            named = next((m for m in ms if m.name == self.column or f"{m.name}, {m.unit or ''}" == self.column
+                          or f"{m.name}, {m.unit_text or ''}" == self.column), None)
+            sib = [m for m in ms if _period_name(m.name) or season_name((split_unit(m.name)[0] or m.name).strip())]
+            if named is not None and not (named in sib and len(sib) >= 2):
+                # колонка-период («2025» рядом с «2024») — не величина, а точка оси: её не навязывают
+                return named
         if self.subject and any(RATE_GOAL.match(s_) for s_ in self.subject) and self.rate_measure is not None:
             # «по обеспеченности врачами», «по уровню преступности» — величина на душу, а не абсолютный счёт
             return self.rate_measure
@@ -552,6 +609,12 @@ class Data:
         оценка — «Анкет»). Колонка-счётчик целыми; из нескольких — с общим словом в имени, потом слово ответов."""
         if m.additive or m.stock or m.change:
             return None
+        if self.weight_name and (not self.column or self.column in (m.name, f"{m.name}, {m.unit or ''}")):
+            # вес назвала цель («по отзывам», «по отправлениям»): среднее — с ним
+            w = next((x for x in self.measures if x is not m and (x.name == self.weight_name or
+                                                                 f"{x.name}, {x.unit or ''}" == self.weight_name)), None)
+            if w is not None and all(v is None or v >= 0 for v in w.values):
+                return w
         return self._weights.get(m.name)
 
     @cached_property
@@ -1102,6 +1165,11 @@ class Data:
         """Строка, которую называет цель при сравнении колонок («сравните отделы по удовлетворённости зарплатой» →
         «Моя зарплата справедлива»): колонки сравнивают по ней, а не по среднему всех строк."""
         rj = self._matrix_rows()
+        if rj is not None and self.categories:
+            # строки назвала цель (модель): точные подписи
+            named = [i for i in self.rows_idx if self.text(i, rj) in self.categories]
+            if len(named) == 1:
+                return named
         if rj is None or not self.subject:
             return []
         dimw = (self.subject_word or "").lower()[:5]
@@ -1141,6 +1209,12 @@ class Data:
     def cat_dim(self) -> Optional[int]:
         """Колонка категорий для сравнения: подпись строки (≤ 60, если есть метрика) или измерение с повторами (2–60
         значений). Без метрики сравнивают число строк — подпись, у которой каждая строка своя, для этого не годится."""
+        if self.dimension:
+            # разрез назвала цель (модель) — точное имя колонки
+            dj = next((j for j, c in enumerate(self.cols) if c.name == self.dimension), None)
+            if dj is not None and dj != self.time_col and (dj in self.dims or dj == self.label) \
+                    and len({self.text(i, dj) for i in self.rows_idx} - {""}) >= 2:
+                return dj
         if self.subject and self.label is not None and self.main is not None:
             # цель называет разрез с повторами («какие специальности оцениваются хуже всего»): по нему, а не по врачам
             named = [j for j in self.dims if j != self.label and 2 <= self.cols[j].distinct < self.n

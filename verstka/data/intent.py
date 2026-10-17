@@ -47,7 +47,7 @@ from typing import Any, Literal, Optional, Sequence
 from pydantic import BaseModel, Field, field_validator
 
 from verstka.data.aggregate import Data
-from verstka.data.goals import GOAL_VIZ, Goal, goals_of
+from verstka.data.goals import GOAL_VIZ, Goal, GoalPeriod, goals_of
 from verstka.data.goals import stems_of as goal_stems
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, task_scores
@@ -1101,10 +1101,10 @@ def _engine_ask(u: UnderstoodGoal, ctx: Optional[_Ctx] = None) -> Optional[str]:
         k = ctx.ids.index(u.dataset)
         m = ctx.measure(k, u.metric)
         w = ctx.datas[k].weight_of(m) if m is not None else None
-        if w is None or w.name != u.weight:
-            # the plan weighs by its own weight column: another one (or none) would say a plain mean of rows as
-            # «в среднем» — wrong for «уровень брака по заводу»; the overall mean is not asked of the plan
-            u.dropped.append(f"среднее с весом по «{u.weight}» план пока не считает — общее среднее не показано")
+        if (w is None or w.name != u.weight) and not (u.weight and ctx.measure(k, u.weight) is not None):
+            # без колонки-веса среднее строк было бы «в среднем» не о том («уровень брака по заводу»); вес из цели
+            # план берёт сам (`Goal.weight`)
+            u.dropped.append(f"среднее с весом по «{u.weight}»: такой колонки нет — общее среднее не показано")
             return None
     if a.startswith(("above:", "below:")) or a in _ENGINE_ASKS or a in ("max", "spike", "meet"):
         return a
@@ -1126,8 +1126,14 @@ def _to_goal(u: UnderstoodGoal, ctx: _Ctx) -> Goal:
         metric, head, negate, pinned = _pin(ctx, k, u.metric, phrase, task, ask if ask in _ENGINE_ASKS else None)
         u.pinned = pinned
         subject = list(dict.fromkeys(subject + [s for s in metric if s not in subject]))
+    # всё, что понято, — плану явно (`Goal.given`): колонка, разрез, категории, вес, период; вопрос — как есть
+    column = u.metric if u.metric and ctx.is_measure(k, u.metric) and ask != "meet" else None
+    period = None
+    if u.period is not None and u.period.kind in ("latest", "range", "compare"):
+        period = GoalPeriod(**u.period.model_dump())
     return Goal(phrase=phrase, task=task, viz=viz, to=to, subject=subject, metric=metric, at=u.at, ask=ask, head=head,
-                negate=negate)
+                negate=negate, given=True, column=column, dimension=u.dimension, categories=list(u.categories),
+                weight=u.weight if u.aggregation == "weighted_mean" else None, period=period)
 
 
 def _fit(g: Goal, u: UnderstoodGoal, ctx: _Ctx) -> Goal:
@@ -1155,17 +1161,15 @@ def _fit(g: Goal, u: UnderstoodGoal, ctx: _Ctx) -> Goal:
         if neutral:
             tries.append(g.model_copy(update={"metric": visible + neutral[:1]}))
         for cand in tries:
-            P._remember([cand])
             per = P.assign_goals([cand], ctx.datas)
             mine = [x for x in per[k] if x.phrase == cand.phrase]
             routed = bool(mine) and not mine[0].unmet and all(not any(x.phrase == cand.phrase for x in per[j])
                                                                for j in range(len(per)) if j != k)
-            d = P.goal_data(t, p, cand.phrase, compare=cand.task == "comparison")
+            d = P.goal_data(t, p, cand.phrase, compare=cand.task == "comparison", goal=cand)
             shown = d.main is not None and d.main.name == u.metric
             if routed and (shown or cand.task in ("reference", "kpi")):
                 u.pinned = True if shown else u.pinned
                 return cand
-        P._remember([g])
         u.pinned = False
         u.dropped.append("план не берёт эту колонку по словам цели — покажет свою")
     except Exception as e:  # noqa: BLE001 - the goal as it is: the plan decides

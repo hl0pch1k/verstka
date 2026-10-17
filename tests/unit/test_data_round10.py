@@ -11,7 +11,7 @@ import pytest
 
 from tests.unit.test_data_factcheck import corpus_conv4
 from verstka.data.aggregate import Data, per_unit_denominator, status_column
-from verstka.data.goals import goal_focus, goals_of, strip_lead
+from verstka.data.goals import Goal, GoalPeriod, goal_focus, goals_of, strip_lead
 from verstka.data.plan import chart_spec_of, data_of, plan_datasets
 from verstka.data.profile import profile_table
 from verstka.data.readers import read_bytes
@@ -317,3 +317,132 @@ def test_answers_to_the_asked_question():
                  ("28", "A"), ("16", "A"), ("25", "C")):
         t, p = _conv4(k, w)
         assert not any("не подтвердил" in r for r in p.task.reasons), (k, w, p.task.reasons)
+
+
+# ── цели, понятые моделью: план берёт каждое поле, состояние — только в вызове ──────────────────────────────────────
+def _given(phrase: str, task: str = "comparison", **kw) -> Goal:
+    from verstka.data.goals import GOAL_VIZ
+
+    viz, to = GOAL_VIZ[task]
+    return Goal(phrase=phrase, task=task, viz=viz, to=to, given=True, **kw)
+
+
+def test_given_goal_fields_are_used_by_the_plan():
+    """Колонка (и с именем-«служебным словом»: «Выполнение»), разрез, вес, явный «max», порог — к своей колонке."""
+    t, _ = _conv4("02")
+    p = plan_datasets([t], "", goals=[_given("у кого хуже всего с выполнением плана", column="Выполнение",
+                                             ask="min")])[0]
+    assert data_of(p, t).main.name == "Выполнение" and _sp(p.headline).startswith("Ниже всего выполнение — ул. Ленина")
+    assert not any("нет величины" in r for r in p.task.reasons)
+    t, _ = _conv4("29")
+    p = plan_datasets([t], "", goals=[_given("какие специальности оцениваются хуже всего", column="Средняя оценка",
+                                             dimension="Специальность", weight="Отзывов", ask="min")])[0]
+    assert _sp(p.headline).startswith("Меньше всего — Хирург: 3,49"), p.headline
+    t, _ = _conv4("25")
+    # «max» — явный ответ (лидер), фразу «хуже всего» план не разбирает заново
+    p = plan_datasets([t], "", goals=[_given("с каким перевозчиком хуже всего", column="Средняя задержка",
+                                             ask="max")])[0]
+    assert _sp(p.headline).startswith("Дольше всего — СеверКарго: 11,8 ч"), p.headline
+    t, _ = _conv4("11")
+    # порог другой цели к показанной колонке не переходит
+    g1 = _given("какие категории решаются дольше всего", column="Среднее время решения", ask="max")
+    g2 = _given("где sla проседает ниже 90%", column="SLA выполнен", ask="below:90")
+    p = plan_datasets([t], "", goals=[g1, g2])[0]
+    assert "ниже 90" not in p.headline.lower() and "90 ч" not in p.headline, p.headline
+
+
+def test_given_goal_categories_and_periods():
+    """Две названные категории — сравнение только их; одна — её ряд или её доля; период: диапазон, последний,
+    сравнение двух периодов (тот же период прошлого года, до и после, начало против конца у остатка)."""
+    t, _ = _conv4("08")
+    p = plan_datasets([t], "", goals=[_given("видеоплатформы по сравнению с телевидением", column="Доля аудитории",
+                                             categories=["Видеоплатформы", "Телевидение"])])[0]
+    assert _sp(p.headline) == "Видеоплатформы впереди: 32,1%, Телевидение — 26,6%", p.headline
+    assert chart_spec_of(p, t).categories == ["Видеоплатформы", "Телевидение"]
+    t, _ = _conv4("26")
+    p = plan_datasets([t], "", goals=[_given("какую долю оборота занимает сбп", "shares", column="Оборот",
+                                             categories=["СБП"])])[0]
+    assert _sp(p.headline) == "СБП — 23% оборота, больше всего — Банковская карта: 58%", p.headline
+    t, _ = _conv4("12")
+    p = plan_datasets([t], "", goals=[_given("продажи квартир по сравнению с прошлым годом", "dynamics",
+                                             column="Продано квартир",
+                                             period=GoalPeriod(kind="compare", base="2024-01", target="2025-01"))])[0]
+    assert _sp(p.headline) == "Число проданных квартир: −20% к тому же периоду 2024 (январь – август 2025)", p.headline
+    t, _ = _conv4("05")
+    p = plan_datasets([t], "", goals=[_given("снизился ли расход топлива после замены шин", "dynamics",
+                                             column="Расход топлива",
+                                             period=GoalPeriod(kind="compare", base="2025-07-01",
+                                                               target="2025-08-15"))])[0]
+    h = _sp(p.headline)
+    assert "29,6 л/100 км" in h and "31,6 л/100 км" in h and "−6,3%" in h, h
+    t, _ = _conv4("06")
+    p = plan_datasets([t], "", goals=[_given("сколько пользователей мы ожидаем к декабрю", "dynamics",
+                                             column="MAU прогноз", period=GoalPeriod(kind="latest"))])[0]
+    assert _sp(p.headline) == "Прогноз на декабрь 2025 — 1 150 тыс., сейчас — 1 047 тыс. (сентябрь 2025)", p.headline
+    t, _ = _conv4("09")
+    p = plan_datasets([t], "", goals=[_given("тарифы 2025 года", column="Тарифы",
+                                             period=GoalPeriod(kind="latest"))])[0]
+    assert "8,07 ₽/кВт·ч (2025 год)" in _sp(p.headline), p.headline
+    for p_ in (p,):
+        assert not any("не подтвердил" in r for r in p_.task.reasons)
+
+
+def test_given_goal_state_is_per_call_and_kept_in_the_plan():
+    """Ни памяти в модуле (`_GIVEN` больше нет), ни утечки между вызовами: та же фраза без модели разбирается заново;
+    поля цели — в `TaskDecision.spec`, и данные слайда после сериализации плана — те же."""
+    import verstka.data.plan as P
+    from verstka.schemas.data import DatasetPlan
+
+    assert not hasattr(P, "_GIVEN")
+    t, _ = _conv4("10")
+    phrase = "какая поликлиника самая загруженная"
+    p1 = plan_datasets([t], "", goals=[_given(phrase, column="Посещений на врача", ask="max")])[0]
+    assert data_of(p1, t).main.name == "Посещений на врача" and p1.task.spec["column"] == "Посещений на врача"
+    p2 = plan_datasets([t], "Какая поликлиника самая загруженная?")[0]  # без модели — по словам цели
+    assert p2.task.spec is None and data_of(p2, t).main.name == "Посещений в смену"
+    back = DatasetPlan.model_validate_json(p1.model_dump_json())  # как после перезапуска
+    assert data_of(back, t).main.name == "Посещений на врача"
+
+
+def test_verify_does_not_reject_true_claims():
+    """«Доставлено вовремя» — не время (больше — лучше); «Меньше всего — …» и строка «… даёт обратную связь» в скобках
+    — не «впереди назван»; «Прочее» в пороге не считается."""
+    t, _ = _conv4("25")
+    p = plan_datasets([t], "", goals=[_given("сравни перевозчиков по своевременности",
+                                             column="Доставлено вовремя")])[0]
+    assert _sp(p.headline) == "ЭкспрессГруз впереди: 97,1%, СеверКарго — 79,5%", p.headline
+    for k, w in (("04", "C"), ("11", "C")):
+        t, p = _conv4(k, w)
+        assert not any("не подтвердил" in r for r in p.task.reasons), (k, w, p.task.reasons)
+
+
+def test_conv4_with_the_models_recorded_goals():
+    """Сквозной прогон conv4 с целями модели (записанные ответы, без вызова модели): ответы на вопрос брифа и ни одного
+    понижения проверкой."""
+    import json
+    from pathlib import Path
+
+    from verstka.data.intent import GoalReading, read_goals
+
+    answers = json.loads(Path("tests/fixtures/intent/answers.json").read_text(encoding="utf-8"))["answers"]
+    want = {
+        "02A": "Не выполнили план — 6 из 12", "05C": "против 31,6 л/100 км", "06C": "+29%",
+        "12B": "−20% к тому же периоду 2024", "17C": "GPU-инстансы растут быстрее всех", "20B": "Сокол впереди: 41",
+        "22C": "на 31% больше, чем за октябрь", "26C": "СБП — 23% оборота", "29C": "Хирург: 3,49",
+        "30C": "Базовый: −14%", "24C": "Аналитика растёт быстрее всех", "06A": "Прогноз на декабрь 2025",
+    }
+    for key, files, briefs in corpus_conv4():
+        tables = [read_bytes(*f)[0] for f in files]
+        for i, brief in enumerate(briefs):
+            bid = f"{key}{'ABC'[i]}"
+            a = answers.get(f"c4-{bid}")
+            if not a or not a.get("reading"):
+                continue
+            gr = read_goals(brief, tables, reading=GoalReading.model_validate(a["reading"]))
+            if gr.goals is None:
+                continue
+            plans = plan_datasets(tables, brief, goals=gr.goals)
+            for p in plans:
+                assert not any("не подтвердил" in r for r in p.task.reasons), (bid, p.headline, p.task.reasons)
+            if bid in want:
+                assert any(want[bid] in _sp(p.headline) for p in plans), (bid, [p.headline for p in plans])

@@ -64,7 +64,7 @@ def _relevant(goals: Sequence[Goal], d: Data) -> list[Goal]:
     return [g for g in goals if goal_match(g, d.profile, vals) > 0]
 
 
-def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
+def _honest_goal(decision: TaskDecision, d: Data, goal: Optional[Goal] = None) -> TaskDecision:
     """«Цель совпала» — только если показана та величина, о которой цель: колонка, выбранная по главному слову цели
     (буквально или по смыслу: «дольше ждут» — срок, «денег» — рубли). Показана другая колонка — так и сказано
     («показано «Заявлений», а не «Срок рассмотрения, дн.»: …»); главного слова нет ни в одной колонке — тоже
@@ -72,10 +72,15 @@ def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
     оно о предмете, а не о величине."""
     if not decision.goal:
         return decision
+    if goal is not None and goal.given:
+        if not goal.column or d.main is None or d.main.name == goal.column or \
+                f"{d.main.name}, {d.main.unit or ''}" == goal.column:
+            return decision  # колонку назвала цель — она и показана
+        reasons = [r for r in decision.reasons if not (r.startswith(f"Цель «{decision.goal}»") and (
+            "совпала" in r or "той же задаче" in r))]
+        return decision.model_copy(update={"reasons": reasons + [
+            f"Цель «{decision.goal}»: показано «{d.main.name}», а не «{goal.column}»: эта колонка не отвечает на цель."]})
     metric, head, _ = goal_focus(decision.goal)
-    given = _GIVEN.get(decision.goal)
-    if given is not None:
-        metric, head = list(given.metric) or metric, given.head or head
     if not head:
         return decision
     word = next((w for w in re.findall(r"[а-яёa-z0-9]+", decision.goal.lower()) if w.replace("ё", "е").startswith(head)),
@@ -106,37 +111,66 @@ def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
     return decision.model_copy(update={"reasons": reasons + [note]})
 
 
-# цели, понятые снаружи (модель, `verstka/data/intent.py`): их величина, отрицания и вопрос — по фразе цели, чтобы
-# `data_of` по плану видел ту же величину, что и план (последние, без роста памяти)
-_GIVEN: dict[str, Goal] = {}
-_GIVEN_MAX = 256
+_SPEC_FIELDS = ("head", "metric", "negate", "ask", "column", "dimension", "categories", "weight", "period")
 
 
-def _remember(goals: Sequence[Goal]) -> None:
-    for g in goals:
-        if g.phrase and (g.head or g.metric or g.negate or g.ask):
-            _GIVEN.pop(g.phrase, None)
-            _GIVEN[g.phrase] = g
-    while len(_GIVEN) > _GIVEN_MAX:
-        _GIVEN.pop(next(iter(_GIVEN)))
+def goal_spec(g: Optional[Goal]) -> Optional[dict]:
+    """Поля цели, понятой снаружи (модель), — для `TaskDecision.spec`: данные слайда и пересборка видят ту же
+    величину без разбора фразы. Цель из текста — None (её разбирает фраза)."""
+    if g is None or not g.given:
+        return None
+    return g.model_dump(include=set(_SPEC_FIELDS), mode="json")
 
 
-def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], compare: bool = False) -> Data:
+def _given_of(spec: Optional[dict], phrase: Optional[str]) -> Optional[Goal]:
+    if not spec:
+        return None
+    return Goal(phrase=phrase or "", task="comparison", viz="bar", to="", given=True, **spec)
+
+
+def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], compare: bool = False,
+              goal: Optional[Goal] = None) -> Data:
     """`Data` глазами цели: предмет — основы её слов, величина — главное слово, уточнения и отрицания
-    («по цене с НДС» → «цен», уточнение «ндс»; «без НДС» — отрицание). Цель, понятая снаружи (с величиной и вопросом),
-    задаёт их сама; разбор фразы — запасной путь."""
+    («по цене с НДС» → «цен», уточнение «ндс»; «без НДС» — отрицание). Цель, понятая снаружи (`goal.given`: модель),
+    задаёт всё сама — колонку, разрез, категории, вес, период и вопрос (и «max» — тоже ответ: фразу не разбирают);
+    разбор фразы — для целей из текста. Состояние — только в аргументах: ничего не помнится между вызовами."""
+    if goal is not None and goal.given:
+        phrase = phrase or goal.phrase
+        ask = None if goal.ask in (None, "max", "null") else goal.ask
+        if ask == "meet" and goal_ask(phrase or "") == "miss":
+            ask = "miss"  # «какие магазины не выполнили план» — кто ниже плана, а не исполнение в целом
+        metric = list(goal.metric)
+        head = goal.head
+        negate = list(goal.negate)
+        if not goal.column and not head and not metric and phrase:
+            # колонку модель не назвала (или её нет в данных) — величину ищет фраза, как у цели из текста
+            metric, head, negate = goal_focus(phrase)
+        period = goal.period.model_dump() if goal.period is not None else None
+        th = re.search(r"(\d+(?:[.,]\d+)?)", ask or "") if (ask or "").startswith(("above:", "below:")) else None
+        unit = None
+        if th is not None and goal.column:
+            # порог — к своей колонке: единица порога — её единица
+            cu = next((c.unit for c in profile.columns if c.name == goal.column or
+                       f"{c.name}, {c.unit}" == goal.column), None)
+            unit = "%" if (cu or "").strip() == "%" else None
+        months = tuple(_MONTH_STEMS.index(mm.group(1)) + 1 for mm in _MONTH_RX.finditer((phrase or "").lower()))
+        p_ = goal.period
+        one_month = p_ is not None and p_.kind == "range" and bool(p_.start) and bool(p_.end) and \
+            (p_.start or "")[:7] == (p_.end or "")[:7] and re.fullmatch(r"\d{4}-\d{2}.*", p_.start or "") is not None
+        if one_month and not months:
+            months = (int((p_.start or "")[5:7]),)  # «за ноябрь»: диапазон в один месяц
+        if ask == "spike" or (ask == "total" and one_month):
+            # всплеск ищут на всём ряду (неделя всплеска — в названном месяце); итог месяца считают по дням месяца,
+            # а сравнение с другим месяцем — по всему файлу
+            period = None
+        return Data(table, profile, subject=tuple(stems_of(phrase or "")), compare=compare, head=head,
+                    negate=tuple(negate), qualifiers=tuple(x for x in metric if x != head), ask=ask,
+                    ask_unit=unit, ask_periods=tuple(dict.fromkeys(months)), column=goal.column,
+                    dimension=goal.dimension, categories=tuple(goal.categories), weight=goal.weight, period=period)
     if not phrase:
         return Data(table, profile, compare=compare)
     metric, head, negate = goal_focus(phrase)
     ask = goal_ask(phrase)
-    given = _GIVEN.get(phrase)
-    if given is not None:
-        metric = list(given.metric) or metric
-        head = given.head or head
-        negate = list(given.negate) or negate
-        ask = given.ask if given.ask in ("fastest", "fastest_down", "worst", "total", "mean", "margin", "min", "meet",
-                                         "miss") or \
-            (given.ask or "").startswith(("above:", "below:")) else ask
     if (ask or "").startswith(("above:", "below:")) and _threshold_is_a_name(phrase, profile):
         ask = None  # «просрочка свыше 90 дней» — колонка «Свыше 90 дней», а не порог
     pct = re.search(r"(?:выше|больше|ниже|меньше|свыше|более|менее)\s+\d+(?:[.,]\d+)?\s*(?:%|процент)", phrase.lower())
@@ -145,6 +179,61 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
     return Data(table, profile, subject=tuple(stems_of(phrase)), compare=compare, head=head, negate=tuple(negate),
                 qualifiers=tuple(x for x in metric if x != head), ask=ask, ask_unit="%" if pct else None,
                 pre_qualifiers=pre, ask_periods=tuple(dict.fromkeys(months)))
+
+
+def _other_mean(rel: Sequence[Goal], goal_phrase: Optional[str], table: Table, profile: DatasetProfile, d: Data,
+                fs: FactSet) -> Optional[str]:
+    """Другая цель того же датасета спрашивает среднее той же величины («какой средний балл по району в целом и какие
+    школы ниже 60»): слайд один и отвечает на порог, среднее — в подписи, с весом, если он есть."""
+    for g in rel:
+        if g.phrase == goal_phrase or (g.ask if g.given else goal_ask(g.phrase)) != "mean":
+            continue
+        d2 = goal_data(table, profile, g.phrase, compare=True, goal=g)
+        if d2.main is None or d.main is None or d2.main.name != d.main.name:
+            continue
+        d2.ask = "mean"
+        fs2 = facts_for("comparison", d2)
+        f = fs2.get("overall_mean")
+        if f is None or "overall_mean" not in fs2.prov:
+            continue
+        fs.add("other_mean", f.value, f.kind, f.text, f.unit, f.explain, prov=fs2.prov["overall_mean"])
+        w = d2.weight_of(d2.main)
+        return f"В целом — {fmt_value(f.value, f.unit)}" + (f" (с весом по «{w.name}»)." if w is not None else ".")
+    return None
+
+
+def _other_extreme(rel: Sequence[Goal], goal_phrase: Optional[str], table: Table, profile: DatasetProfile, d: Data,
+                   fs: FactSet, said: str = "") -> Optional[str]:
+    """Другая цель того же датасета спрашивает, кто первый (последний) по другой колонке («какие категории решаются
+    дольше всего и где SLA ниже 90%»): слайд один — о первой цели, ответ на вторую — в подписи."""
+    from verstka.data.aggregate import is_other_label
+    from verstka.data.facts import _pcat
+
+    for g in rel:
+        if g.phrase == goal_phrase or not g.given or g.task != "comparison":
+            continue
+        ask = g.ask if g.ask in ("max", "min", None) else "skip"
+        if ask == "skip":
+            continue
+        d2 = goal_data(table, profile, g.phrase, compare=True, goal=g)
+        m2, cv = d2.main, d2.cats
+        if m2 is None or cv is None or d.main is None or m2.name == d.main.name or m2.j < 0:
+            continue
+        real = [k for k in range(cv.n) if not is_other_label(cv.labels[k]) and not cv.labels[k].startswith("Остальные")]
+        if len(real) < 2:
+            continue
+        low = ask == "min"
+        k = (min if low else max)(real, key=lambda k_: (cv.values[k_], -k_ if not low else k_))
+        lab, v = cv.labels[k], cv.values[k]
+        if lab in said:
+            return None  # уже сказано («больше всех — Фасад: +19,6%»)
+        fs.add("other_extreme", v, "min" if low else "leader", f"{lab} — {fmt_value(v, cv.unit)}", cv.unit,
+               f"{'Меньше' if low else 'Больше'} всех по колонке «{m2.name}».",
+               prov=_pcat(d2, m2, cv.dim, [lab], rank="min" if low else "max",
+                          exclude=tuple(x for x in cv.labels if is_other_label(x))))
+        fs.ctx.setdefault("labels", []).append(lab)
+        return f"«{m2.name}»: {'меньше' if low else 'больше'} всех — {lab}, {fmt_value(v, cv.unit)}."
+    return None
 
 
 def _threshold_is_a_name(phrase: str, profile: DatasetProfile) -> bool:
@@ -163,8 +252,10 @@ _MONTH_RX = re.compile(r"\b(январ|феврал|март|апрел|ма(?=[
 
 
 def data_of(plan: DatasetPlan, table: Table) -> Data:
-    """Тот же `Data`, что видел план (главная метрика — по цели, которая решила задачу; у сравнения — колонка-итог)."""
-    return goal_data(table, plan.profile, plan.task.goal, compare=plan.task.task == "comparison")
+    """Тот же `Data`, что видел план (главная метрика — по цели, которая решила задачу; у сравнения — колонка-итог;
+    цель, понятая моделью, — по её полям из `TaskDecision.spec`, без разбора фразы)."""
+    return goal_data(table, plan.profile, plan.task.goal, compare=plan.task.task == "comparison",
+                     goal=_given_of(plan.task.spec, plan.task.goal))
 
 
 def _source(p: DatasetProfile) -> str:
@@ -180,10 +271,17 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     d0 = Data(table, profile)
     rel = list(goals or []) if assigned else _relevant(goals or [], d0)
     first = decide_task(Data(table, profile, subject=tuple(s for g in rel for s in g.subject)), rel)
+    g_first = next((g for g in rel if g.phrase == first.goal), None)
     subject = tuple(stems_of(first.goal)) if first.goal else ()
-    d = goal_data(table, profile, first.goal) if subject else d0
+    d = goal_data(table, profile, first.goal, goal=g_first) if subject or (g_first is not None and g_first.given) \
+        else d0
     decision = decide_task(d, rel)
-    decision = _honest_goal(decision, d)
+    g_dec = next((g for g in rel if g.phrase == decision.goal), None)
+    if decision.goal and decision.goal != first.goal:
+        # задачу решила другая цель — данные глазами её (как их увидит `data_of`)
+        d = goal_data(table, profile, decision.goal, goal=g_dec)
+    decision = decision.model_copy(update={"spec": goal_spec(g_dec)}) if g_dec is not None else decision
+    decision = _honest_goal(decision, d, g_dec)
     source = _source(profile)
     title = file_title(profile.file, profile.sheet)
 
@@ -198,20 +296,44 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     task = decision.task
     if task == "comparison":
         # сравнение категорий — по колонке-итогу («Итого за год»), если она есть, а не по первой части
-        d = goal_data(table, profile, first.goal, compare=True)
+        d = goal_data(table, profile, decision.goal or first.goal, compare=True,
+                      goal=g_dec if decision.goal else g_first)
     data_task = max(base, key=lambda k: base[k])
     raised = decision.goal is not None and base[data_task] > base[task]
     options = rank_options(task, d, [g for g in rel if base.get(g.task, 0) >= FEASIBLE or g.task == task], raised)
     th_goal = None
-    if d.ask is None:
-        # порог цели («какие серверы загружены выше 80%») — ответ и тогда, когда сравнивать категории нечем
-        th_goal = next((g for g in rel if (goal_ask(g.phrase) or "").startswith(("above:", "below:"))), None)
-        if th_goal is not None and not _threshold_is_a_name(th_goal.phrase, profile):
-            d.ask = goal_ask(th_goal.phrase)
+    if d.ask is None and not (g_dec is not None and g_dec.given and (g_dec.ask or "").startswith(("above", "below"))):
+        # порог цели («какие серверы загружены выше 80%») — ответ и тогда, когда сравнивать категории нечем; порог —
+        # к своей колонке: цель о другой величине свой порог показанной колонке не передаёт
+        th_goal = next((g for g in rel if ((g.ask if g.given else goal_ask(g.phrase)) or "").startswith(
+            ("above:", "below:"))), None)
+        if th_goal is not None and th_goal.given:
+            gd_ = goal_data(table, profile, th_goal.phrase, goal=th_goal)
+            if gd_.main is None or d.main is None or gd_.main.name != d.main.name:
+                th_goal = None
+        if th_goal is not None and not th_goal.given and _threshold_is_a_name(th_goal.phrase, profile):
+            th_goal = None
+        if th_goal is not None:
+            d.ask = th_goal.ask if th_goal.given else goal_ask(th_goal.phrase)
             if re.search(r"\d\s*(?:%|процент)", th_goal.phrase):
                 d.ask_unit = "%"
+    if d.ask == "total" and len(d.ask_periods) == 1:
+        # итог месяца, а другая цель того же предложения сравнивает его с другим месяцем («… как это соотносится с
+        # октябрём»): база сравнения — её месяц
+        for g in rel:
+            p_ = g.period if g.given else None
+            if p_ is not None and p_.kind == "compare" and p_.base and re.fullmatch(r"\d{4}-\d{2}.*", p_.base):
+                mb = int(p_.base[5:7])
+                if mb != d.ask_periods[0]:
+                    d.ask_periods = (d.ask_periods[0], mb)
+                    break
     fs = facts_for(task, d)
     headline, caption = compose(task, fs)
+    extra = _other_mean(rel, decision.goal, table, profile, d, fs) if task == "comparison" else None
+    if task == "comparison" and not extra:
+        extra = _other_extreme(rel, decision.goal, table, profile, d, fs, f"{headline} {caption or ''}")
+    if extra:
+        caption = f"{extra} {caption}" if caption else extra
     plain = fs.ctx.get("plain") or title
     if th_goal is not None and fs.ctx.get("threshold"):
         side, thr = fs.ctx["threshold"][:2]
@@ -344,10 +466,16 @@ def _metric_ok(g: Goal, d: Data) -> bool:
     """Величина цели («по прибыли») есть в колонках или в названии файла; цель без величины — да. Слова-описания
     величины понимаются по смыслу: «по обеспеченности врачами», «по уровню преступности» — колонка на душу населения;
     «по изменению продаж» — колонка изменения; «по средней оценке» — среднее оценок."""
+    if g.given and g.column:
+        # цель называет колонку точно (модель): она есть — величина есть; слова её имени не сверяются
+        return any(m.name == g.column or f"{m.name}, {m.unit or ''}" == g.column for m in d.measures) or any(
+            c.name == g.column for c in d.profile.columns)
     if not g.metric:
         return True
     words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(
         f"{c.name} {c.unit or ''}" for c in d.profile.columns))
+    # и шапка файла как была («Мячи» над «Забито» и «Пропущено»)
+    words += stems_of(" ".join(x for x in (getattr(d.table, "raw_header", None) or []) if x))
     # и слова, которые цели считают служебными («Выполнение» — колонка, хотя «выполнение плана» — слово задачи)
     words += [x for x in (re.sub(r"(?:ием|ием|ией|ию|ия|ие|ий|ем|ом|ам|ой|ы|и|а|е|у|ю|я)$", "", w)
                           for c in d.profile.columns for w in re.findall(r"[а-яё]{5,}", c.name.lower())) if len(x) >= 4]
@@ -397,7 +525,7 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
     values = [_values_for_match(d) for d in datas]
     for g in goals:
         # данные глазами цели: главная метрика — по её предмету («структура выручки» — выручка, а не цена)
-        gd = [goal_data(d.table, d.profile, g.phrase) if g.subject else d for d in datas]
+        gd = [goal_data(d.table, d.profile, g.phrase, goal=g) if g.subject or g.given else d for d in datas]
         scores = [task_scores(x) for x in gd]
         # величина цели («по прибыли», «по среднему баллу») должна быть в данных — иначе цель не об этом датасете
         ok = [_metric_ok(g, x) for x in gd]
@@ -459,12 +587,14 @@ def plan_datasets(tables: Sequence[Table], brief_text: str = "",
                   profiles: Optional[Sequence[DatasetProfile]] = None,
                   goals: Optional[Sequence[Goal]] = None) -> list[DatasetPlan]:
     """Планы всех датасетов; цели из текста — каждая своему датасету. `goals` — цели, понятые снаружи (модель,
-    `verstka/data/intent.py`): тогда текст брифа не разбирается, а цели распределяются по датасетам так же; их
-    величина, отрицания и вопрос (`head`, `metric`, `negate`, `ask`) задают колонку вместо разбора фразы."""
+    `verstka/data/intent.py`): тогда текст брифа не разбирается, а цели распределяются по датасетам так же; у целей,
+    понятых моделью (`given`), колонка, разрез, категории, вес, период и вопрос задают данные вместо разбора фразы
+    и сохраняются в плане (`TaskDecision.spec`)."""
     profs = list(profiles) if profiles is not None else [profile_table(t) for t in tables]
     if goals is not None:
-        goals = list(goals)
-        _remember(goals)
+        # цель снаружи с величиной (`head`, `metric`, `negate`) — явная: её поля выбирают колонку, фразу не разбирают
+        goals = [g if g.given or not (g.head or g.metric or g.negate) else g.model_copy(update={"given": True})
+                 for g in goals]
     else:
         goals = goals_of(brief_text)
     datas = [Data(t, p) for t, p in zip(tables, profs)]
