@@ -1531,7 +1531,7 @@ class CatFit:
     """How a category axis sets its labels (`fit_categories`)."""
 
     labels: list  # the labels written into the chart («» for one left out)
-    mode: str  # "flat" (one line each), "wrap" (whole words on ≤ 2 lines), "turn" (45°)
+    mode: str  # "flat" (one line each), "wrap" (whole words on ≤ 3 lines), "thin" (every k-th label); never turned
     size: float  # their size
     lines: int = 1
     keep: int = 1  # every k-th turned label is shown (turned labels closer than their line height)
@@ -1588,10 +1588,9 @@ def is_time_axis(cats: Sequence[str]) -> bool:
 
 
 def _soft_sizes(floor: float, sizes: Sequence[float]) -> list[float]:
-    """The sizes a little under the chart's floor (0.9 and 0.82 of it, never under 8 pt) a time axis may thin its labels at
-    before it turns them: LibreOffice breaks a word wider than its slot, and a smaller word is the way to keep it whole."""
-    low = min(sizes) if sizes else floor
-    return [x for x in (_snap(floor * 0.9), _snap(floor * 0.82)) if 8.0 <= x < low - 0.05]
+    """The sizes under the chart's floor a time axis may set its labels at: none — the floor is the readable threshold
+    (`readable_pt`); a time axis thins out its labels instead of setting them smaller."""
+    return []
 
 
 def ellipsize(text: str, family: Optional[str], size: float, width: float) -> str:
@@ -1644,19 +1643,20 @@ def thin_picks(n: int, k: int, present: Optional[Sequence[bool]] = None) -> list
 def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True, ordered: bool = False, soft_sizes: Sequence[float] = (), present: Optional[Sequence[bool]] = None) -> CatFit:
     """Category labels measured one by one at the axis font against their slot (`slot` = the plot's width over the
     categories, pt; `below_max` = the most room under the axis the labels may take). In order, at each size of
-    `sizes` (the axis size first, smaller ones after): every label on one line as written, then shortened
-    (`period_levels`); then turned by 45° (shortest level; every k-th label when turned neighbours would touch) or
-    wrapped between whole words on two lines — `turn_first` picks which is tried first. `ordered` (a time axis): the
-    labels stay straight — one line at a smaller size before anything else, then every 2nd, 3rd … label with the first
-    and the last kept («thin»; a shown label wider than its slot wraps on two lines) — and are turned only when no
-    thinning fits. Nothing is ever left for the renderer to break inside a word: the last resort is the shortest labels
-    turned at the smallest size, as many shown as keep apart (`fits` False). `soft_sizes`: sizes a little under the chart's
-    floor that a time axis may thin out at before it turns."""
+    `sizes` (the axis size first, smaller ones after — none under the readable threshold): every label on one line as
+    written, then shortened (`period_levels`); then wrapped between whole words on two lines. `ordered` (a time axis, a
+    line's points, a histogram's bins): the labels stay straight — one line at a smaller size before anything else, then
+    every 2nd, 3rd … label with the first and the last kept («thin», tilted a degree so that no renderer wraps it). Other
+    labels (names: they cannot be left out) wrap on up to three lines, and as the last resort a name with a word wider
+    than its slot is cut to «…» at the slot (`fits` False). A label is never turned (45° labels are hard to read and the
+    owner's rule is: thin out, do not turn) and nothing is left for the renderer to break inside a word. `soft_sizes`:
+    sizes a time axis may thin out at (kept for callers; the readable threshold leaves none under it). `turn_first` is
+    accepted for old callers and ignored."""
     levels = period_levels(cats)
     if ordered:
         cut = short_years(levels[-1])
         if cut != levels[-1]:
-            levels = levels + [cut]  # (a time axis may cut its years to two digits before it turns)
+            levels = levels + [cut]  # (a time axis may cut its years to two digits before it thins out)
     n = max(1, len(cats))
     room = _cat_room(family)
     last = levels[-1]
@@ -1664,26 +1664,29 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
     def width(t: str, size: float) -> float:
         return text_width_pt(t, family, size) if t else 0.0
 
-    def turned(size: float, force: bool = False) -> Optional[CatFit]:
-        widths = [width(t, size) for t in last]
-        # LibreOffice cuts a turned label once its turned height + one average character pass the room under the axis
-        need = max((TURN_SIN * (w + CAT_LINE * size) + w / max(1, len(t)) for t, w in zip(last, widths) if t), default=0.0) + 0.35 * size
-        if need > below_max and not force:
-            return None
-        keep = max(1, math.ceil(CAT_LINE * size / TURN_SIN / max(slot, 1.0) - 1e-6))
-        labels = [t if (n - 1 - j) % keep == 0 else "" for j, t in enumerate(last)] if keep > 1 else list(last)
-        return CatFit(labels, "turn", size, 1, keep, need, max(widths, default=0.0), len(levels) - 1)
-
-    def wrapped(size: float) -> Optional[CatFit]:
+    def wrapped(size: float, max_lines: int = 2, force: bool = False) -> Optional[CatFit]:
         lim = slot * room
         for lv, labs in enumerate(levels):
             if any(width(w, size) > _word_room(w, lim) for t in labs for w in label_pieces(t)):
                 continue  # a word (a number, a range's half) wider than its slot would be broken inside
             lines = max((len(wrap_lines(t, family, size, False, lim, dashes=True)) for t in labs if t), default=1)
             below = lines * size * CAT_LINE + size * 0.6
-            if lines <= 2 and below <= below_max:
-                return CatFit(list(labs), "wrap", size, lines, 1, below, max((width(t, size) for t in labs), default=0.0), lv)
+            if lines <= max_lines and (below <= below_max or force):
+                return CatFit(list(labs), "wrap", size, lines, 1, below, max((width(t, size) for t in labs), default=0.0), lv, fits=below <= below_max)
         return None
+
+    def cut(size: float) -> CatFit:
+        """The last resort of names: each on up to three lines, a word too wide for the slot cut to «…» there."""
+        lim = slot * room
+        labs = []
+        for t in last:
+            pieces = label_pieces(t)
+            if any(width(w, size) > _word_room(w, lim) for w in pieces) or len(wrap_lines(t, family, size, False, lim, dashes=True)) > 3:
+                t = ellipsize(t, family, size, lim * WORD_SAFETY)
+            labs.append(t)
+        lines = max((len(wrap_lines(t, family, size, False, lim, dashes=True)) for t in labs if t), default=1)
+        below = min(lines, 3) * size * CAT_LINE + size * 0.6
+        return CatFit(labs, "wrap", size, min(lines, 3), 1, below, max((width(t, size) for t in labs), default=0.0), len(levels) - 1, fits=False)
 
     def tilt_thin(size: float, want: int, force: bool = False) -> Optional[CatFit]:
         """Every k-th label, each on one line, the others blank, the axis's text tilted by TILT_DEG: a tilted label is never
@@ -1698,20 +1701,23 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
             kmin = next((kk for kk in range(2, n + 1) if widest * 1.25 <= kk * slot), None)
             if kmin is None:
                 continue
-            kk = next((x for x in range(kmin, min(n, kmin + 2) + 1) if (n - 1) % x == 0), kmin)  # (ends and steps even)
+            # (the step that shows the most labels; of two that show as many, the one whose steps are even to the end)
+            kk = max(range(kmin, min(n, kmin + 2) + 1), key=lambda x: (len(thin_picks(n, x, present)), (n - 1) % x == 0, -x))
             picks = set(thin_picks(n, kk, present))
-            if len(picks) < min(3, n):
+            if len(picks) < min(3, n) and not force:
                 continue
             got = CatFit([t if j in picks else "" for j, t in enumerate(labs)], "thin", size, 1, kk, below, widest, lv, tilt=True)
-            if len(picks) >= want:
-                return got
-            if best is None or len(picks) > best[0]:
-                best = (len(picks), got)
-        return best[1] if (best is not None and force) else None
+            # (the form that shows the most labels — «1 мес.» every other month beats «1-й месяц» every third —, the
+            # shorter one of two that show as many: more air between the labels shown)
+            if best is None or (len(picks), -widest) > best[0]:
+                best = ((len(picks), -widest), got)
+        if best is None:
+            return None
+        return best[1] if (best[0][0] >= want or force) else None
 
     if ordered:
         # a time axis stays straight and whole as far as it can: one line at a smaller size; the labels all, on two lines,
-        # when there are few; else every k-th one on a line of its own with the axis tilted a degree; turned last
+        # when there are few; else every k-th one on a line of its own with the axis tilted a degree
         for size in sizes:
             lim = slot * room
             for lv, labs in enumerate(levels):
@@ -1723,12 +1729,22 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
                 if got is not None:
                     return got
         want = 5 if n >= 15 else 4
-        for need in (want, 3):
+        for need in (want, 3, 2):
             for size in sizes:
                 got = tilt_thin(size, need)
                 if got is not None:
                     return got
-        turn_first = True
+        # nothing fits the room under the axis: the labels still stay straight (two short lines cost less than a turned
+        # one), the frame is what is too short
+        for size in sorted(sizes):
+            got = tilt_thin(size, 2, force=True)
+            if got is not None:
+                got.fits = False
+                return got
+        size = min(sizes) if sizes else 10.0
+        got = wrapped(size, 3, force=True) or cut(size)
+        got.fits = False
+        return got
 
     for size in sizes:
         lim = slot * room
@@ -1737,19 +1753,15 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
             # (a long single word keeps a margin: it cannot wrap, a renderer breaks it inside — `_word_room`)
             if all(width(t, size) <= (_word_room(t, lim) if len(label_pieces(t)) == 1 else lim) for t in labs if t):
                 return CatFit(list(labs), "flat", size, 1, 1, size * CAT_LINE + size * 0.6, longest, lv)
-        for step in ((turned, wrapped) if turn_first else (wrapped, turned)):
-            got = step(size)
-            if got is not None:
-                return got
-    if ordered:
-        # nothing fits the room under the axis: a time axis still keeps its labels straight (two short lines cost less
-        # than a turned one), the frame is what is too short
-        for size in sorted(sizes):
-            got = tilt_thin(size, 3, force=True)
-            if got is not None:
-                got.fits = False
-                return got
-    got = turned(min(sizes) if sizes else 10.0, force=True)
+        got = wrapped(size)
+        if got is not None:
+            return got
+    for size in sizes:
+        got = wrapped(size, 3)
+        if got is not None:
+            return got
+    size = min(sizes) if sizes else 10.0
+    got = wrapped(size, 3, force=True) or cut(size)
     got.fits = False
     return got
 
@@ -2114,10 +2126,51 @@ def add_ring(slide: Slide, bbox: Bbox, percent: float, color_hex: str, ground_he
 
 
 def _font_floor(slide: Slide) -> float:
-    """The smallest chart text, relative to the slide: 2 % of its height (≈ 11 pt on a 16:9 slide of 540 pt, 8 pt on
-    one of 405 pt, where the template's 9 pt body is the same size on screen)."""
+    """The smallest print around a chart that is not one of its labels (the source line under it), relative to the
+    slide: 2 % of its height (≈ 11 pt on a 16:9 slide of 540 pt, 8 pt on one of 405 pt)."""
     _, sh = _slide_size(slide)
     return max(8.0, 0.02 * sh / EMU_PER_PT)
+
+
+# The readable threshold of a chart's labels (categories, ticks, values, legend, axis titles) and of a table's text:
+# never under READ_H of the slide's height — 1/42 of the screen, 13 pt on a 7.5″ slide of 540 pt, 10 pt on one of
+# 405 pt: a grey label in a thin face on a projected slide reads at the size a 12 pt black body line does — nor under
+# READ_BODY of the template's own body size (one step down its type scale, the caption step of a 1.25–1.33 scale: a
+# label is a caption); the body share is taken at most to READ_CAP_H of the height — 2.6 %, where chart text is capped
+# anyway (`chart_text_capped`): a template whose «body» is an 18–24 pt bullet style does not make 14–18 pt chart labels. Labels that do not fit at it are thinned out (a time axis), set on two
+# or three lines, cut to «…» at a word (rows of bars) — never set smaller and never turned.
+READ_H = 0.024
+READ_BODY = 0.75
+READ_CAP_H = 0.026
+# The one exception, until the composer gives a bars chart a frame tall enough for its rows at the threshold
+# (`gf.verstka_min_height`): the row names of horizontal bars may step down to this share of it before the frame is
+# called too short — else a ten-row chart in a frame cut for the old 2 % labels becomes a table (and the same data set is
+# a chart on one template, a table on another). 1.0 once the composer sizes the frame by `min_frame_height` at the
+# threshold; the values, ticks, legend and titles never go under the threshold either way.
+ROW_NAMES_GIVE = 0.85
+
+
+def template_body_pt(typography: Optional[Typography]) -> Optional[float]:
+    """The template's own body size (its type scale's «body» role), None when it names none."""
+    if typography is None:
+        return None
+    for s in typography.scale or []:
+        if s.role == "body" and s.size_pt and s.size_pt > 0:
+            return float(s.size_pt)
+    return None
+
+
+def readable_pt(slide_h_pt: float, body_pt: Optional[float] = None) -> float:
+    """The readable threshold (pt, rounded up to half a point) of chart labels and table text on a slide `slide_h_pt`
+    high whose template sets its body at `body_pt`: max(READ_H × H, min(READ_BODY × body, READ_CAP_H × H))."""
+    by_body = min(READ_BODY * body_pt, READ_CAP_H * slide_h_pt) if body_pt else 0.0
+    return math.ceil(max(READ_H * slide_h_pt, by_body, 8.0) * 2 - 1e-6) / 2
+
+
+def readable_floor(slide: Slide, typography: Optional[Typography] = None) -> float:
+    """`readable_pt` of a slide and its template's typography."""
+    _, sh = _slide_size(slide)
+    return readable_pt(sh / EMU_PER_PT, template_body_pt(typography))
 
 
 def _type_sizes(typography: Optional[Typography], used: bool = False) -> list[float]:
@@ -2245,6 +2298,7 @@ class _Kit:
     slice_labels: bool = True  # a pie of amounts with the caller's legend: no computed shares on the slices
     pct_given: bool = False  # a pie of the brief's own percents: each slice says its value as written («18,6%», «42%»)
     capped: bool = False  # chart text capped relative to the slide (chart_text_capped): category labels measured strictly
+    floor: float = 8.0  # the readable threshold (`readable_pt`): no label of the chart is set smaller
     squeeze: float = 0.0  # a trend chart's longest category label over its slot (> 1: the renderer breaks it inside a word)
     turned: bool = False  # its category labels were turned by 45° or thinned out (every other one blank) to stay whole
     cramped: bool = False  # the plot kept its least width (0.3 of the frame) past the room its axis and end labels leave:
@@ -2492,7 +2546,12 @@ def add_chart(
     W, H = max(bbox.w, EMU_PER_PT) / EMU_PER_PT, max(bbox.h, EMU_PER_PT) / EMU_PER_PT
     sw, sh = _slide_size(slide)
     family = style.font_family or typography.primary_family
-    fs = _size_at_least(max(style.font_size_pt or 0.0, _font_floor(slide)), typography, cap=1.35)
+    # never under the readable threshold (`readable_pt`): every label of the chart is measured against it
+    read = readable_floor(slide, typography)
+    # (raised to the threshold: a template's size at most 5 % above it, else the threshold itself — a 9 pt chart style on
+    # a 405 pt slide reads at 10, not at the scale's next steps 11 or 12, which would ask its frame for a tenth more)
+    raised = (style.font_size_pt or 0.0) < read - 0.05
+    fs = _size_at_least(max(style.font_size_pt or 0.0, read), typography, cap=1.05 if raised else 1.35)
     try:
         body = typography.size_for("body", fs)
     except Exception:  # noqa: BLE001
@@ -2506,9 +2565,9 @@ def add_chart(
         # chart text relative to the slide (≤ 2.6 % of its height) and to its frame (≤ a tenth of it): a bullet
         # placeholder's 24 pt on an 11″ slide is not a chart label size
         hpt = sh / EMU_PER_PT
-        cap = max(min(0.026 * hpt, H / 10.0), 8.0)
+        cap = max(min(0.026 * hpt, H / 10.0), read)
         if fs > cap:
-            fs = _size_at_most(cap, typography)
+            fs = max(read, _size_at_most(cap, typography))
         fs_value = max(fs, _size_at_most(min(fs_value, 1.25 * fs, max(0.03 * hpt, fs)), typography))
         fs_hl = max(fs_value, _size_at_most(min(fs_hl, 1.12 * fs_value), typography)) if not bold else fs_value
 
@@ -2661,6 +2720,7 @@ def add_chart(
     )
     k.slice_labels = True
     k.capped = capped
+    k.floor = read
     k.pct_given = pie_pct
     k.x_title, k.y_title, k.xs = x_title, y_title, xs_all
     k.trend_helper = trend_helper
@@ -2814,18 +2874,18 @@ def _relieve(k: _Kit) -> bool:
 
 def min_frame_height(kind: str, n: int = 1, font_pt: float = 10.8, *, legend_rows: int = 0, x_title: bool = False, value_title: bool = False, label_lines: int = 1) -> float:
     """The least height (pt) of a chart's frame that still gives a readable plot: the plot keeps `MIN_PLOT` of the frame
-    and at least 5½ lines of type (four gridlines apart); a horizontal bars' plot also a row of 1.3 lines of type for each
+    and at least 5½ lines of type (four gridlines apart); a horizontal bars' plot also a row of 1.25 lines of type for each
     of its `n` categories (the labels left of the bars never touch). `font_pt` is the size the chart sets its labels at
-    (`gf.verstka_font_pt` of a first draft; the template's chart size snapped up its type scale, never under 2 % of the
-    slide's height). Over and under the plot: the values over the bars, the category labels (`label_lines`: a time axis
+    (`gf.verstka_font_pt` of a first draft; the template's chart size, never under the readable threshold `readable_pt`
+    — a composer measuring before drawing passes `max(its chart size, readable_floor(slide, typography))`). Over and under the plot: the values over the bars, the category labels (`label_lines`: a time axis
     whose labels wrap is 2), the category axis's title under the plot (`x_title`: a data chart always has one; for
     horizontal bars `value_title`, the value axis's) and the legend (`legend_rows`). For the composer: about 9½ lines of
     type for a column chart or a line with a time axis and no titles (≈ 100 pt at 10.8 pt), about 17 with an axis title
-    and a legend, and 1.3 lines of type more for every category of a bars chart."""
+    and a legend, and 1.25 lines of type more for every category of a bars chart."""
     fs = max(float(font_pt), 8.0)
     legend = (legend_rows * fs * 1.35 + fs * 0.55) if legend_rows else 0.0
     if kind in _HORIZONTAL:
-        plot = max(n * fs * 1.3, 5.5 * fs)
+        plot = max(n * fs * 1.25, 5.5 * fs)
         around = fs * 0.3 + fs * 1.8 + (fs * (TITLE_LINE + 0.35) if value_title else 0.0) + legend
     else:
         # (a scatter wants a plot of a near-square shape: 12 lines of type at the least; the engine narrows a wider plot)
@@ -2908,7 +2968,7 @@ def _axis_titles(k: _Kit, left: float, top: float, pw: float, ph: float) -> None
     if not (k.x_title or k.y_title) or k.kind in ("pie", "doughnut"):
         return
     horizontal = k.kind in _HORIZONTAL
-    floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+    floor = k.floor
     for text, axis, is_x in ((k.x_title, k.chart.category_axis, True), (k.y_title, k.chart.value_axis, False)):
         if not text:
             continue
@@ -2999,14 +3059,15 @@ def _style_bars(k: _Kit) -> None:
     # stepped down when the wrapped lines would not fit their row
     cat_fs = fs
     cat_w = 0.0
-    # never under the chart's own floor (2 % of the slide's height): a label that does not fit at it wraps or turns
-    # (below) — Ateliers' 7.5 pt labels under 12 pt values read as footnotes
-    floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+    name_share = 0.42  # the share of the frame's width the row names of horizontal bars take (0.55 when they would wrap)
+    # never under the chart's readable threshold (`readable_pt`): a label that does not fit at it wraps, is thinned out
+    # or cut at a word (below) — Ateliers' 7.5 pt labels under 12 pt values read as footnotes
+    floor = k.floor
     if horizontal:
         row = max(H - k.title_h - k.foot - fs, H * 0.3) / n
         for size in sorted({fs, max(floor, _snap(fs * 0.9)), max(floor, _snap(fs * 0.82))}, reverse=True):
             cat_fs = size
-            cat_w = min(max((text_width_pt(c, family, size) for c in cats), default=20.0), W * 0.42)
+            cat_w = min(max((text_width_pt(c, family, size) for c in cats), default=20.0), W * name_share)
             lines = max((len(wrap_lines(c, family, size, False, cat_w + 0.5, dashes=True)) for c in cats), default=1)
             if lines * size * 1.2 <= row * 0.92:
                 break
@@ -3055,16 +3116,14 @@ def _style_bars(k: _Kit) -> None:
     if not horizontal and not stacked:
         # every value label must fit over its bar (plus a little of the gap)
         room = bar + (slot - group) * 0.5 if not multi else bar * 1.12
-        sizes = (fs_val, _snap(fs * 1.15), fs, _snap(fs * 0.9)) if not multi else (fs, _snap(fs * 0.9), max(8.0, _snap(fs * 0.82)))
-        for size in sizes:
+        sizes = (fs_val, _snap(fs * 1.15), fs, _snap(fs * 0.9)) if not multi else (fs, _snap(fs * 0.9), _snap(fs * 0.82))
+        for size in [x for x in sizes if x >= k.floor - 0.05]:
             if all(text_width_pt(t, family, s, b) <= room * 0.98 for t, s, b in labels(size)):
                 fs_val = size
                 break
         else:
-            if multi:
-                labels_on, axis_on = False, True
-            else:
-                fs_val = _snap(fs * 0.9)
+            # no readable size keeps every value over its own column: the values go to a quiet value axis
+            labels_on, axis_on = False, True
         left, top, pw, ph = box(labels_on, axis_on, fs_val)
     if horizontal and multi and not stacked and (ph / n / (1 + gap / 100) / ns) < fs * 0.9:
         labels_on, axis_on = False, True
@@ -3075,27 +3134,35 @@ def _style_bars(k: _Kit) -> None:
     rotate_cols = tilt_cols = False
     if not horizontal and cats:
         # B3-1: LibreOffice breaks a column's label inside a word wider than 95 % of its slot — every word measured at
-        # the axis font against the real slot: a size down (never under the floor), else the labels turn by 45°
+        # the axis font against the real slot: a size down (never under the readable threshold), else a time axis (and a
+        # histogram of more than 12 bins) shows every k-th label; other labels — a dozen bins among them, «100–» over
+        # «120» — wrap on up to three lines, all shown (a word too wide cut with «…»)
         lim = pw / n * _cat_room(family)
-        floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+        floor = k.floor
         # (each word against its own room: a long word keeps a margin, `_word_room`)
         # (a label breaks at its ordinary spaces and after the dash of a range, never at a no-break space or inside a
         # number: its pieces, `label_pieces` — «1 250–1 500» is «1 250–» over «1 500»)
         over = lambda size: any(text_width_pt(w, family, size) > _word_room(w, lim) for c in cats for w in label_pieces(c))  # noqa: E731
         if over(cat_fs):
-            for size in [x for x in (_snap(cat_fs * 0.9), _snap(cat_fs * 0.82)) if x >= min(floor, cat_fs) - 0.05]:
+            downs = sorted({x for x in (_snap(cat_fs * 0.9), _snap(cat_fs * 0.82), floor) if min(floor, cat_fs) - 0.05 <= x < cat_fs - 0.05}, reverse=True)
+            for size in downs:
                 if not over(size):
                     cat_fs = size
                     break
             else:
                 room_h = H - top - k.foot
-                fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - MIN_PLOT * H), ordered=is_time_axis(cats), soft_sizes=_soft_sizes(floor, [cat_fs]), present=[any(vs[j] is not None for vs in values if j < len(vs)) for j in range(n)])
-                if fit.mode in ("turn", "thin"):
+                present = [any(vs[j] is not None for vs in values if j < len(vs)) for j in range(n)]
+                fit = fit_categories(cats, family, sorted({cat_fs, *downs}, reverse=True), pw / n, max(0.0, room_h - MIN_PLOT * H), ordered=(hist and n > WRAP_MAX_LABELS) or is_time_axis(cats), soft_sizes=_soft_sizes(floor, [cat_fs]), present=present)
+                if hist and any(t.endswith("…") and t not in cats for t in fit.labels):
+                    # a bin's name would be cut («боль…»): the bins are in order — every other one shown whole reads better
+                    fit = fit_categories(cats, family, sorted({cat_fs, *downs}, reverse=True), pw / n, max(0.0, room_h - MIN_PLOT * H), ordered=True, present=present)
+                if fit.mode in ("turn", "thin", "wrap"):
                     rotate_cols = fit.mode == "turn"
                     tilt_cols = fit.tilt
-                    k.turned = True
+                    k.turned = fit.mode != "wrap" or fit.labels != list(cats)
                     k.thinned = fit.mode == "thin"
                     turned_below = fit.below
+                    cat_fs = fit.size
                     if fit.labels != list(cats):
                         cats = k.cats = list(fit.labels)
                         _set_categories(k, cats)
@@ -3142,25 +3209,39 @@ def _style_bars(k: _Kit) -> None:
     # needs two lines cut to one with an ellipsis. A name is never blanked: a frame too short for its rows says so
     # (`gf.verstka_rows_fit`, `gf.verstka_min_height`) and the composer gives it the height (`min_frame_height`)
     if horizontal and n > 1:
-        hard = max(8.0, _snap(floor * 0.75))
+        hard = max(8.0, math.floor(floor * ROW_NAMES_GIVE * 2 + 1e-6) / 2)  # (`ROW_NAMES_GIVE`: the row names only)
 
         def need_h(size: float = 0.0, names: Optional[Sequence[str]] = None) -> float:
             size = size or cat_fs
-            return max((len(wrap_lines(c, family, size, False, min(cat_w, W * 0.42) + 0.5, dashes=True)) for c in (names or cats)), default=1) * size * 1.2
+            # (a line of a name and the leading between lines: a one-line row wants 1.14 of its size — 1.2 of it with
+            # the row's 5 % margin, as a table's row — two lines 2.34)
+            return (max((len(wrap_lines(c, family, size, False, min(cat_w, W * name_share) + 0.5, dashes=True)) for c in (names or cats)), default=1) * 1.2 - 0.06) * size
 
-        for _ in range(5):
+        for _ in range(6):
             pitch = ph / n
+            if labels_on and not stacked and not axis_on and pitch < fs_val * 1.15 and fs_val > fs + 0.05 and pitch >= fs * 1.15:
+                fs_val = fs  # (the values at the labels' size before they leave the bars: a figure on its bar reads best)
+                left, top, pw, ph = box(labels_on, axis_on, fs_val)
+                continue
             if labels_on and not stacked and not axis_on and pitch < fs_val * 1.15:
                 labels_on, axis_on = False, True  # (the values stand on the axis instead of over each other)
                 left, top, pw, ph = box(labels_on, axis_on, fs_val)
                 continue
             if need_h() <= pitch * 0.95:
                 break
+            if name_share < 0.55:
+                # names that wrap in 42 % of a narrow frame take up to 55 % of it on one line before they get smaller (a
+                # row of two lines costs twice the height; shorter bars cost nothing a reader needs)
+                wide = min(max((text_width_pt(c, family, cat_fs) for c in cats), default=20.0), W * 0.55)
+                if (max((len(wrap_lines(c, family, cat_fs, False, wide + 0.5, dashes=True)) for c in cats), default=1) * 1.2 - 0.06) * cat_fs < need_h():
+                    name_share, cat_w = 0.55, wide
+                    left, top, pw, ph = box(labels_on, axis_on, fs_val)
+                    continue
             smaller = [x for x in sorted({_snap(cat_fs * 0.9), _snap(cat_fs * 0.82), _snap(cat_fs * 0.75), hard}, reverse=True) if hard - 0.05 <= x < cat_fs - 0.05]
             fitting = next((x for x in smaller if need_h(x) <= pitch * 0.95), None)
             if fitting is not None or smaller:
                 cat_fs = fitting if fitting is not None else smaller[-1]
-                cat_w = min(max((text_width_pt(c, family, cat_fs) for c in cats), default=20.0), W * 0.42)
+                cat_w = min(max((text_width_pt(c, family, cat_fs) for c in cats), default=20.0), W * name_share)
                 left, top, pw, ph = box(labels_on, axis_on, fs_val)
                 if fitting is not None:
                     continue
@@ -3171,7 +3252,7 @@ def _style_bars(k: _Kit) -> None:
         pitch = ph / n
         if need_h() > pitch * 0.95:
             # one line a name: a long one is cut with an ellipsis (its start says which row it is)
-            cut = [ellipsize(c, family, cat_fs, min(cat_w, W * 0.42)) for c in cats]
+            cut = [ellipsize(c, family, cat_fs, min(cat_w, W * name_share)) for c in cats]
             if cut != list(cats):
                 cats = k.cats = cut
                 _set_categories(k, cats)
@@ -3473,8 +3554,8 @@ def _style_line(k: _Kit) -> None:
 
     # category labels at the chart's text size, measured one by one against the real slot — the plot's width over the
     # points (the value axis and the end label take their share of the frame): straight on one line as written, else
-    # shortened («1-й месяц» → «1-й мес.» → «1 мес.»), else turned by 45° with the room under the axis for their turned
-    # height, else wrapped between whole words; a size smaller only when none of these fits (`fit_categories`)
+    # shortened («1-й месяц» → «1-й мес.» → «1 мес.»), else wrapped between whole words, else every k-th label shown
+    # (never turned); a size smaller only down to the readable threshold (`fit_categories`)
     cat_fs = fs
 
     # value range
@@ -3500,9 +3581,9 @@ def _style_line(k: _Kit) -> None:
 
     marker = 7 if multi else 8
     lab_h = fs_val * 1.2
-    floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+    floor = k.floor
     sizes = sorted({cat_fs, max(min(floor, cat_fs), _snap(cat_fs * 0.9)), max(min(floor, cat_fs), _snap(cat_fs * 0.82))}, reverse=True)
-    ordered = is_time_axis(cats)  # a time axis thins out its labels before it turns any
+    ordered = True  # a line's points are in order (periods, steps): it thins out its labels, never turns them
     top_head = k.title_h + ((max(fs_val, _snap(fs_val * ratio)) * 1.25 + marker / 2 + 6) if every_point else fs * 0.9)
     for _ in range(3):
         # the plot keeps `MIN_PLOT` of the frame: the labels under it take what is left; when no way of setting them fits,
@@ -3995,7 +4076,7 @@ def _style_pie(k: _Kit) -> None:
     size = k.fs_value
     m, avail_h, side = geometry(False)
     if k.capped:
-        size = max(min(size, _snap(side / 8.0)), min(fs, 8.0))  # a slice label never larger than an eighth of the pie
+        size = max(min(size, _snap(side / 8.0)), min(fs, k.floor))  # a slice label never larger than an eighth of the pie (nor under the readable threshold)
     where = decide(side, size)
     if any(v in ("outEnd", "none") for v in where.values()) and size > fs:
         smaller = decide(side, fs)

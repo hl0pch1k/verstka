@@ -616,10 +616,11 @@ def test_histogram_bin_labels_never_break_inside_a_number():
         for cats in (BINS12, all_nbsp):
             prs, s, gf = _in(box, ChartSpec(type="histogram", categories=cats, series=[InlineSeries(name="Заказы", values=COUNTS12)], x_title="Сумма заказа, ₽", y_title="Число заказов"))
             cs = gf.chart._chartSpace
-            labels = [v.text for v in cs.findall(f".//{C}barChart/{C}ser/{C}cat//{C}pt/{C}v")]
+            labels = [v.text or "" for v in cs.findall(f".//{C}barChart/{C}ser/{C}cat//{C}pt/{C}v")]
             assert len(labels) == 12 and not [t for t in labels if re.search(r"\d \d{3}", t)]  # (no ordinary space inside a number)
+            assert cs.find(f".//{C}catAx/{C}txPr/{A}bodyPr").get("rot") in (None, "0", "-60000")  # never turned by 45°
             # either every piece a renderer may break between fits its slot (so it breaks after the dash, before a
-            # word), or the labels are turned: the labels are whole
+            # word), or the bins are thinned out (every k-th shown, tilted a degree): the labels shown are whole
             assert _label_pieces_fit(cs, box.w / 12700, 12), (box, cats[-1])
     # the labels of the full-width chart stay straight and wrap after the dash (two short lines each)
     cs = _in(BOX, ChartSpec(type="histogram", categories=BINS12, series=[InlineSeries(name="Заказы", values=COUNTS12)]))[2].chart._chartSpace

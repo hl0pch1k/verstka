@@ -152,7 +152,7 @@ def test_fit_categories_prefers_a_smaller_size_then_thinning_then_turning_on_a_t
 
 @pytest.mark.parametrize("kind", ["line21", "line21_titled", "column6", "stacked_legend", "bars12", "scatter"])
 def test_the_plot_keeps_55_percent_of_a_frame_of_the_minimum_height(kind):
-    fs = 12.0  # the chart's label size: the floor of a 540 pt slide (10.8 pt) snapped up this template's type scale
+    fs = 13.0  # the chart's label size: the readable threshold of a 540 pt slide (2.4 % of it, 12.96 pt, up to half a point)
     if kind == "line21":
         spec, args = _line(), ("line", 21, fs, dict(label_lines=2))
     elif kind == "line21_titled":
@@ -215,13 +215,15 @@ def test_twelve_horizontal_rows_keep_every_name_and_never_have_text_over_text(h_
     size = int(cs.find(f".//{C}catAx/{C}txPr/{A}p/{A}pPr/{A}defRPr").get("sz")) / 100
     assert all(labels) and len(labels) == len(REG)  # a name is never blanked (an unnamed row cannot be read)
     assert all(lab.startswith(name[: max(3, len(lab) - 1)].rstrip("…")) for lab, name in zip(labels, REG))  # (cut at the most with an ellipsis)
+    assert size >= 11.0  # the row names: never under ROW_NAMES_GIVE of the readable threshold (13 pt on 540 pt), whatever the frame
     if gf.verstka_rows_fit:
-        assert pitch * 0.95 >= size * 1.15, (h_pt, size, round(pitch, 1))  # the rows hold their names: none over another
+        assert pitch >= size * 1.2 - 0.05, (h_pt, size, round(pitch, 1))  # the rows hold their names (1.2 lines a row): none over another
     else:
-        assert h_pt < 190 and gf.verstka_min_height > h_pt  # a frame too short says so, and says what it needs
-    assert gf.verstka_rows_fit == (h_pt >= 190)
-    if h_pt >= 260:
-        assert size >= 10.5 and labels == REG  # room enough: the labels at the chart's own size, whole
+        assert gf.verstka_min_height > h_pt  # a frame too short says so, and says what it needs
+    if h_pt >= gf.verstka_min_height:
+        assert gf.verstka_rows_fit  # (the least height asked for is enough; a little less may still hold the rows)
+    if h_pt >= 340:
+        assert labels == REG  # room enough: the labels at the chart's own size, whole
 
 
 def test_a_tall_enough_frame_names_every_row_and_keeps_the_bars_readable():

@@ -618,6 +618,30 @@ def table_sizes(lead: float, body: float, small: float, *, h1: float, slide_h_em
     return out or [max(min(body, top), round(floor * 2) / 2)]
 
 
+def readable_table_pt(slide_h_emu: int, typography: Optional[Typography] = None) -> float:
+    """The readable threshold of a table's text: the chart labels' (`charts.readable_pt` — 2.4 % of the slide's height,
+    or three quarters of the template's body size up to 2.6 % of it). A table is set at the deck's body size when its
+    area holds it there, and never under this: a ten-row table that does not fit its area at it wants a taller area
+    (`table_need_h`) or fewer rows, never a smaller type."""
+    from verstka.rendering.charts import readable_pt, template_body_pt
+
+    return readable_pt(slide_h_emu / EMU_PER_PT, template_body_pt(typography))
+
+
+def readable_sizes(sizes_desc: list[float], floor_pt: float) -> list[float]:
+    """The sizes of a ladder at or above `floor_pt`; the floor itself when the ladder has none there (a template whose
+    small step is under the threshold: its 8 pt table on a 446 pt slide is set at 11 pt)."""
+    keep = [s for s in sizes_desc if s and s >= floor_pt - 0.05]
+    return keep or [floor_pt]
+
+
+def table_need_h(table: TableData, width_emu: int, font: Optional[str], size_pt: float, *, line_height: float = 1.2, header_bold: bool = True) -> int:
+    """The least height (EMU) of a table set `width_emu` wide at `size_pt`: every row its text and its padding, no
+    growth — what a composer compares with an area before it puts a table there."""
+    fit = measure_table(table, width_emu, font, [size_pt], line_height, max_h_emu=0, fill_h_emu=0, min_row_h_emu=0, max_row_h_emu=0, header_bold=header_bold)
+    return sum(fit.row_heights)
+
+
 def measure_table(
     table: TableData,
     width_emu: int,
@@ -631,6 +655,7 @@ def measure_table(
     *,
     header_bold: bool = True,
     max_size_pt: Optional[float] = None,
+    min_size_pt: Optional[float] = None,
 ) -> TableFit:
     """Type size, column widths and row heights (EMU) of a table set ``width_emu`` wide.
 
@@ -647,13 +672,18 @@ def measure_table(
       ``fill_h_emu`` tall; the header is at least ¾ of a body row.
 
     Measured as :func:`add_table` sets the table: typeset with NBSP, units moved into the header, header (and total
-    rows) bold unless ``header_bold=False``, boolean columns as ✓ / —.
+    rows) bold unless ``header_bold=False``, boolean columns as ✓ / —. ``min_size_pt`` (the readable threshold,
+    :func:`readable_table_pt`): the sizes under it are dropped (the threshold itself when none is left).
     """
     n = max(len(table.columns), 1)
     width_pt = width_emu / EMU_PER_PT
     sizes = [s for s in sizes_desc if s and s > 0] or [12.0]
     if max_size_pt:
         sizes = [s for s in sizes if s <= max_size_pt + 1e-6] or [min(sizes)]
+    if min_size_pt:
+        # (the readable threshold, `readable_table_pt`: no size under it — a table that does not fit its area at it is
+        # reported as `overflow` for the composer to give it room or fewer rows)
+        sizes = readable_sizes(sizes, min_size_pt)
     if not table.columns:
         h = min_row_h_emu or int(sizes[-1] * 2 * EMU_PER_PT)
         return TableFit(sizes[-1], [width_emu], [h], content_w=width_emu)
@@ -724,15 +754,15 @@ def neutral_run(rPr: etree._Element) -> None:
 
 def default_sizes(typography: Typography, slide_h_emu: int, style_size: Optional[float] = None) -> list[float]:
     """Candidate table sizes, largest first, when no composer chose them: body B = max(scale body, 0.026 H) down to
-    the dense-table floor 0.022 H, through the template's own sizes in between."""
+    the readable threshold (`readable_table_pt`), through the template's own sizes in between."""
     h_pt = slide_h_emu / EMU_PER_PT
     body = typography.size_for("body", style_size or 12.0)
     b = round(max(body, 0.026 * h_pt) * 2) / 2
-    floor = round(0.022 * h_pt * 2) / 2
+    floor = readable_table_pt(slide_h_emu, typography)
     sparse = bool(getattr(typography, "derived_sizes", None))
     if sparse or (style_size or 0.0) > 0.026 * h_pt:
         # a bullet placeholder's 24 pt is not a table size on an 11″ slide: capped relative to the slide
-        b = min(b, math.floor(0.026 * h_pt * 2) / 2)
+        b = max(min(b, math.floor(0.026 * h_pt * 2) / 2), floor)
     cands = {b, floor}
     cands.update(s for s in list(typography.sizes_used) + [st.size_pt for st in typography.scale] + [style_size or 0] if floor <= s <= b)
     return sorted(cands, reverse=True)

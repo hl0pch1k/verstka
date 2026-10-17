@@ -810,6 +810,15 @@ def _lo_label_faults(gf) -> list[str]:
     room = fh * (1 - g["y"] - g["h"])
     faults = []
     shown = [j for j, c in enumerate(cats) if c and c != "None"]
+    if rot == -60000:
+        # thinned out, tilted a degree: every shown label on one line, as wide as the slots up to the next shown one
+        if len(shown) < 2 or shown[0] != 0 or shown[-1] != len(cats) - 1:
+            faults.append("the first and the last label are not both shown")
+        for a, b in zip(shown, shown[1:] + [None]):
+            room = ((b - a) if b is not None else (a - shown[shown.index(a) - 1] if len(shown) > 1 else len(cats))) * slot
+            if text_width_pt(cats[a], family, size) > room:
+                faults.append(f"«{cats[a]}» runs into its neighbour")
+        return faults
     for j in shown:
         c = cats[j]
         w = text_width_pt(c, family, size)
@@ -833,21 +842,24 @@ def _lo_label_faults(gf) -> list[str]:
 def test_coffee_months_at_half_width_on_vk_tech_are_shortened_not_broken():
     """B3-1: the live coffee deck on VK Tech (10 × 5.63 in, Play 9 pt) set its revenue chart at half width and
     LibreOffice broke «1-й мес.» into «1-й ме / с.» (33.8 pt in a 31.3 pt slot: under the old 10 % tolerance). Every
-    label is measured against 95 % of its slot: «1-й месяц» → «1-й мес.» → «1 мес.», straight, all whole."""
+    label is measured against 95 % of its slot: «1-й месяц» → «1-й мес.» → «1 мес.». At the readable threshold of the
+    slide (10 pt: 2.4 % of 405 pt — the template's 9 pt is under it) the shortened labels no longer all fit: every other
+    one is shown, straight and whole, the first and the last kept — never turned, never set smaller."""
     prs = Presentation()
     prs.slide_width, prs.slide_height = Emu(9144000), Emu(5143500)
     gf = _line_chart(prs, (4031483 / 9144000, 1774287 / 5143500), "Play", 9.0)  # the live frame (20260928-034442-97788d s5)
-    cats = [str(c) for c in gf.chart.plots[0].categories]
-    assert cats == ["Сейчас"] + [f"{i} мес." for i in range(1, 7)]
+    cats = [str(c) if c is not None else "" for c in gf.chart.plots[0].categories]
+    shown = [c for c in cats if c and c != "None"]
+    assert cats[0] == "Сейчас" and cats[-1] == "6 мес." and len(shown) >= 3
+    assert all(c in ["Сейчас"] + [f"{i} мес." for i in range(1, 7)] for c in shown)
+    assert gf.verstka_font_pt >= 10.0
     assert _lo_label_faults(gf) == []
-    assert not gf.verstka_turned
 
 
 @pytest.mark.parametrize("plot_w", [0.35, 0.29])
 def test_six_month_labels_at_narrow_widths_are_shortened_turned_or_thinned_never_cut(plot_w):
-    """B3-1: at 0.35 W and 0.29 W the six months no longer fit straight even shortened: they turn by 45° with room under
-    the axis for their turned height (LibreOffice cuts a turned label to «1-й …» otherwise — Handdrawn at gate 3), and
-    every other one is left out when turned neighbours would touch. Nothing is broken, wrapped or cut."""
+    """B3-1: at 0.35 W and 0.29 W the six months no longer fit straight even shortened: every other (third) one is shown,
+    straight on one line — never turned by 45° (owner's rule: thin out, do not turn). Nothing is broken, wrapped or cut."""
     prs = Presentation()
     prs.slide_width, prs.slide_height = Emu(9144000), Emu(5143500)
     gf = _line_chart(prs, (plot_w, 0.345), "Play", 9.0)
@@ -858,8 +870,8 @@ def test_six_month_labels_at_narrow_widths_are_shortened_turned_or_thinned_never
 
 
 def test_turned_labels_get_the_room_libreoffice_measures_under_the_axis():
-    """B3-1: Handdrawn (13.33 in, Verdana 14 pt) turned «1-й мес.» at 0.41 W and reserved 60.9 pt under the axis for a
-    54.4 pt turned height — LibreOffice wants one more average character (6.7 pt) and cut every month to «1-й …»."""
+    """B3-1: Handdrawn (13.33 in, Verdana 14 pt) turned «1-й мес.» at 0.41 W and LibreOffice cut every turned month to
+    «1-й …». Labels are never turned now: the months at 0.41 W are shown straight and whole (thinned out if need be)."""
     prs = Presentation()
     prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
     gf = _line_chart(prs, (5029200 / 12192000, 2337491 / 6858000), "Verdana", 14.0)

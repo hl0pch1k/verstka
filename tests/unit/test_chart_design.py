@@ -275,14 +275,14 @@ def test_bold_emphasis_only_where_the_template_speaks_in_bold():
 
 
 def test_sizes_come_from_the_template_scale():
-    """A 720×405 pt slide with a 7/9/12/24/47 scale and a 7 pt chart style: labels at 9 (on the scale, the body
-    size), values a step up on the scale — not an off-scale 10.5."""
+    """A 720×405 pt slide with a 7/9/12/24/47 scale and a 7 pt chart style: labels at the readable threshold 10 pt
+    (2.4 % of the height: the scale's 9 is under it and its 12 a fifth over it), values a step up on the scale (12)."""
     typo = Typography(scale=[TypeStep(role="display", size_pt=47), TypeStep(role="h1", size_pt=24), TypeStep(role="h2", size_pt=12), TypeStep(role="body", size_pt=9), TypeStep(role="small", size_pt=7)])
     prs, s = _slide("FFFFFF", 9144000, 5143500)
     box = Bbox(x=500000, y=1300000, w=5000000, h=3200000)
     gf = add_chart(s, box, ChartSpec(type="column", series_ids=["cc"], highlight_index=2), OUTLINE, ChartStyleSpec(series_colors=["0077FF"], font_size_pt=7.0), typo, text_hex="000000")
     cs = gf.chart._chartSpace
-    assert cs.find(f".//{C}catAx//{A}defRPr").get("sz") == "900"
+    assert cs.find(f".//{C}catAx//{A}defRPr").get("sz") == "1000"
     assert cs.find(f".//{C}ser/{C}dLbls/{C}txPr//{A}defRPr").get("sz") == "1200"
 
 
