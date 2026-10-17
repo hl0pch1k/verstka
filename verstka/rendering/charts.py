@@ -364,20 +364,39 @@ def _chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: It
     far = "FFFFFF" if _is_dark(ground_) else "000000"
 
     def synth() -> list[str]:
-        s = [muted_tint(first, ground_), _mix(first, far, 0.55), _mix(first, ground_, 0.72), _mix(first, far, 0.3)]
-        for c in out[1:]:
-            s += [muted_tint(c, ground_), _mix(c, far, 0.55)]
-        # a template with one colour has only its shades to give, and shades of a dark colour that stand off the ground
-        # sit close together: the next hues round the accent (± 40°, ± 80°), each kept at the floor, tell series apart
-        s += [legible_color(shift_hue(first, d), ground_, floor) if floor > MIN_FILL_CONTRAST else shift_hue(first, d) for d in (40, -40, 80, -80)]
-        return [h for h in s if contrast_ratio(h, ground_) >= floor]
+        # a template's colours run out: only their own shades — lighter toward the ground, deeper toward the far end —
+        # never hues the template does not use (the old ± 40° / ± 80° turns of the accent put green and red slices into
+        # the pie of a yellow-and-black template); a fine ladder of each taken colour, the ones far apart picked below
+        s = [muted_tint(first, ground_)]
+        for c in [first] + [h for h in out[1:] if h in cands]:  # (the template's own colours, not shades of shades)
+            s += [_mix(c, ground_, t / 100) for t in range(10, 80, 5)] + [_mix(c, far, t / 100) for t in range(10, 90, 5)]
+        # (a chromatic template's shades stay data colours — never a near-black or a near-white; a black-and-white
+        # template's are its greys)
+        data = _is_data_color(first)
+        return [h for h in dict.fromkeys(s) if contrast_ratio(h, ground_) >= floor and (_is_data_color(h) or not data)]
 
-    for de, strict in ((MIN_SERIES_DE, True), (MIN_SERIES_DE, False), (MIN_SERIES_DE * 0.6, False)):
-        for h in synth() + rest:
+    def shades(least: float) -> None:
+        # the shade farthest from every colour taken (by ΔE): the series spread over the whole way from pale to deep
+        pool = [h for h in synth() if h not in out]
+        while len(out) < n and pool:
+            best = max(pool, key=lambda h: min(delta_e(h, o) for o in out))
+            if min(delta_e(best, o) for o in out) < least:
+                break
+            out.append(best)
+            pool.remove(best)
+
+    for least in (MIN_SERIES_DE, MIN_SERIES_DE * 0.6):
+        for h in rest:  # the template's other colours, merely distinct
             if len(out) >= n:
                 return out
-            if h not in out and far_from_all(h, de, strict):
+            if h not in out and far_from_all(h, least, False):
                 out.append(h)
+        shades(least)
+        if len(out) >= n:
+            return out
+    shades(8.0)
+    if len(out) >= n:
+        return out
     # a narrow palette (Классика's beiges and browns: four colours for eight slices, cycling — the legend matched two
     # slices per swatch): every taken colour stepped toward the ground and toward the far end in finer steps, each
     # still a visible step (ΔE ≥ 8) from all taken, before any colour repeats

@@ -115,7 +115,11 @@ def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[S
     if chip_fills:
         comp.icon_chip = IconChipSpec(bg_hex=_mode(chip_fills), size_frac=_med(chip_sizes), icon_color_hex=tokens.color_for("accent.1"))
 
-    accent = tokens.color_for("accent.1") or "0077FF"
+    # a template without an accent of its own (monochrome Piano, grey Progress — the stock theme accents are no colour
+    # of its brand) colours its tables and charts with its own colours: the most saturated first, then the text colour
+    # and the neutrals — never a colour it does not use (it was VK blue 0077FF: blue charts on a black-and-white deck)
+    own = own_colors(tokens)
+    accent = tokens.color_for("accent.1") or (own[0] if own else "0077FF")
     text_primary = tokens.color_for("text.primary") or "000000"
     header_text = "FFFFFF" if contrast_ratio("FFFFFF", accent) >= 3.0 else text_primary
     comp.table_style = TableStyleSpec(
@@ -127,7 +131,7 @@ def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[S
         font_size_pt=typo.size_for("small", typo.size_for("body") * 0.85),
         numbers_align="right",
     )
-    series = tokens.accents() or [accent]
+    series = tokens.accents() or own or [accent]
     comp.chart_style = ChartStyleSpec(
         series_colors=series[:6],
         gridlines=False,
@@ -141,6 +145,21 @@ def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[S
         comp.chart_style.font_size_pt = min(comp.chart_style.font_size_pt, cap)
         comp.table_style.font_size_pt = min(comp.table_style.font_size_pt, cap)
     return comp
+
+
+def own_colors(tokens) -> list[str]:
+    """The template's own non-ground colours, the most saturated first, then the text colours, then by weight (the same
+    order as `rendering.compose.palette_accents` for a template without accents)."""
+
+    def sat(h: str) -> float:
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        mx, mn = max(r, g, b), min(r, g, b)
+        return 0.0 if mx == 0 else (mx - mn) / mx
+
+    grounds = ("background", "surface")
+    cands = [c for c in (tokens.colors or []) if c.hex and len(c.hex) == 6 and not any((r or "").startswith(grounds) for r in (c.roles or [c.role]))]
+    cands.sort(key=lambda c: (-round(sat(c.hex), 1), 0 if (c.role or "").startswith("text") else 1, -(c.weight or 0.0)))
+    return [c.hex.upper() for c in cands]
 
 
 def data_text_cap(sizes_used: list[float], slide_h: int) -> float:

@@ -383,17 +383,22 @@ def test_every_horizontal_row_keeps_its_name_even_in_a_frame_too_short_for_the_r
 
 
 def test_series_of_a_one_colour_template_differ_by_more_than_the_shade():
-    # Blueprint: one teal in the template. Its shades that stand off the ground at 3:1 sit close together: the hues round it
+    # Blueprint: one teal in the template. A one-colour template gets its own shades (stage 2: «однотонный шаблон
+    # получает оттенки»), never other hues: spread over the whole way from pale to deep, each standing off the ground
+    from verstka.rendering.charts import _chroma, _hue_gap
+
     for bg in ("FFFFFF", "0B1220", "F5F1E8"):
         pal = chart_palette(["2F8AA5"], bg, 4, extra=[], floor=SERIES_CONTRAST)
         assert len(set(pal)) == 4 and pal[0] == "2F8AA5" or bg != "FFFFFF"
         assert all(contrast_ratio(c, bg) >= SERIES_CONTRAST for c in pal), (bg, pal)
-        assert min(delta_e(a, b) for i, a in enumerate(pal) for b in pal[i + 1 :]) >= 20, (bg, pal)
+        # (one teal at 3:1 on white has only its deeper half: four series ≈ ΔE 9–11 apart — the legend names them)
+        assert min(delta_e(a, b) for i, a in enumerate(pal) for b in pal[i + 1 :]) >= 8, (bg, pal)
+        assert all(_hue_gap(c, "2F8AA5") <= 12 for c in pal if _chroma(c) >= 12), (bg, pal)  # (shades of the teal, no other hue)
     one = ChartStyleSpec(series_colors=["2F8AA5"], font_family="Play", font_size_pt=7.0)
     spec = ChartSpec(type="stacked_bar", categories=["a", "b", "c"], series=[InlineSeries(name="x", values=[3, 2, 4]), InlineSeries(name="y", values=[2, 3, 1]), InlineSeries(name="z", values=[1, 1, 2])], unit="чел.")
     cs = _chart(spec, _frame(0.88, 260), style=one)[2]
     fills = [ser.find(f"{C}spPr/{A}solidFill/{A}srgbClr").get("val") for ser in cs.iter(f"{C}ser")]
-    assert len(set(fills)) == 3 and min(delta_e(a, b) for i, a in enumerate(fills) for b in fills[i + 1 :]) >= 20 and all(contrast_ratio(f, "FFFFFF") >= 3.0 for f in fills)
+    assert len(set(fills)) == 3 and min(delta_e(a, b) for i, a in enumerate(fills) for b in fills[i + 1 :]) >= 8 and all(contrast_ratio(f, "FFFFFF") >= 3.0 for f in fills)
 
 
 def _cloud(n, slope, noise, seed=1, off=0.0):
