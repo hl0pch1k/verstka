@@ -1748,6 +1748,8 @@ class Composer:
         per, gap, cw, _, _ = lay(cols, size)
         if (spread or getattr(self, "_boost", 0) >= 1) and self.fits_width(lines, k.lead, False, cw - _emu(k.lead * 1.1)) and sum(len(t) for t in lines) <= 40 * cols * per:
             size = k.lead  # captions of a few words each (or the lines of a short block, on the fill pass) at the lead size
+        elif getattr(self, "_boost", 0) >= 1 and not spread and lay(cols, k.lead)[4] <= 0.4 * area.h:
+            size = k.lead  # (longer lines too, on the fill pass, while they keep to 40 % of the area: never small print under a grown block)
         per, gap, cw, paras, eh = lay(cols, size)
         room = eh + int(k.vgap * 1.4)
         if spread and getattr(self, "_rehousing", False) and room > 0.3 * area.h:
@@ -2584,7 +2586,14 @@ class Composer:
             denser_ = getattr(self, "_dense", False) or getattr(self, "_rehousing", False)
             ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * (1.0 if denser_ else 0.8))
             groups = [extra[i * per:(i + 1) * per] for i in range(ecols)]
-            esize = k.lead if getattr(self, "_boost", 0) >= 1 and self.fits_width(extra, k.lead, False, ew - _emu(k.lead * 1.1)) else k.body
+            esize = k.body
+            if not denser_:
+                # the note grows with the figures: short lines at the lead size on the fill pass, and a paragraph at
+                # the lead size whenever it stays a note (under a third of the area) — at the body size under 66 pt
+                # figures and their 20 pt labels it read as small print, the hierarchy upside down
+                lead_paras = [[self.P(t, k.lead, k.colors.text, space_after=k.lead * 0.5, marker="•" if len(extra) > 1 else None) for t in g] for g in groups if g]
+                if (getattr(self, "_boost", 0) >= 1 and self.fits_width(extra, k.lead, False, ew - _emu(k.lead * 1.1))) or max(self.h(pg, ew) for pg in lead_paras) <= 0.3 * area.h:
+                    esize = k.lead
             steps = [esize]
             if getattr(self, "_rehousing", False):
                 # set again above the conclusion's room (B2): the lines under the tiles step down (the small size, on

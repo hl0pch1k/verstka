@@ -38,6 +38,8 @@ def _ground_pictures(slide) -> list[tuple[object, object, Bbox]]:
     for lay in layers:
         if lay.kind != "pic" or lay.placeholder or lay.cover < 0.85:
             continue
+        if lay.xbox is not None:
+            continue  # a turned picture: its pixels do not stand on the slide as its rows and columns read
         blip = next(iter(lay.el.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip")), None)
         if blip is not None:
             out.append((owners[lay.source].part, blip, lay.box))

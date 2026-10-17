@@ -405,6 +405,256 @@ def _without_opaque_alpha(data: bytes) -> Optional[bytes]:
     return got
 
 
+_DRAWN_PART_RE = re.compile(r"^ppt/(slides/slide|slideLayouts/slideLayout|slideMasters/slideMaster)\d+\.xml$")
+_GRAY_MEMO: dict[tuple[int, int], Optional[bytes]] = {}
+
+
+def _gray_with_alpha(data: bytes) -> Optional[bytes]:
+    """A picture with transparent pixels turned grey as PowerPoint's «grayscale» shows it, its transparency kept (PNG);
+    None for a picture without transparency (LibreOffice draws those right) or an unreadable one."""
+    key = (len(data), hash(data))
+    if key in _GRAY_MEMO:
+        return _GRAY_MEMO[key]
+    got: Optional[bytes] = None
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        im = Image.open(BytesIO(data))
+        if im.mode in ("P", "PA", "LA", "La", "RGBa") or "transparency" in im.info:
+            im = im.convert("RGBA")
+        if "A" in im.getbands() and im.getchannel("A").getextrema()[0] < 255:
+            a = im.getchannel("A")
+            g = im.convert("RGB").convert("L")
+            buf = BytesIO()
+            Image.merge("LA", (g, a)).save(buf, format="PNG", compress_level=1)
+            got = buf.getvalue()
+    except Exception as e:  # noqa: BLE001 — the picture goes as it is
+        log.debug("grayscale bake failed: %s", e)
+    if len(_GRAY_MEMO) >= 32:
+        _GRAY_MEMO.clear()
+    _GRAY_MEMO[key] = got
+    return got
+
+
+def _baked_grayscale(zin: zipfile.ZipFile, own: Optional[dict[str, bytes]] = None) -> dict[str, bytes]:
+    """Parts to write instead of (or beside) the package's own for LibreOffice: a picture with transparent pixels drawn
+    with PowerPoint's «grayscale» effect (`a:grayscl`) is drawn by LibreOffice with its transparent pixels black — a
+    building shot whose sky is transparent became a black diamond under a dark grey cover title, and the preview, the
+    PDF and the designer's eyes all saw dark grey on black where PowerPoint shows it on white. Such a picture is
+    given, in the render copy only, as a grey picture with its transparency (a new media part, the slide's
+    relationship pointed at it) and the effect is dropped. `own`: parts already rewritten for the render (read from
+    there). {} when no part draws one."""
+    from lxml import etree
+
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    names = set(zin.namelist())
+    own = own or {}
+
+    def read(n: str) -> bytes:
+        return own[n] if n in own else zin.read(n)
+
+    out: dict[str, bytes] = {}
+    baked: dict[str, str] = {}  # source media → the grey media part
+    for name in sorted(names):
+        if not _DRAWN_PART_RE.match(name):
+            continue
+        data = read(name)
+        if b"grayscl" not in data:
+            continue
+        rels_name = name.rsplit("/", 1)[0] + "/_rels/" + name.rsplit("/", 1)[1] + ".rels"
+        if rels_name not in names:
+            continue
+        try:
+            root = etree.fromstring(data)
+            rels = etree.fromstring(read(rels_name))
+        except etree.XMLSyntaxError:
+            continue
+        by_id = {r.get("Id"): r for r in rels}
+        changed = False
+        for blip in root.iter(f"{{{a_ns}}}blip"):
+            gray = blip.find(f"{{{a_ns}}}grayscl")
+            rid = blip.get(f"{{{r_ns}}}embed")
+            rel = by_id.get(rid)
+            if gray is None or rel is None or rel.get("TargetMode") == "External":
+                continue
+            target = rel.get("Target") or ""
+            src = target.lstrip("/") if target.startswith("/") else os.path.normpath(os.path.join(name.rsplit("/", 1)[0], target)).replace(os.sep, "/")
+            if src not in names:
+                continue
+            if src not in baked:
+                grey = _gray_with_alpha(zin.read(src))
+                if grey is None:
+                    continue
+                dst = f"ppt/media/verstka-grey-{len(baked) + 1}.png"
+                while dst in names:
+                    dst = dst.replace(".png", "-x.png")
+                baked[src] = dst
+                out[dst] = grey
+            new_id = f"rIdVg{len(by_id) + 1}"
+            while new_id in by_id:
+                new_id += "x"
+            el = etree.SubElement(rels, f"{{{rel_ns}}}Relationship")
+            el.set("Id", new_id)
+            el.set("Type", rel.get("Type"))
+            el.set("Target", "/" + baked[src])
+            by_id[new_id] = el
+            blip.set(f"{{{r_ns}}}embed", new_id)
+            blip.remove(gray)
+            changed = True
+        if changed:
+            out[name] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+            out[rels_name] = etree.tostring(rels, xml_declaration=True, encoding="UTF-8", standalone=True)
+    if baked and "[Content_Types].xml" in names:
+        ct = read("[Content_Types].xml")
+        if b'Extension="png"' not in ct and b"Extension='png'" not in ct:
+            out["[Content_Types].xml"] = ct.replace(b"<Default ", b'<Default Extension="png" ContentType="image/png"/><Default ', 1)
+    return out
+
+
+_P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def _plate_fill(sp) -> bool:
+    """A layout placeholder that paints: its own fill (solid, gradient, picture, pattern) or its style's fill."""
+    sppr = sp.find(f"{{{_P_NS}}}spPr")
+    if sppr is not None:
+        if sppr.find(f"{{{_A_NS}}}noFill") is not None:
+            return False
+        if any(sppr.find(f"{{{_A_NS}}}{t}") is not None for t in ("solidFill", "gradFill", "blipFill", "pattFill")):
+            return True
+    ref = sp.find(f"{{{_P_NS}}}style/{{{_A_NS}}}fillRef")
+    return ref is not None and (ref.get("idx") or "0") != "0"
+
+
+def _hidden_layout_plates(zin: zipfile.ZipFile, own: Optional[dict[str, bytes]] = None) -> dict[str, bytes]:
+    """Parts rewritten for LibreOffice so that a layout's painted placeholders show only where a slide uses them, as in
+    PowerPoint. PowerPoint never draws a layout's placeholder on a slide that has no shape of its own for it;
+    LibreOffice imports such placeholders as plain shapes of the layout and draws them on every slide (a blue circle
+    and a bar of the template's sample, painted «Текст» placeholders, stood over the photo of every slide set on that
+    layout, and the designer's eyes judged them). In the render copy the layout's placeholder stops painting, and a
+    slide that uses it gets the layout's paint written on its own shape (its geometry, fill, outline and style when
+    it sets none of its own). {} when no layout has such a placeholder."""
+    import copy
+
+    from lxml import etree
+
+    own = own or {}
+
+    def read(n: str) -> bytes:
+        return own[n] if n in own else zin.read(n)
+
+    def key_of(ph) -> tuple:
+        return ("idx", ph.get("idx")) if ph.get("idx") is not None else ("type", ph.get("type") or "body")
+
+    names = set(zin.namelist())
+    layouts: dict[str, Optional[tuple]] = {}  # layout part → (root, {key: layout sp}) of its painted placeholders
+    out: dict[str, bytes] = {}
+    p_, a_ = f"{{{_P_NS}}}", f"{{{_A_NS}}}"
+    for name in sorted(names):
+        if not re.match(r"^ppt/slides/slide\d+\.xml$", name):
+            continue
+        rels_name = "ppt/slides/_rels/" + name.rsplit("/", 1)[1] + ".rels"
+        if rels_name not in names:
+            continue
+        try:
+            rels = etree.fromstring(read(rels_name))
+        except etree.XMLSyntaxError:
+            continue
+        lay = next((r.get("Target") for r in rels if (r.get("Type") or "").endswith("/slideLayout")), None)
+        if not lay:
+            continue
+        lay = lay.lstrip("/") if lay.startswith("/") else os.path.normpath(os.path.join("ppt/slides", lay)).replace(os.sep, "/")
+        if lay not in names:
+            continue
+        if lay not in layouts:
+            try:
+                lroot = etree.fromstring(read(lay))
+            except etree.XMLSyntaxError:
+                layouts[lay] = None
+                continue
+            found = {}
+            for sp in lroot.iter(p_ + "sp"):
+                ph = sp.find(f"{p_}nvSpPr/{p_}nvPr/{p_}ph")
+                if ph is None or (ph.get("type") or "body") in _SERVICE_PH or not _plate_fill(sp):
+                    continue
+                found[key_of(ph)] = copy.deepcopy(sp)  # (the paint as it was, before the layout stops painting)
+                sppr = sp.find(p_ + "spPr")
+                if sppr is None:
+                    sppr = etree.SubElement(sp, p_ + "spPr")
+                for t in ("solidFill", "gradFill", "blipFill", "pattFill", "noFill"):
+                    for x in sppr.findall(a_ + t):
+                        sppr.remove(x)
+                nf = etree.Element(a_ + "noFill")
+                geo = [i for i, c in enumerate(sppr) if etree.QName(c).localname in ("xfrm", "custGeom", "prstGeom")]
+                sppr.insert(geo[-1] + 1 if geo else 0, nf)
+                ln = sppr.find(a_ + "ln")
+                if ln is None:
+                    ln = etree.SubElement(sppr, a_ + "ln")
+                for c in list(ln):
+                    if etree.QName(c).localname in ("solidFill", "gradFill", "pattFill", "noFill"):
+                        ln.remove(c)
+                ln.insert(0, etree.Element(a_ + "noFill"))
+                st = sp.find(p_ + "style")
+                if st is not None:
+                    sp.remove(st)
+            layouts[lay] = (lroot, found) if found else None
+            if found:
+                out[lay] = etree.tostring(lroot, xml_declaration=True, encoding="UTF-8", standalone=True)
+        got = layouts.get(lay)
+        if not got:
+            continue
+        found = got[1]
+        try:
+            root = etree.fromstring(read(name))
+        except etree.XMLSyntaxError:
+            continue
+        changed = False
+        for sp in root.iter(p_ + "sp"):
+            ph = sp.find(f"{p_}nvSpPr/{p_}nvPr/{p_}ph")
+            src = found.get(key_of(ph)) if ph is not None else None
+            if src is None or _plate_fill(sp):
+                continue
+            sppr = sp.find(p_ + "spPr")
+            if sppr is None:
+                sppr = etree.SubElement(sp, p_ + "spPr")
+                sp.insert(1, sppr)
+            if sppr.find(a_ + "noFill") is not None:
+                continue  # the slide itself says «no fill»: nothing is painted in PowerPoint either
+            lsp = src.find(p_ + "spPr")
+            for t in ("xfrm", "custGeom", "prstGeom"):
+                if sppr.find(a_ + t) is None and lsp is not None and lsp.find(a_ + t) is not None:
+                    if t != "xfrm" and (sppr.find(a_ + "custGeom") is not None or sppr.find(a_ + "prstGeom") is not None):
+                        continue
+                    sppr.append(copy.deepcopy(lsp.find(a_ + t)))
+            for t in ("solidFill", "gradFill", "blipFill", "pattFill"):
+                if lsp is not None and lsp.find(a_ + t) is not None:
+                    sppr.append(copy.deepcopy(lsp.find(a_ + t)))
+                    break
+            if sppr.find(a_ + "ln") is None and lsp is not None and lsp.find(a_ + "ln") is not None:
+                sppr.append(copy.deepcopy(lsp.find(a_ + "ln")))
+            # (spPr children in schema order: xfrm, geometry, fill, ln)
+            order = {"xfrm": 0, "custGeom": 1, "prstGeom": 1, "noFill": 2, "solidFill": 2, "gradFill": 2, "blipFill": 2, "pattFill": 2, "grpFill": 2, "ln": 3}
+            kids = sorted(list(sppr), key=lambda c: order.get(etree.QName(c).localname, 4))
+            for c in kids:
+                sppr.append(c)
+            if sp.find(p_ + "style") is None and src.find(p_ + "style") is not None:
+                tx = sp.find(p_ + "txBody")
+                st = copy.deepcopy(src.find(p_ + "style"))
+                if tx is not None:
+                    tx.addprevious(st)
+                else:
+                    sp.append(st)
+            changed = True
+        if changed:
+            out[name] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    return out
+
+
 def render_copy(pptx: Path, out_dir: Path) -> Path:
     """A copy of the deck for LibreOffice only, named like the original (the PDF takes the stem).
 
@@ -412,7 +662,9 @@ def render_copy(pptx: Path, out_dir: Path) -> Path:
     custom layout as plain master shapes: their prompt text shows through wherever the sample covered it with a
     card that the renderer removed. Runs of Cyrillic text in an installed face without Cyrillic are set in one
     stand-in face, a «₽» the face lacks in a face of its class (`run_faces`). A big PNG with an alpha channel opaque
-    everywhere goes without it (`_without_opaque_alpha`). The .pptx handed to the user is not touched.
+    everywhere goes without it (`_without_opaque_alpha`). A transparent picture under PowerPoint's grayscale effect goes
+    grey already (`_baked_grayscale`); a painted placeholder of a layout paints only on the slides that use it
+    (`_hidden_layout_plates`). The .pptx handed to the user is not touched.
     """
     from verstka import pkgzip
 
@@ -424,15 +676,29 @@ def render_copy(pptx: Path, out_dir: Path) -> Path:
         log.warning("cyrillic run faces skipped: %s", e)
         faces = {}
     with zipfile.ZipFile(pptx) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        try:
+            # a layout's painted placeholders paint only where a slide uses them, as in PowerPoint
+            faces = {**faces, **_hidden_layout_plates(zin, faces)}
+        except Exception as e:  # noqa: BLE001 — a render never fails over it
+            log.warning("layout plates kept: %s", e)
+        try:
+            grey = _baked_grayscale(zin, faces)  # pictures LibreOffice greys wrong: grey pixels baked, transparency kept
+        except Exception as e:  # noqa: BLE001 — a render never fails over it
+            log.warning("grayscale bake skipped: %s", e)
+            grey = {}
         for item in zin.infolist():
-            data = zin.read(item)
-            if item.filename in faces:
-                data = faces[item.filename]
-            elif _LAYOUT_PART_RE.match(item.filename):
+            name = item.filename
+            if name in grey or name in faces:
+                data = grey.pop(name) if name in grey else faces[name]  # (grey is built on the other rewrites)
+            else:
+                data = zin.read(item)
+                if name.startswith("ppt/media/"):
+                    data = _without_opaque_alpha(data) or data
+            if _LAYOUT_PART_RE.match(name):
                 data = _blank_prompts(data)
-            elif item.filename.startswith("ppt/media/"):
-                data = _without_opaque_alpha(data) or data
             zout.writestr(pkgzip.entry(item), data)
+        for name, data in grey.items():  # the new grey pictures
+            zout.writestr(zipfile.ZipInfo(name), data, compress_type=pkgzip.compress_type(name))
     return dst
 
 

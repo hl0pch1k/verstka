@@ -61,10 +61,17 @@ class Layer:
     ph_type: Optional[str] = None
     slide_w: int = 0
     slide_h: int = 0
+    rot: float = 0.0  # the shape's rotation, degrees clockwise (its `box` is what it covers turned, `xbox` its frame)
+    xbox: Optional[Bbox] = None  # the frame of a turned shape as its xfrm writes it (unturned), None when not turned
+    part_ref: Optional[object] = None  # weak reference to the part holding a turned picture (its pixels are read)
+    painted_cover: Optional[float] = None  # a turned picture: the share of the slide its opaque pixels really cover
 
     @property
     def cover(self) -> float:
-        """Share of the slide the layer covers."""
+        """Share of the slide the layer covers (a turned picture: what its opaque pixels cover, not its bounding box —
+        a photo turned 139° and clipped to a wedge spans the slide's box, paints half of it)."""
+        if self.painted_cover is not None:
+            return self.painted_cover
         return _cover(self.box, self.slide_w, self.slide_h)
 
 
@@ -115,6 +122,43 @@ def _xfrm_box(el: etree._Element) -> Optional[Bbox]:
         return Bbox(x=int(off.get("x")), y=int(off.get("y")), w=int(ext.get("cx")), h=int(ext.get("cy")))
     except (TypeError, ValueError):
         return None
+
+
+def _rotation(el: etree._Element) -> float:
+    """The shape's rotation in degrees (0 ≤ r < 360), read from its xfrm."""
+    tag = etree.QName(el).localname
+    xfrm = el.find(_P + "grpSpPr/" + _A + "xfrm") if tag == "grpSp" else el.find(_P + "spPr/" + _A + "xfrm")
+    try:
+        return (int(xfrm.get("rot") or 0) / 60000.0) % 360.0 if xfrm is not None else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _turned(rot: float) -> bool:
+    return 0.5 < rot < 359.5
+
+
+def _turn(px: float, py: float, cx: float, cy: float, deg: float) -> tuple[float, float]:
+    """A point turned `deg` degrees clockwise (slide y runs down) about (cx, cy)."""
+    import math
+
+    r = math.radians(deg)
+    c, s_ = math.cos(r), math.sin(r)
+    dx, dy = px - cx, py - cy
+    return cx + dx * c - dy * s_, cy + dx * s_ + dy * c
+
+
+def turned_box(box: Bbox, frame: Bbox, deg: float) -> Bbox:
+    """What `box` (a part of a shape's unturned `frame`) covers once the shape is turned `deg` degrees about the
+    frame's centre: the bounding box of its turned corners. A bar written 9 in wide and turned 90° stands down the
+    slide's edge; read unturned it lay across the middle of the slide and pushed the content under it."""
+    if not _turned(deg):
+        return box
+    cx, cy = frame.x + frame.w / 2.0, frame.y + frame.h / 2.0
+    pts = [_turn(x, y, cx, cy, deg) for x, y in ((box.x, box.y), (box.x2, box.y), (box.x2, box.y2), (box.x, box.y2))]
+    x0, y0 = min(p[0] for p in pts), min(p[1] for p in pts)
+    x1, y1 = max(p[0] for p in pts), max(p[1] for p in pts)
+    return Bbox(x=int(round(x0)), y=int(round(y0)), w=int(round(x1 - x0)), h=int(round(y1 - y0)))
 
 
 def _slide_size(obj) -> tuple[int, int]:
@@ -448,6 +492,19 @@ def _layer_of(el: etree._Element, source: str, part, paint: _Paint, W: int, H: i
             blip = sppr.find(_A + "blipFill/" + _A + "blip") if sppr is not None else None
             layer.busy = picture_busy(part, blip.get(_R_EMBED) if blip is not None else None)
         layer.custom_geom = sppr is not None and sppr.find(_A + "custGeom") is not None
+    rot = _rotation(el)
+    if _turned(rot):
+        # a turned shape covers its turned frame (a vertical side bar written as a horizontal one turned 90°)
+        layer.rot, layer.xbox = rot, box
+        if layer.picture and part is not None:
+            try:
+                layer.part_ref = weakref.ref(part)
+            except TypeError:
+                layer.part_ref = None
+            pts = _turned_picture_points(layer, Bbox(x=0, y=0, w=W, h=H), cols=32, rows=18) if W > 0 and H > 0 else None
+            if pts:
+                layer.painted_cover = sum(1 for p in pts if p is not None and p[3] > 0.5) / float(len(pts))
+        layer.box = turned_box(layer.box, box, rot)
     layer.full_bleed = layer.cover >= FULL_BLEED
     return layer
 
@@ -890,12 +947,103 @@ def _picture_region(part, rid: Optional[str], crop: tuple[float, float, float, f
     return got
 
 
+_TURNED_PX: dict[tuple, object] = {}
+
+
+def _turned_picture_points(layer: Layer, region: Bbox, holder=None, cols: int = 12, rows: int = 6) -> Optional[list[Optional[tuple[float, float, float, float]]]]:
+    """The picture of a turned layer sampled at a `cols`×`rows` grid of `region`: each point turned back into the
+    picture's frame, kept only inside its outline (a freeform clip), its pixel (r, g, b, alpha 0–1) read there; None
+    for a point off the picture. A picture turned 139° (a building shot whose sky is transparent) painted its glass
+    where the box read straight would have put its sky. None when the picture cannot be read."""
+    el = layer.el
+    frame = layer.xbox
+    part = getattr(holder, "part", None)
+    if part is None and layer.part_ref is not None:
+        part = layer.part_ref()
+    if frame is None or frame.w <= 0 or frame.h <= 0 or part is None or region.w <= 0 or region.h <= 0:
+        return None
+    blip = el.find(".//" + _A + "blip")
+    rid = blip.get(_R_EMBED) if blip is not None else None
+    if not rid:
+        return None
+    src = el.find(".//" + _A + "srcRect")
+    crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
+    try:
+        img_part = part.related_part(rid)
+    except Exception:  # noqa: BLE001
+        return None
+    key = (_image_key(img_part), crop)
+    if key not in _TURNED_PX:
+        got = None
+        try:
+            import numpy as np
+            from PIL import Image
+
+            im = Image.open(io.BytesIO(img_part.blob))
+            im.draft("RGB", (512, 512))
+            im = im.convert("RGBA")
+            iw, ih = im.size
+            l, t, r, b = crop
+            im = im.crop((int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1)))
+            im.thumbnail((256, 256))
+            got = np.asarray(im, dtype=np.float32)
+        except Exception:  # noqa: BLE001 - an unreadable picture (EMF/WMF/SVG)
+            got = None
+        if len(_TURNED_PX) > 64:
+            _TURNED_PX.clear()
+        _TURNED_PX[key] = got
+    px = _TURNED_PX[key]
+    if px is None:
+        return None
+    hh, ww = px.shape[0], px.shape[1]
+    polys = None
+    if el.find(_P + "spPr/" + _A + "custGeom") is not None:
+        try:
+            from verstka.audit.ir import shape_outline
+
+            polys = shape_outline(el, frame, 0.0)  # the clip in the unturned frame
+        except Exception:  # noqa: BLE001
+            polys = None
+    xfrm = el.find(_P + "spPr/" + _A + "xfrm")
+    flip_h = xfrm is not None and xfrm.get("flipH") in ("1", "true")
+    flip_v = xfrm is not None and xfrm.get("flipV") in ("1", "true")
+    cx, cy = frame.x + frame.w / 2.0, frame.y + frame.h / 2.0
+    out: list[Optional[tuple[float, float, float, float]]] = []
+    for j in range(rows):
+        py = region.y + (j + 0.5) * region.h / rows
+        for i in range(cols):
+            px_ = region.x + (i + 0.5) * region.w / cols
+            ux, uy = _turn(px_, py, cx, cy, -layer.rot)
+            u, v = (ux - frame.x) / frame.w, (uy - frame.y) / frame.h
+            if not (0.0 <= u < 1.0 and 0.0 <= v < 1.0):
+                out.append(None)
+                continue
+            if polys and sum(1 for poly in polys if len(poly) > 2 and _inside(ux, uy, poly)) % 2 == 0:
+                out.append(None)
+                continue
+            if flip_h:
+                u = 1.0 - u
+            if flip_v:
+                v = 1.0 - v
+            p = px[min(int(v * hh), hh - 1), min(int(u * ww), ww - 1)]
+            out.append((float(p[0]), float(p[1]), float(p[2]), float(p[3]) / 255.0))
+    return out
+
+
 def layer_paint_at(layer: Layer, region: Bbox, holder=None) -> Optional[tuple[str, float]]:
     """(colour, opacity) a layer paints over `region`: a picture's opaque pixels there, a gradient's colours there,
     a solid or pattern fill's colour. None when it paints nothing we can read."""
     el = layer.el
     part = getattr(holder, "part", None)
     tag = etree.QName(el).localname
+    if (tag == "pic" or (tag == "sp" and layer.picture)) and layer.xbox is not None:
+        pts = _turned_picture_points(layer, region, holder)
+        if pts is not None:
+            wsum = sum(p[3] for p in pts if p is not None)
+            if wsum <= 0:
+                return None if not pts else ("FFFFFF", 0.0)
+            rgb = [sum(p[k] * p[3] for p in pts if p is not None) / wsum for k in range(3)]
+            return "%02X%02X%02X" % tuple(int(round(c)) for c in rgb), wsum / len(pts)
     if tag == "pic" or (tag == "sp" and layer.picture):
         blip = el.find(".//" + _A + "blip")
         rid = blip.get(_R_EMBED) if blip is not None else None
@@ -935,6 +1083,11 @@ def _outline_of(layer: Layer) -> Optional[list]:
         return None
     prst = layer.el.find(_P + "spPr/" + _A + "prstGeom")
     if prst is not None and (prst.get("prst") or "rect") in _RECT_PRESETS:
+        if layer.xbox is not None and abs(((layer.rot + 45.0) % 90.0) - 45.0) > 0.5:
+            # a rectangle turned off the right angles paints its turned corners, not its bounding box
+            f = layer.xbox
+            cx, cy = f.x + f.w / 2.0, f.y + f.h / 2.0
+            return [[tuple(int(round(c)) for c in _turn(x, y, cx, cy, layer.rot)) for x, y in ((f.x, f.y), (f.x2, f.y), (f.x2, f.y2), (f.x, f.y2))]]
         return None
     try:
         from verstka.audit.ir import shape_outline
@@ -968,6 +1121,10 @@ def painted_share(layer: Layer, box: Bbox) -> float:
     over = layer.box.intersection(box) / float(box.area)
     if over <= 0:
         return 0.0
+    if layer.xbox is not None and (layer.kind == "pic" or (layer.kind == "sp" and layer.picture)):
+        pts = _turned_picture_points(layer, box)
+        if pts is not None:
+            return sum(1 for p in pts if p is not None and p[3] > 0.5) / float(len(pts))
     polys = _outline_of(layer)
     if polys is None:
         if layer.kind == "sp" and layer.custom_geom:

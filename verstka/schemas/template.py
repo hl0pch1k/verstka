@@ -318,7 +318,7 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "35"
+    analysis_version: str = "36"
     embedded_fonts: list[str] = Field(default_factory=list)
     # template families this machine does not have (not installed, not embedded) → the face previews and PDFs set them
     # in (the LibreOffice replacement table of ingest.render, fonts.render_standin; else fontconfig's substitute);

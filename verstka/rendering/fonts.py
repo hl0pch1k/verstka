@@ -73,10 +73,17 @@ def _norm(name: str) -> str:
     return re.sub(r"[\s_\-]+", "", (name or "").lower())
 
 
+_OTHER_WIDTH_RE = re.compile(r"\b(black|heavy|ultra|extra ?bold|narrow|condensed|cond|compressed|extended|expanded|wide|rounded)\b")
+
+
 def _is_family_of(key: str, k: str) -> bool:
     """`key` names the family `k` or one of its faces («open sans light», «montserrat-regular»), not another family
-    that merely starts with the same letters («playfair display» is not Play)."""
-    return key.startswith(k) and (len(key) == len(k) or not key[len(k)].isalnum())
+    that merely starts with the same letters («playfair display» is not Play), nor a cut of other widths: «Arial
+    Black» sets its letters a fifth wider than Arial and «Arial Narrow» a fifth narrower — measured as Arial, a cover
+    title tracked in Arial Black broke inside its words and ran under the picture beside it."""
+    if not (key.startswith(k) and (len(key) == len(k) or not key[len(k)].isalnum())):
+        return False
+    return not _OTHER_WIDTH_RE.search(key[len(k):].replace("-", " ").replace("_", " "))
 
 
 def is_pinned(family: Optional[str]) -> bool:

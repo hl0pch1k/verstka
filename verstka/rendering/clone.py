@@ -848,6 +848,11 @@ class _SlideCtx:
                 continue
             if b[1] < bx.y2 and b[1] + b[3] > bx.y and b[0] >= bx.x2 - int(0.01 * self.W):
                 limit = min(limit, b[0] - int(0.015 * self.W))
+        # a heading printed on a painted panel (white capitals on the blue column of a section sample) widens along the
+        # panel only: past its edge its letters stand in their colour on another ground — white on the white page
+        panel = _ground_panel(self, bx)
+        if panel is not None and panel.x2 > bx.x + int(0.05 * self.W):
+            limit = min(limit, panel.x2 - int(0.015 * self.W))
         return limit
 
     def _hold_in_band(self, el: etree._Element, bx: Bbox, need_w: int, limit: int) -> Optional[tuple[int, int, int, int]]:
@@ -5979,6 +5984,13 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         top_lim = max(top_lim, above + int(max(0.05 * H, 0.6 * target * EMU_PER_PT)))
     t_ins = _body_insets(t_el)
     word_room = 0.75 if bold else 0.8
+    from verstka.rendering.fonts import is_measured, is_pinned
+
+    if family and not is_pinned(family) and is_measured(family):
+        # a face measured with its own file (installed, the very one the renderer sets): its words are measured as they
+        # render, the fifth kept free for a wider stand-in only cost the cover its display size (Arial Black, tracked:
+        # «ЭКОСИСТЕМЫ» held a 36 pt heading to 20 pt in a box made for it)
+        word_room = 0.97  # (the line itself keeps 5 % free: `inner`)
 
     def inner(w: int) -> float:
         # 5 % of the line is kept free: the face that renders the deck (the template font, or a substitute where it is
@@ -5991,10 +6003,12 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         return max(0.2, min(0.45, typo.size_for("h1", 0.45 * ref) / ref))
 
     def fit_lines(txt: str, n: int, ref: float) -> tuple[float, int, int]:
-        s1, n1 = display_fit(txt, family, ref, bold, inner(w_sample), n, ctx.grow_scale, floor=floor_of(ref), word_room=word_room, spc_pt=t_spc)
+        # (every size the template sets is a step to try: tried only on the grow scale, a heading that fits at 30 pt —
+        # a size of the template — was fitted at 28.8 and snapped down to 24)
+        s1, n1 = display_fit(txt, family, ref, bold, inner(w_sample), n, snap_sizes, floor=floor_of(ref), word_room=word_room, spc_pt=t_spc)
         if s1 >= 0.85 * ref - 0.05 or w_max <= w_sample:
             return s1, n1, w_sample
-        s2, n2 = display_fit(txt, family, ref, bold, inner(w_max), n, ctx.grow_scale, floor=floor_of(ref), word_room=word_room, spc_pt=t_spc)
+        s2, n2 = display_fit(txt, family, ref, bold, inner(w_max), n, snap_sizes, floor=floor_of(ref), word_room=word_room, spc_pt=t_spc)
         return (s2, n2, w_max) if s2 > s1 else (s1, n1, w_sample)
 
     def breaks(txt: str, sz: float, w: int, n_min: int = 1) -> list[str]:
@@ -6216,6 +6230,11 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         # Классика's 24 and 40 — is no size of the template, `size_not_in_scale`)
         steps_below = [s for s in snap_sizes if 0.5 * size0 - 0.05 <= s < size - 0.05]
         size = max(smaller) if smaller else (max(steps_below) if steps_below else _snap_display(size * 0.92, snap_sizes))
+    if kind == PatternKind.title and h1 and size < min(0.6 * target, h1) - 0.05:
+        # a cover whose title the sample's room holds only at a fraction of its size (a closing slide's word «СПАСИБО»
+        # between the stripes of its picture, a long title at 18 pt where the deck's slide headings stand at 36): it
+        # does not read as a cover — the next sample, or a composed cover
+        raise SampleRefused(f"the heading had to shrink to {size:g} pt (the deck sets {max(target, h1):g} pt)")
     if kind == PatternKind.title:
         st.cover_size, st.cover_bold = size, bold
     if sub_text and not st.sub_size:

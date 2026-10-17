@@ -3772,7 +3772,7 @@ def _free_width(slide: Slide, box: Bbox, W: int, H: int, right: int, skip: tuple
     for el in items:
         if el in skip or etree.QName(el).localname not in ("sp", "pic", "grpSp", "graphicFrame", "cxnSp"):
             continue
-        b = element_bbox(el)
+        b = _drawn_box(slide, el)
         if not b or b[2] * b[3] >= 0.6 * W * H:
             continue
         if b[1] < box.y2 and b[1] + b[3] > box.y and b[0] >= box.x + int(0.1 * W):
@@ -3908,6 +3908,28 @@ def _foot_top(slide: Slide, W: int, H: int) -> Optional[int]:
         if b[1] >= 0.8 * H and b[1] + b[3] <= H * 1.01:
             tops.append(b[1])
     return min(tops) if tops else None
+
+
+def _drawn_box(slide: Slide, el) -> Optional[tuple[int, int, int, int]]:
+    """Where a drawn element stands on the slide: its own box, the box a placeholder of the slide inherits from its
+    layout (a picture placeholder kept for the slide's picture writes none of its own — read as nowhere, the heading
+    ran on under the photo), the box a turned shape really covers (a side bar written across and turned 90°)."""
+    b = element_bbox(el)
+    if b is None and el.find(".//" + q("p:ph")) is not None:
+        from verstka.rendering.deck import inherited_box
+
+        shp = next((sh for sh in slide.shapes if sh._element is el), None)
+        b = inherited_box(shp) if shp is not None else None
+    if b is None:
+        return None
+    from verstka.rendering.layers import _rotation, turned_box
+
+    rot = _rotation(el)
+    if 0.5 < rot < 359.5:
+        frame = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+        t = turned_box(frame, frame, rot)
+        return t.x, t.y, t.w, t.h
+    return b
 
 
 def _drawn(slide: Slide) -> list:
