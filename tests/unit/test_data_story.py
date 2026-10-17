@@ -55,7 +55,9 @@ def test_the_sample_story_follows_the_scenario(sales_story):
     o = sales_story.outline
     assert len(o.slides) == 9
     assert o.slides[0].kind.value == "title"
-    assert o.title == "Итоги продаж VK Cloud за 9 месяцев 2026 года" and o.subtitle == "Для правления"
+    # conv5 F11: the cover is the verified conclusion of the brief's first goal, never its first sentence verbatim
+    assert o.title == next(s for s in o.slides if s.data is not None and s.data.file == "Выручка по месяцам.csv").headline
+    assert o.subtitle == "Для правления"
     files = [s.data.file if s.data else s.id for s in o.slides]
     # cover → key figures → the goals' datasets in the goals' order → distribution → quality (gaps) → reference → summary
     assert files == ["title", "Итоги квартала.txt", "Выручка по месяцам.csv", "Регионы.xlsx", "Каналы продаж.json",
@@ -167,7 +169,7 @@ def test_a_big_reference_table_goes_to_the_appendix_and_the_count_drops_it_first
 
 def test_without_text_the_deck_is_titled_by_its_data(sales):
     o = build_data_outline("", sales)
-    assert o.title == "Что показывают данные" and o.subtitle
+    assert o.title == "NPS по кварталам и ещё 6 тем" and o.subtitle  # the files' topics, not «Что показывают данные»
     assert not any(s.id.startswith("context") for s in o.slides)
 
 
@@ -176,7 +178,8 @@ def test_a_brief_with_context_gets_a_context_slide(sales):
             "Команда продаж выросла вдвое, а партнёрская программа заработала с весны. Покажи рост выручки.")
     o = build_data_outline(text, sales)
     ctx = [s for s in o.slides if s.id.startswith("context")]
-    assert len(ctx) == 1 and ctx[0].verbatim and len(ctx[0].content.bullets) == 2
+    # the first sentence is context now: the cover is the answer of the goal, not the brief's first sentence (F11)
+    assert len(ctx) == 1 and ctx[0].verbatim and len(ctx[0].content.bullets) == 3
     assert not any("Покажи" in b for b in ctx[0].content.bullets)
 
 
@@ -219,7 +222,9 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
     told = [c for c in mp.calls if c["schema"] == "StoryWriting"]
     assert len(told) == 1 and len(mp.calls) == 2 and mp.calls[0]["schema"] == "GoalReading"
     by = _by_file(o)
-    assert o.title == "Продажи VK Cloud в 2026 году" and o.slides[0].headline == o.title
+    # conv5 F11: the cover is the verified answer of the brief's first goal — a topic title of the model does not replace it
+    assert o.title == build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales).title and o.slides[0].headline == o.title
+    assert any(r["what"] == "title" and r["to"] == "Продажи VK Cloud в 2026 году" and not r["accepted"] for r in st.rephrased)
     assert by["Выручка по месяцам.csv"].headline == "Выручка за год выросла на 23%"
     assert by["Каналы продаж.json"].headline == "Почти половину выручки приносят прямые продажи"
     # refused: a number the data does not give — the analysis's own headline stays
@@ -281,7 +286,7 @@ def test_a_failed_model_leaves_the_deterministic_story(sales):
 def test_numbers_in_a_title_come_from_the_brief(sales):
     _, reg = _model({"title": "Продажи VK Cloud выросли на 30% в 2026 году"})
     st = build_data_story(SALES_BRIEF, sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
-    assert st.outline.title == "Итоги продаж VK Cloud за 9 месяцев 2026 года"
+    assert st.outline.title == build_data_outline(SALES_BRIEF, sales).title  # the deterministic cover stays
     assert st.rejected and st.rejected[0]["what"] == "title"
 
 

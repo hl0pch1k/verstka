@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from verstka.data.aggregate import is_other_label
 from verstka.data.goals import goal_match
 from verstka.data.goals import stems_of as goal_stems
 from verstka.data.headline import numbers_in
@@ -132,27 +133,81 @@ def _is_num(c: Any) -> bool:
     return isinstance(c, (int, float)) and not isinstance(c, bool)
 
 
+def _tokens(text: str) -> list[str]:
+    return [w for w in re.findall(r"[a-zа-яё0-9]+", (text or "").lower().replace("ё", "е")) if w]
+
+
+def _word_hit(w: str, q: Sequence[str]) -> bool:
+    """Слово имени — целое слово вопроса или та же основа («партнёров» — «Партнёры»), а не кусок другого слова
+    («город» — не «Академгородок», F4)."""
+    from verstka.data.words import stem
+
+    if w.isdigit():
+        return w in q
+    sw = stem(w)
+    for x in q:
+        if x.isdigit():
+            continue
+        sx = stem(x)
+        if sw == sx or (min(len(sw), len(sx)) >= 4 and (sx.startswith(sw) or sw.startswith(sx))
+                        and abs(len(sw) - len(sx)) <= 3):
+            return True
+    return False
+
+
+_BENCH_RE = re.compile(r"(?i)^(?:средн|в\s+среднем|итог|всего|норматив|план\b|медиан|по\s+(?:сети|району|стране|компании))")
+
+
 def named_rows(question: str, t: Table) -> list[int]:
     """Rows of a short table whose name the question says («прямых продаж» → «Прямые продажи», «партнёров» →
-    «Партнёры»): every word of the name is a word of the question."""
+    «Партнёры»): every word of the name is a whole word of the question (or its stem) — «Академгородок» is not named by
+    «город». Rows whose name repeats (one category over several rows) are no answer: their value is an aggregate."""
     j = label_column(t)
     if j is None or len(t.rows) > MAX_ROWS_NAMED:
         return []
-    q = goal_stems(question)
+    q = _tokens(question)
+    labels = [str(r[j]).strip().lower() for i, r in enumerate(t.rows) if i not in set(t.totals) and j < len(r)
+              and isinstance(r[j], str)]
     out = []
     for i, r in enumerate(t.rows):
         if i in set(t.totals) or j >= len(r) or not isinstance(r[j], str) or not r[j].strip():
             continue
-        ws = goal_stems(r[j])
-        if ws and all(any(same_stem(w, x) or stem_in(w, x) for x in q) for w in ws):
+        if labels.count(r[j].strip().lower()) > 1:
+            continue
+        if _BENCH_RE.match(r[j].strip()):
+            continue  # «Среднее по району», «Итого», «Норматив» — ориентир, а не строка, о которой вопрос
+        ws = [w for w in _tokens(r[j]) if len(w) >= 3 or w.isdigit()]
+        if ws and all(_word_hit(w, q) for w in ws):
             out.append(i)
     return out
 
 
-def rows_answer(question: str, t: Optional[Table]) -> Optional[RowsAnswer]:
-    """The figures of the rows a question names (up to three), said row by row — the share first, the sum beside it,
-    one count column after («Прямые продажи — 46% (1 608 млн ₽), сделок: 214; партнёры — 28% (978 млн ₽), сделок:
-    391») — and as facts, so that every figure of the card is one of the data's. None — the question names no row."""
+def _share_of(t: Table, share: int, col: int, rows: Sequence[int]) -> bool:
+    """Колонка «%» — доля строки в сумме колонки `col` (значение / итог × 100 у каждой строки), а не другая
+    величина в процентах (NPS, доля возвратов внутри категории)."""
+    body = [i for i in range(len(t.rows)) if i not in set(t.totals)]
+    vals = [t.rows[i][col] if col < len(t.rows[i]) else None for i in body]
+    if not vals or any(not _is_num(v) for v in vals):
+        return False
+    tot = sum(float(v) for v in vals)
+    if not tot:
+        return False
+    for i in body:
+        a, b = t.rows[i][share] if share < len(t.rows[i]) else None, t.rows[i][col]
+        if not _is_num(a) or abs(float(a) - float(b) / tot * 100) > 0.6:
+            return False
+    return True
+
+
+def _col_label(t: Table, j: int) -> str:
+    return lower_first(t.columns[j]) if not re.match(r"^[A-ZА-ЯЁ]{2,}", t.columns[j]) else t.columns[j]
+
+
+def rows_answer(question: str, t: Optional[Table], main: Optional[str] = None) -> Optional[RowsAnswer]:
+    """The figures of the rows a question names (up to three), said row by row, every figure with the column it came
+    from (F4): the slide's measure `main` first («Ночная — оценка качества: 79 баллов, меньше — только у «Выходного
+    дня» (74)»), a «%» column as a share only when it is the row's share of the sum column («Прямые продажи — 46%
+    (1 608 млн ₽), сделок: 214»), any other «%» column by its own name. None — the question names no row."""
     if t is None:
         return None
     rows = named_rows(question, t)
@@ -166,30 +221,76 @@ def rows_answer(question: str, t: Optional[Table]) -> Optional[RowsAnswer]:
     nums = [j for j in range(len(t.columns)) if j != j0 and all(j < len(t.rows[i]) and _is_num(t.rows[i][j]) for i in rows)]
     if not nums:
         return None
-    share = next((j for j in nums if unit(j) == "%"), None)
-    sums = [j for j in nums if j != share and unit(j)]
-    counts = [j for j in nums if j != share and not unit(j)]
+    jm = next((j for j in nums if main and t.columns[j] == main), None)
+    labels = [str(t.rows[i][j0]).strip() for i in rows]
+    clauses, shorts, facts = [], [], []
+    pct = [j for j in nums if unit(j) == "%"]
+    sums = [j for j in nums if j not in pct and unit(j)]
+    counts = [j for j in nums if j not in pct and not unit(j)]
+    share = next((j for j in pct if sums and _share_of(t, j, sums[0], rows)), None)
+    if jm is not None and share is not None and jm in (share, sums[0]) and len(rows) >= 2:
+        jm = None  # каналы и их доли выручки: доля, сумма и сделки — по строке (qa4 NEW-S2)
+    if jm is not None:
+        body = [i for i in range(len(t.rows)) if i not in set(t.totals) and jm < len(t.rows[i]) and _is_num(t.rows[i][jm])
+                and j0 < len(t.rows[i]) and isinstance(t.rows[i][j0], str)]
+        u = unit(jm)
+        name_m = _col_label(t, jm)
+        for n, (i, lab) in enumerate(zip(rows, labels)):
+            v = float(t.rows[i][jm])
+            facts.append(HeadlineFact(id=f"ask_{i}_{jm}", text=f"{lab} — {t.columns[jm]}: {fmt_value(v, u)}", value=v,
+                                      unit=u, kind="total"))
+            line = f"{lab if n == 0 else mid_case(lab)} — {name_m}: {fmt_value(v, u)}"
+            if len(rows) == 1 and len(body) >= 3:
+                others = [(str(t.rows[k][j0]).strip(), float(t.rows[k][jm])) for k in body if k != i
+                          and not is_other_label(str(t.rows[k][j0]))]
+                hi = [x for x in others if x[1] > v]
+                lo = [x for x in others if x[1] < v]
+                for lab2, v2 in hi + lo:
+                    if len(hi) <= 2 or len(lo) <= 2:
+                        facts.append(HeadlineFact(id=f"ask_rank_{len(facts)}", text=f"{lab2} — {t.columns[jm]}: {fmt_value(v2, u)}",
+                                                  value=v2, unit=u, kind="total"))
+                said = lambda xs: join_and([f"«{a}» ({fmt_value(b, u)})" for a, b in xs])  # noqa: E731
+                if not hi:
+                    line += ", больше всех"
+                elif not lo:
+                    line += ", меньше всех"
+                elif len(lo) <= 2:
+                    line += f", меньше — только у {said(lo)}"
+                elif len(hi) <= 2:
+                    line += f", больше — только у {said(hi)}"
+            clauses.append(line)
+            shorts.append(line)
+        if len(rows) == 2:
+            (a, va), (b, vb) = [(lab, float(t.rows[i][jm])) for i, lab in zip(rows, labels)]
+            if va != vb:
+                short = (f"{a} — {name_m}: {fmt_value(va, u)}, {'больше' if va > vb else 'меньше'}, чем у "
+                         f"«{b}» ({fmt_value(vb, u)})")
+                shorts = [short]
+        title = join_and([labels[0]] + [mid_case(x) for x in labels[1:]])
+        return RowsAnswer(title=title, text="; ".join(clauses), short=", ".join(shorts), facts=facts)
     measure = None
-    if share is not None and sums:
+    if share is not None:
         p = phrase(t.columns[sums[0]])
         measure = lower_first(p.gen) if p is not None and p.sure else None
-    clauses, shorts, facts = [], [], []
-    labels = [str(t.rows[i][j0]).strip() for i in rows]
+    other_pct = [j for j in pct if j != share]
     for n, (i, lab) in enumerate(zip(rows, labels)):
         name = lab if n == 0 else mid_case(lab)
         r = t.rows[i]
         bits, short = [], ""
         if share is not None:
-            s = fmt_value(float(r[share]), "%")
-            facts.append(HeadlineFact(id=f"ask_{i}_{share}", text=f"{lab} — {s}", value=float(r[share]), unit="%", kind="share"))
-            short = s + (f" {measure}" if measure and n == 0 else "")
+            s_ = fmt_value(float(r[share]), "%")
+            facts.append(HeadlineFact(id=f"ask_{i}_{share}", text=f"{lab} — {s_}", value=float(r[share]), unit="%", kind="share"))
+            short = s_ + (f" {measure}" if measure and n == 0 else "")
         if sums:
             v = fmt_value(float(r[sums[0]]), unit(sums[0]))
             facts.append(HeadlineFact(id=f"ask_{i}_{sums[0]}", text=f"{lab} — {v}", value=float(r[sums[0]]), unit=unit(sums[0]), kind="total"))
-            bits.append(f"{fmt_value(float(r[share]), '%')} ({v})" if share is not None else v)
-            short = short or v
-        elif share is not None:
-            bits.append(fmt_value(float(r[share]), "%"))
+            bits.append(f"{fmt_value(float(r[share]), '%')} ({v})" if share is not None else f"{_col_label(t, sums[0])}: {v}")
+            short = short or f"{_col_label(t, sums[0])}: {v}"
+        for j in other_pct[:1]:
+            v = fmt_value(float(r[j]), "%")
+            facts.append(HeadlineFact(id=f"ask_{i}_{j}", text=f"{lab} — {t.columns[j]}: {v}", value=float(r[j]), unit="%", kind="total"))
+            bits.append(f"{_col_label(t, j)}: {v}")
+            short = short or f"{_col_label(t, j)}: {v}"
         for j in counts[:1]:
             v = fmt_value(float(r[j]), None)
             facts.append(HeadlineFact(id=f"ask_{i}_{j}", text=f"{lab} — {lower_first(t.columns[j])}: {v}", value=float(r[j]), unit=None, kind="count"))

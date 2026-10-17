@@ -93,7 +93,9 @@ def test_a_question_about_two_channels_gets_their_shares_sums_and_deals(sales):
 
 def test_a_brief_without_questions_keeps_its_own_cover_and_order(sales):
     o = build_data_story(Brief(text=SALES_BRIEF), sales).outline
-    assert o.title.startswith("Итоги продаж VK Cloud") and _data(o)[0].data.file == "Итоги квартала.txt"
+    # conv5 F11: the cover is the verified conclusion of the brief's main goal, never its first sentence verbatim
+    assert not o.title.startswith("Итоги продаж VK Cloud") and _data(o)[0].data.file == "Итоги квартала.txt"
+    assert o.title == next(s for s in _data(o) if s.data.file == "Выручка по месяцам.csv").headline
 
 
 # ── NEW-S1: the summary's headline is a conclusion ───────────────────────────────────────────────────────────────────

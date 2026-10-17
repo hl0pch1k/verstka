@@ -12,6 +12,19 @@ Numbers — the most important rule:
 - A headline without any number is allowed when it still says a conclusion («Прямые продажи приносят почти половину
   выручки»), but never only a topic («Выручка по месяцам»).
 
+Meaning — as important as the numbers (the program refuses a sentence that breaks it and keeps its own):
+- Every claim comes from the draft and the facts of that slide. Rephrase only by reordering or shortening the draft's
+  own words and adding connecting words («при этом», «уже», «у»). Keep each number with the measure, the category, the
+  period and the unit of its own fact: «1 265 тыс. пасс.», never «1 265 пассажиров»; a network figure is never said of
+  one region; a share of all failures is never «доля не сдавших».
+- Never take a qualifier from the brief that the facts do not carry: «на посетителя», «за сеанс», «ожидаемая»,
+  «с учётом вероятности», «всех …», «в Сибири», «за лето», «до конца года», «после обновления». The brief asks; only
+  the facts answer.
+- Verdict words — «опережает», «отстаёт», «выполнен», «не выполнен», «лучше», «хуже», «связана», «не связана»,
+  «самый …», «превысил в N раз», «хуже, чем год назад» — only when the draft or the facts of that slide already say
+  so. Never answer a question the draft does not answer: when the draft says «по данным не посчитано», the deck says
+  that too.
+
 Questions. When the brief asks questions (they are listed as «Questions of the brief»), the deck answers them first:
 - the title is the answer to the main question, said with the facts of the slide that answers it («Москва даёт 41%
   выручки, Казань растёт быстрее всех») — never a topic («Итоги III квартала 2026: рост выручки и NPS»);
