@@ -1441,7 +1441,7 @@ class Composer:
         bottom = self._content_bottom(n0)
         if bottom is None or area.h <= 0:
             return None
-        return (bottom - area.y) / area.h
+        return (bottom - getattr(self, "_band_lift", 0) - area.y) / area.h
 
     def _grow_to(self, area_h: int, rows: int, gap: int, content_h: int) -> int:
         """The height a block's row may take at the fill pass's second level: the rows together about FILL_TARGET of
@@ -1452,6 +1452,7 @@ class Composer:
         return max(content_h, min(want, int(content_h * 1.6)))
 
     def _compose_body(self, comp: str, area: Bbox) -> None:
+        self._band_lift = 0  # (a row of steps set lower than under the heading: `process`)
         c = self.o.content
         kind = self.o.kind
         intro = self._intro_text(comp)
@@ -2779,10 +2780,15 @@ class Composer:
             return
         block_h = self._grow_to(area.h, 1, 0, total) if in_cards else total
         y0 = self._place_v(area, block_h)
-        if not in_cards and not titled and block_h < 0.45 * area.h:
-            # a row of bare step names on its axis is a band, not a column of text: it stands a third of the way down
-            # its area rather than under the heading with half the slide empty below it
+        sentences = titled and not any(i.title for i in items)  # (steps told as sentences — the rows grow taller)
+        if not in_cards and (not titled or sentences) and block_h < (0.6 if sentences else 0.45) * area.h:
+            # a row of bare steps on its axis — their names, or the sentences of a deck's closing steps («Что дальше»
+            # of a data deck, qa3 leftovers) — is a band, not a column of text: it stands a third of the way down its
+            # area rather than under the heading with half the slide empty below it (the fill pass measures the
+            # sentences where they would stand under the heading: their type still grows into the room — `_fill`)
             y0 = area.y + (area.h - block_h) // 3
+            if sentences:
+                self._band_lift = max(0, y0 - self._place_v(area, block_h))
         # the axis runs through the badges' centres, behind them
         cy = y0 + d // 2
         first_cx = area.x + (pad if in_cards else 0) + d // 2

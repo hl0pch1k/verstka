@@ -249,3 +249,53 @@ def test_the_audit_sees_a_logo_missing_or_in_another_corner(tmp_path):
     got, _ = run_checks(AuditContext(ir=ir, manifest=None, outline=None), only={"brand_logo_place"})
     by = {i.slide: i.message for i in got}
     assert set(by) == {4, 5} and "снизу слева" in by[4] and "нет логотипа" in by[5]
+
+
+def test_an_icon_is_picked_by_meaning_or_not_at_all(tmp_path):
+    """qa3 N-B5: a card's icon says what the card says — the hint's words or its topic among the icon's tags; a stem
+    hidden inside another word («начать» is no «чат», «update» no «date») picks nothing, and no match means no icon
+    (the clone then takes the sample's pictogram off) rather than the largest one."""
+    from types import SimpleNamespace
+
+    from verstka.rendering.assets_pick import pick_icon
+    from verstka.schemas.template import Asset
+
+    icons = [Asset(id="cal", path="a/cal.png", kind="icon", width=96, height=96, has_alpha=True, tags=["calendar", "date"]),
+             Asset(id="chat", path="a/chat.png", kind="icon", width=64, height=64, has_alpha=True, tags=["chat", "message bubble"]),
+             Asset(id="up", path="a/up.png", kind="icon", width=64, height=64, has_alpha=True, tags=["growth", "arrow"])]
+    m, ws = SimpleNamespace(assets=icons), SimpleNamespace(dir=tmp_path)
+    assert pick_icon(m, ws, "Каналы продаж") is None
+    assert pick_icon(m, ws, "начать продажи") is None
+    assert pick_icon(m, ws, "update") is None
+    assert pick_icon(m, ws, "") is None
+    assert pick_icon(m, ws, "сообщения клиентов")[0] == "chat"
+    assert pick_icon(m, ws, "рост выручки")[0] == "up"
+    assert pick_icon(m, ws, "сроки запуска")[0] == "cal"
+
+
+def test_a_closing_slide_reads_as_its_whole_content():
+    """qa3 leftovers: a data deck's summary on a sample is led by its figures — each at least 1.5× its card's text (ЛЦТ
+    p17: 24 pt over 18 pt) — and its text is never under the template's body size (ЛЦТ p4: 13 pt at a 14 pt body)."""
+    from pptx.util import Pt
+
+    from verstka.rendering.clone_check import closing_trouble
+
+    def slide(fig: float, text: float):
+        prs = Presentation()
+        sl = prs.slides.add_slide(prs.slide_layouts[6])
+        for k, (n, t, x) in enumerate([("+23%", "Итоги квартала", "Выручка растёт быстрее числа клиентов"), ("41%", "Выручка по регионам", "Москва даёт 41% выручки")]):
+            tf = sl.shapes.add_textbox(Emu(600000 + k * 3000000), Emu(1500000), Emu(2800000), Emu(3000000)).text_frame
+            tf.text = n
+            tf.paragraphs[0].runs[0].font.size = Pt(fig)
+            for line in (t, x):
+                r = tf.add_paragraph().add_run()
+                r.text, r.font.size = line, Pt(text)
+        sl.__dict__["_verstka_closing"] = [("+23%", "Итоги квартала", "Выручка растёт быстрее числа клиентов"), ("41%", "Выручка по регионам", "Москва даёт 41% выручки")]
+        return sl
+
+    assert "не ведут" in closing_trouble(slide(24, 18), 14.0)
+    assert "мельче основного" in closing_trouble(slide(36, 13), 14.0)
+    assert closing_trouble(slide(48, 15), 14.0) is None
+    plain = slide(24, 18)
+    plain.__dict__.pop("_verstka_closing")
+    assert closing_trouble(plain, 14.0) is None

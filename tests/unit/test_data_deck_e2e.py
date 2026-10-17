@@ -229,3 +229,64 @@ def test_both_example_sets_pass_the_data_checks_on_every_template(which, request
         for strategy, rep in audits.items():
             errors = [(i.slide, i.check_id, i.message) for i in rep.issues if i.check_id in DATA_CHECKS and i.severity == "error"]
             assert errors == [], (which, name, strategy, errors)
+
+
+def test_the_closing_slides_read_as_a_deliberate_end(templates, tmp_path):
+    """qa3 leftovers: a data deck's «Что дальше» is numbered steps — a sample that numbers its steps, or the composer's
+    — never three short lines in a ruled list or in tall cards (ЛЦТ p15, VK Tech p24/p25/p28), at the template's body
+    size or larger; the summary's cards are led by their figures, each at least 1.5× the cards' text (ЛЦТ p17 set them
+    at 24 pt over 18 pt)."""
+    import re
+
+    from pptx import Presentation
+
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import OutlineSlide, SlideContent, SlideItem
+
+    root, found = templates
+    story = build_data_story(Brief(text=BRIEF, slide_count=9), _tables(SALES))
+    o = story.outline
+    steps = ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани и Краснодаре", "Удержать темп роста выручки в IV квартале"]
+    at = next(k + 1 for k, s in enumerate(o.slides) if s.id == "summary")
+    o.slides.insert(at, OutlineSlide(id="next-steps", kind=PatternKind.process, headline="Что дальше", content=SlideContent(items=[SlideItem(title=x) for x in steps])))
+    cards = next(s for s in o.slides if s.id == "summary").content.items
+
+    def norm(t: str) -> str:
+        return re.sub(r"\s+", "", t or "")
+
+    def shapes(group):
+        for x in group:
+            if x.shape_type == 6:  # (a group: its members — a sample's steps are often grouped)
+                yield from shapes(x.shapes)
+            else:
+                yield x
+
+    def sizes(slide, texts: list[str], exact: bool) -> list[float]:
+        keys = [norm(t) for t in texts if norm(t)]
+        out = []
+        for shape in shapes(slide.shapes):
+            if not shape.has_text_frame:
+                continue
+            for p in shape.text_frame.paragraphs:
+                t = norm(p.text)
+                if t and any(t == x if exact else t[:16] == x[:16] for x in keys):
+                    out += [r.font.size.pt for r in p.runs if r.font.size]
+        return out
+
+    for t in found:
+        res = generate_variants(t, outline=o, out_dir=tmp_path / t.stem, workspace_root=root, use_llm=False, use_vlm=False, audit=False,
+                                autofix=False, exports=[], render_images=False, pictures=False)
+        body = res.manifest.tokens.typography.size_for("body", 14.0)
+        for v in res.variants:
+            plan = json.loads((v.out_dir / "layout_plan.json").read_text(encoding="utf-8"))["slides"]
+            deck = Presentation(v.out_dir / "deck.pptx")
+            k = next(i for i, s in enumerate(plan) if s["outline_id"] == "next-steps")
+            if plan[k]["mode"] == "clone":
+                pat = next(p for p in res.manifest.patterns if p.id == plan[k]["pattern_id"])
+                assert any(x.role.value == "number" for x in pat.slots), (t.name, v.strategy, pat.id)
+            got = sizes(deck.slides[k], steps, exact=False)
+            assert got and min(got) >= body - 0.5, (t.name, v.strategy, got, body)
+            j = next(i for i, s in enumerate(plan) if s["outline_id"] == "summary")
+            figs = sizes(deck.slides[j], [i.number for i in cards], exact=True)
+            words = sizes(deck.slides[j], [x for i in cards for x in (i.title, i.text) if len(norm(x)) >= 4], exact=False)
+            assert figs and words and min(figs) >= 1.5 * max(words) - 0.5, (t.name, v.strategy, figs, words)

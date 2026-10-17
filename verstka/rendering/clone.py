@@ -1221,6 +1221,12 @@ def _figure_color(ctx: "_SlideCtx", el: etree._Element, slot: Optional[Slot]) ->
     return None
 
 
+def _icons_described(manifest: TemplateManifest) -> bool:
+    """Whether the analysis described the template's icons (their tags: what each shows) — only then can an icon be
+    told to fit a card's text by meaning or not."""
+    return any(a.kind == "icon" and a.tags for a in manifest.assets)
+
+
 def _figure_size(ctx: "_SlideCtx", base: float) -> float:
     """A figure leading a card is set well above its label — about 2.4× (12 pt → 29 pt), never past the template's
     display size; the box it lands in may still cut it down to fit one line."""
@@ -1557,7 +1563,14 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
                         sid = ctx.id_of(e)
                         if sid:
                             ctx.filled.add(sid)
-            elif role == SlotRole.icon and item is not None and not item.icon_hint and ctx.verbatim and e.getparent() is not None:
+                elif e.getparent() is not None and not _logo_mark(ctx, e) and (ctx.verbatim or getattr(ctx, "data_deck", False) or _icons_described(ctx.manifest)):
+                    # no icon of the template says what the card says: no icon, never the sample's own about something
+                    # else (qa3 N-B5: a calendar beside «Каналы продаж»). (Icons the analysis could not describe — no
+                    # vision model — say nothing either way: on an ordinary deck the sample's own stays.)
+                    _drop_icon(ctx, e)
+            elif role == SlotRole.icon and item is not None and not item.icon_hint and (ctx.verbatim or getattr(ctx, "data_deck", False)) and e.getparent() is not None and not _logo_mark(ctx, e):
+                # (a data deck's cards — the summary, the next steps — say what the files say: the sample's pictogram
+                # is about something else)
                 # the sample's own pictogram (a wallet, a «$» on a monitor) says what the sample said, not what the
                 # author's card says: on a slide of the author's text it goes (a card without an icon reads right)
                 _drop_icon(ctx, e)
@@ -6492,6 +6505,15 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
     ctx.kind = oslide.kind
     ctx.data_deck = any(x.data is not None for x in outline.slides)
     ctx.verbatim = bool(oslide.verbatim)
+    if ctx.data_deck and oslide.data is None and c.items and oslide.kind in (PatternKind.cards, PatternKind.process) and c.chart is None and c.table is None:
+        # a data deck's closing slides — the summary's cards led by their figures, the next steps — are the slide's
+        # whole content: the gate measures them on the slide as shown (`clone_check.closing_trouble`)
+        slide.__dict__["_verstka_closing"] = [(i.number or "", i.title or "", i.text or "") for i in c.items]
+    if ctx.data_deck and oslide.data is None and oslide.kind == PatternKind.process and c.items and not any(x.role == SlotRole.number for x in pattern.slots):
+        # a data deck's closing steps («Что дальше») are the slide's whole content: numbered steps, not three short lines
+        # in a sample's ruled list or tall cards (ЛЦТ p15, VK Tech p24/p25/p28 — the steps read as a footnote): a sample
+        # that numbers its steps, or the composer's numbered steps (qa3 leftovers)
+        raise RuntimeError("шаги «Что дальше» — нумерованные, а образец не нумерует свои ячейки")
     if not _is_bookend(oslide):
         # the sample's own largest empty stretch, before anything is taken off: the gate compares the slide with it;
         # and where the sample's own words stand (a text it sets over its art is the design — as far as it goes)

@@ -453,6 +453,42 @@ def _layout_plates_left_empty(slide, manifest: TemplateManifest) -> int:
     return len(empty) if len(empty) >= 2 else 0
 
 
+def closing_trouble(slide, body: float) -> Optional[str]:
+    """A data deck's closing slides (the clone marks their items, `_verstka_closing`) are the slide's whole content and
+    read as a deliberate end, not as a footnote: their text at the template's body size or larger (ЛЦТ p4: the summary
+    at 13 pt under its 14 pt body, squeezed further by its box), and the summary's cards led by their figures — a
+    figure set little above its card's text (ЛЦТ p17: 24 pt over the cards' 18 pt bold) leads nothing; under 1.5× the
+    text (the composer's rule for a figure over its label) the sample is no place for them. Why, or None (qa3
+    leftovers)."""
+    marks = slide.__dict__.get("_verstka_closing")
+    if not marks:
+        return None
+
+    def norm(t: str) -> str:
+        return re.sub(r"\s+", "", t or "")
+
+    nums = {norm(n) for n, _, _ in marks if norm(n)}
+    words = [norm(x) for _, a, b in marks for x in (a, b) if len(norm(x)) >= 4]
+    figs: list[float] = []
+    texts: list[float] = []
+    for para in slide._element.iter(q("a:p")):
+        t = norm("".join(x.text or "" for x in para.iter(q("a:t"))))
+        if not t:
+            continue
+        sizes = [int(rp.get("sz")) / 100 for rp in (r.find(q("a:rPr")) for r in para.iter(q("a:r"))) if rp is not None and (rp.get("sz") or "").isdigit()]
+        if not sizes:
+            continue
+        if t in nums:
+            figs.append(max(sizes))
+        elif any(t[:16] == w[:16] for w in words):
+            texts.append(min(sizes))
+    if texts and body and min(texts) < body - 0.5:
+        return f"текст итоговых карточек мельче основного текста шаблона: {min(texts):g} pt при {body:g} pt"
+    if figs and texts and min(figs) < 1.5 * max(texts) - 0.5:
+        return f"цифры карточек не ведут их: {min(figs):g} pt над текстом в {max(texts):g} pt"
+    return None
+
+
 def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, warnings: list[str]) -> Optional[str]:
     """Why a content slide set on `pattern` must not be shown, or None."""
     for w in warnings:
@@ -552,6 +588,9 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         sizes = [int(r.get("sz")) / 100 for r in el.iter(q("a:rPr")) if r.get("sz")] if el is not None else []
         if ref and sizes and min(sizes) < 0.75 * ref - 0.05:
             return f"the heading had to shrink to {min(sizes):g} pt (the deck sets {ref:g} pt)"
+    closing = closing_trouble(slide, body)
+    if closing:
+        return closing
     # figures squeezed far below the sample's own (VK Tech p42: two display figures, three of ours set at a label's
     # size in narrowed cells): the sample's point — the big number — is lost
     nums = {s.shape_id: (s.style.size_pt or 0.0) for s in pattern.slots if s.role == SlotRole.number and (s.style.size_pt or 0.0) >= 20}
