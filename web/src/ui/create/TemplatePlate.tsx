@@ -11,7 +11,7 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Spinner } from "../kit/Spinner";
 import { Analysis } from "./Analysis";
 import { Cover, inkOf, Ribbon } from "./TemplateRibbon";
-import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, fileRefusal, orderTemplates, READING_DECK, tplMeta, UPLOAD_BUSY_TITLE, uploadFailed, type AnalysisFacts, type StepState } from "./ribbon";
+import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, fileRefusal, READING_DECK, tplMeta, UPLOAD_BUSY_TITLE, uploadFailed, type AnalysisFacts, type StepState } from "./ribbon";
 import { Icon } from "../kit/Icon";
 import { usePresence } from "../kit/usePresence";
 import { useHeld } from "./ImproveNote";
@@ -280,7 +280,7 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
  *  тела (четыре дорожки) перестраивается вместе с ней: у ленты в каждом ряду одна обложка уходит, у разбора — вторая
  *  дорожка (create.css «01 · лента», `tp-anl`). */
 export function TemplateBody({ upload }: { upload: TemplateUpload }) {
-  const { ui, dispatch, templates, notices, data } = useApp();
+  const { ui, dispatch, notices, data } = useApp();
   // разбор брендбука — в теле шага, на месте ленты (V2 `bbRunOn`; свой шаблон, если разбирается, — главнее)
   const bp = data.brand.phase;
   const brandAn = upload.phase === "idle" && (bp === "run" || bp === "done" || bp === "out" || bp === "fail");
@@ -290,7 +290,6 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   // пока читается презентация «Улучшить готовую», файл на плиту не принимается — шапка шага говорит почему
   const over = useFileDrop(body, on && !upload.busy, upload.start, on && upload.busyWhy === READING_DECK ? upload.refuse : undefined);
   const peek = (id: string) => dispatch({ type: "set", patch: { tplPreview: id, tplDelete: null } });
-  const gallery = () => dispatch({ type: "sect", sect: "tpls" });
   const fileName = upload.file?.name ?? "";
   const info = notices.template?.kind === "info" ? notices.template.text : null;
   return (
@@ -302,11 +301,11 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
           brandInput.current?.click();
         }} />
       ) : upload.phase === "idle" ? (
-        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} uploadOff={upload.busyWhy} />
+        <Ribbon fresh={upload.fresh} onPeek={peek} onUpload={upload.pick} uploadOff={upload.busyWhy} />
       ) : (
-        <Analysis list={orderTemplates(templates, upload.fresh)} name={templateTitle(fileName)} fileName={fileName}
+        <Analysis name={templateTitle(fileName)} fileName={fileName}
           steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}
-          info={upload.phase === "fail" ? null : info} onPeek={peek} onGallery={gallery}
+          info={upload.phase === "fail" ? null : info}
           onRetry={upload.retry} onOther={upload.pick} onClose={upload.dismiss} />
       )}
       <UploadZone on={over} />

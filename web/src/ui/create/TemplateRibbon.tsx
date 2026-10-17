@@ -1,19 +1,17 @@
-// Лента шага 01 (C-templates): шесть обложек — свои первыми, выбранная всегда видна, — плитка «Все шаблоны · ещё N» и
-// плитка «Загрузить свой», ряды по четыре (V2 `tpRows`). Помощник сужает колоду: в каждом ряду одна обложка уходит — её
-// дорожка сжимается до нуля, она гаснет на месте; остальные плитки сужаются вместе с плитой (четыре обложки в три
-// колонки, без перескоков между рядами), «ещё N» меняет число на месте (morph.ts `ribbonRows`, create.css «01 · лента»).
-// Без «Все шаблоны» (скрытых шаблонов нет) обложки не уходят: до ушедшей было бы не добраться.
+// Лента шага 01 (C-templates): семь обложек — свои первыми, выбранная всегда видна, — и плитка «Загрузить свой», ряды по
+// четыре (V2 `tpRows`). Плитки «Все шаблоны» нет: весь список открывает кнопка «Шаблоны» в шапке (замечание владельца
+// 18.10). Помощник сужает колоду: в каждом ряду одна обложка уходит — её дорожка сжимается до нуля, она гаснет на месте;
+// остальные плитки сужаются вместе с плитой (четыре обложки в три колонки, без перескоков между рядами; morph.ts
+// `ribbonRows`, create.css «01 · лента»). Если скрытых шаблонов нет, обложки не уходят.
 // Разметка — boards/V2.dc.html, `#p2-b1`. Здесь же обложка шаблона (картинка или схема титульного слайда `tp-wf`) и
 // плитка обложки — их берут разбор, раздел «Шаблоны», «Слайды шаблона» и диалог удаления.
 import { useState, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
-import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
 import { ribbonRows } from "./morph";
-import { useNarrow } from "./useNarrow";
 import { ribbonItems, tplMeta, tplShort } from "./ribbon";
 
 /** Как стоит обложка: плитка ленты (142 px), раздел «Шаблоны» (16:9), миниатюра слайда (16:9, r12), шапка шага
@@ -98,11 +96,11 @@ export function TemplateTile({ t, selected, delay, out, onPick, onPeek, kind = "
   );
 }
 
-/** Служебная плитка: значок-слои и подпись в две строки (высота 40 у обеих — знаки на одной линии). `noteNarrow` —
- *  подпись в узкой колоде: обе стоят в одном месте, широкая гаснет, узкая проявляется (`hp-sw`). `cell` — клетка ряда
- *  ленты; `cut` — плитка уходит в узкой колоде (клетка сжимается до нуля, плитка гаснет на месте). */
-export function ActTile({ icon, note, noteNarrow, name, delay, out, onClick, label, title, kind = "tt", off, cell, cut }: {
-  icon: IconName; note: string[]; noteNarrow?: string; name: string; delay: number; out?: boolean; onClick(): void; label?: string; title?: string; kind?: "tt" | "an";
+/** Служебная плитка («Загрузить свой»): значок-слои и подпись в две строки (высота 40 — знак на одной линии с
+ *  обложками). `cell` — клетка ряда ленты; `cut` — плитка уходит в узкой колоде (клетка сжимается до нуля, плитка гаснет
+ *  на месте). */
+export function ActTile({ icon, note, name, delay, out, onClick, label, title, kind = "tt", off, cell, cut }: {
+  icon: IconName; note: string[]; name: string; delay: number; out?: boolean; onClick(): void; label?: string; title?: string; kind?: "tt" | "an";
   /** Плитка занята: почему (подсказка); null — нет. */
   off?: string | null;
   cell?: boolean; cut?: boolean;
@@ -112,9 +110,7 @@ export function ActTile({ icon, note, noteNarrow, name, delay, out, onClick, lab
       <span className={`p2-cover ${kind}-act`}>
         <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name={icon} size={22} /></span></span>
         <span className={`${kind}-note`}>
-          {noteNarrow != null
-            ? <span className="hp-sw"><span className="hp-wo">{note[0]}</span><span className="hp-no">{noteNarrow}</span></span>
-            : note.map((s) => <span key={s}>{s}</span>)}
+          {note.map((s) => <span key={s}>{s}</span>)}
         </span>
       </span>
       <span className={`${kind}-cap`}>
@@ -129,29 +125,21 @@ export function ActTile({ icon, note, noteNarrow, name, delay, out, onClick, lab
   );
 }
 
-/** «ещё 2 шаблона». */
-export const moreText = (n: number) => `ещё ${plural(n, "шаблон", "шаблона", "шаблонов")}`;
+/** Сколько обложек в ленте: с «Загрузить свой» — два полных ряда по четыре. */
+export const RIBBON_MAX = 7;
 
-export function Ribbon({ fresh, onPeek, onGallery, onUpload, uploadOff }: {
+export function Ribbon({ fresh, onPeek, onUpload, uploadOff }: {
   /** Только что загруженный шаблон — первым. */
   fresh: string | null;
   onPeek(id: string): void;
-  onGallery(): void;
   onUpload(): void;
   /** «Загрузить свой» занята (читается презентация «Улучшить готовую»): почему; null — нет. */
   uploadOff?: string | null;
 }) {
   const { templates, templateId } = useApp();
-  const narrow = useNarrow();
   const pick = usePickTemplate();
-  const { shown, rest } = ribbonItems(templates, templateId, 6, fresh);
+  const { shown, rest } = ribbonItems(templates, templateId, RIBBON_MAX, fresh);
   const { rows } = ribbonRows(shown, (t) => t.template_id === templateId, rest > 0);
-  // в узкой колоде «Все шаблоны» прячет и обложки, ушедшие из рядов
-  const cut = rows.flatMap((r) => r.slots.filter((s) => s.cut && s.item).map((s) => s.item as TemplateListItem));
-  const hidden = templates.filter((x) => !shown.includes(x));
-  const restNarrow = rest + cut.length;
-  // узкая колода — та раскладка, что на деле (≤ 900 px помощник встаёт под колоду, обложки не уходят)
-  const tip = (narrow ? [...cut, ...hidden] : hidden).map(tplLabel).join(", ");
   return (
     <>
       {rows.map((r, ri) => (
@@ -159,9 +147,6 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload, uploadOff }: {
           {r.slots.map((s) => s.kind === "cover" && s.item ? (
             <TemplateTile key={s.item.template_id} t={s.item} selected={s.item.template_id === templateId} delay={shown.indexOf(s.item) * 40} cell cut={s.cut}
               onPick={() => pick((s.item as TemplateListItem).template_id)} onPeek={() => onPeek((s.item as TemplateListItem).template_id)} />
-          ) : s.kind === "all" ? (
-            <ActTile key="all" icon="grid" note={[moreText(rest)]} noteNarrow={moreText(restNarrow)} name="Все шаблоны" delay={240} onClick={onGallery} cell
-              label={`Все шаблоны, ${moreText(narrow ? restNarrow : rest)}`} title={tip} />
           ) : (
             <ActTile key="up" icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} off={uploadOff} cell />
           ))}

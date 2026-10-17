@@ -180,20 +180,20 @@ test("подписи по ширине: при 1440 — полные, при 128
 
 const ids = (rows: ReturnType<typeof ribbonRows<string>>["rows"]) => rows.map((r) => r.slots.map((s) => (s.kind === "cover" ? s.item : s.kind) + (s.cut ? "✂" : "")));
 
-test("ribbonRows: шесть обложек, «Все шаблоны», «Загрузить свой» — два ряда по четыре; в каждом уходит последняя обложка", () => {
-  const { rows, gone } = ribbonRows(["a", "b", "c", "d", "e", "f"], (t) => t === "a", true);
-  assert.deepEqual(ids(rows), [["a", "b", "c", "d✂"], ["e", "f✂", "all", "upload"]]);
+test("ribbonRows: семь обложек и «Загрузить свой» — два ряда по четыре, плитки «Все шаблоны» нет; в каждом уходит последняя обложка", () => {
+  const { rows, gone } = ribbonRows(["a", "b", "c", "d", "e", "f", "g"], (t) => t === "a", true);
+  assert.deepEqual(ids(rows), [["a", "b", "c", "d✂"], ["e", "f", "g✂", "upload"]]);
   assert.equal(gone, 2);
   assert.equal(rows[0].narrow, "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0fr)");
-  assert.equal(rows[1].narrow, "minmax(0, 1fr) minmax(0, 0fr) minmax(0, 1fr) minmax(0, 1fr)");
+  assert.equal(rows[1].narrow, "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0fr) minmax(0, 1fr)");
 });
 
 test("ribbonRows: выбранная обложка не уходит — уходит предыдущая", () => {
-  const { rows } = ribbonRows(["a", "b", "c", "d", "e", "f"], (t) => t === "d" || t === "f", true);
-  assert.deepEqual(ids(rows), [["a", "b", "c✂", "d"], ["e✂", "f", "all", "upload"]]);
+  const { rows } = ribbonRows(["a", "b", "c", "d", "e", "f", "g"], (t) => t === "d" || t === "g", true);
+  assert.deepEqual(ids(rows), [["a", "b", "c✂", "d"], ["e", "f✂", "g", "upload"]]);
 });
 
-test("ribbonRows: без «Все шаблоны» (5–6 шаблонов, скрытых нет) обложки не уходят — до каждой можно добраться; ряды по четыре", () => {
+test("ribbonRows: скрытых шаблонов нет обложки не уходят — до каждой можно добраться; ряды по четыре", () => {
   for (const covers of [["a", "b", "c", "d", "e"], ["a", "b", "c", "d", "e", "f"], ["a", "b", "c"]]) {
     const { rows, gone } = ribbonRows(covers, (t) => t === "a", false);
     assert.equal(gone, 0, covers.join());
@@ -204,9 +204,9 @@ test("ribbonRows: без «Все шаблоны» (5–6 шаблонов, ск
   }
 });
 
-test("ribbonRows: со «Все шаблоны» короткий ряд — лишние пустые дорожки сверх трёх сжимаются", () => {
+test("ribbonRows: короткий ряд — лишние пустые дорожки сверх трёх сжимаются", () => {
   const { rows, gone } = ribbonRows(["a"], () => false, true);
-  assert.deepEqual(ids(rows), [["a", "all", "upload"]]);
+  assert.deepEqual(ids(rows), [["a", "upload"]]);
   assert.equal(gone, 0);
   assert.equal(rows[0].narrow, "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0fr)");
 });

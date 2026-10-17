@@ -51,7 +51,8 @@
 .an-track{position:relative;display:block;height:4px;margin-top:12px;border-radius:999px;background:#FFFFFF;overflow:hidden}
 .an-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;transform-origin:left center}
 /* C-analyzing: коробка «Разбираю шаблон» — шаги разбора */
-.an-box{display:flex;flex-direction:column;justify-content:space-between;align-self:start;height:328px;min-width:0;padding:24px;border-radius:24px;background:#F3F4F1}
+.an-box{display:flex;flex-direction:column;justify-content:space-between;align-self:start;grid-column:2 / span 3;grid-row:1 / span 2;height:328px;min-width:0;padding:24px;border-radius:24px;background:#F3F4F1}
+.an-file{grid-column:1;grid-row:1}
 .an-steps{margin:0;padding:0;list-style:none}
 .an-step{position:relative;display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;column-gap:12px;height:28px}
 .an-step::before{content:"";position:absolute;left:9px;top:25px;width:2px;height:6px;border-radius:999px;background:rgba(11,18,32,.14)}
@@ -236,7 +237,6 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   #p2-b1{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) !important;column-gap:0 !important;margin-right:-16px !important}
   #p2-b1.p2-on{transition:grid-template-columns 340ms var(--ease),opacity 360ms var(--ease) 120ms}
   #p2-b1.p2-off{transition:grid-template-columns 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-nar #p2-b1.tp-anl{grid-template-columns:minmax(0,1fr) minmax(0,0fr) minmax(0,1fr) minmax(0,1fr) !important}
   .hp-nar #p2-b1.p2-on{transition:grid-template-columns 520ms var(--ease),opacity 360ms var(--ease) 120ms}
   .hp-nar #p2-b1.p2-off{transition:grid-template-columns 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   #p2-b1 > *{margin-right:16px}
@@ -607,7 +607,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   #p2-b1{grid-template-columns:repeat(var(--tpc),minmax(0,1fr)) !important;gap:24px 16px !important}
   #p2-b1 > .tp-row{display:contents}
   .tp-row > .tp-cell,.tp-cut{min-width:0}
-  #p2-b1.tp-anl{grid-template-columns:minmax(0,1fr) !important}
+  /* разбор: файл в первой колонке, шаги — на остальных (на телефоне — под файлом, ниже) */
+  .an-box{grid-column:2 / -1;grid-row:1}
   .tt-tile,.an-tile,#p2-b1 .tp-cell{container-type:inline-size}
   :is(.tt-tile,.an-tile) .p2-cover{height:auto;aspect-ratio:16 / 9}
   :is(.tt-tile,.an-tile) .p2-cover img,:is(.tt-tile,.an-tile) .p2-cover .tp-wf{height:100% !important}
@@ -721,6 +722,11 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   /* служебные плитки ленты на телефоне: пояснение мельче, плитка — по его высоте (не ниже обложки рядом) */
   .p2-cover:is(.tt-act,.an-act){min-height:84px;padding:12px 8px}
   :is(.tt-note,.an-note){padding:0 4px;font-size:12px;line-height:16px}
+  /* разбор на телефоне: файл во всю ширину и невысокой полосой (имя, ход, «разбираю…»), шаги под ним */
+  .an-file{grid-column:1 / -1}
+  .an-file .an-sk{aspect-ratio:auto;height:112px}
+  .an-file .an-cap{display:none}
+  .an-box{grid-column:1 / -1;grid-row:2}
   .p2-field.tx-ring{padding:16px !important;height:232px !important}
   /* короткий ряд на телефоне: степпер во всю ширину, варианты — строками */
   #p2-b3{grid-template-columns:minmax(0,1fr) !important;grid-auto-flow:row;gap:8px}
