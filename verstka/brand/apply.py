@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "9"
+APPLY_VERSION = "10"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -538,8 +538,10 @@ def apply_brand(
         has_own = bool(find_template_logos(pkg, manifest, slots) or find_text_logos(pkg, manifest, fonts_pair, src))
         if brand.logos:
             res.warnings.append("Файлы логотипов брендбука не найдены — " + ("логотип шаблона оставлен." if has_own else "логотип бренда не поставлен."))
-        elif brand.logo_place or has_own:
-            res.warnings.append("В брендбуке нет файлов логотипа — " + ("логотип шаблона оставлен." if has_own else "логотип бренда не поставлен."))
+        else:
+            from verstka.brand.read import NO_LOGO_FILES
+
+            res.warnings.append(NO_LOGO_FILES)  # то же, что в предупреждениях самого брендбука, — одной фразой везде
 
     # знаки партнёров шаблона (у ЛЦТ — организаторы, впечатаны в фоны) не трогаются: брендбук заменяет логотип самого
     # шаблона, а не чужие знаки, которые принадлежат содержанию
@@ -581,6 +583,14 @@ def branded_info(template_id: str, workspace_root: Optional[Path | str] = None) 
         return json.loads((root / "templates" / template_id / BRAND_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def branded_warnings(template_id: str, workspace_root: Optional[Path | str] = None) -> list[str]:
+    """Предупреждения брендированной копии для человека — чтения брендбука и применения, без повторов: их печатает CLI
+    и пишет run_manifest («Файлов логотипа в брендбуке нет — …»). [] — обычный шаблон."""
+    info = branded_info(template_id, workspace_root) or {}
+    out = list(info.get("brand_warnings") or []) + list((info.get("result") or {}).get("warnings") or [])
+    return list(dict.fromkeys(w for w in out if w))
 
 
 def _title_of(d: Path) -> str:
@@ -711,6 +721,7 @@ def branded_template(
                 "title": title,
                 "result": res.as_dict(),
                 "conflicts": conflicts,
+                "brand_warnings": list(brand.warnings),  # что сказало чтение брендбука (нет файлов логотипа…)
             }
             tmpj = d / f".{BRAND_FILE}.tmp"
             tmpj.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

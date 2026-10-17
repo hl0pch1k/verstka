@@ -871,6 +871,45 @@ def _set_box(pic: etree._Element, groups: list[etree._Element], box: Box) -> Non
     ext.set("cy", str(max(1, int(round(h)))))
 
 
+def refit_group(g: etree._Element) -> bool:
+    """Рамка группы — по её детям: `chOff`/`chExt` — объединение рамок детей, `off`/`ext` — то же в координатах
+    родителя (масштаб группы прежний), так что дети стоят где стояли, а рамка группы — там, где их видно. Нужна после
+    замены картинки в группе картинкой другой ширины (логотип VK Cloud шире логотипа VK Tech): иначе по рамке группы
+    логотип ставят мимо и он вылезает за край слайда. True — рамка изменилась."""
+    xf = _group_xf(g)
+    x = g.find(f"{{{P}}}grpSpPr/{{{A}}}xfrm")
+    if xf is None or x is None:
+        return False
+    boxes = [b for b in (shape_box(ch) for ch in g if etree.QName(ch).localname in ("sp", "pic", "cxnSp", "graphicFrame", "grpSp")) if b and b[2] >= 0 and b[3] >= 0]
+    if not boxes:
+        return False
+    ox, oy, sx, sy, cx, cy = xf
+    u = _union(boxes)
+    new = (ox + (u[0] - cx) * sx, oy + (u[1] - cy) * sy, u[2] * sx, u[3] * sy)
+    off, ext = x.find(f"{{{A}}}off"), x.find(f"{{{A}}}ext")
+    choff, chext = x.find(f"{{{A}}}chOff"), x.find(f"{{{A}}}chExt")
+    if choff is None:
+        choff = etree.SubElement(x, f"{{{A}}}chOff")
+    if chext is None:
+        chext = etree.SubElement(x, f"{{{A}}}chExt")
+    before = (off.get("x"), off.get("y"), ext.get("cx"), ext.get("cy"), choff.get("x"), choff.get("y"), chext.get("cx"), chext.get("cy"))
+    off.set("x", str(int(round(new[0]))))
+    off.set("y", str(int(round(new[1]))))
+    ext.set("cx", str(max(1, int(round(new[2])))))
+    ext.set("cy", str(max(1, int(round(new[3])))))
+    choff.set("x", str(int(round(u[0]))))
+    choff.set("y", str(int(round(u[1]))))
+    chext.set("cx", str(max(1, int(round(u[2])))))
+    chext.set("cy", str(max(1, int(round(u[3])))))
+    return before != (off.get("x"), off.get("y"), ext.get("cx"), ext.get("cy"), choff.get("x"), choff.get("y"), chext.get("cx"), chext.get("cy"))
+
+
+def refit_groups(groups: list[etree._Element]) -> None:
+    """Группы-предки картинки, от внутренней к внешней."""
+    for g in groups:
+        refit_group(g)
+
+
 def _set_blip(pic: etree._Element, rid: str, img: BrandImage, brand_name: str) -> None:
     blip_fill = pic.find(f"{{{P}}}blipFill")
     blip = blip_fill.find(f"{{{A}}}blip")
@@ -1885,6 +1924,7 @@ def _replace_pic_logo(pkg: Package, lk: Lockup, images: list[BrandImage], brand_
     for pc in lk.pics[1:]:
         if pc.el.getparent() is not None:
             pc.el.getparent().remove(pc.el)
+    refit_groups(keep.groups)  # рамка группы — там, где теперь видно логотип бренда (он шире логотипа шаблона)
     pkg.dirty.add(lk.part)
     return True
 
@@ -2075,15 +2115,27 @@ def brand_logos(
     # и туда: сначала то же место, что у содержательных слайдов, иначе свободный угол обложки
     shown_now = stay_parts | kept_parts | rep.placed
     books = [i for i in _bookend_samples(manifest) if 0 < i <= len(order)]
-    if brand.logo_place and books:
+    prefer = (rep.box, rep.corner, rep.kind) if rep.box is not None else None
+    for _ in range(3):
+        # обложки разные: та, где общее место занято (у «Классики» — титул с фото), получает своё свободное место
+        left = [i for i in books if not _shows(pkg, order[i - 1], shown_now)]
+        if not brand.logo_place or not left:
+            break
         rep_c = add_logos(
             pkg, manifest, brand, images, [], src, bookends=True, quiet=True,
-            exclude=frozenset(i for i in books if _shows(pkg, order[i - 1], shown_now)),
+            exclude=frozenset(i for i in books if i not in left),
             skip_layouts=frozenset(lp for lp in layouts if _shows(pkg, lp, shown_now)) | frozenset(twins.values()),
             taken=frozenset(i for i in range(1, len(order) + 1) if _shows(pkg, order[i - 1], shown_now)),
-            ignore=ignore, prefer=(rep.box, rep.corner, rep.kind) if rep.box is not None else None,
+            ignore=ignore, prefer=prefer,
         )
-        out.covers = rep_c
+        out.covers.added += rep_c.added
+        out.covers.layouts += rep_c.layouts
+        out.covers.placed |= rep_c.placed
+        out.covers.covered += rep_c.covered
+        if not rep_c.placed:
+            break
+        shown_now = shown_now | rep_c.placed
+        prefer = None
     media = Media(pkg)
     missing = False
     for lp, twin in twins.items():

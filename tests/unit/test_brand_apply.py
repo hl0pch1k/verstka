@@ -19,6 +19,7 @@ from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.enum.shapes import MSO_SHAPE
+from pptx.oxml import parse_xml
 from pptx.util import Emu, Pt
 
 import verstka.brand.apply as ap
@@ -1817,14 +1818,21 @@ def test_vk_education_content_slides_get_the_logo(tmp_path, fonts_missing):
 
 
 def test_brandbook_without_logo_files_says_so(tmp_path, fonts_here):
-    """Брендбук из tokens.json без файлов логотипа: спокойное предупреждение — логотип шаблона оставлен (или логотип
-    бренда не поставлен, если у шаблона его нет)."""
+    """Брендбук из tokens.json без файлов логотипа: одно спокойное предупреждение — в отчёте копии, в `brand.json`
+    (и чтения брендбука, и применения) и в `branded_warnings`, которые печатает CLI и пишет run_manifest."""
+    from verstka.brand.read import NO_LOGO_FILES
+
     src = build_custom(tmp_path, "nofiles", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], logos=[("Logo ACME", 0.04)])
     res = apply_brand(src, tmp_path / "a.pptx", _brand(logos=[]), manifest=_analyze(src, tmp_path / "ws"), brand_dir=_brand_dir(tmp_path))
-    assert "В брендбуке нет файлов логотипа — логотип шаблона оставлен." in res.warnings
-    src2 = build_custom(tmp_path, "nofiles2", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
-    res2 = apply_brand(src2, tmp_path / "b.pptx", _brand(logos=[]), manifest=_analyze(src2, tmp_path / "ws2"), brand_dir=_brand_dir(tmp_path))
-    assert "В брендбуке нет файлов логотипа — логотип бренда не поставлен." in res2.warnings
+    assert NO_LOGO_FILES in res.warnings
+    ws = tmp_path / "ws3"
+    base = TemplateWorkspace.create(src, ws)
+    brand = _brand(logos=[], warnings=[NO_LOGO_FILES])
+    bid = branded_template(base.template_id, brand, "brand", workspace_root=ws, brand_dir=_brand_dir(tmp_path), render=False)
+    info = branded_info(bid, ws)
+    assert NO_LOGO_FILES in info["brand_warnings"] and NO_LOGO_FILES in info["result"]["warnings"]
+    assert ap.branded_warnings(bid, ws).count(NO_LOGO_FILES) == 1
+    assert ap.branded_warnings(base.template_id, ws) == []
 
 
 def test_status_red_is_kept_unless_the_brand_has_a_danger_colour(tmp_path, fonts_missing):
@@ -1958,3 +1966,94 @@ def test_title_caps_follow_only_a_brandbook_rule(synthetic, fonts_here, tmp_path
     out2 = tmp_path / "nocaps.pptx"
     res = apply_brand(src, out2, nocaps, manifest=m, brand_dir=bdir)
     assert res.caps_changed >= 1 and 'cap="all"' not in _parts(out2, r"ppt/slideMasters/slideMaster1\.xml$")["ppt/slideMasters/slideMaster1.xml"]
+
+
+# ============================================================================================== круг 7: живой прогон 3
+
+
+def _group_lockup_xml(rid_mark: str, rid_word: str, box: tuple[int, int, int, int], child_w: int, name: str = "Logo ACME") -> str:
+    """Группа-логотип (знак и надпись) с рамкой `box`; ширина детей в координатах группы — `child_w`."""
+    x, y, w, h = box
+    return (
+        f'<p:grpSp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        f'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:nvGrpSpPr><p:cNvPr id="900" name="{name} group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
+        f'<p:grpSpPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="0" y="0"/><a:chExt cx="{child_w}" cy="{h}"/></a:xfrm></p:grpSpPr>'
+        f'<p:pic><p:nvPicPr><p:cNvPr id="901" name="{name} mark"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rid_mark}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+        f'<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{h}" cy="{h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+        f'<p:pic><p:nvPicPr><p:cNvPr id="902" name="{name} word"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rid_word}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+        f'<p:spPr><a:xfrm><a:off x="{int(h * 1.2)}" y="{int(h * 0.3)}"/><a:ext cx="{child_w - int(h * 1.2)}" cy="{int(h * 0.4)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:grpSp>'
+    )
+
+
+def _abs_pics(holder) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """Картинки части с их рамками на слайде (через преобразования групп)."""
+    out = []
+    for pic in holder._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}pic"):
+        b = lg.xfrm_box(pic.find("{http://schemas.openxmlformats.org/presentationml/2006/main}spPr/" + A + "xfrm"))
+        groups = [g for g in pic.iterancestors() if g.tag == "{http://schemas.openxmlformats.org/presentationml/2006/main}grpSp"]
+        out.append((pic.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr").get("name"), lg.to_abs(b, groups)))
+    return out
+
+
+def test_wider_brand_logo_in_a_template_group_refits_the_group(tmp_path, fonts_here):
+    """Логотип шаблона — группа (знак и надпись), логотип бренда шире: после замены рамка группы — там, где видно
+    логотип бренда, и он внутри слайда (VK Tech: картинка 1 676 934 EMU в группе шириной 1 232 613)."""
+    (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+    mark = tmp_path / "src" / "mark.png"
+    Image.new("RGBA", (100, 100), (31, 111, 235, 255)).save(mark)
+    word = _logo_png(tmp_path / "src" / "word.png", (31, 41, 55, 255), (31, 41, 55, 255), size=(300, 100))
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    box = (int(W * 0.03), int(H * 0.9), int(W * 0.08), int(H * 0.05))
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(s, f"Итоги квартала {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "1F2937")
+        _, r1 = s.part.get_or_add_image_part(str(mark))
+        _, r2 = s.part.get_or_add_image_part(str(word))
+        s.shapes._spTree.append(parse_xml(_group_lockup_xml(r1, r2, box, box[2])))
+    src = tmp_path / "src" / "grp.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "grp-brand.pptx"
+    res = apply_brand(src, out, _brand(logo_place="bottom_left"), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_replaced == 3
+    got = Presentation(str(out))
+    for s in got.slides:
+        grp = next(sh for sh in s.shapes if sh.shape_type is not None and sh._element.tag.endswith("}grpSp"))
+        gx, gy, gw, gh = grp.left, grp.top, grp.width, grp.height
+        pics = [b for name, b in _abs_pics(s) if name.startswith("Логотип")]
+        assert pics
+        for x, y, w, h in pics:
+            assert gx - 2 <= x and x + w <= gx + gw + 2 and gy - 2 <= y and y + h <= gy + gh + 2
+            assert 0 <= x and x + w <= W
+
+
+def test_one_corner_keeps_a_grouped_logo_inside_the_slide(tmp_path):
+    """Сборка ставит логотипы колоды в один угол (`one_corner`). Логотип макета — группа, чья рамка уже логотипа бренда
+    внутри (копия старой версии): её мерят по детям и ставят так, что логотип не выходит за край («VK Clouc»)."""
+    from verstka.brand.package import BRAND_LOGO_MARK
+    from verstka.rendering.brand_logo import one_corner
+
+    png = _logo_png(tmp_path / "logo.png", (0, 119, 255, 255), (11, 18, 32, 255))
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    lay = prs.slide_layouts[5]
+    _, r1 = lay.part.get_or_add_image_part(str(png))
+    narrow = int(W * 0.06)  # рамка группы и chExt — уже картинки внутри
+    grp = parse_xml(_group_lockup_xml(r1, r1, (int(W * 0.03), int(H * 0.9), narrow, int(H * 0.045)), narrow))
+    wide = grp.findall("{http://schemas.openxmlformats.org/presentationml/2006/main}pic")[1]
+    wide.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr").set("name", "Логотип Облако")
+    wide.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr").set("descr", "Логотип Облако")
+    wide.find("{http://schemas.openxmlformats.org/presentationml/2006/main}spPr/" + A + "xfrm/" + A + "ext").set("cx", str(int(W * 0.12)))
+    lay.shapes._spTree.append(grp)
+    for i in range(4):
+        s = prs.slides.add_slide(prs.slide_layouts[6] if i < 3 else lay)
+        if i < 3:
+            pic = s.shapes.add_picture(str(png), Emu(int(W * 0.85)), Emu(int(H * 0.9)), Emu(int(W * 0.12)), Emu(int(H * 0.045)))
+            pic.name = "Логотип Облако"
+            pic._element.nvPicPr.cNvPr.set("title", BRAND_LOGO_MARK)
+            pic._element.nvPicPr.cNvPr.set("descr", "Логотип Облако")
+    assert one_corner(prs) >= 1
+    for name, (x, y, w, h) in _abs_pics(prs.slides[3].slide_layout):
+        if name.startswith("Логотип"):
+            assert x > W * 0.5 and x + w <= W * 0.99 and y + h <= H * 0.99, (x / W, (x + w) / W)

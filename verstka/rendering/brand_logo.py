@@ -133,7 +133,9 @@ def put_back_brand_logos(slide, warnings: list[str], corner: bool = True):
             W = float(slide.part.package.presentation_part.presentation.slide_width)
             w = target[3] * own[2] / own[3]
             x = target[0] if target[0] + target[2] / 2 < W / 2 else target[0] + target[2] - w
-            target = (x, target[1], w, target[3])
+            Hs = float(slide.part.package.presentation_part.presentation.slide_height)
+            x, y = _inside(x, target[1], w, target[3], W, Hs, min(target[0], W - target[0] - target[2]), min(target[1], Hs - target[1] - target[3]))
+            target = (x, y, w, target[3])
         _place(held[0], target)
     tree = _tree(slide)
     ids = [int(e.get("id")) for e in slide._element.iter(f"{{{_P}}}cNvPr") if (e.get("id") or "").isdigit()]
@@ -160,6 +162,21 @@ def put_back_brand_logos(slide, warnings: list[str], corner: bool = True):
     if bad:
         warnings.append(DROPPED)
     return slide, warnings
+
+
+def _fit_group(el: etree._Element) -> None:
+    """A logo group's frame refit to its children (inner groups first): `_box` then measures where it is seen."""
+    from verstka.brand.logos import refit_group
+
+    for g in reversed(list(el.iter(f"{{{_P}}}grpSp"))):
+        refit_group(g)
+
+
+def _inside(x: float, y: float, w: float, h: float, W: float, H: float, dx: float, dy: float) -> tuple[float, float]:
+    """The logo kept inside the slide with the deck's clear space from the edge (at least 1 % of the slide): never
+    hanging off it («VK Clouc», qa4 NEW-B1)."""
+    mx, my = max(0.01 * W, min(dx, 0.06 * W)), max(0.01 * H, min(dy, 0.06 * H))
+    return min(max(x, mx), max(mx, W - mx - w)), min(max(y, my), max(my, H - my - h))
 
 
 def _xfrm(el: etree._Element):
@@ -288,6 +305,7 @@ def one_corner(prs, skip: frozenset | set = frozenset()) -> int:
             if tag == "pic" and is_brand_logo_any(el):
                 out.append(el)
             elif tag == "grpSp" and any(is_brand_logo_any(x) for x in el.iter(f"{{{_P}}}pic")):
+                _fit_group(el)  # its frame where the logo is seen (the brand's picture may be wider than the template's)
                 b = _box(el)
                 if b is not None and b[2] * b[3] < 0.05 * W * H:
                     out.append(el)
@@ -345,6 +363,7 @@ def one_corner(prs, skip: frozenset | set = frozenset()) -> int:
                 w = hh * b[2] / b[3]
                 x = (dx + ux * W) if corner[0] == "l" else W - dx - ux * W - w
                 y = (dy + uy * H) if corner[1] == "t" else H - dy - uy * H - hh
+                x, y = _inside(x, y, w, hh, W, H, dx, dy)
                 tgt = (x - pad, y - pad, w + 2 * pad, hh + 2 * pad)
                 if not hits(lay, tgt) and not any(hits(sl, tgt) for sl in slides):
                     _place(el, (x, y, w, hh))
