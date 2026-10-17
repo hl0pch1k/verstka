@@ -13,6 +13,7 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { useRise } from "../result/useRise";
+import { useTier } from "../shell/tier";
 import { Layer, lsDelay } from "./Layer";
 import { Scrim } from "./Scrim";
 
@@ -127,17 +128,19 @@ export function TplPreviewLayer() {
   };
 
   const single = templates.length <= 1;
+  // телефон: «Удалить» и «Разбор» — одной строкой над «Выбрать шаблон» (layers.css), подпись короче; полное имя — для чтения с экрана
+  const phone = useTier() === "sm";
   return (
     <>
       <Scrim open={open} onClose={close} label="Закрыть «Слайды шаблона»" z={8} />
       <Layer id="tp-lay-p" open={open} top={120} z={open || !dead ? 8 : 6} label={`Слайды шаблона «${name}»`} role="dialog" onClose={close}>
         {t && (
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div className="ly-hd" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
+              <div className="ly-hc" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 {!edit ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 16, height: 40, minWidth: 0 }}>
-                    <h2 title={t.title ? `Файл: ${fileName}` : undefined}
+                  <div className="pv-nmr" style={{ display: "flex", alignItems: "center", gap: 16, height: 40, minWidth: 0 }}>
+                    <h2 className="ly-ttl" title={t.title ? `Файл: ${fileName}` : undefined}
                       style={{ margin: 0, minWidth: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {name}
                     </h2>
@@ -146,7 +149,7 @@ export function TplPreviewLayer() {
                     </button>
                   </div>
                 ) : (
-                  <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 8, height: 40 }}>
+                  <div className="p2-in pv-edr" style={{ display: "flex", alignItems: "center", gap: 8, height: 40 }}>
                     <label style={{ display: "flex", alignItems: "center" }}>
                       <span className="p2-sr">Название шаблона</span>
                       <input type="text" className="p2-inp pv-name" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onNameKey}
@@ -157,7 +160,7 @@ export function TplPreviewLayer() {
                     </button>
                   </div>
                 )}
-                <div style={{ display: "flex", alignItems: "center", gap: 16, height: 24 }}>
+                <div className="pv-mr" style={{ display: "flex", alignItems: "center", gap: 16, height: 24 }}>
                   {err ? (
                     <ErrorLine text={err} lines={1} />
                   ) : (
@@ -167,7 +170,7 @@ export function TplPreviewLayer() {
                           {t.palette.slice(0, 6).map(hexOf).map((hex, i) => <span key={`${hex}-${i}`} className="pv-dot" title={hex} style={{ background: hex }} />)}
                         </span>
                       )}
-                      <span style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{meta}</span>
+                      <span className="ly-sub" style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{meta}</span>
                     </>
                   )}
                 </div>
@@ -192,11 +195,11 @@ export function TplPreviewLayer() {
                   <Icon name="trash" size={18} />
                   <span>Удалить</span>
                 </button>
-                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div className="pv-acts" style={{ display: "flex", alignItems: "center", gap: 16 }}>
                   {deck && (
-                    <button type="button" className="p2-ob" onClick={details}>
+                    <button type="button" className="p2-ob" onClick={details} aria-label={phone ? "Подробный разбор" : undefined}>
                       <Icon name="search" size={18} />
-                      <span>Подробный разбор</span>
+                      <span>{phone ? "Разбор" : "Подробный разбор"}</span>
                     </button>
                   )}
                   <button type="button" className="p2-cta pv-cta" onClick={() => pick(t.template_id)} aria-pressed={chosen}>

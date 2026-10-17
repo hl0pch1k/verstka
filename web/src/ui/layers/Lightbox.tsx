@@ -4,13 +4,14 @@
 // текущий слайд, что у результата (`selectedSlide`): закрыли — результат стоит на последнем показанном. Превью — та же
 // стопка, что у сцены (Shots): новый слайд проявляется, когда его картинка декодирована. Клавиши ←/→, Home/End и Esc —
 // свои, пока поверх просмотра ничего не открыто; клавиши результата в это время молчат (ResultPlate `layered`).
-import { useCallback, useEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
 import { useApp } from "../../store";
 import type { Variant } from "../../types";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
 import { slideHeadline, slideSrc, slidesOf } from "../result/resultView";
 import { Shots } from "../result/Stage";
+import { useStack } from "../shell/tier";
 import { Layer, lsDelay } from "./Layer";
 import { lbFrameWidth, lbKey, lbView } from "./lightboxView";
 
@@ -75,6 +76,8 @@ function Frame({ view, live, onClose, onPage }: {
 }) {
   const lb = lbView(view.n, view.total, slideHeadline(view.v, view.n));
   const src = slideSrc(view.v, view.n);
+  // колода стопкой (окно уже 1280): кадр вписывается в место по ширине и высоте — пропорция шаблона для CSS (layers.css)
+  const fit = useStack() ? ({ "--lb-ar": String(view.aspect) } as CSSProperties) : null;
   // стрелка, дошедшая до края, прячется — фокус с неё уходит на плиту просмотра, а не в никуда
   const page = (k: number) => (e: MouseEvent<HTMLButtonElement>) => {
     if (!live) return;
@@ -83,13 +86,13 @@ function Frame({ view, live, onClose, onPage }: {
   };
   return (
     <>
-      <div className="p2-ls" style={{ ...lsDelay(120), display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 40, flex: "none" }}>
+      <div className="p2-ls lb-hd" style={{ ...lsDelay(120), display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 40, flex: "none" }}>
         <h2 aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, margin: 0, whiteSpace: "nowrap" }}>
           <span style={{ flex: "none", fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 20, lineHeight: "28px", letterSpacing: "-0.02em", color: "#FFFFFF" }}>
             {lb.count}
           </span>
           {lb.title && (
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 15, fontWeight: 600, lineHeight: "24px", color: "rgba(255,255,255,.64)" }}>
+            <span className="lb-t" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 15, fontWeight: 600, lineHeight: "24px", color: "rgba(255,255,255,.64)" }}>
               · {lb.title}
             </span>
           )}
@@ -99,13 +102,13 @@ function Frame({ view, live, onClose, onPage }: {
         </button>
       </div>
 
-      <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 16 }}>
+      <div className="lb-stage" style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 16 }}>
         <button type="button" className={cls("p2-rb lb-arrow", !lb.prev && "lb-hide")} onClick={page(view.n - 1)} aria-label="Предыдущий слайд (←)"
           title="Предыдущий слайд (←)" style={{ left: 0 }}>
           <Icon name="chevron-left" size={20} />
         </button>
         <div className="lb-frame rt-lsp"
-          style={{ ...lsDelay(200), position: "relative", flex: "none", width: lbFrameWidth(view.aspect), aspectRatio: String(view.aspect), borderRadius: 24, overflow: "hidden", background: "rgba(255,255,255,.06)", boxShadow: "0 0 0 1px rgba(255,255,255,.1)" }}>
+          style={{ ...lsDelay(200), position: "relative", flex: "none", width: lbFrameWidth(view.aspect), aspectRatio: String(view.aspect), borderRadius: 24, overflow: "hidden", background: "rgba(255,255,255,.06)", boxShadow: "0 0 0 1px rgba(255,255,255,.1)", ...fit }}>
           <Shots src={src} alt={lb.title ? `Слайд ${view.n}: ${lb.title}` : `Слайд ${view.n}`} />
         </div>
         <button type="button" className={cls("p2-rb lb-arrow", !lb.next && "lb-hide")} onClick={page(view.n + 1)} aria-label="Следующий слайд (→)"
@@ -114,7 +117,7 @@ function Frame({ view, live, onClose, onPage }: {
         </button>
       </div>
 
-      <p className="p2-ls" style={{ ...lsDelay(280), display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 24, margin: "16px 0 0", flex: "none", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.48)" }}>
+      <p className="p2-ls lb-keys" style={{ ...lsDelay(280), display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 24, margin: "16px 0 0", flex: "none", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.48)" }}>
         <kbd className="lb-k" aria-label="Стрелка влево">←</kbd>
         <kbd className="lb-k" aria-label="Стрелка вправо">→</kbd>
         <span>листать</span>

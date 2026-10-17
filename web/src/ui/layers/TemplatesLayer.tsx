@@ -27,10 +27,10 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
   // помощник сужает колоду: те же четыре колонки сужаются вместе с ней (V2 версии 100), подписи — в строку с многоточием
   return (
     <Layer id="p2-lay-t" open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <h2 id="ga-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap" }}>Шаблоны</h2>
-          <p style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>
+      <div className="ly-hd" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
+        <div className="ly-hc" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <h2 id="ga-ttl" className="ly-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap" }}>Шаблоны</h2>
+          <p className="ly-sub" style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>
             {plural(list.length, "шаблон", "шаблона", "шаблонов")}. Выберите оформление или загрузите своё.
           </p>
         </div>

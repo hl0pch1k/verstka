@@ -256,13 +256,13 @@ export function HistoryLayer() {
       plateStyle={{ display: "flex", flexDirection: "column" }}>
       <TxNarrow.Provider value={narrow}>
       <div className="gh-body">
-      <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
+      <div className="gh-hd" style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
         <h2 className="p2-ttl" style={{ margin: 0, color: "#0B1220" }}>Мои презентации</h2>
-        <span style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+        <span className="gh-err" style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
           {headErr && <span key={headErr} className="p2-in" style={{ display: "flex", minWidth: 0 }}><ErrorLine text={headErr} lines={1} /></span>}
         </span>
         {/* список не загрузился ни разу — «0 презентаций» было бы неправдой */}
-        <span style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{listErr && !generations.length ? null : view?.total}</span>
+        <span className="gh-cnt" style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{listErr && !generations.length ? null : view?.total}</span>
         <button type="button" className="p2-rbl" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 

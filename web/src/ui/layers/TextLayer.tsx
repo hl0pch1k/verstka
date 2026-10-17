@@ -83,14 +83,14 @@ export function TextLayer() {
     <Layer id="rt-lay-text" open={open} top={160} z={5} label="Текст презентации" role="dialog" onClose={close}>
       {w && (
         <TxNarrow.Provider value={narrow}>
-        <div style={{ display: "flex", flexDirection: "column", height: 572 }}>
+        <div className="rt-body" style={{ display: "flex", flexDirection: "column", height: 572 }}>
           <div className={cls("rt-hd", tight && "rt-tight")} style={{ flex: "none" }}>
           <div className="p2-hrow p2-ls" style={{ ...lsDelay(120), display: "flex", alignItems: "center", gap: 24, height: 64 }}>
             <div className="rt-head" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
               <h2 className="p2-ttl" style={{ flex: "none", margin: 0, color: "#0B1220" }}>Текст презентации</h2>
               <Byline w={w} />
             </div>
-            <span style={{ flex: 1, minWidth: 0 }} />
+            <span className="rt-sp" style={{ flex: 1, minWidth: 0 }} />
             <div className="rt-acts" style={{ position: "relative", display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
               <CopyLine copy={copy} />
               <button type="button" className="p2-ob rt-copy" onClick={onCopy} aria-label="Скопировать" title="Скопировать текст" style={{ flex: "none", height: 40 }}>
@@ -108,7 +108,7 @@ export function TextLayer() {
           </div>
           </div>
 
-          <div className="p2-ls" style={{ ...lsDelay(200), display: "flex", flexDirection: "column", flex: 1, minHeight: 0, marginTop: 24, borderRadius: 24, background: "#FFFFFF", overflow: "hidden" }}>
+          <div className="p2-ls rt-box" style={{ ...lsDelay(200), display: "flex", flexDirection: "column", flex: 1, minHeight: 0, marginTop: 24, borderRadius: 24, background: "#FFFFFF", overflow: "hidden" }}>
             <div className="rt-scroll p2-fade-top" tabIndex={0} role="region" aria-label="Текст по слайдам" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24 }}>
               <div className="rt-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "24px 48px" }}>
                 {slides.map((s, i) => (
@@ -193,9 +193,9 @@ function CopyLine({ copy }: { copy: { ok: boolean; err?: string } | null }) {
 function SourceRow({ w, sources, sel }: { w: WriterInfo; sources: WriterSource[]; sel: number | null }) {
   const line = sourceLine(w, sources, sel);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 16, height: 64, padding: "0 16px 0 24px", flex: "none", borderTop: "1px solid rgba(11,18,32,.08)" }}>
+    <div className="rt-src" style={{ display: "flex", alignItems: "center", gap: 16, height: 64, padding: "0 16px 0 24px", flex: "none", borderTop: "1px solid rgba(11,18,32,.08)" }}>
       <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="book" size={20} /></span>
-      <p aria-live="polite" title={line.quote}
+      <p className="rt-q" aria-live="polite" title={line.quote}
         style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         <span style={{ fontWeight: 700 }}>Источник:</span> {line.quote}
       </p>

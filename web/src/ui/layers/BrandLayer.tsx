@@ -49,16 +49,16 @@ export function BrandLayer() {
       <Layer id="bb-lay" presence={p} open={open} top={120} z={8} label={name} role="dialog" onClose={close}>
         {p.mounted && spec && (
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <h2 id="bb-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div className="ly-hd" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
+              <div className="ly-hc" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <h2 id="bb-ttl" className="ly-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {name}
                 </h2>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, height: 24, minWidth: 0 }}>
+                <div className="bb-mr" style={{ display: "flex", alignItems: "center", gap: 16, height: 24, minWidth: 0 }}>
                   <span role="img" aria-label="Палитра брендбука" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none" }}>
                     {spec.colors.slice(0, 6).map((c, i) => <span key={`${c.hex}-${i}`} className="pv-dot" title={c.hex} style={{ background: c.hex }} />)}
                   </span>
-                  <span style={{ minWidth: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <span className="ly-sub" style={{ minWidth: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {brandLayerMeta(spec, b.file, tplName)}
                   </span>
                 </div>

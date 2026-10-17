@@ -89,18 +89,18 @@ export function TplDeleteDialog() {
       <div className={cls("dl-scrim tp-dls", on && "tp-dl-on")} onClick={no} aria-hidden="true" />
       <div className={cls("dl-wrap tp-dlw", on && "tp-dl-on")}>
         <section className="dl-dlg" role="dialog" aria-modal="true" aria-labelledby="dl-ttl" aria-describedby="dl-desc">
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div className="dl-hd" style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Cover src={t.cover_url} kind="d" ink={inkOf(t)} label={`Обложка шаблона ${name}`} />
             <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
               <h2 id="dl-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 24, lineHeight: "32px", letterSpacing: "-0.03em", color: "#0B1220" }}>Удалить шаблон?</h2>
-              <span style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <span className="dl-nm" style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 <b style={{ fontWeight: 700, color: "#0B1220" }}>{name}</b>{n ? ` · ${plural(n, "слайд", "слайда", "слайдов")}` : ""}
               </span>
             </div>
           </div>
           <p id="dl-desc" style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Уже собранные презентации останутся.</p>
           {err && <ErrorLine text={err} style={{ marginTop: 16 }} />}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, marginTop: 24 }}>
+          <div className="dl-acts" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, marginTop: 24 }}>
             <button ref={cancel} type="button" className="p2-ob" onClick={no} disabled={busy}>Отмена</button>
             <button type="button" className="p2-cta" onClick={() => void yes()} disabled={busy} aria-busy={busy} style={{ height: 48, padding: "0 24px", fontSize: 15 }}>
               {busy ? <Spinner size={18} /> : <Icon name="trash" size={18} />}
