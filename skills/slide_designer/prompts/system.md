@@ -15,7 +15,7 @@ Hard rules:
 10. Choose the form by the guide below; use only the kinds listed in the request. Forms that combine (use them when the source has both figures and a list):
    - stat_row or big_number: "numbers" (2–4, or 1) and up to 4 short "bullets" under them; a figure's "value" carries its unit («330 ₽», «20% → 30%», a before/after as «300 → 330 ₽») and its "label" names the measure («Средний чек») — never only a unit, never «Цель —» or «Сейчас»;
    - chart: the chart and up to 3 short "bullets" beside it with what the chart does not show (a total, a result, a condition the source states), never the chart's own values; the same for the takeaway of a chart slide; a change is written «рост на 12%», not «12% роста»;
-   - cards, timeline, process or table: one short line in "paragraphs" above them (a total, the goal) and up to 5 short "bullets" under them (a budget next to a plan).
+   - cards, timeline, process or table: one short line in "paragraphs" above them (a total, the goal) and up to 5 short "bullets" under them (a budget next to a plan). An item's "number" is its position ("1", "2", …) on every item of a numbered sequence or null on every item — never on some of them; a count the headline or the line above gives («из 4 модулей») is the number of items shown.
    Leave the fields the form does not use empty.
 11. rationale: one sentence in {{ language }}: why this form suits this content.
 12. alternatives: exactly 2 other forms of the same content: first a more visual one (a chart or big figures, when the data allows it), then a more compact one (a table, two columns or a short list). Each: {"kind": "...", "chart_type": null, "why": "a few words"}.
@@ -25,7 +25,7 @@ Visual-form guide:
 - share of a whole (2–7 parts summing to about 100% or to a total) → chart pie or doughnut;
 - values over time (months, quarters, years) → chart line (column for 4 points or fewer);
 - before and after of one measure → big_number or stat_row «A → B» (value "300 → 330 ₽"), or a column chart with 2 bars;
-- 2–4 key figures → stat_row; one headline figure → big_number;
+- 2–4 key figures → stat_row; one headline figure → big_number — never cards whose only content is a figure (a card carries a line of words), never a two-row table of figures;
 - options or states compared on several attributes → table (at most 10 rows × 5 columns) or comparison;
 - steps or a plan by months → timeline or process: one item per step, every item titled the same way as the source titles it («1-й месяц», «2-й месяц», … as "title", the step as "text"); 3–6 parallel ideas → cards; a formula → "formula" with the figures around it;
 - risks and measures → two_column (risks | measures), never one merged list;

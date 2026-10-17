@@ -114,9 +114,12 @@ _DATE_RE = re.compile(
     rf"|(?P<d2>\d{{1,2}}){_SP}+(?P<m2>{'|'.join(_MONTHS)})(?:{_SP}+(?P<y2>\d{{4}})(?:{_SP}?(?:года|году|год|г\.|г{_NB}))?)?{_NB})",
     re.I,
 )
-# «Этап 1», «Неделя 2», «Шаг 3»: a step's number, not a figure
+# «Этап 1», «Неделя 2», «Модуль 2», «Урок 3»: the number of a step or of a part of a whole (a programme's module, a
+# course's lesson), not a figure
 _ORDINAL_BEFORE_RE = re.compile(
-    r"(?<![\wё])(?:этап\w*|шаг\w*|фаз\w*|недел\w*|волн\w*|спринт\w*|итераци\w*|верси\w*|вариант\w*|уров\w*|пункт\w*|слайд\w*|step|phase|stage|week|wave|sprint|version|option|level|slide|№|#)\s*$",
+    r"(?<![\wё])(?:этап\w*|шаг\w*|фаз\w*|недел\w*|волн\w*|спринт\w*|итераци\w*|верси\w*|вариант\w*|уров\w*|пункт\w*|слайд\w*|"
+    r"модул\w*|блок\w*|раздел\w*|глав[аеуы]|част[ьи]|урок\w*|заняти\w*|семестр\w*|ступен\w*|"
+    r"step|phase|stage|week|wave|sprint|version|option|level|slide|module|block|chapter|lesson|part|№|#)\s*$",
     re.I,
 )
 _LIST_NUMBER_RE = re.compile(r"^\s*\d{1,2}[.)]\s")
@@ -1291,6 +1294,25 @@ _ORDINAL_TOKEN_RE = re.compile(r"(\d{1,2})-?(?:й|ый|ой|ий|го|ого|е�
 _ORDINAL_WORDS = {1: "перв", 2: "втор", 3: "трет|тр[её]х", 4: "четв[её]рт|четыр[её]х", 5: "пят", 6: "шест", 7: "седьм|сем", 8: "восьм|восем", 9: "девят", 10: "десят"}
 
 
+# the end of a pair the analyst read that is a plan: «Цель», «План», «Прогноз», «Ожидание» (in the series' name or the
+# end's own label), or the end after «Сейчас» / «Текущий» — never «Было / Стало», two months of a pilot or two sets
+_PLAN_LABEL_RE = re.compile(r"(?<![\wё])(?:цел[ьиеюя]\w*|план\w*|прогноз\w*|ожида\w*|целев\w*|target|plan\w*|forecast\w*|goal\w*|expect\w*)", re.I)
+_NOW_LABEL_RE = re.compile(r"^\s*(?:сейчас|текущ\w*|нынешн\w*|сегодня|now|current|today)\b", re.I)
+
+
+def _planned_end(name: str, first: str, last: str) -> bool:
+    """The last value of a series (or the second column of a table) the analyst read is a plan, a target or a forecast:
+    its name or its label says so, it follows «Сейчас», or it is a year still to come."""
+    if _PLAN_LABEL_RE.search(name or "") or _PLAN_LABEL_RE.search(last or "") or _NOW_LABEL_RE.match(first or ""):
+        return True
+    m = re.fullmatch(r"\s*(?:\D{0,20}\s)?((?:19|20)\d{2})\s*(?:г\.?|год)?\s*", last or "")
+    if m:
+        import datetime
+
+        return int(m.group(1)) > datetime.date.today().year
+    return False
+
+
 class BriefIndex:
     """What the brief says: its figures (with units), the values derived from pairs of them, its words, its title.
     Figures and content words come from the brief's text and title only; the user's instructions and the audience
@@ -1352,6 +1374,10 @@ class BriefIndex:
         points is."""
         placed = [p for p in self.placed if not p.ordinal and p.fig.date is None and not p.fig.approx and not _is_year(p.fig)]
         out: set[tuple[float, Optional[str], str]] = {(round(x, 6), "pct", "share") for x in self._shares}
+        # the values derived from a pair one end of which the brief gives as a plan, a target or a forecast: only a
+        # change of such a pair is a forecast («вырастет в 2,1 раза» of «Сейчас 120 000 / Прогноз 254 795»), never a
+        # change of a pilot's months or of two past sets (S4: «Пользователи пилота вырастут в 10 раз» of May → September)
+        fut: set[tuple[float, Optional[str], str]] = set()
         seen: set[tuple] = set()
         for pa, pb in combinations(placed, 2):
             a, b, ua, ub = pa.fig.mag, pb.fig.mag, pa.fig.unit, pb.fig.unit
@@ -1389,16 +1415,24 @@ class BriefIndex:
                 continue
             seen.add(key)
             d = abs(a - b)
+            got: set[tuple[float, Optional[str], str]] = set()
             if ua in ("pct", "pp"):
-                out.update({(round(d, 6), "pct", "diff"), (round(d, 6), "pp", "diff")})
-                continue
-            out.add((round(d, 6), ua, "diff"))
-            if base.fig.mag and "pct" in kinds:
-                out.add((round(d / abs(base.fig.mag) * 100, 6), "pct", "pct"))
-            lo, hi = sorted((abs(a), abs(b)))
-            if lo and "ratio" in kinds:
-                out.add((round(hi / lo, 6), "times", "ratio"))
-        out.update((v, u, k) for v, u, k, _ in getattr(self, "_extra", []))
+                got = {(round(d, 6), "pct", "diff"), (round(d, 6), "pp", "diff")}
+            else:
+                got.add((round(d, 6), ua, "diff"))
+                if base.fig.mag and "pct" in kinds:
+                    got.add((round(d / abs(base.fig.mag) * 100, 6), "pct", "pct"))
+                lo, hi = sorted((abs(a), abs(b)))
+                if lo and "ratio" in kinds:
+                    got.add((round(hi / lo, 6), "times", "ratio"))
+            out |= got
+            if pa.future or pb.future:
+                fut |= got
+        for v, u, k, planned in getattr(self, "_extra", []):
+            out.add((v, u, k))
+            if planned:
+                fut.add((v, u, k))
+        self._future_derived = sorted(fut, key=lambda x: x[0])
         return sorted(out, key=lambda x: x[0])
 
     def use_structure(self, structure: Optional[BriefStructure]) -> "BriefIndex":
@@ -1409,35 +1443,40 @@ class BriefIndex:
         if structure is None or self._structure_used:
             return self
         self._structure_used = True
-        pairs: list[tuple[float, float, Optional[str]]] = []
+        pairs: list[tuple[float, float, Optional[str], bool]] = []
         for s in structure.series:
             vals = [v for v in s.values if v is not None]
             self.categories.update(" ".join(c.lower().split()) for c in s.categories)
             if len(vals) >= 2 and len(vals) == len(s.categories):
                 unit = figures(f"1 {s.unit}")[0].unit if s.unit and figures(f"1 {s.unit}") else None
-                pairs.append((vals[0], vals[-1], unit))
+                pairs.append((vals[0], vals[-1], unit, _planned_end(s.name, s.categories[0], s.categories[-1])))
         for tb in structure.tables:
             if len(tb.columns) < 3:
                 continue
+            planned = _planned_end(tb.caption or "", tb.columns[1], tb.columns[2])
             for row in tb.rows:
                 cells = [figures(c) for c in row[1:3]]
                 if len(cells) == 2 and len(cells[0]) == 1 and len(cells[1]) == 1:
                     a, b = cells[0][0], cells[1][0]
                     if (a.unit == b.unit or None in (a.unit, b.unit)) and not (a.date or b.date):
-                        pairs.append((a.mag, b.mag, a.unit or b.unit))
+                        pairs.append((a.mag, b.mag, a.unit or b.unit, planned))
         extra = []
-        for a, b, unit in pairs:
+        for a, b, unit, planned in pairs:
             if not a or _eq(a, b):
                 continue
+            # only the end of a plan is a forecast («Сейчас / Цель», «Прогноз выручки», a sentence with «составит»): the
+            # last month of a pilot or the second of two past sets is a result (S4)
+            planned = planned or any(p.future and _eq(p.fig.mag, b) for p in self.placed)
             d = abs(b - a)
             if unit in ("pct", "pp"):
-                extra += [(round(d, 6), "pct", "diff", True), (round(d, 6), "pp", "diff", True)]
+                extra += [(round(d, 6), "pct", "diff", planned), (round(d, 6), "pp", "diff", planned)]
                 continue
-            extra += [(round(d, 6), unit, "diff", True), (round(d / abs(a) * 100, 6), "pct", "pct", True)]
+            extra += [(round(d, 6), unit, "diff", planned), (round(d / abs(a) * 100, 6), "pct", "pct", planned)]
             lo, hi = sorted((abs(a), abs(b)))
             if lo:
-                extra.append((round(hi / lo, 6), "times", "ratio", True))
-            self._future_values.add(round(b, 6))
+                extra.append((round(hi / lo, 6), "times", "ratio", planned))
+            if planned:
+                self._future_values.add(round(b, 6))
         self._extra = extra
         self._derived = self._derive()
         self._cache.clear()
@@ -1484,8 +1523,8 @@ class BriefIndex:
                     out.append(p)
         return out
 
-    def _derived_ok(self, f: Fig, kinds: tuple[str, ...] = ("diff", "pct", "ratio", "share")) -> bool:
-        for x, ux, kind in self._derived:
+    def _derived_ok(self, f: Fig, kinds: tuple[str, ...] = ("diff", "pct", "ratio", "share"), pool: Optional[list] = None) -> bool:
+        for x, ux, kind in (self._derived if pool is None else pool):
             if kind not in kinds:
                 continue
             # a bare figure may be a difference («на 18» after «с 47 до 29 минут»), never a share or a ratio; points
@@ -1577,11 +1616,13 @@ class BriefIndex:
         return bool(q.lead) and q.lead == p.lead and abs(q.group - p.group) <= 8 and not p.cell
 
     def future_figure(self, f: Fig) -> bool:
-        """The brief states this figure (or the change it is of) as a plan, a target or a forecast."""
+        """The brief states this figure (or the change it is of) as a plan, a target or a forecast: a figure the brief
+        writes only in a plan, or a change of a pair whose end is a plan — not any change once the brief has a plan
+        somewhere (a pilot's growth stays a result next to a launch plan)."""
         same = self._same(f)
         if same:
             return all(p.future or round(p.fig.mag, 6) in self._future_values for p in same)
-        return self._derived_ok(f) and bool(self._future_values or any(p.future for p in self.placed))
+        return self._derived_ok(f, pool=getattr(self, "_future_derived", []))
 
     def verdict(self, f: Fig) -> str:
         """«ok» — the brief's figure (or one derived from two of them); «strip» — the brief's number with a unit the
@@ -1723,6 +1764,39 @@ class BriefIndex:
         """The line states a figure the brief gives as a plan, a target or a forecast (or a change of one)."""
         figs = [f for f in figures(text) if not _ordinal(text, f) and f.date is None and not _is_year(f)]
         return any(self.verdict(f) == "ok" and self.future_figure(f) for f in figs)
+
+    def in_brief_tense(self, text: str) -> Optional[str]:
+        """The line with the change it tells as coming («снизятся», «вырастет») told in the brief's own tense, when the
+        brief states that change as done or ongoing: every figure of the line is the brief's, none a plan, and the
+        brief's sentence of one of them says the change without a plan word («Функция снижает срывы дедлайнов с 31% до
+        12%» → «снижаются»; «Доля … выросла на 34%» → «выросла»). None when the line stays as it is."""
+        if not _FUTURE_CHANGE_RE.search(text or ""):
+            return None
+        figs = [f for f in figures(text) if not _ordinal(text, f) and f.date is None and not _is_year(f)]
+        if not figs or any(self.verdict(f) != "ok" for f in figs) or self.forecast_line(text):
+            return None
+        sents = []
+        for f in figs:
+            for p in self._same(f):
+                sn = self._texts.get(p.group, "")
+                if sn and not p.future and not p.cell and not _FUTURE_RE.search(sn) and (_NOW_CHANGE_RE.search(sn) or PAST_CHANGE_RE.search(sn)):
+                    sents.append(sn)
+        if not sents:
+            return None
+
+        def repl(m: re.Match) -> str:
+            w = m.group(0)
+            now, plural_past = next((n, pp) for f, n, pp in _FUTURE_TO_NOW if f == w.lower())
+            out = now
+            if not any(_NOW_CHANGE_RE.search(sn) for sn in sents):
+                # the brief's own past form of the verb («выросла»: its gender), else the plural past
+                past_rx = next((rx for rx, fs, fp in _PAST_TO_FUTURE if w.lower() in (fs, fp)), None)
+                found = next((mm.group(0).lower() for sn in sents if past_rx and (mm := re.search(rf"(?<![\wё])(?:{past_rx})(?![\wё])", sn, re.I))), None)
+                out = found or plural_past or now
+            return out[:1].upper() + out[1:] if w[:1].isupper() else out
+
+        new = _FUTURE_CHANGE_RE.sub(repl, text)
+        return new if new != text else None
 
     def token_ok(self, tok: str) -> bool:
         if re.search(rf"(?<![\w]){re.escape(tok.lower())}(?![\w])", self.lower) is not None:
@@ -1881,6 +1955,27 @@ _PAST_TO_FUTURE = [
 ]
 _PAST_RES = [(re.compile(rf"(?<![\wё])(?:{rx})(?![\wё])", re.I), s or p) for rx, s, p in _PAST_TO_FUTURE]
 PAST_CHANGE_RE = re.compile(r"(?<![\wё])(?:" + "|".join(rx for rx, _, _ in _PAST_TO_FUTURE) + r")(?![\wё])", re.I)
+
+
+# a change told as coming → the same change as the brief tells it, in the present («Функция снижает срывы дедлайнов с
+# 31% до 12%»: the deck says «снижаются», never «снизятся»); the plural past for a past one («выросли»)
+_FUTURE_TO_NOW = [
+    ("вырастет", "растёт", None), ("вырастут", "растут", "выросли"), ("увеличится", "увеличивается", None), ("увеличатся", "увеличиваются", "увеличились"),
+    ("увеличит", "увеличивает", None), ("увеличат", "увеличивают", "увеличили"), ("снизится", "снижается", None), ("снизятся", "снижаются", "снизились"),
+    ("снизит", "снижает", None), ("снизят", "снижают", "снизили"), ("сократится", "сокращается", None), ("сократятся", "сокращаются", "сократились"),
+    ("сократит", "сокращает", None), ("сократят", "сокращают", "сократили"), ("уменьшится", "уменьшается", None), ("уменьшатся", "уменьшаются", "уменьшились"),
+    ("повысится", "повышается", None), ("повысятся", "повышаются", "повысились"), ("повысит", "повышает", None), ("повысят", "повышают", "повысили"),
+    ("удвоится", "удваивается", None), ("удвоятся", "удваиваются", "удвоились"), ("достигнет", "достигает", None), ("достигнут", "достигают", "достигли"),
+    ("составит", "составляет", None), ("составят", "составляют", "составили"), ("упадёт", "падает", None), ("упадет", "падает", None),
+    ("упадут", "падают", "упали"), ("сэкономит", "экономит", None), ("сэкономят", "экономят", "сэкономили"), ("принесёт", "приносит", None),
+    ("принесет", "приносит", None),
+]
+_FUTURE_CHANGE_RE = re.compile(r"(?<![\wё])(?:" + "|".join(f for f, _, _ in _FUTURE_TO_NOW) + r")(?![\wё])", re.I)
+_NOW_CHANGE_RE = re.compile(
+    r"(?<![\wё])(?:растёт|растет|растут|увеличива\w+|снижа\w+|сокраща\w+|уменьша\w+|повыша\w+|удваива\w+|достига\w+|составля\w+|"
+    r"пада\w+|эконом(?:ит|ят)|принос\w+)(?![\wё])",
+    re.I,
+)
 
 
 def to_future(text: str) -> str:
@@ -2104,25 +2199,68 @@ def _item_text(it: SlideItem) -> str:
     return " ".join(x for x in [it.title, it.text, it.number or "", " ".join(it.bullets)] if x)
 
 
+# an item's position badge («1», «02», «3.»): the order of the list, never a figure of the brief
+_BADGE_RE = re.compile(r"^\s*(0?)(\d{1,2})\s*[.)]?\s*$")
+# «1. Основы SQL», «2) Потоковая обработка»: a position written into the item's own words
+_LEAD_NUMBER_RE = re.compile(r"^\s*(\d{1,2})\s*[.)]\s+(?=\S)")
+
+
+def is_badge(number: Optional[str]) -> bool:
+    m = _BADGE_RE.match(number or "")
+    return bool(m) and 1 <= int(m.group(2)) <= 20
+
+
+def uniform_numbers(items: list[SlideItem]) -> bool:
+    """A list numbered all or nothing (S5: «3», «4» on items 3–4 only when the brief had no «1», «2» to ground): the
+    items' position badges 1…n on every item in order when at least half of them carry one (an item dropped or a badge
+    lost on the way), else none; a position written into an item's title («1. Основы SQL») becomes its badge. Figures
+    given as an item's number («71%», «145 000 ₽») are no numbering: left as they are. True when anything changed."""
+    if len(items) < 2:
+        return False
+    changed = False
+    for k, it in enumerate(items, 1):
+        m = _LEAD_NUMBER_RE.match(it.title or "")
+        if m and int(m.group(1)) == k and (not it.number or is_badge(it.number)):
+            it.title = it.title[m.end():].strip()
+            it.number = it.number or str(k)
+            changed = True
+    nums = [it.number for it in items]
+    if not any(nums) or any(n and not is_badge(n) for n in nums):
+        return changed
+    pad = any(_BADGE_RE.match(n).group(1) for n in nums if n)  # «01», «02»: the template's style kept
+    if sum(1 for n in nums if n) * 2 >= len(items):
+        want = [f"{k:02d}" if pad else str(k) for k in range(1, len(items) + 1)]
+    else:
+        want = [None] * len(items)
+    for it, w in zip(items, want):
+        if it.number != w:
+            it.number = w
+            changed = True
+    return changed
+
+
 def _ground_item(idx: BriefIndex, it: SlideItem, log: _Log, *, judge: bool = True) -> Optional[SlideItem]:
     title, text = idx.clean(it.title), idx.clean(it.text)
-    number = idx.clean(it.number) if it.number else None
+    badge = is_badge(it.number)
+    number = idx.clean(it.number) if it.number and not badge else None
     bullets = [idx.clean(b) for b in it.bullets]
     for c in [title, text] + bullets + ([number] if number else []):
         log.take(c)
     it.title = title.text
     it.text = _keep_line(idx, text) if (text.bad and judge) else text.text
-    it.number = number.text if number is not None and number.text and not number.bad else None
+    if not badge:
+        it.number = number.text if number is not None and number.text and not number.bad else None
     it.bullets = [x for x in (_keep_line(idx, b) if judge else b.text for b in bullets) if x]
-    if not (it.title or it.text or it.bullets or it.number):
+    figure = it.number if not badge else None  # (a position badge alone is no content)
+    if not (it.title or it.text or it.bullets or figure):
         return None
     if title.bad and not it.text and not it.bullets:
         return None  # «Охват: 12 000 пользователей» without its figure says nothing
     if judge:
-        whole = _Clean(_item_text(it), bad=title.bad + text.bad)
+        whole = _Clean(_item_text(it.model_copy(update={"number": figure})), bad=title.bad + text.bad)
         if not _keep_line(idx, whole):
             return None
-        if not (it.text or it.bullets or it.number) and (text.bad or any(b.bad for b in bullets)):
+        if not (it.text or it.bullets or figure) and (text.bad or any(b.bad for b in bullets)):
             return None  # only the title is left of a card whose text was invented
     return it
 
@@ -2566,6 +2704,7 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
     c.paragraphs = [x for x in (_line(idx, _take(idx.clean(p), log), lenient) for p in c.paragraphs) if x]
     # items and columns
     c.items = [x for x in (_ground_item(idx, it, log, judge=not lenient) for it in c.items) if x is not None]
+    uniform_numbers(c.items)
     cols = []
     for col in c.columns:
         t = idx.clean(col.title)

@@ -770,7 +770,9 @@ def _tense_guard(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run
     """A plan, a target or a forecast is never told as done, and a hedge is on the true value's side: every line of a
     content slide whose figure the brief gives as a plan (a «Цель» / «Прогноз» value, a sentence with «составит»,
     «вырастет», «к шестому месяцу», or a change of such a value) says it in the future tense («выросла» → «вырастет»);
-    on a slide whose source speaks only of the plan, so does a line without a figure. «почти в 2,1 раза» of 2,12 →
+    on a slide whose source speaks only of the plan, so does a line without a figure. The other way round, a result the
+    brief states (a pilot's months, «Функция снижает … с 31% до 12%») is never told as coming: its line keeps the
+    brief's tense (grounding.BriefIndex.in_brief_tense). «почти в 2,1 раза» of 2,12 →
     «более чем в 2,1 раза». The brief's own rule «Не представляй прогноз как гарантию» makes this stricter, never
     looser."""
     specs = {sp.number: sp for sp in structure.specs}
@@ -790,6 +792,10 @@ def _tense_guard(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run
             new = idx.fix_hedges(text)
             if PAST_CHANGE_RE.search(new) and (idx.forecast_line(new) or (lenient_plan and plan_only and not figures(new))):
                 new = to_future(new)
+            elif not plan_only:
+                # and a result the brief states is never told as coming («Функция снижает срывы дедлайнов с 31% до 12%» →
+                # «снижаются», not «снизятся»)
+                new = idx.in_brief_tense(new) or new
             if new != text:
                 changed.append(f"«{text[:70]}» → «{new[:70]}»")
             return new
@@ -821,6 +827,15 @@ def _undated_axis(s: OutlineSlide) -> bool:
     return not all(date_start(it.title or "") for it in s.content.items)
 
 
+def _poor_form(new: OutlineSlide, old: OutlineSlide) -> bool:
+    """Key figures switched to a form that reads worse than them (bare figure cards, a two-row table): agent's rule."""
+    try:
+        from verstka.planning.agent import _poor_form as poor
+    except Exception:  # noqa: BLE001
+        return False
+    return poor(new, old)
+
+
 def _variety(o: DeckOutline, structure: BriefStructure, run: _Run, written: bool = False) -> None:
     """More than two slides of one kind in a row: a slide of the run takes one of its alternatives that fits (the
     third first, then the second), never one whose chart or table the user asked for. `written` (writer mode): never a
@@ -840,7 +855,7 @@ def _variety(o: DeckOutline, structure: BriefStructure, run: _Run, written: bool
             done = False
             for alt in s.alternatives:
                 new = apply_alternative(s, alt, spec)
-                if new is None or _run_len(kinds, j, new.kind) > 2 or (written and _undated_axis(new)):
+                if new is None or _run_len(kinds, j, new.kind) > 2 or (written and _undated_axis(new)) or _poor_form(new, s):
                     continue
                 slides[j] = new
                 run.warn(f"slide {s.id}: {k.value} → {new.kind.value} (three slides of one kind in a row)")

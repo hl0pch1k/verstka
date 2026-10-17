@@ -1,5 +1,5 @@
 name: deck_architect
-version: 1.0.0
+version: 1.1.0
 role: llm
 description: >
   Makes the storyline of a brief that does not describe its slides (Agent v2): which content slides the deck has,
@@ -17,3 +17,9 @@ changelog:
   - "1.0.0: initial version (Agent v2). The brief is shown as numbered sentences and the answer refers to them by
     number, so the storyline stays small (no copied text to truncate) and every slide's source text is the brief's
     own; the data list shows the registry ids with values."
+  - "1.1.0: live QA of 2026-10-17 (VK model, edu brief, 12 slides): the storyline spent three slides on one sentence
+    each and left out «Как устроено обучение» and «Что нужно от партнёров» — the key ask for partner universities.
+    Now every «##» part of the brief is on some slide (two one-sentence ideas of one part share a slide first when the
+    count is tight, never three parts on one slide) and the brief's ask always has one. Deterministic guard: planning/agent.py cover_sections adds a slide for a
+    section left out whole (merging two short slides of one part when the count is fixed; the ask joins its nearest
+    slide when nothing can be merged)."

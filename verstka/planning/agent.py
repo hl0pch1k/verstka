@@ -826,6 +826,110 @@ def _units_from_specs(ctx: _Ctx) -> list[_Unit]:
     return units
 
 
+# a section of the brief that asks its audience for something («Что нужно от партнёров», «Просим утвердить запуск»):
+# the call to action the deck exists for — never left out of a storyline
+_ASK_SECTION_RE = re.compile(
+    r"(?<![\wё])(?:нужн[оаы]?\s+от|что\s+нужно|просим|просьба|запрос\w*|призыв\w*|от\s+вас|ожидаем\s+от|требуется\s+от|"
+    r"предлагаем\s+(?:партн|вам|университ|компани)\w*|call\s+to\s+action|what\s+we\s+need|our\s+ask)",
+    re.I,
+)
+_HEADING_SENTENCE_RE = re.compile(r"^\s*#{2,6}\s+(?P<t>\S.*?)\s*#*\s*$")
+
+
+def _brief_sections(sentences: list[str]) -> list[tuple[str, list[int], list[int]]]:
+    """The brief's «##» sections by the architect's sentence numbers: (heading, every line, the lines that are not a
+    table's rows), in order; the deck's own «#» title is no section."""
+    out: list[tuple[str, list[int], list[int]]] = []
+    for n, sn in enumerate(sentences, 1):
+        m = _HEADING_SENTENCE_RE.match(sn)
+        if m:
+            out.append((H.strip_end(m.group("t")), [], []))
+            continue
+        if not out or re.match(r"^\s*#\s", sn):
+            continue
+        out[-1][1].append(n)
+        if not sn.lstrip().startswith("|"):
+            out[-1][2].append(n)
+    return [s for s in out if s[1]]
+
+
+def cover_sections(units: list[_Unit], spans: dict[str, set[int]], sentences: list[str], ctx: _Ctx, n_content: int, warnings: list[str]) -> list[_Unit]:
+    """Every «##» section of the brief reaches the storyline (S5: the edu decks left out «Как устроено обучение» and
+    «Что нужно от партнёров», the key ask for partner universities): a section none of whose sentences a slide presents
+    gets a slide of its own in the brief's order — a free place when the deck has one; else two short neighbours of
+    one part of the story (the architect's section, its sentences and data, at most three sentences together) share a
+    slide; else a section that asks the audience for something joins its nearest slide. A section of a table's rows
+    only is covered by its data. `spans` gets the new slides' sentences (the pictures' notes are placed by them)."""
+    sections = _brief_sections(sentences)
+    if not sections:
+        return units
+    used = {n for u in units for n in spans.get(u.key, set())}
+    any_data = any(u.series_ids or u.table_ids for u in units)
+    missing = []
+    for title, lines, prose in sections:
+        if any(n in used for n in lines):
+            continue
+        if not prose and any_data:
+            continue  # a table's rows only: the table is on a slide by its id
+        text = "\n".join(sentences[n - 1] for n in lines if not sentences[n - 1].lstrip().startswith("|")) or "\n".join(sentences[n - 1] for n in lines)
+        ask = bool(_ASK_SECTION_RE.search(title) or any(_ASK_SECTION_RE.search(sentences[n - 1][:40]) for n in prose))
+        missing.append((title, lines, text, ask))
+    if not missing:
+        return units
+    units = list(units)
+    first = lambda u: min(spans.get(u.key, set()) or {10**6})  # noqa: E731 - the unit's place in the brief
+    seq = len(units) + len(spans) + 1
+
+    def free_slot() -> bool:
+        if len(units) < n_content:
+            return True
+        best = None
+        for i in range(1, len(units)):
+            a, b = units[i - 1], units[i]
+            if a.frame or b.frame or a.locked or b.locked or not a.section or a.section != b.section:
+                continue
+            na, nb = len(spans.get(a.key, set())), len(spans.get(b.key, set()))
+            if na + nb > 3 or (a.series_ids or a.table_ids) and (b.series_ids or b.table_ids):
+                continue
+            key = (bool(a.series_ids or a.table_ids or b.series_ids or b.table_ids), na + nb, len(a.fact_ids) + len(b.fact_ids), i)
+            if best is None or key < best[0]:
+                best = (key, i)
+        if best is None:
+            return False
+        i = best[1]
+        a, b = units[i - 1], units[i]
+        a.title = H.short(f"{a.title} и {_low_first(b.title)}", 10)
+        a.text = "\n".join(x for x in (a.text, b.text) if x)
+        a.form = None  # the designer chooses the form of the two together
+        a.series_ids = list(dict.fromkeys([*a.series_ids, *b.series_ids]))
+        a.table_ids = list(dict.fromkeys([*a.table_ids, *b.table_ids]))
+        a.fact_ids = list(dict.fromkeys([*a.fact_ids, *b.fact_ids]))
+        spans[a.key] = spans.get(a.key, set()) | spans.pop(b.key, set())
+        del units[i]
+        warnings.append(f"deck_architect: slides «{a.title[:60]}» share one slide to make room for a section the storyline left out")
+        return True
+
+    for title, lines, text, ask in sorted(missing, key=lambda m: (not m[3], m[1][0])):
+        if free_slot():
+            key = f"u{seq}"
+            seq += 1
+            u = _Unit(key=key, title=title, text=text, section=title, fact_ids=_facts_in(ctx, text))
+            spans[key] = set(lines)
+            at = next((k for k, x in enumerate(units) if first(x) > lines[0]), len(units))
+            units.insert(at, u)
+            warnings.append(f"deck_architect left out the section «{title[:60]}»: a slide added for it")
+        elif ask and units:
+            # the deck's ask is never lost: with it the nearest slide by the brief's order (the next steps, as a rule)
+            host = min(units, key=lambda x: (abs(first(x) - lines[0]), -first(x)))
+            host.text = "\n".join(x for x in (host.text, text) if x)
+            host.fact_ids = list(dict.fromkeys([*host.fact_ids, *_facts_in(ctx, text)]))
+            spans[host.key] = spans.get(host.key, set()) | set(lines)
+            warnings.append(f"deck_architect left out the section «{title[:60]}»: it joins the slide «{host.title[:60]}»")
+        else:
+            warnings.append(f"deck_architect left out the section «{title[:60]}» and the deck has no room for it")
+    return units
+
+
 # ------------------------------------------------------------------ designs
 
 
@@ -842,6 +946,18 @@ class _Design:
     # dated events), «list» (the slide's own lists), «figures» (its data series and figure lists), «prose» (its
     # sentences alone) — the verbatim layout takes the rules' slide for every basis but prose
     basis: str = "prose"
+    # the designer's answer as it came (SlideDesignAnswer): a slide made from a data file takes only its words from it
+    # (planning/slide_edit.py) — the brief's checks of design_from_answer are not the data's
+    answer: Any = None
+
+
+class UnusableAnswer(ValueError):
+    """The designer answered, but nothing of its answer can be the slide (no content block: a text-only edit of a
+    slide whose chart comes from a data file). The model is there — never «the model is unavailable»."""
+
+    def __init__(self, message: str, answer: Any = None) -> None:
+        super().__init__(message)
+        self.answer = answer
 
 
 _MARK_RE = re.compile(r"^\s*(?:[—–\-•*·]|\d{1,2}[.)])\s+")
@@ -2067,14 +2183,25 @@ _CONDITION_TAIL_RE = re.compile(r"\s+(?:при|с\s+учетом|с\s+учёто
 _CONDITION_ONLY_RE = re.compile(r"^[^\d]*?(?<![\wё])(?:при|с\s+учетом|с\s+учётом|для|за\s+сч[её]т|в\s+случае)\s[^—–:]*\d", re.I)
 
 
+# the brief's request to its audience («Просим утвердить запуск и бюджет на продвижение», «Нужны аудитории для
+# практикумов»): the call to action a deck ends with — it states what is asked, never «a label»
+_REQUEST_RE = re.compile(
+    r"^(?:просим|прошу|предлагаем|призываем|приглашаем|ждём|ждем|рассчитываем\s+на|нужн[аоы]?|необходим[аоы]?|требу[ею]тся|"
+    r"запрос\s+на|просьба)(?![\wё])",
+    re.I,
+)
+
+
 def takeaway_states(text: Optional[str]) -> bool:
     """A takeaway that states something (a figure, a verb, a dash or a colon for the verb: «Рост постепенный: это
-    прогноз, а не гарантия»), not a label or a list announced («Три ключевых направления для роста прибыли»), nor a
-    phrase whose only figures are a condition's («Дополнительные покупки при среднем чеке 330 ₽» — its result is cut
-    off)."""
+    прогноз, а не гарантия»; a request to the audience: «Просим утвердить запуск и бюджет на продвижение»), not a label
+    or a list announced («Три ключевых направления для роста прибыли»), nor a phrase whose only figures are a
+    condition's («Дополнительные покупки при среднем чеке 330 ₽» — its result is cut off)."""
     t = (text or "").strip()
     if not t:
         return False
+    if _REQUEST_RE.match(t):
+        return True
     has_verb = any(m.group(0).lower() not in _NOT_VERBS for m in _VERB_RE.finditer(t))
     if not has_verb and not re.search(r"\s[—–]\s|:\s", t) and _CONDITION_ONLY_RE.match(t):
         return False
@@ -2232,9 +2359,11 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
             # before the check, which would otherwise cut the figure and leave «… выросла почти»
             fixed = ctx.index.fix_hedges(raw_head)
             if PAST_CHANGE_RE.search(fixed) and ctx.index.forecast_line(fixed):
-                fixed = to_future(fixed)
+                fixed = to_future(fixed)  # (only a figure the brief gives as a plan: a pilot's result stays a result — S4)
+            else:
+                fixed = ctx.index.in_brief_tense(fixed) or fixed  # a result the brief states is never told as coming
             if fixed != raw_head:
-                changes.append(f"slide {unit.key}: headline «{raw_head[:80]}» → «{fixed[:80]}» (a plan is not a result; the hedge's side)")
+                changes.append(f"slide {unit.key}: headline «{raw_head[:80]}» → «{fixed[:80]}» (a plan is not a result, a result not a plan; the hedge's side)")
                 raw_head = fixed
         except Exception:  # noqa: BLE001 - the compiler's guard runs again anyway
             pass
@@ -2861,6 +2990,188 @@ def invented_counts(headline: str, source: str, s: OutlineSlide) -> list[str]:
     return bad
 
 
+_PROMISE_DIGIT_RE = re.compile(r"(?<![\d,.\wё])(?P<n>[2-9]|10)\s+(?P<w>[А-Яа-яЁё]{3,})")
+# words after a count that are no list's items: units of time and measure, scores, multiples, parts of a whole
+_PROMISE_SKIP_RE = re.compile(
+    r"^(?:балл|оцен|раз|процент|тысяч|миллион|миллиард|млн|млрд|тыс|час|минут|секунд|дн|день|недел|месяц|кварт|лет|год|век|"
+    r"рубл|руб|доллар|евро|сотрудник|человек|студент|пользовател|клиент|компани|участник|выпускник|специалист|п)",
+    re.I,
+)
+
+
+def promised_counts(text: Optional[str]) -> list[tuple[int, str, int, int]]:
+    """The counts of items a line promises («Программа из 4 модулей», «Четыре функции закрывают цикл», «три этапа»):
+    (count 2–10, the counted word, the phrase's start and end) — not amounts of time, money or people («за 3 недели»,
+    «5 часов», «2 сотрудника»), multiples or scores («в 2 раза», «4,8 из 5»)."""
+    from verstka.planning.grounding import _CARDINALS
+
+    t = text or ""
+    out: list[tuple[int, str, int, int]] = []
+    for m in _PROMISE_DIGIT_RE.finditer(t):
+        if not _PROMISE_SKIP_RE.match(m.group("w")):
+            out.append((int(m.group("n")), m.group("w"), m.start(), m.end()))
+    toks = list(re.finditer(r"[А-Яа-яЁё]+", t))
+    for i, m in enumerate(toks[:-1]):
+        v = _CARDINALS.get(m.group(0).lower())
+        nxt = toks[i + 1]
+        if not v or not 2 <= v[0] <= 10 or t[m.end():nxt.start()].strip() or len(nxt.group(0)) < 3:
+            continue
+        if _PROMISE_SKIP_RE.match(nxt.group(0)) or nxt.group(0).lower() in _CARDINALS:
+            continue
+        out.append((v[0], nxt.group(0), m.start(), nxt.end()))
+    return out
+
+
+def _source_list(source: str, n: int, word: str) -> list[str]:
+    """The source's own list of `n` items the count speaks of: a sentence «… из 4 модулей: основы SQL и Python,
+    потоковая обработка, …» (its count or its counted word before the colon), else a list group or the steps of `n`."""
+    stem = word.lower()[:4]
+    for sn in H.split_sentences(source or "") or []:
+        head, sep, body = sn.partition(":")
+        if not sep:
+            continue
+        if stem in head.lower() or re.search(rf"(?<!\d){n}(?!\d)", head) or any(v == n for v, *_ in promised_counts(head)):
+            parts = _enum_parts(body)
+            if len(parts) == n:
+                return parts
+    src = _read_source(source or "")
+    for g in src.groups:
+        if len(g.items) == n:
+            return [H.strip_end(x) for x in g.items]
+    if len(src.steps) == n:
+        return [f"{t} — {x}" for t, x in src.steps]
+    return []
+
+
+def keep_promise(s: OutlineSlide, source: str, fallback: Optional[str] = None) -> list[str]:
+    """A headline (or the lead line above the slide's list) that promises N items shows N (S5: «Программа из 4
+    модулей» over three steps, module 2 only in the notes): the items the slide lost are restored from the source's own
+    list, in its order and in the form of the others («Модуль 2 — Потоковая обработка»); when the source has no such
+    list, the promise goes — «из N …» cut from the headline, else the source's own headline (`fallback`), and a lead
+    line that promises what the slide does not show is dropped. What changed, in English, for the warnings."""
+    from verstka.planning.grounding import uniform_numbers
+
+    c = s.content
+    if s.kind.value in FRAME_KINDS or s.data is not None or c.chart is not None or c.table is not None:
+        return []
+    said: list[str] = []
+    main = "items" if c.items else "columns" if c.columns else "bullets" if c.bullets else ""
+    if not main:
+        return []
+
+    def sizes() -> set[int]:
+        # the slide's lists and the names or parts one of its lines enumerates («ВКонтакте», «Одноклассники», «Мой мир»)
+        return _list_sizes(s)
+
+    def broken(text: Optional[str]) -> list[tuple[int, str, int, int]]:
+        have = sizes()
+        return [p for p in promised_counts(text) if p[0] not in have and p[0] > len(getattr(c, main))]
+
+    lines = [s.headline, *(c.paragraphs[:1])]
+    for n, word, *_ in [p for x in lines for p in broken(x)]:
+        parts = _source_list(source, n, word)
+        if not parts or n in sizes():
+            continue
+        shown = _Shown(_visible_text(s))
+        lost = [(k, p) for k, p in enumerate(parts) if not shown.line(p)]
+        cur = getattr(c, main)
+        if not lost or len(cur) + len(lost) != n:
+            continue
+        if main == "items":
+            # the form of the others: «Модуль 3» · «Хранилища и витрины» → «Модуль 2» · «Потоковая обработка»
+            m = next((x for it in cur if it.text and (x := re.match(r"^(?P<w>[А-ЯЁA-Z][а-яёa-z]+)\s+\d{1,2}$", it.title or ""))), None)
+            for k, p in lost:
+                it = SlideItem(title=f"{m.group('w')} {k + 1}", text=H.cap_first(p)) if m else SlideItem(title=H.short(H.cap_first(p), 6))
+                cur.insert(min(k, len(cur)), it)
+            if m:
+                for k, it in enumerate(cur, 1):
+                    if not (it.title or "").strip() and it.text:
+                        it.title = f"{m.group('w')} {k}"  # a title lost on the way: the form of the others
+            uniform_numbers(cur)
+        elif main == "bullets":
+            for k, p in lost:
+                cur.insert(min(k, len(cur)), H.cap_first(p))
+        else:
+            continue
+        said.append(f"{len(lost)} of the {n} items the headline promises restored from the source: " + "; ".join(f"«{p[:40]}»" for _, p in lost))
+    for p in broken(s.headline):
+        head = s.headline
+        cut = re.sub(rf"\s+из\s+{p[0]}\s+{re.escape(p[1])}(?![\wё])", "", head, count=1) if re.search(rf"из\s+{p[0]}\s+{re.escape(p[1])}", head) else head
+        if cut != head and len(cut.split()) >= 3:
+            s.headline = cut
+        elif fallback and not broken(fallback):
+            s.headline = fallback
+        else:
+            continue
+        said.append(f"the headline «{head[:80]}» promised {p[0]} items the slide does not show → «{s.headline[:80]}»")
+        break
+    if c.paragraphs and broken(c.paragraphs[0]):
+        said.append(f"the lead line «{c.paragraphs[0][:60]}» promised items the slide does not show, dropped")
+        c.paragraphs = c.paragraphs[1:]
+    return said
+
+
+# the brief's own request to its audience, a sentence of its own: «Просим утвердить запуск и бюджет на продвижение»
+_ASK_SENTENCE_RE = re.compile(r"^\s*(?:просим|прошу|призываем|приглашаем|ждём|ждем|предлагаем\s+(?:вам|утвердить|поддержать|принять|начать))(?![\wё])", re.I)
+
+
+def keep_ask(s: OutlineSlide, source: str) -> list[str]:
+    """The brief's request to its audience reaches the slide (S5: «Просим утвердить запуск и бюджет на продвижение»
+    left only in the notes): a request sentence of the slide's source that the slide does not show becomes its takeaway
+    when it has none, else a line under its block, else it takes the takeaway's place — the ask is what the deck is
+    for. What changed, in English, for the warnings."""
+    if s.kind.value in FRAME_KINDS or s.data is not None or not (source or "").strip():
+        return []
+    said: list[str] = []
+    for sn in H.split_sentences(source) or []:
+        ask = H.strip_end(sn.strip())
+        if not _ASK_SENTENCE_RE.match(ask) or len(ask.split()) > 16:
+            continue
+        if _Shown(_visible_text(s)).line(ask):
+            continue
+        c = s.content
+        room = {"comparison": 2, "two_column": 2}.get(s.kind.value, _LINE_ROOM.get(s.kind.value, 0)) - len(c.bullets)
+        if not s.takeaway:
+            s.takeaway = ask
+            said.append(f"the brief's request «{ask[:60]}» was not on the slide: the slide's takeaway now")
+        elif room > 0 and not c.chart:
+            c.bullets.append(ask)
+            said.append(f"the brief's request «{ask[:60]}» was not on the slide: a line of the slide now")
+        else:
+            said.append(f"the brief's request «{ask[:60]}» takes the takeaway's place of «{s.takeaway[:60]}»")
+            s.takeaway = ask
+    return said
+
+
+# a step in time or in a plan is a label of its own («Месяц 1», «Неделя 2», «Этап 3»), never only a position
+_TIME_STEP_RE = re.compile(r"^(?:месяц|недел|кварт|день|дня|год|сезон|спринт|фаз|волн|этап|шаг|week|month|quarter|day|year|phase|stage|step|sprint)", re.I)
+
+
+def position_labels(items: list[SlideItem], source: str) -> bool:
+    """An item's position said again in its words («1» · «Основы SQL и Python» · «Модуль 1»): a label «<word> N» equal to
+    the item's badge, when the source does not title its items so («Неделя 1: …» stays — the source's own step), goes;
+    the item keeps its other words. True when anything changed."""
+    from verstka.planning.grounding import is_badge
+
+    changed = False
+    for k, it in enumerate(items, 1):
+        if not is_badge(it.number) or int(re.sub(r"\D", "", it.number or "0") or 0) != k:
+            continue
+        for field_, other in (("text", "title"), ("title", "text")):
+            m = re.fullmatch(r"\s*(?P<w>[А-ЯЁA-Z][а-яёa-z]+)\s+(?P<n>\d{1,2})\s*", getattr(it, field_) or "")
+            if not m or int(m.group("n")) != k or not (getattr(it, other) or "").strip():
+                continue
+            if _TIME_STEP_RE.match(m.group("w")) or _numbered_in(m.group("w").lower(), source or "", k):
+                continue  # a time step («Месяц 1», «Неделя 2») or the source's own title of the step («1-й модуль»)
+            if field_ == "title":
+                it.title, it.text = it.text, ""
+            else:
+                it.text = ""
+            changed = True
+            break
+    return changed
+
+
 _LABEL_DROP_RE = re.compile(
     r"^(?:что|и|а|но|это|так|около|более|менее|почти|примерно|свыше|порядка|до|лишь|только|уже|было|будет|был[аио]?|были|"
     r"составит|составляет|составил[аио]?|составили|достиг\w*|насчитыва\w*|прогнозиру\w*|ожида\w*|оценива\w*)$",
@@ -3332,6 +3643,16 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
         if len(keep) < len(lines) and (keep or c.chart is not None or c.table is not None or c.items or c.columns or c.numbers or c.formula or field_ == "paragraphs" or c.paragraphs):
             setattr(c, field_, keep)
     _uniform_steps(d, ctx.brief.text if ctx is not None else d.unit.text)
+    if (d.unit.text or "").strip():
+        # a count the headline promises is what the slide shows (S5); a list numbered all or nothing
+        fb = _fallback_headline(d.unit, ctx) if ctx is not None and promised_counts(s.headline) else None
+        d.changes.extend(f"slide {d.unit.key}: {x}" for x in keep_promise(s, d.unit.text, fb))
+    from verstka.planning.grounding import uniform_numbers
+
+    if uniform_numbers(c.items):
+        d.changes.append(f"slide {d.unit.key}: the items numbered all or none")
+    if position_labels(c.items, d.unit.text or ""):
+        d.changes.append(f"slide {d.unit.key}: an item's number said again in its words («Модуль 1» beside the badge 1) dropped")
     s.takeaway = plain_change(s.takeaway)
     c.bullets = [plain_change(b) or b for b in c.bullets]
     charts = [x for x in (c.chart, c.chart2) if x is not None]
@@ -3372,6 +3693,22 @@ _PP_RE = re.compile(r"(\d)\s+п\.\s*п\.")
 _STEP_ORD_RE = re.compile(r"^(?:(?P<n1>\d{1,2})\s*-?\s*(?:й|ый|ой|ий)?\s*(?P<w1>месяц|недел[яи]|квартал|этап|шаг|день)|(?P<w2>месяц|неделя|квартал|этап|шаг)\s+(?P<n2>\d{1,2}))$", re.I)
 
 
+def _source_label(title: str, source: str) -> bool:
+    """`title` is a label the source itself writes before a step («Далее: интеграция с календарём и почтой»)."""
+    t = H.strip_end(title or "").strip()
+    return bool(t) and re.search(rf"(?<![\wё]){re.escape(t)}\s*[:—–]", source or "", re.I) is not None
+
+
+def _numbered_in(word: str, source: str, n: Optional[int] = None) -> bool:
+    """The source numbers steps with `word` («Неделя 1», «2-й месяц»): any number, or `n` when given."""
+    if not word:
+        return False
+    stem = re.escape(word[:5])
+    num = str(n) if n is not None else r"\d{1,2}"
+    rx = rf"(?<![\wё]){stem}\w*\s+{num}(?!\d)(?![.,]\d)|(?<!\d){num}\s*-?\s*(?:й|ый|ой|ий|я|ая)\s+{stem}"  # («из 4 модулей» is a count)
+    return re.search(rx, source or "", re.I) is not None
+
+
 def _uniform_steps(d: _Design, text: str = "") -> None:
     """The steps of a timeline or a process (or a column of steps) titled one way: the source's own step titles
     («1-й месяц», …) when the slide shows as many steps as the source gives, in order; else an untitled step between
@@ -3397,12 +3734,22 @@ def _uniform_steps(d: _Design, text: str = "") -> None:
             m = next(_STEP_ORD_RE.match(H.strip_end(it.title)) for it, ok in zip(items, titled) if ok)
             word = (m.group("w1") or m.group("w2") or "").lower()
             ordinal = m.group("n1") is not None
+            source = d.unit.text or ""
+            retitled = False
             for i, (it, ok) in enumerate(zip(items, titled), 1):
-                if not ok:
-                    if it.title and not it.text:
-                        it.text = it.title
-                    it.title = f"{i}-й {word}" if ordinal else f"{word.capitalize()} {i}"
-            d.changes.append(f"slide {d.unit.key}: untitled steps titled like the others")
+                if ok:
+                    continue
+                if it.title and _source_label(it.title, source):
+                    continue  # the source's own label of the step («Далее: интеграция…»), never «Неделя 4» for it
+                new = f"{i}-й {word}" if ordinal else f"{word.capitalize()} {i}"
+                if _numbered_in(word, source) and not _numbered_in(word, source, i):
+                    continue  # the source numbers its steps «Неделя 1–3»: a fourth one would be invented
+                if it.title and not it.text:
+                    it.text = it.title
+                it.title = new
+                retitled = True
+            if retitled:
+                d.changes.append(f"slide {d.unit.key}: untitled steps titled like the others")
     for col in c.columns:
         bl = col.bullets
         if len(bl) >= 3 and src.steps and len(src.steps) == len(bl) and any(_step_item(b) for b in bl) != all(_step_item(b) for b in bl) or (
@@ -3996,6 +4343,21 @@ def _merge(a: _Placed, b: _Placed) -> Optional[_Placed]:
     return _Placed(slide=merged, units=[*a.units, *b.units])
 
 
+def _poor_form(new: OutlineSlide, old: OutlineSlide) -> bool:
+    """A form a variant would switch a slide of 1–4 key figures to that reads worse than the figures themselves (L3):
+    cards of a bare figure each (a 13 pt number beside an icon, the card two-thirds empty), a «Показатель | Значение»
+    table of two rows on half a slide, or the figures as plain lines. A table of before/after changes («Показатель |
+    Сейчас | Цель») is a form of its own and stays allowed."""
+    oc, c = old.content, new.content
+    if old.kind.value not in ("stat_row", "big_number") or not 1 <= len(oc.numbers) <= 4 or oc.chart or oc.table or oc.items or oc.columns:
+        return False
+    if new.kind.value == "cards":
+        return bool(c.items) and all(not (it.text or it.bullets) for it in c.items)
+    if new.kind.value == "table":
+        return c.table is None or len(c.table.columns) <= 2
+    return new.kind.value == "bullets"
+
+
 def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary: Optional[dict[str, OutlineSlide]] = None, prefer: Optional[list[str]] = None, case_text: str = "") -> list[str]:
     """No two neighbours of one form when one of them has an alternative that fits: of the two, the switch whose new
     form the variant prefers most (`prefer`, best first; the second slide on a tie). Two neighbours of one of the
@@ -4025,7 +4387,7 @@ def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary:
             for a in options:
                 src_slide = base if base is not None and a.kind == base.kind.value else p.slide
                 r = reshape(src_slide, a.kind, a.chart_type, case_text)
-                if r is None:
+                if r is None or _poor_form(r, p.slide):
                     continue
                 probe = _Placed(slide=r, units=p.units)
                 if form(probe) in around or form(probe) == form(p):
@@ -4109,7 +4471,7 @@ def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx,
                     tries.append(Alternative(kind=k, why=_ALT_WHY.get(k, "")))
             for a in tries:
                 r = reshape(d.slide, a.kind, a.chart_type, ctx.brief.text)
-                if r is not None and _rank(r.kind.value, prefer) < best_rank:
+                if r is not None and not _poor_form(r, d.slide) and _rank(r.kind.value, prefer) < best_rank:
                     best, best_rank = r, _rank(r.kind.value, prefer)
                     best.rationale = (a.why[:1].upper() + a.why[1:] + ".") if a.why else best.rationale
             s = best
@@ -4423,8 +4785,8 @@ class _Agent:
         """A model call failed. Not the budget's end (that is not the model's fault): after BREAKER_STREAK failures in
         a row — or a whole first wave when it is smaller — the agent stops asking (the circuit breaker): the slides
         left are designed by the rules and the critic and the revisions are skipped."""
-        if _budget_error(e):
-            return
+        if _budget_error(e) or isinstance(e, UnusableAnswer):
+            return  # (an answer without content is the model answering: no reason to stop asking it)
         with self.lock:
             self.fail_streak += 1
             limit = max(1, min(BREAKER_STREAK, self.first_wave or BREAKER_STREAK))
@@ -4489,6 +4851,7 @@ class _Agent:
             self.tracker.emit("architect", "Архитектор: сюжет модели не опирается на бриф — план составит встроенный планировщик.")
             return None
         units = units[:n_content]
+        units = cover_sections(units, spans, sentences, ctx, n_content, warnings)
         place_pictures(units, spans, notes, warnings)
         taken = {x for u in units for x in u.series_ids}
         for sid, s in ctx.series.items():
@@ -4529,8 +4892,9 @@ class _Agent:
             raise
         d = design_from_answer(res.parsed, unit, ctx)
         if d is None:
-            raise ValueError("the designer's answer has no content for the slide")
+            raise UnusableAnswer("the designer's answer has no content for the slide", answer=res.parsed)
         d.model = getattr(res, "label", None) or getattr(res, "model", None)
+        d.answer = res.parsed
         return d
 
     def design_all(self, units: list[_Unit], ctx: _Ctx, phase_end: Optional[float]) -> list[_Design]:
@@ -6045,6 +6409,24 @@ def run_agent(
                 warns.append(f"agent plan rejected: grounding failed ({str(e)[:160]})")
                 continue
         o = polish_plan(o)
+        # after grounding: a count the headline promises is still what the slide shows, a list numbered all or none
+        # (S5: grounding took «Модуль 2» for a figure the brief does not have and left «Программа из 4 модулей» with 3)
+        try:
+            from verstka.planning.grounding import uniform_numbers
+
+            units_of = {f"sl{i}": p.units for i, p in enumerate(placed[st.name], 1)}
+            for sl in o.slides:
+                keys = units_of.get(sl.id) or []
+                u = unit_by_key.get(keys[0]) if len(keys) == 1 else None
+                if u is not None and not u.frame and (u.text or "").strip():
+                    fb = _fallback_headline(u, ctx) if promised_counts(sl.headline) else None
+                    warns.extend(f"slide {u.key}: {x}" for x in keep_promise(sl, u.text, fb))
+                    warns.extend(f"slide {u.key}: {x}" for x in keep_ask(sl, u.text))
+                uniform_numbers(sl.content.items)
+                if u is not None and position_labels(sl.content.items, u.text or ""):
+                    warns.append(f"slide {u.key}: an item's number said again in its words dropped")
+        except Exception:  # noqa: BLE001 - the deck stands without this check
+            log.warning("promised counts failed on %s", st.name, exc_info=True)
         if ctx.written:
             # the variant's final slides (the compiler's variety pass may have given one another form): each against its
             # writer text once more

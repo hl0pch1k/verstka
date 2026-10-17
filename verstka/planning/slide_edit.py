@@ -162,6 +162,115 @@ def _ground_rest(o: DeckOutline, brief: Brief, structure) -> DeckOutline:
     return o
 
 
+# what a text edit is about: the words of the slide it names (none named — all of them)
+_TARGETS: list[tuple[re.Pattern, set[str]]] = [
+    (re.compile(r"подзаголов", re.I), {"subtitle"}),
+    (re.compile(r"(?<!под)заголов|название\s+слайда", re.I), {"headline"}),
+    (re.compile(r"подпис|вывод|пояснени|takeaway|caption", re.I), {"takeaway"}),
+    (re.compile(r"пункт|строк|списк|тезис", re.I), {"bullets"}),
+    (re.compile(r"замет|для\s+докладчика", re.I), {"notes"}),
+]
+
+
+def edit_targets(request: str) -> set[str]:
+    """The words a request asks to change («сделай заголовок короче» — the headline; «добавь в подпись, почему…» — the
+    caption), all of them when it names none («перепиши понятнее»)."""
+    out: set[str] = set()
+    for rx, fields in _TARGETS:
+        if rx.search(request or ""):
+            out |= fields
+    return out or {"headline", "subtitle", "takeaway", "bullets", "notes"}
+
+
+_ADD_RE = re.compile(r"(?<![\wё])(?:добав\w*|дополн\w*|допиш\w*|допиши|поясни\w*|объясни\w*)", re.I)
+
+
+def _sentence_key(x: str) -> str:
+    return re.sub(r"\s+", " ", (x or "").replace("\u00a0", " ")).strip(" .;").lower()
+
+
+def _added(old_text: Optional[str], new_text: Optional[str]) -> Optional[str]:
+    """An addition to a text («добавь в подпись, почему…»): the new text when it keeps every figure and most words of
+    the old one (rewritten with the addition); else the old sentences all kept and the new ones after them; None when
+    the new text adds no sentence of its own (the old text stays)."""
+    from verstka.planning import heuristics as H
+
+    def split(x: Optional[str]) -> list[str]:
+        # a sentence ends before a capital: «кв. 2025», «п. за 7 кварталов» stay inside theirs
+        return [t.strip() for t in re.split(r"(?<=[.!?…])\s+(?=[А-ЯЁA-Z«])", (x or "").replace("\u00a0", " ")) if t.strip()]
+
+    olds, news = split(old_text), split(new_text)
+    nums = lambda x: re.findall(r"\d+(?:[.,]\d+)?", (x or "").replace("\u00a0", ""))  # noqa: E731
+    words = lambda x: set(re.findall(r"[а-яёa-z]{4,}", (x or "").lower()))  # noqa: E731
+    ow, nw = words(old_text), words(new_text)
+    if set(nums(old_text)) <= set(nums(new_text)) and len(ow & nw) * 10 >= len(ow) * 7 and len(nw) > len(ow):
+        return H.strip_end(new_text or "")  # the caption rewritten with the addition: every figure and most words kept
+    have = {_sentence_key(x) for x in olds}
+    extra = [x for x in news if _sentence_key(x) not in have and not any(_sentence_key(x) in k for k in have)]
+    if not extra:
+        return None
+    base = (old_text or "").strip()  # as it was written (its non-breaking spaces too)
+    if base and not base.endswith((".", "!", "?", "…")):
+        base += "."
+    return (base + " " + " ".join(extra)).strip().rstrip(".")
+
+
+def data_words(old: OutlineSlide, answer: Any, fields: Optional[set[str]] = None, adding: bool = False) -> OutlineSlide:
+    """A slide made from a data file with the designer's words only (E1: «сделай заголовок короче», «добавь в подпись,
+    почему…» on a chart from a file): the words the request is about (`fields`: headline, subtitle, the caption under the
+    chart — `takeaway`, lines, notes; all by default) from the answer, everything else — the chart, the table, the
+    figures, the cards — as it was. The answer's content blocks are the brief's business, never a data slide's: the
+    chart stays the file's. The number rule of the data layer runs next (`keep_data`)."""
+    from verstka.planning import heuristics as H
+
+    fields = fields or {"headline", "subtitle", "takeaway", "bullets", "notes"}
+    new = old.model_copy(deep=True)
+    head = H.strip_end(getattr(answer, "headline", "") or "")
+    if head and "headline" in fields:
+        new.headline = head
+    sub = H.strip_end(getattr(answer, "subtitle", None) or "")
+    if sub and "subtitle" in fields:
+        new.subtitle = sub
+    tk = H.strip_end(getattr(answer, "takeaway", None) or "")
+    if tk and "takeaway" in fields:
+        # an addition keeps what the caption said («добавь в подпись, почему…» never drops its figures)
+        new.takeaway = (_added(old.takeaway, tk) or old.takeaway) if adding and old.takeaway else tk
+    notes = (getattr(answer, "notes", "") or "").strip()
+    if notes and "notes" in fields:
+        new.notes = notes
+    c = new.content
+    for key in ("bullets", "paragraphs") if "bullets" in fields else ():
+        lines = [H.strip_end(x) for x in (getattr(answer, key, None) or []) if (x or "").strip()]
+        # (the lines that say the headline or the caption again add nothing)
+        lines = [x for x in lines if x.lower() not in {(new.headline or "").lower(), (new.takeaway or "").lower()}]
+        if lines or getattr(c, key):
+            setattr(c, key, lines[:6])
+    if getattr(answer, "rationale", ""):
+        new.rationale = answer.rationale
+    return new
+
+
+def _refused(old: OutlineSlide, proposed: OutlineSlide, got: OutlineSlide) -> list[str]:
+    """The words the data's number rule did not take from the designer's answer, in plain Russian."""
+    out = []
+    if proposed.headline != old.headline and got.headline == old.headline:
+        out.append(f"заголовок «{proposed.headline}» — в нём число, которого нет в данных слайда")
+    if (proposed.takeaway or "") != (old.takeaway or "") and (got.takeaway or "") == (old.takeaway or ""):
+        out.append(f"подпись «{proposed.takeaway}» — в ней число, которого нет в данных слайда")
+    return out
+
+
+def _data_facts(old: OutlineSlide) -> str:
+    d = old.data
+    facts = [f.text for f in (d.headline_facts if d is not None else []) if f.text][:8]
+    return "; ".join(f"«{x}»" for x in facts)
+
+
+def _words_of(s: OutlineSlide) -> tuple:
+    c = s.content
+    return (s.headline, s.subtitle, s.takeaway, tuple(c.bullets), tuple(c.paragraphs), tuple((it.title, it.text) for it in c.items))
+
+
 def keep_data(old: OutlineSlide, new: OutlineSlide) -> OutlineSlide:
     """A redesigned slide made from a data file stays the data layer's: its chart, table or figures, their source and
     `data` (for «Почему так» and the data checks) are kept. The designer's words stay only where every number in them
@@ -309,6 +418,9 @@ def redesign_slide(
             raise ValueError(f"без модели слайд из файла «{old.data.file}» меняет только «Пересобрать слайд так» — можно {titles}")
     new: Optional[OutlineSlide] = None
     how = ""
+    answered = False  # the model answered (its answer may still not fit the slide): never «the model is unavailable»
+    proposed: Optional[OutlineSlide] = None  # a data slide's words as the model proposed them (before the number rule)
+    refused_first: list[str] = []
     if agent.models:
         tracker.emit("designer", f"Дизайнер: слайд {index} — {start_line if start_line is not None else '«' + request[:140] + '»'}.", slide=index)
         if note is None:
@@ -319,11 +431,52 @@ def redesign_slide(
             )
             if photo:
                 note += f"\n- The slide keeps {A.photo_requirement(photo)}."
+        if old.data is not None:
+            note += (
+                f"\n- This slide is made from the data file «{old.data.file}»: its chart, table and figures stay exactly as they are "
+                "(do not return them). Change only the words the request is about: the headline, the caption under the chart "
+                "(\"takeaway\"), the subtitle or the lines. Every number you write is one of this slide's own figures, as in "
+                "your previous design."
+            )
+        fields = edit_targets(request) if old.data is not None else None
+
+        def data_attempt(issues: str) -> tuple[OutlineSlide, Optional[OutlineSlide], list[str]]:
+            """One designer call for a data slide's words: (the slide after the number rule, the words as proposed, what
+            the rule did not take); a design without its answer (a stub's) is taken as it is: (it, None, [])."""
+            try:
+                d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=issues, previous=A._previous_json(old))
+                ans = d.answer
+            except A.UnusableAnswer as e:
+                if e.answer is None:
+                    raise
+                ans = e.answer  # a headline or a caption without a content block: a text edit of a data slide (E1)
+            if ans is None:
+                return d.slide, None, []
+            prop = data_words(old, ans, fields, adding=bool(_ADD_RE.search(request or "")))  # the words only: the brief's checks are not the data's
+            got = keep_data(old, prop.model_copy(deep=True))
+            log.info("data slide edit %s: proposed %s", index, json.dumps({"headline": prop.headline, "takeaway": prop.takeaway, "fields": sorted(fields or [])}, ensure_ascii=False))
+            return got, prop, _refused(old, prop, got)
+
         try:
-            d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=note, previous=A._previous_json(old))
-            A.tidy_design(d, ctx)
-            new = d.slide
+            if old.data is not None:
+                first = data_attempt(note)
+                answered = True
+                if first[2] and clock.left() > 20:
+                    # once more, with the figures the slide has: «за 9 месяцев» is no figure of a September-to-September chart
+                    again = data_attempt(note + f"\n- Your answer was not taken: {'; '.join(first[2])}. This slide's own figures: {_data_facts(old)}. Write it again with these figures only, or without a number.")
+                    if len(again[2]) < len(first[2]) and _words_of(again[0]) != _words_of(old):
+                        first = again
+                new, proposed, refused_first = first
+            else:
+                d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=note, previous=A._previous_json(old))
+                answered = True
+                A.tidy_design(d, ctx)
+                new = d.slide
             how = "model"
+        except A.UnusableAnswer:
+            answered = True
+            log.warning("slide edit: the designer's answer has no content for slide %s", index)
+            how = "model answered without content"
         except Exception as e:  # noqa: BLE001 - the rules try the form the request names
             log.warning("slide edit: the designer failed", exc_info=True)
             if not fixing or form is not None:
@@ -338,13 +491,28 @@ def redesign_slide(
                 how = "rules"
         if new is None:
             if form is None:
+                if answered:
+                    raise ValueError("модель ответила, но в её ответе нет содержимого для этого слайда — попробуйте сказать иначе, что поменять: заголовок, подпись или пункты")
                 if fixing:
                     raise ValueError("model_unavailable")
+                if agent.models:
+                    raise ValueError("модель не ответила, а без неё могу только сменить форму слайда («таблицей», «круговой диаграммой», «карточками») — попробуйте ещё раз через минуту")
                 raise ValueError("без модели могу только сменить форму слайда («таблицей», «круговой диаграммой», «карточками»), а модель сейчас недоступна")
             raise ValueError(f"содержимое слайда {index} не ложится в такую форму: для неё нет подходящих данных в тексте")
     new = keep_what_was_asked(old, new.model_copy(deep=True), request, outline)
+    refused: list[str] = []
     if old.data is not None:
         new = keep_data(old, new)
+        if proposed is not None:
+            refused = refused_first
+            if _words_of(new) == _words_of(old) and not (photo or drop_photo):
+                if refused:
+                    why = "; ".join(refused)
+                elif _ADD_RE.search(request or ""):
+                    why = "в её ответе нет ничего нового к тексту слайда — в данных слайда этого нет"
+                else:
+                    why = "модель вернула прежний текст"
+                raise ValueError(f"модель ответила, но правку не применил: {why}")
     new.id = old.id
     new.spec_ref = old.spec_ref
     new.content.photo_slot = photo or (None if drop_photo else old.content.photo_slot)
@@ -379,7 +547,9 @@ def redesign_slide(
     what = describe_change(old, result)
     reply = f"Слайд {index} переделан: {what}."
     if how == "rules":
-        reply += " Модель не ответила, форму сменил по правилам."
+        reply += " Модель не ответила, форму сменил по правилам." if not answered else " Ответ модели не подошёл к слайду, форму сменил по правилам."
+    if refused:
+        reply += " Не взял из ответа модели: " + "; ".join(refused) + "."
     tracker.emit("designer", f"Дизайнер: слайд {index} — {after}.", slide=index)
     line = log_line if log_line is not None else f"Правка: слайд {index} по просьбе «{request.strip()[:160]}» — {{what}}."
     grounded.agent_log = [*outline.agent_log, line.replace("{what}", what)]
