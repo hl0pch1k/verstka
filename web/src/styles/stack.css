@@ -1,0 +1,160 @@
+/* Колода стопкой — окно уже 1280 px (ui/shell/tier.ts). Компьютер (от 1280) — как на холсте v105, этот файл его не
+ * касается: все правила — под запросами ширины до 1279.98 px. Язык тот же: плиты 01–04 одна под другой, свёрнутые —
+ * полосами, ездят translateY 520 мс; слои, помощник — плиты, которые поднимаются снизу поверх колоды (только transform и
+ * opacity), под ними колода темнеет. Места плит считает колода по высотам содержимого (ui/deck/stack.ts), здесь — поля,
+ * полосы, шапки шагов, слои и помощник. Правила областей (Создать, Сборка, Результат, Подробнее, разделы) — в конце их
+ * файлов, блоками «Колода стопкой».
+ *   lg 1024–1279: поля 32, номер шага 64 px рядом с названием (колонка 112), тела шагов — под названием;
+ *   md 768–1023:  поля 32 / 24, номер над названием (48 px), всё, что справа от названия, — строкой под ним;
+ *   sm до 768:    поля 24 / 16, номер 40 px, разделы шапки — за кнопкой меню, касания не меньше 44 px. */
+@media (max-width: 1279.98px){
+  .p2-root{--pt:32px;--px:32px;--ps:48px;--num:64px;--numh:48px;--numw:112px;--hg:24px;--body:136px;--tpc:4;--gut:16px;--sheet-top:72px;padding:0 var(--gut) var(--gut) !important;min-height:0 !important}
+  /* шапка: логотип и разделы — по полям колоды */
+  .p2-hdr{position:relative;padding:0 var(--px) !important}
+  /* колода: высота и места плит — от колоды (Deck, stack.ts), плиты — её высоты */
+  .p2-plate{padding:var(--pt) var(--px) !important}
+  .p2-deck[data-snap] .p2-slot{transition:none !important}
+  /* полосы свёрнутых плит — касание 48; название целиком (до 60 %), приписка — сколько поместится */
+  .p2-strip,.ci-strip{left:var(--px) !important;right:var(--px) !important;height:var(--ps) !important}
+  .p2-strip > span[title]{flex:0 0 auto;max-width:60%}
+  .p2-strip > span:last-child:not([title]){flex:0 1 auto !important;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  /* полосы результата над слоями (текст, «Подробнее») — стопкой слой закрывает затемнение */
+  .rt-strip,.dd-back{display:none !important}
+  /* шаг «Создать»: содержимое — своей высоты от верха плиты (колода меряет низ шапки и низ тела) */
+  .p2-fxbox{bottom:auto !important;padding:var(--pt) var(--px) 0 !important}
+  .p2-hrow{flex-wrap:wrap;height:auto !important;row-gap:16px;column-gap:var(--hg) !important}
+  .p2-head{gap:var(--hg);min-height:var(--numh);height:auto}
+  .p2-num{width:var(--numw);height:var(--numh);font-size:var(--num);line-height:var(--numh)}
+  .p2-num3{top:var(--pt) !important;left:var(--px) !important}
+  .p2-spc{width:var(--numw) !important;height:var(--numh) !important}
+  .p2-ttl{font-size:28px;line-height:36px;white-space:normal}
+  .p2-ttl-box{height:auto}
+  .p2-ttl-sz{display:none}
+  .p2-ttl-v{position:static;transform:none !important}
+  .p2-hx{flex:1 1 0%;flex-wrap:wrap;height:auto;min-height:48px;row-gap:12px;column-gap:16px}
+  /* в стопке колода не сужается: узкие копии стопок текста и то, что только для узкой колоды, не нужны */
+  .hp-txn,.hp-no,.hp-in,.hp-shade{display:none !important}
+  .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
+  .hp-tx.hp-txa{display:flex;flex:1 1 0%;min-width:0;min-height:0}
+  .hp-tx > .hp-txw{min-width:0}
+}
+@media (max-width: 1023.98px){
+  .p2-root{--pt:32px;--px:24px;--num:48px;--numh:40px;--numw:auto;--hg:4px;--body:0px;--tpc:3}
+  /* номер шага — над названием */
+  .p2-head{flex-direction:column;align-items:flex-start}
+  .p2-spc{width:64px !important}
+  .p2-hx{flex:1 1 100%}
+}
+@media (max-width: 767.98px){
+  .p2-root{--pt:24px;--px:16px;--num:40px;--numh:32px;--gut:8px;--sheet-top:16px;--tpc:2;font-size:16px}
+  .p2-hdr{height:56px !important;padding:0 8px 0 var(--px) !important}
+  .p2-deck{border-radius:32px !important}
+  .p2-plate{border-radius:32px !important}
+  .p2-ttl{font-size:24px;line-height:32px}
+}
+
+/* ── разделы шапки за кнопкой меню (телефон): кнопка — раскрытие (aria-expanded), меню — белая плита под ней, как меню
+   «Из файла»: проявляется 240 мс (scale .98 → 1), гаснет 160 */
+.p2-navbtn{display:none}
+@media (max-width: 767.98px){
+  .p2-navbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px 0 12px;border:0;border-radius:999px;background:transparent;color:#0B1220;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;cursor:pointer;transition:transform 160ms var(--ease),background-color 240ms var(--ease)}
+  .p2-navbtn:active{transform:scale(.98)}
+  .p2-navbtn[aria-expanded="true"]{background:#FFFFFF}
+  .p2-navs{position:absolute;top:52px;right:8px;z-index:30;display:flex !important;flex-direction:column;align-items:stretch !important;gap:2px !important;width:min(280px,calc(100vw - 32px));margin:0 !important;padding:8px;border-radius:24px;background:#FFFFFF;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12);transform-origin:top right;opacity:0;visibility:hidden;transform:scale(.98);pointer-events:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease),visibility 0s linear 160ms}
+  .p2-navs.p2-navs-on{opacity:1;visibility:visible;transform:none;pointer-events:auto;transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s}
+  .p2-navs .p2-nav{justify-content:flex-start;height:48px;padding:0 16px;font-size:15px;color:#0B1220}
+  .p2-navs .p2-nav:hover,.p2-navs .p2-nav-on{background:#F3F4F1}
+}
+
+/* ── слои колоды стопкой: плита поднимается снизу поверх колоды (translateY 520 мс), уходит вниз непрозрачной со своим
+   содержимым; прокрутка — внутри плиты. Сверху остаётся полоса затемнённой страницы — она закрывает слой (StackScrim) */
+@media (max-width: 1279.98px){
+  .p2-lay{position:fixed !important;left:var(--gut) !important;right:var(--gut) !important;top:var(--sheet-top) !important;bottom:0;height:auto !important;transform:translateY(0) !important}
+  .p2-lay.p2-lay-off{transform:translateY(calc(100% + 48px)) !important}
+  .p2-lay > .p2-plate,.p2-lay > .dd-sheet{border-radius:40px 40px 0 0 !important;box-shadow:0 -24px 48px -24px rgba(11,18,32,.4)}
+  /* полоса страницы над открытым разделом на компьютере закрывает его; в стопке это делает затемнение */
+  .p2-scrim{display:none !important}
+  /* прокрутка внутри плиты сверху не передаётся странице под ней */
+  .p2-lay *,.hp-help *{overscroll-behavior:contain}
+}
+@media (max-width: 1279.98px){
+  /* плита слоя — во всю высоту места, содержимое — колонкой: что прокручивается, растёт до низа окна */
+  .p2-lay > .p2-plate{display:flex;flex-direction:column;padding:var(--pt) var(--px) 0 !important}
+  /* лист «Подробнее»: шапка (вкладки, вариант, ✕) и под ней вкладка — до низа листа, прокрутка внутри */
+  .p2-lay > .dd-sheet{padding:var(--pt) var(--px) 0 !important}
+  .dd-sheet .dd-pw,.dd-sheet .dd-load{left:var(--px) !important;right:var(--px) !important;top:calc(var(--pt) + var(--ddh,64px) + 16px) !important;bottom:0}
+  .dd-sheet .dd-scroll{height:100% !important;margin:0 calc(-1 * var(--px)) !important;padding:8px var(--px) 32px !important}
+  /* «Слайд N шаблона» — над листом «Подробнее», от его верха (40), как на компьютере */
+  #dl-lay-x{top:40px !important;left:0 !important;right:0 !important}
+  #dl-lay-x > .dpt-layer{padding:var(--pt) var(--px) 0 !important;border-radius:40px 40px 0 0}
+  /* весь экран: тёмная плита во всё окно */
+  #rt-lay-lb{top:0 !important;left:0 !important;right:0 !important}
+  #rt-lay-lb > .p2-plate{border-radius:0 !important;padding:var(--pt) var(--px) var(--pt) !important}
+}
+@media (max-width: 767.98px){
+  .p2-lay{left:0 !important;right:0 !important}
+  .p2-lay > .p2-plate,.p2-lay > .dd-sheet{border-radius:32px 32px 0 0 !important}
+  #rt-lay-lb > .p2-plate{border-radius:0 !important}
+}
+/* затемнение под слоем или помощником (только opacity): 360 мс вход, 240 уход; щелчок закрывает верхний */
+.p2-dim{display:none}
+@media (max-width: 1279.98px){
+  .p2-dim{position:fixed;inset:0;z-index:4;display:block;padding:0;border:0;background:rgba(11,18,32,.4);opacity:0;visibility:hidden;cursor:pointer;touch-action:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .p2-dim.p2-dim-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease),visibility 0s}
+}
+
+/* ── помощник стопкой: плита снизу поверх колоды. lg и md — справа, во всю высоту окна, шириной 400; телефон — во всю
+   ширину. Поднимается translateY 520 мс, уходит вниз 340 мс непрозрачной; каскад содержимого — как на компьютере */
+@media (max-width: 1279.98px){
+  .hp-wrap,.hp-wrap.hp-nar{grid-template-columns:minmax(0,1fr) 0px !important;column-gap:0 !important}
+  .hp-hcell{position:static;z-index:auto}
+  .hp-help{position:fixed !important;z-index:20;top:var(--sheet-top) !important;bottom:0;right:var(--gut) !important;left:auto;width:min(400px,calc(100vw - 2 * var(--gut))) !important;height:auto !important;border-radius:40px 40px 0 0 !important;box-shadow:0 -24px 48px -24px rgba(11,18,32,.4);opacity:1 !important;transform:translateY(calc(100% + 48px)) !important;transition:transform 340ms var(--ease),visibility 0s linear 340ms !important}
+  .hp-open .hp-help{transform:translateY(0) !important;transition:transform 520ms var(--ease),visibility 0s linear 0s !important}
+}
+@media (max-width: 767.98px){
+  .hp-help{left:0 !important;right:0 !important;width:auto !important;padding:16px 16px 8px !important;border-radius:32px 32px 0 0 !important}
+}
+@media (prefers-reduced-motion: reduce){
+  .p2-root .p2-lay,.p2-root .hp-help,.p2-root .p2-dim,.p2-root .p2-navs{transition:none !important}
+}
+
+/* ── нет связи: строка рядом с логотипом короче на узком окне (по замеру: при 768 рядом с тремя разделами и на телефоне
+   рядом с кнопкой меню помещается «Нет связи»; у кнопки меню тогда остаётся значок) */
+.of-short{display:none}
+@media (max-width: 1023.98px){
+  .of-wrap > [role=status] > .of-full{display:none}
+  .of-wrap > [role=status] > .of-short{display:inline}
+  .p2-nav{white-space:nowrap}
+}
+@media (max-width: 767.98px){
+  .p2-hdr:has(.p2-offline) .p2-navbtn > span{display:none}
+  .p2-hdr:has(.p2-offline) .p2-navbtn{width:44px;padding:0}
+}
+
+/* ── помощник стопкой: читаемый текст и касания */
+@media (max-width: 767.98px){
+  .gh-bot,.gh-user{font-size:16px;line-height:24px}
+  .gh-item{max-width:88%}
+  .gh-job{width:100%}
+  .gh-ta{font-size:16px !important}
+  .gh-send{width:44px;height:44px}
+  .hp-help .p2-pill{height:44px}
+}
+/* поля ввода на телефоне — 16 px (iOS не увеличивает страницу при фокусе) */
+@media (max-width: 767.98px){
+  .rk-inp,.bb-figin{font-size:16px}
+}
+
+/* ── телефон: касания не меньше 44 px. Кнопки — выше (min-height перекрывает инлайн-высоту 40); маленькие видимые
+   элементы (переключатель 24, таблетка «Слайды» 32, крестик файла 28) — с невидимым полем касания вокруг */
+@media (max-width: 767.98px){
+  .p2-ob,.p2-gb,.p2-pill,.p2-seg,.p2-rseg,.bf-obd{min-height:44px}
+  .p2-rb,.p2-rbl{width:44px;height:44px}
+  .p2-sw,.dt-x,.pp-go,.tx-take{position:relative}
+  .p2-sw::before,.tt-eye::before,.an-eye::before,.ga-eye::before,.pp-go::before,.tx-take::before{content:"";position:absolute;left:-4px;right:-4px;top:-12px;bottom:-12px}
+  .dt-card{grid-template-columns:28px minmax(0,1fr) 44px;height:auto;min-height:48px;padding-top:4px;padding-bottom:4px}
+  .dt-nm,.dt-sw > *,.dt-pf .hp-sw > span,.dt-run > span{white-space:normal}
+  .dt-sw{height:auto}
+  .dt-list{max-height:none}
+  .dt-x{width:44px;height:44px}
+}

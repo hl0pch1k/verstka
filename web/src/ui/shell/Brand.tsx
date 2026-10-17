@@ -27,7 +27,10 @@ export function Brand({ offline, onHome }: { offline: boolean; onHome: () => voi
       <span role="status" aria-live="polite" className={c.line}
         style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "#DC2626", fontSize: 14, fontWeight: 600, lineHeight: "20px", whiteSpace: "nowrap" }}>
         <Icon name="wifi-off" size={16} />
-        <span>Нет связи с сервером — переподключение…</span>
+        {/* окно уже 1024 (stack.css): рядом с логотипом и разделами места меньше — строка короче (по замеру: при 768 с
+            тремя разделами помещается «Нет связи»), полоски логотипа бегут, как и на компьютере */}
+        <span className="of-full">Нет связи с сервером — переподключение…</span>
+        <span className="of-short">Нет связи</span>
       </span>
     </div>
   );

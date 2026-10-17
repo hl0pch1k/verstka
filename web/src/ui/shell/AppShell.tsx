@@ -41,6 +41,8 @@ import { buildRunning } from "../create/params";
 import { deckBrand, deckStrip, deckTemplate, docTitle, openDeck } from "../result/resultView";
 import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
+import { StackDim } from "./StackDim";
+import { helperBeside, useTier } from "./tier";
 
 const ROOT: CSSProperties = {
   width: "100%", minHeight: 900, boxSizing: "border-box", padding: "0 24px 24px", background: "#F3F4F1", color: "#0B1220",
@@ -144,8 +146,11 @@ export function AppShell() {
     dispatch({ type: "open", step: "tpl" });
     upload.pick();
   };
+  const beside = helperBeside(useTier());
   const layers = (
     <>
+      {/* колода стопкой (окно уже 1280): затемнение под слоем или помощником, щелчок закрывает верхнюю плиту */}
+      <StackDim />
       {/* «Улучшить готовую»: полоса «01 Итоги квартала.pptx» над плитой 02 */}
       <ImproveStrip />
       {/* слои результата: «Текст презентации» (до 160 px) и «На весь экран» (вся колода), z 5 */}
@@ -169,7 +174,7 @@ export function AppShell() {
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
         {/* колода и место помощника: закрыт — колонка 0; открыт — 400 px, зазор 16, колода сужается на всех экранах */}
-        <div className={cls("hp-wrap", ui.helper ? "hp-open hp-nar" : "hp-closed")}>
+        <div className={cls("hp-wrap", ui.helper ? (beside ? "hp-open hp-nar" : "hp-open hp-sheet") : "hp-closed")}>
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
             h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />

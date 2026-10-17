@@ -301,3 +301,9 @@ export function placeholderFor(c: { screen: Screen; deck: boolean; slide: number
   if (c.screen === "build") return "Вопрос о сборке";
   return c.screen === "result" && c.deck ? `Что поменять на слайде ${c.slide}?` : "Вопрос или текст презентации";
 }
+
+/** Подсказка поля на телефоне (`phone`): длинная «Вопрос или текст презентации» не помещается в строку поля и
+ *  обрезалась бы — короче на месте; остальные помещаются как есть. */
+export function shortPlaceholder(p: string, phone: boolean): string {
+  return phone && p === "Вопрос или текст презентации" ? "Вопрос или текст" : p;
+}

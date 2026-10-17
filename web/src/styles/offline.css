@@ -46,7 +46,6 @@
 .of-brand .p2-lbar{transition:transform 240ms var(--ease),background-color 360ms var(--ease)}
 .of-brand .p2-ltrain .p2-lbar{transition:background-color 360ms var(--ease)}
 .of-gone{position:absolute;left:calc(100% + 16px);top:50%;margin-top:-10px}
-@media (max-width: 900px){.of-wrap{min-width:0}.of-wrap>[role=status]{min-width:0;white-space:normal !important}}
 @keyframes of-home{to{transform:none}}
 .of-land .p2-lmove{animation:p2-off-run 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
 .of-land .p2-lb1{animation:p2-op1 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}

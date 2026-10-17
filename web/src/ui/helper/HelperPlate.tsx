@@ -18,8 +18,9 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { useSwap } from "../kit/useSwap";
 import { useStale } from "../shell/StaleLine";
-import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
+import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, noteView, placeholderFor, shortPlaceholder, typeset, type FeedJob, type FeedNote } from "./chat";
 import { useHelperChat } from "./useHelperChat";
+import { useTier } from "../shell/tier";
 
 const LINE = 24;
 const PAD = 16;
@@ -131,7 +132,9 @@ export function HelperPlate() {
     open: deck ? generation?.id ?? null : null, slide: selectedSlide,
     template: !!templateId, fixable,
   });
-  const placeholder = placeholderFor({ screen: ui.screen, deck, slide: selectedSlide });
+  // телефон: поле уже — подсказка «Вопрос или текст презентации» короче на месте (по замеру поля 246 px при 390)
+  const phone = useTier() === "sm";
+  const placeholder = shortPlaceholder(placeholderFor({ screen: ui.screen, deck, slide: selectedSlide }), phone);
 
   // новое в открытой ленте всплывает само (p2-in); что было до открытия — входит каскадом вместе с плитой
   const openedAt = useRef(0);
@@ -160,7 +163,11 @@ export function HelperPlate() {
       const raf = window.requestAnimationFrame(() => area.current?.focus({ preventScroll: true }));
       return () => window.cancelAnimationFrame(raf);
     }
-    if (plate.current?.contains(document.activeElement)) document.getElementById("hp-nav")?.focus({ preventScroll: true });
+    if (plate.current?.contains(document.activeElement)) {
+      const nav = document.getElementById("hp-nav");
+      const to = nav && nav.getClientRects().length && getComputedStyle(nav).visibility !== "hidden" ? nav : document.getElementById("p2-navbtn");
+      to?.focus({ preventScroll: true });
+    }
   }, [open]);
 
   const close = () => dispatch({ type: "set", patch: { helper: false } });

@@ -13,6 +13,10 @@ import { deckGeometry, type Geometry } from "./geometry";
 import { Plate } from "./Plate";
 import { Strip, type StripData } from "./Strip";
 import { DeckFitContext, DeckWrapContext, useDeckLayout, useWrapWidth } from "./useDeckFit";
+import { stackGeometry } from "./stack";
+import { useHeldHeight, useStackMetrics } from "./useStackMetrics";
+import { helperBeside, isStack, useTier } from "../shell/tier";
+import { openSheets } from "../shell/sheets";
 
 export interface DeckProps {
   /** Ряд заголовка плиты после кнопки «номер + название»: всё, что справа (кнопки, обложка, сводка, CTA).
@@ -56,6 +60,7 @@ function StepTitle({ text, color }: { text: string; color: string }) {
 
 /** Содержимое шага (`p2-fxbox`, create.css): место плиты целиком, поля — внутри; ширина — плиты в этом кадре. */
 function StepBox({ on, children }: { on: boolean; children: ReactNode }) {
+  // стопкой содержимое шага — своей высоты от верха плиты (stack.css), колода меряет низ шапки и низ тела
   return <div className={cls("p2-fxbox", show(on))}>{children}</div>;
 }
 
@@ -69,7 +74,29 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
   const deckRef = useRef<HTMLElement>(null);
   const wrap = useWrapWidth(deckRef);
   const width = wrap ?? 0;
-  const layout = useDeckLayout(deckRef, ui.helper, width);
+  // окно уже 1280 — колода стопкой (ui/shell/tier.ts): помощник её не сужает, места плит — по высотам содержимого
+  const tier = useTier();
+  const stack = isStack(tier);
+  const layout = useDeckLayout(deckRef, ui.helper && helperBeside(tier), width);
+  const metrics = useStackMetrics(deckRef, stack && wrap !== null);
+  const sg = stack && metrics ? stackGeometry(ui, metrics) : null;
+  const ys = sg ? sg.y : g.y;
+  const height = useHeldHeight(sg ? sg.height : 812);
+  // первая раскладка стопкой (и смена ступени) встаёт на место без хода плит: им неоткуда ехать
+  const snapKey = `${tier}/${sg ? 1 : 0}`;
+  const [settledKey, setSettledKey] = useState(snapKey);
+  const snap = settledKey !== snapKey;
+  useEffect(() => {
+    if (!snap) return;
+    let r2 = 0;
+    const r1 = window.requestAnimationFrame(() => {
+      r2 = window.requestAnimationFrame(() => setSettledKey(snapKey));
+    });
+    return () => {
+      window.cancelAnimationFrame(r1);
+      window.cancelAnimationFrame(r2);
+    };
+  }, [snap, snapKey]);
   const create = ui.screen === "create";
   const more = create && ui.more;
   const tplOpen = create && ui.open === "tpl";
@@ -100,22 +127,49 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
   const head3 = create && !enter3;
   // заголовки 01 и 02 проявляются в том же кадре, что «03» и содержимое плиты 03 (возврат на «Создать»: все три ждут enter3)
   const heads = g.heads && !enter3;
+  // стопкой поверх колоды — слой или помощник (плита снизу, под ней затемнение): плиты колоды под ним не принимают
+  // фокус и не читаются (inert), Tab ходит по плите сверху; на компьютере слои и помощник — в колоде и рядом, так не делается
+  const covered = stack && openSheets(ui).length > 0;
+  // то, что открыло плиту сверху (карточка, кнопка на плите), inert лишает фокуса — колода помнит его и возвращает фокус,
+  // когда плита уехала, а фокус остался ни на чём
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = deckRef.current;
+    if (!el) return;
+    const slots = Array.from(el.querySelectorAll<HTMLElement>(":scope > .p2-slot:not(.p2-lay)"));
+    if (covered) {
+      const a = document.activeElement;
+      if (a instanceof HTMLElement && slots.some((s) => s.contains(a))) opener.current = a;
+    }
+    for (const s of slots) {
+      if (covered) s.setAttribute("inert", "");
+      else s.removeAttribute("inert");
+    }
+    if (!covered && opener.current) {
+      const o = opener.current;
+      opener.current = null;
+      const now = document.activeElement;
+      // фокус ещё в уезжающей плите (лист, раздел, помощник) или ни на чём — обратно к тому, что её открыло
+      const away = !now || now === document.body || !!now.closest(".p2-lay, .hp-help");
+      if (o.isConnected && away) o.focus({ preventScroll: true });
+    }
+  }, [covered, wrap]);
   // overflow: clip, а не hidden, как на доске: вид тот же, но колода не становится прокручиваемой — scrollIntoView или
   // фокус на элементе плиты ниже края не сдвигают все плиты вверх
   // `--dkw` — ширина колоды в покое без помощника (= обёртка): по ней закрытые слои и невыбранные вкладки «Подробнее»
   // держат замороженную ширину (layers.css); меняется только с окном
   const style = {
-    position: "relative", zIndex: 0, minWidth: 0, height: 812, borderRadius: 40, overflow: "clip",
+    position: "relative", zIndex: 0, minWidth: 0, height, borderRadius: 40, overflow: "clip",
     ...(width > 0 && { "--dkw": `${width}px` }),
   } as CSSProperties;
   return (
     <DeckWrapContext.Provider value={width}>
     <DeckFitContext.Provider value={layout}>
-    <main ref={deckRef} className="p2-deck" style={style}>
+    <main ref={deckRef} className="p2-deck" style={style} data-snap={snap || undefined}>
       {/* до первого замера обёртки колода пуста: всё, что в ней, встаёт уже в настоящей ширине (useWrapWidth) —
           в том же кадре, до первой отрисовки, и при загрузке ни одна дорожка не едет от угаданной ширины к своей */}
       {wrap !== null && (<>
-        <Plate z={1} y={g.y[0]} className="p2-rise" label="Шаг 1 — шаблон" style={{ background: "#FFFFFF", color: "#0B1220", animationDelay: "0ms" }}>
+        <Plate z={1} y={ys[0]} height={height} className="p2-p1 p2-rise" label="Шаг 1 — шаблон" style={{ background: "#FFFFFF", color: "#0B1220", animationDelay: "0ms" }}>
           {/* полоса 01 видна и тогда, когда плита 01 свёрнута файлами с данными (V2 `s1Cls`, `s1Btn`): её заголовок гаснет */}
           <Strip n="01" {...s1} on={g.strips || g.fold1} onClick={more || g.fold1 ? () => dispatch({ type: "open", step: "tpl" }) : undefined} label="Вернуться к шагу «Шаблон»" />
           <StepBox on={heads && !g.fold1}>
@@ -127,11 +181,11 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
               </button>
               <div className="p2-hx">{h1}</div>
             </div>
-            <div>{p1}</div>
+            <div className="p2-sb">{p1}</div>
           </StepBox>
         </Plate>
 
-        <Plate z={2} y={g.y[1]} className="p2-p2 p2-rise" label="Шаг 2 — текст"
+        <Plate z={2} y={ys[1]} height={height} className="p2-p2 p2-rise" label="Шаг 2 — текст"
           style={{ background: "#E9F1FF", color: "#0B1220", boxShadow: "0 -24px 48px -24px rgba(11,18,32,.16)", animationDelay: "40ms" }}>
           <Strip n="02" {...s2} on={g.strips} onClick={more ? () => dispatch({ type: "open", step: "text" }) : undefined} label="Вернуться к шагу «Текст»" />
           <StepBox on={heads}>
@@ -143,11 +197,11 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
               </button>
               <div className="p2-hx">{h2}</div>
             </div>
-            <div>{p2}</div>
+            <div className="p2-sb">{p2}</div>
           </StepBox>
         </Plate>
 
-        <Plate z={3} y={g.y[2]} className="p2-p3 p2-dark p2-rise" label="Шаг 3 — параметры и запуск"
+        <Plate z={3} y={ys[2]} height={height} className="p2-p3 p2-dark p2-rise" label="Шаг 3 — параметры и запуск"
           style={{ background: "#0B1220", color: "#FFFFFF", boxShadow: "0 -24px 48px -24px rgba(11,18,32,.28)", animationDelay: "80ms" }}>
           <Strip n="03" {...s3} on={ui.screen === "result"} dark />
           {/* большая «03» гаснет и проявляется вместе с заголовками 01 и 02; на сборке остаётся рядом с фазами */}
@@ -163,14 +217,14 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
                 </button>
                 <div className="p2-hx">{h3}</div>
               </div>
-              <div>{p3}</div>
+              <div className="p2-sb">{p3}</div>
               {m3}
             </StepBox>
           )}
           {b3}
         </Plate>
 
-        <Plate z={4} y={g.y[3]} slotClass={S4[g.s4]} label="Результат"
+        <Plate z={4} y={ys[3]} height={height} slotClass={S4[g.s4]} label="Результат"
           style={{ background: "#FFFFFF", color: "#0B1220", boxShadow: "0 -24px 48px -24px rgba(11,18,32,.4)" }}>
           {p4}
         </Plate>

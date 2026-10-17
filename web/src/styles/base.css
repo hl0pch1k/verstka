@@ -154,29 +154,6 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
 @media (prefers-reduced-motion: reduce){
   .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
 }
-@media (max-width: 900px){
-  .p2-root{padding:0 16px 16px !important}
-  .p2-hdr{padding:0 8px !important}
-  .p2-navs{display:none !important}
-  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
-  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
-  .p2-slot:first-child{margin-top:0}
-  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
-  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
-  .p2-body{margin-left:0 !important}
-  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
-  .p2-head{gap:16px}
-  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
-  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
-  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
-  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
-  .p2-field{height:auto !important}
-  .p2-ta{min-height:120px !important}
-  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
-  .p2-phs{height:auto !important}
-  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
-  .p2-ph-past,.p2-ph-next{display:none}
-}
 /* иконка-слои: маленькая колода плит; при наведении на карточку задняя плита приподнимается */
 .p2-lic{position:relative;display:block;flex:none;width:56px;height:56px}
 .p2-lic-b{display:none}

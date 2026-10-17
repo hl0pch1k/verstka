@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
-  latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
+  latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, shortPlaceholder, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
 } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
@@ -285,4 +285,10 @@ test("U2, V2: несвежесть не от помощника не «ожив�
   assert.deepEqual(noteView(b, { stale: null, live: false, latest: true, open: "g2" }), { text: RESOLVED, refresh: false });
   // открыта эта и свежая — «обновлена»
   assert.deepEqual(noteView(b, { stale: null, live: false, latest: true, open: "g1" }), { text: REFRESHED, refresh: false });
+});
+
+test("подсказка поля на телефоне: длинная — короче, остальные как есть", () => {
+  assert.equal(shortPlaceholder("Вопрос или текст презентации", true), "Вопрос или текст");
+  assert.equal(shortPlaceholder("Вопрос или текст презентации", false), "Вопрос или текст презентации");
+  assert.equal(shortPlaceholder("Что поменять на слайде 3?", true), "Что поменять на слайде 3?");
 });

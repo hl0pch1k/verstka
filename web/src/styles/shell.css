@@ -23,10 +23,5 @@
    плиты не гаснут */
 /* закрытая плита ждёт за правым краем (+32 px) — без горизонтальной прокрутки страницы: лишнее обрезается по краю окна */
 .p2-root:has(.hp-wrap){overflow-x:clip}
-@media (max-width: 900px){
-  .hp-wrap{display:flex !important;flex-direction:column;height:auto !important;gap:16px}
-  .hp-hcell{height:auto !important}
-  .hp-closed .hp-hcell{display:none}
-}
 /* логотип крупнее (владелец, 15.10): «Verstka» 25 px, полоски 5 px — всё в пропорции, вместе с наведением и анимацией «Нет связи» */
 .p2-brand{zoom:1.25}

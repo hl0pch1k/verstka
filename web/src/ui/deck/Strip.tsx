@@ -17,7 +17,7 @@ export function Strip({ n, title, meta, icon, on, dark, onClick, label }: StripD
   label?: string;
 }) {
   return (
-    <div className={on ? "p2-on" : "p2-off"} style={{ position: "absolute", left: 48, right: 48, top: 0, height: 40, display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
+    <div className={on ? "p2-strip p2-on" : "p2-strip p2-off"} style={{ position: "absolute", left: 48, right: 48, top: 0, height: 40, display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
       <span style={{ flex: "none", fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 700, fontSize: 13, lineHeight: "20px", color: dark ? "rgba(255,255,255,.56)" : "#5A6272" }}>{n}</span>
       {icon}
       {/* длинное название сжимается многоточием, приписка остаётся целой */}
