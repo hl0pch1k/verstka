@@ -19,9 +19,13 @@ def _ref_view(d: Data) -> RefView:
     неотрицательной метрики (у рейтинга или прибыли с убытками доля смысла не имеет)."""
     m = d.main
     lab = d.label if d.label is not None else d.id_col
-    order = list(d.rows_idx)
+    # опечатка (в сто и больше раз больше медианы: 1 500 000 ₽ среди пожертвований по 975 ₽) — не в топе и не в
+    # долях: она бы дала «10 крупнейших — 82%» одна; строка остаётся в таблице последней, подпись говорит о ней
+    typos = set(d.dominant_typos(m))
+    order = [i for i in d.rows_idx if i not in typos]
     if m is not None:
         order.sort(key=lambda i: (m.values[i] is None, -(m.values[i] or 0.0), i))
+    order += sorted(typos)
     summable = m is not None and m.additive and m.nonneg
     # колонки: подпись, измерения (до 2), метрика, доля
     cols: list[int] = []
@@ -45,7 +49,7 @@ def _ref_view(d: Data) -> RefView:
     cols_sorted = sorted(set(cols), key=lambda j: (j != lab, j))
     total = None
     if summable:
-        total = float(sum(m.present))  # type: ignore[union-attr]
+        total = float(sum(m.values[i] for i in d.rows_idx if m.values[i] is not None and i not in typos))  # type: ignore
         for i in sorted(d.totals):
             tv = _num(d.cell(i, m.j))  # type: ignore[union-attr]
             if tv is not None and tv > 0:
@@ -63,11 +67,11 @@ def _ref_view(d: Data) -> RefView:
         return r
 
     all_rows = [row(i) for i in order]
-    top_n = min(TOP_N, d.n)
+    top_n = min(TOP_N, d.n - len(typos))
     top_sum = float(sum(m.values[i] or 0 for i in order[:top_n])) if summable else None  # type: ignore[union-attr]
     rest = None
-    if d.n > top_n:
-        k = d.n - top_n
+    if d.n - len(typos) > top_n:
+        k = d.n - len(typos) - top_n
         ent = phrase(d.entity) if d.entity else None
         word = plural(k, ent.low.nom, ent.low.gen, ent.low.gen_pl) if ent is not None and ent.sure else \
             plural(k, "строка", "строки", "строк")

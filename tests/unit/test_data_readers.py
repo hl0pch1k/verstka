@@ -961,7 +961,7 @@ def test_dash_stays_missing_for_codes_and_scores_at_any_size():
 def test_units_row_under_a_group_names_columns_by_group_and_unit():
     # Minor 10: «Выручка» над строкой единиц «млн ₽ | %» — «Выручка» в двух единицах, а не колонки «млн» и «%»
     t = read_bytes("u.csv", ";Выручка;\nРегион;млн ₽;%\nМосква;10;40\nКазань;15;60\n".encode())[0]
-    assert t.columns == ["Регион", "Выручка", "Выручка (2)"] and t.units == [None, "млн ₽", "%"]
+    assert t.columns == ["Регион", "Выручка, ₽", "Выручка, %"] and t.units == [None, "млн ₽", "%"]  # раунд 10, M6
     assert t.raw_header == ["Регион", "Выручка, млн ₽", "Выручка, %"]
 
 
@@ -1007,7 +1007,7 @@ def _two_floor_xlsx(group: str, leaves: list[str]) -> bytes:
 @pytest.mark.parametrize("group, leaves, columns, units", [
     ("Цена", ["Мин", "Макс"], ["Товар", "Мин", "Макс"], [None, None, None]),
     ("План", ["Год", "Месяц"], ["Товар", "Год", "Месяц"], [None, None, None]),
-    ("Выручка", ["млн ₽", "%"], ["Товар", "Выручка", "Выручка (2)"], [None, "млн ₽", "%"]),
+    ("Выручка", ["млн ₽", "%"], ["Товар", "Выручка, ₽", "Выручка, %"], [None, "млн ₽", "%"]),
 ])
 def test_second_floor_words_are_names_unless_all_are_units(group, leaves, columns, units):
     # C-2: «Мин | Макс», «Год | Месяц» под группой — названия, а не минуты и годы; «млн ₽ | %» — единицы

@@ -115,7 +115,7 @@ def test_ordinal_shares_leader_by_value():
 def test_ordinal_comparison_highlights_the_max():
     t = _t(["Возраст", "Клиентов"], [["до 25", 150], ["25–34", 350], ["35–44", 300], ["45 и старше", 200]])
     p = _plan(t)
-    assert _sp(p.headline) == "25–34 — больше всех: 35% клиентов"  # доля — вывод, «из скольких» — в подписи
+    assert _sp(p.headline) == "25–34 — больше всех: 35% всех клиентов"  # доля — вывод, «из скольких» — в подписи
     assert p.plain_headline == "Число клиентов по возрастам"
     assert chart_spec_of(p, t).highlight_index == 1
 

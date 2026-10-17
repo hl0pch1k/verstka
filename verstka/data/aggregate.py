@@ -25,7 +25,7 @@ from typing import Any, Optional
 import numpy as np
 
 from verstka.data.kpi import _kpi_view
-from verstka.data.parse import forecast_period, is_total_label, season_name, split_unit
+from verstka.data.parse import forecast_period, is_total_label, iso_ord, period_str, season_name, split_unit
 from verstka.data.reference import _ref_view, describe_dropped
 from verstka.data.timeaxis import columns_time_view, resample_freq, time_view
 from verstka.data.units import (
@@ -85,6 +85,15 @@ def den_matches(den: str, unit: str, name: str) -> bool:
                                                                   (name or "").lower()))
 
 
+def _no_n(name: str) -> str:
+    """«Продажи (n=120)» → «Продажи»: размер выборки — не часть имени."""
+    return re.sub(r"\s*\(\s*n\s*=\s*[\d\s]+\)\s*$", "", name or "").strip()
+
+
+_OVERALL = re.compile(r"^(?:все\s+[а-яё]+|в\s+целом|по\s+компании|по\s+всем\s+[а-яё]+|в\s+среднем\s+по\s+[а-яё]+|"
+                      r"overall|all\s+[a-z]+)$", re.I)
+
+
 # колонка статуса строки: «Факт» / «Прогноз» / «План» / «Оценка» — не факт всё, кроме факта
 _STATUS = {"факт": "fact", "фактически": "fact", "fact": "fact", "actual": "fact", "actuals": "fact",
            "прогноз": "forecast", "прогн.": "forecast", "forecast": "forecast", "план": "plan", "plan": "plan",
@@ -137,7 +146,8 @@ _LEVEL_GOAL = re.compile(r"^(?:конверс|дол[ьиея]?$|процент|
 # цель о величине на душу («обеспеченность врачами», «уровень преступности»): колонка «на 1 000 жителей», «на 100 тыс.»
 RATE_GOAL = re.compile(r"^(?:обеспеченн|уров|частот|плотн|интенсивн|распространенн|заболеваем|смертн|рождаем)", re.I)
 RATE_COLUMN = re.compile(r"(?:^|[\s(/])на\s+(?:1\s*000|1000|10\s*000|100\s*000|100\s*тыс|10\s*тыс|тыс\.?\s*(?:жител|человек|"
-                         r"населени)|душу|человека|жителя|\d[\d\s]*(?:жител|человек|населени))|per\s+capita|‰", re.I)
+                         r"населени)|душу|человека|жителя|\d[\d\s]*(?:жител|человек|населени)|одн(?:ого|у|о)\b|"
+                         r"врача|сотрудника|работника|ученика|студента|пациента)|per\s+capita|‰", re.I)
 
 
 # ── главный объект ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -343,12 +353,15 @@ class Data:
         if self.subject and any(RATE_GOAL.match(s_) for s_ in self.subject) and self.rate_measure is not None:
             # «по обеспеченности врачами», «по уровню преступности» — величина на душу, а не абсолютный счёт
             return self.rate_measure
+        twin = self._unit_twin
+        if twin is not None:
+            return twin  # «по объёму» — тонны, «в деньгах» — доллары, когда у колонок одно имя и разные единицы
         if self.head:
             # главное слово величины цели решает: «по свободным местам» — «Свободно мест», а не «Куплено мест»;
             # «по цене с НДС» — не «Цена без НДС»; главного слова нет ни в одной колонке — цель колонку не выбирает
             picked = self.head_measure
             if picked is not None:
-                return self._not_target(self._rate_over_count(picked))
+                return self._not_target(self._rate_over_count(picked, broad=False))
             if not self.head_in_columns:
                 ms_sub = ()
             else:
@@ -367,9 +380,13 @@ class Data:
                         tied.sort(key=lambda m: (m.type != "percent", m.additive, m.j))
                     else:
                         tied.sort(key=lambda m: (not (m.type == "money" and m.additive), not m.additive, m.j))
-                return self._not_target(self._rate_over_count(tied[0]))
+                return self._not_target(self._rate_over_count(tied[0], broad=False))
         if self.compare and self.total_metric is not None:
             return self.total_metric
+        tm = self.total_metric
+        if tm is not None and all(x is tm or _period_name(x.name) or season_name((split_unit(x.name)[0] or x.name).strip())
+                                  for x in ms if (x.unit or "") == (tm.unit or "")):
+            return tm  # «Июль · Август · Сентябрь · Итого за квартал»: величина таблицы — итог за квартал, а не июль
 
         def latest(m: Measure) -> Measure:
             """Колонки-периоды («Выручка 2025 · Выручка 2026»): главная — последний период."""
@@ -378,6 +395,15 @@ class Data:
             sib = [x for x in ms if _period_name(x.name) and (x.unit or "") == (m.unit or "") and not x.change]
             return max(sib, key=lambda x: (_period_key(x.name), x.j)) if len(sib) >= 2 else m
 
+        # колонка по всем («Все сотрудники», «В целом», «По компании») рядом с подгруппами («Продажи (n=120)»): она и есть
+        # величина таблицы, а не первая подгруппа
+        ov = [m for m in ms if _OVERALL.match(_no_n(m.name)) and not m.change]
+        if ov and sum(1 for x in ms if x is not ov[0] and (x.unit or "") == (ov[0].unit or "")) >= 2:
+            return ov[0]
+        # колонка с одним значением у всех строк («И» — 22 игры у каждой команды) — не главная, если есть другие
+        varied = [m for m in ms if len(set(m.present)) > 1]
+        if varied and len(varied) < len(ms):
+            ms = varied
         th = self._title_head
         for pred in (
             lambda m: m.type == "money" and not m.change and not m.mixed and m.additive,
@@ -453,6 +479,15 @@ class Data:
             if bad:
                 out[m.name] = bad
         return out
+
+    def dominant_typos(self, m: Optional[Measure]) -> list[int]:
+        """Опечатки, которые делают итог сами (больше половины суммы и в сто раз больше медианы: 1 500 000 ₽ среди
+        пожертвований по 975 ₽): в топе и долях их нет. Крупнейший клиент — не опечатка, даже если в сто раз больше."""
+        if m is None:
+            return []
+        rows = self.typo_rows.get(m.name, [])
+        tot = sum(float(m.values[i]) for i in self.rows_idx if m.values[i] is not None and m.values[i] > 0)  # type: ignore
+        return [i for i in rows if m.values[i] is not None and tot > 0 and float(m.values[i]) > 0.5 * tot]  # type: ignore
 
     @cached_property
     def parallel_time_only(self) -> bool:
@@ -550,15 +585,52 @@ class Data:
         h = head_word(title)
         return stem(h) if h and h not in ("данные", "итоги", "итог", "отчёт", "отчет", "таблица", "список") else ""
 
-    def _rate_over_count(self, m: Measure) -> Measure:
+    @cached_property
+    def _unit_twin(self) -> Optional[Measure]:
+        """Колонки с одним именем и разными единицами («Экспорт, т» и «Экспорт, $»): цель «по объёму / в тоннах» —
+        натуральная, «в деньгах / выручки / стоимость» — денежная. Нет такой пары или цель о другом — None."""
+        if not self.subject:
+            return None
+        base = {}
+        for m in self.measures:
+            base.setdefault((split_unit(m.name)[0] or m.name).strip().lower(), []).append(m)
+        pairs = [ms for ms in base.values() if len(ms) >= 2 and len({x.unit_text for x in ms}) == len(ms)]
+        if not pairs:
+            return None
+        words = " ".join(self.subject)
+        money = re.search(r"выручк|деньг|денеж|стоимост|доход|доллар|рубл|валют|сумм", words)
+        volume = re.search(r"объ[её]м|объем|тонн|натур|физическ|вес|штук|литр|количеств", words)
+        for ms in pairs:
+            if money and not volume:
+                hit = next((x for x in ms if x.type == "money"), None)
+            elif volume and not money:
+                hit = next((x for x in ms if x.type != "money"), None)
+            else:
+                hit = None
+            if hit is not None:
+                return hit
+        return None
+
+    def _rate_over_count(self, m: Measure, broad: bool = True) -> Measure:
         """Счёт и его доля рядом («Конверсии» и «Конверсия, %», A/B-тест): сравнивают долю — она не зависит от размера
         группы."""
-        if m.type == "percent":
+        if m.type == "percent" or m.type == "money":
             return m
         hm = stem(head_word(split_unit(m.name)[0] or m.name))
         for x in self.measures:
             if x is not m and x.type == "percent" and not x.change \
                     and same_stem(hm, stem(head_word(split_unit(x.name)[0] or x.name))):
+                return x
+        # «Брак, шт.» и «Брак, ppm», «Возвратов» и «Доля возвратов, %», «Завершили» и «Доля завершивших»: уровень (ppm,
+        # %, на 1000) не зависит от объёма — сравнивают его, а не долю счёта («34% брака» читается как уровень брака)
+        mw = {w[:5] for w in stems_of(split_unit(m.name)[0] or m.name) if len(w) >= 4} if broad else set()
+        for x in self.measures:
+            if x is m or x.change or not mw:
+                continue
+            u = (x.unit_text or "").strip().lower()
+            rate = x.type == "percent" or u in ("ppm", "‰", "%", "п.п.") or bool(RATE_COLUMN.search(f"{x.name} {u}"))
+            xw = {w[:5] for w in stems_of(split_unit(x.name)[0] or x.name) if len(w) >= 4} - {"доля", "уровен", "проце"}
+            if rate and mw & xw:
                 return x
         return m
 
@@ -820,17 +892,21 @@ class Data:
         величины («Выручка · Расходы · Прибыль»)."""
         if self.time_col is not None or self.part_group or self.plan_fact is not None:
             return []
-        ms = [m for m in self.measures if not is_total_label(m.name)]
+        # подгруппы с размером выборки («Продажи (n=120)») — значения признака; колонка по всем — не подгруппа
+        ms = [m for m in self.measures if not is_total_label(m.name) and not _OVERALL.match(_no_n(m.name))]
         if len(ms) < 3 or any(m.change or m.mixed for m in ms):
             return []
         if len({m.unit_text or "" for m in ms}) != 1 or len({m.type for m in ms}) != 1 \
                 or len({m.additive for m in ms}) != 1:
             return []
-        names = [(split_unit(m.name)[0] or m.name).strip() for m in ms]
+        names = [_no_n((split_unit(m.name)[0] or m.name).strip()) for m in ms]
         if all(re.fullmatch(r"(?:19|20)\d\d", n) for n in names):
             return []  # колонки-годы — ось времени, а не второй признак: годы не складывают как категории
         calendar = all(_WEEKDAY.match(n) or season_name(n) or re.fullmatch(r"(?:19|20)\d\d", n) for n in names)
-        if not calendar and any(_METRIC_WORD.search(n) or len(n.split()) > 3 or re.search(r"\d", n) for n in names):
+        # колонки с размером выборки («Продажи (n=120)», «ИТ (n=85)») — подгруппы, даже если имя похоже на величину
+        subgroups = sum(1 for m in ms if re.search(r"\(\s*n\s*=", m.name)) >= 2
+        if not calendar and not subgroups and any(_METRIC_WORD.search(n) or len(n.split()) > 3 or re.search(r"\d", n)
+                                                  for n in names):
             return []
         if not calendar:
             # варианты одной величины («Город · Трасса · Смешанный», «Пиковая зона · Ночная зона») — не значения
@@ -861,11 +937,17 @@ class Data:
         ms = self.matrix
         if not ms:
             return None
+        # колонка по всем или итог строк уже есть («Все сотрудники», «Итого за квартал»): строки сравнивают по ней
+        overall = any(_OVERALL.match(_no_n(m.name)) for m in self.measures) or self.total_metric is not None
+        rj0 = self._matrix_rows()
+        if self.subject_word and rj0 is not None and not stems_match(self.subject, self.cols[rj0].name) \
+                and not any(stem_in(s, m.name) for s in self.subject for m in ms):
+            return "col"  # «в каком отделе хуже всего» — колонки-отделы, а не строки-утверждения
         if not self.subject:
-            return "row"
+            return None if overall else "row"  # есть колонка по всем — строки сравнивают по ней
         rj = self._matrix_rows()
         if rj is not None and stems_match(self.subject, self.cols[rj].name):
-            return "row"
+            return None if overall else "row"  # «сравни регионы» при «Итого за год» — по итогу, а не сумме колонок
         names = " ".join(m.name for m in ms)
         if any(stem_in(s, m.name) for s in self.subject for m in ms):
             return None
@@ -873,7 +955,7 @@ class Data:
         # («сколько всего отгрузили за полугодие») — итоги строк, а не «июнь — 19%»
         if re.search(r"(?:^|\s)(?:дн|недел|месяц|квартал|предмет|колонк|столбц)", " ".join(self.subject)):
             return "col"
-        return "row"
+        return None if overall else "row"
 
     @cached_property
     def matrix_note(self) -> Optional[str]:
@@ -886,6 +968,9 @@ class Data:
             first, last = ms[0].name, ms[-1].name
             return (f"сумма {first}–{last}" if add else f"среднее {first}–{last}") if len(first) <= 12 and \
                 len(last) <= 12 else (f"сумма по {len(ms)} колонкам" if add else f"в среднем по {len(ms)} колонкам")
+        if self.matrix_focus_rows:
+            rj = self._matrix_rows()
+            return f"«{self.text(self.matrix_focus_rows[0], rj)}»" if rj is not None else None
         n = len(self.rows_idx)
         return f"сумма по {n} строкам" if add else f"в среднем по {n} строкам"
 
@@ -905,9 +990,10 @@ class Data:
                          level=not add, time_unit=ms[0].time_unit, basis=ms[0].basis, scale=ms[0].scale)
             return self.cat_view(vm)
         aggs = []
+        rows = self.matrix_focus_rows or self.rows_idx
         for m in ms:
-            xs = [m.values[i] for i in self.rows_idx if m.values[i] is not None]
-            aggs.append(float(sum(xs)) if add else float(sum(xs) / len(xs)))
+            xs = [m.values[i] for i in rows if m.values[i] is not None]
+            aggs.append((float(sum(xs)) if add else float(sum(xs) / len(xs))) if xs else 0.0)
         order = sorted(range(len(ms)), key=lambda k: (-aggs[k], k))
         vm = Measure(j=-4, name=upper_first(self.matrix_note or ""), unit=unit, type=ms[0].type, values=[],
                      level=not add, time_unit=ms[0].time_unit, basis=ms[0].basis, scale=ms[0].scale)
@@ -915,6 +1001,19 @@ class Data:
             upper_first(self.subject_word or "Колонка")
         return CatView(dim=dim, labels=[ms[k].name for k in order], values=[aggs[k] for k in order], measure=vm,
                        ranked=True, total=float(sum(aggs)) if add else None, distinct=len(ms), aggregated=True)
+
+    @cached_property
+    def matrix_focus_rows(self) -> list[int]:
+        """Строка, которую называет цель при сравнении колонок («сравните отделы по удовлетворённости зарплатой» →
+        «Моя зарплата справедлива»): колонки сравнивают по ней, а не по среднему всех строк."""
+        rj = self._matrix_rows()
+        if rj is None or not self.subject:
+            return []
+        dimw = (self.subject_word or "").lower()[:5]
+        # слово-род колонок («отдел») — не о строке: «Я понимаю цели своего отдела» не названа целью «в каком отделе»
+        subj = [x for x in self.subject if len(x) >= 5 and not (dimw and x.startswith(dimw[:4]))]
+        hits = [i for i in self.rows_idx if any(stem_in(x, w) for x in subj for w in stems_of(self.text(i, rj)))]
+        return hits if len(hits) == 1 else []
 
     @cached_property
     def subject_word(self) -> Optional[str]:
@@ -972,6 +1071,28 @@ class Data:
         m = self.main
         return m is None or m.additive or m.stock
 
+    @cached_property
+    def panel_latest(self) -> Optional[tuple[set[int], str, str]]:
+        """Таблица «период × категория» (тарифы регионов по годам, OEE линий по месяцам): строки последнего периода и
+        его подпись. Уровень, цену и остаток сравнивают по последнему периоду («в 2025»), а не средним за все годы."""
+        if self.time_col is None:
+            return None
+        keys: dict[int, tuple] = {}
+        for i in self.rows_idx:
+            v = self.cell(i, self.time_col)
+            iso = period_str(str(v), True, years=True) if v is not None else None
+            r = iso_ord(iso) if iso else None
+            if r is not None:
+                keys[i] = (r[1], iso)
+        if len(keys) < 2 or len({k for k, _ in keys.values()}) < 2:
+            return None
+        last = max(k for k, _ in keys.values())
+        first = min(k for k, _ in keys.values())
+        rows = {i for i, (k, _) in keys.items() if k == last}
+        iso = next(x for k, x in keys.values() if k == last)
+        iso0 = next(x for k, x in keys.values() if k == first)
+        return rows, iso, iso0
+
     def cat_view(self, m: Optional[Measure], top: int = MAX_CATS, dim: Optional[int] = None,
                  rank: bool = True, rank_with: Optional[list[Measure]] = None) -> Optional[CatView]:
         dj = dim if dim is not None else self.cat_dim()
@@ -986,9 +1107,15 @@ class Data:
             return None
         aggregated = any(len(v) > 1 for v in groups.values())
 
+        latest = self.panel_latest if dj != self.time_col else None
+
         def value_of(mm: Optional[Measure], idx: list[int]) -> Optional[float]:
             if mm is None:
                 return float(len(idx))
+            if latest is not None and mm is not None and (mm.stock or (not mm.additive and self.weight_of(mm) is None)):
+                # уровень и остаток по периодам: последний период, а не среднее (или сумма) всех лет; уровень с весом
+                # (средний чек и число чеков) — среднее взвешенное за весь период, оно и есть «средний чек за квартал»
+                idx = [i for i in idx if i in latest[0]] or idx
             xs = [mm.values[i] for i in idx if mm.values[i] is not None]
             if not xs:
                 return None

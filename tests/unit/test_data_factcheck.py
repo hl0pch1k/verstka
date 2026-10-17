@@ -2780,6 +2780,8 @@ class Raw:
 
     def additive(self, j: int) -> bool:
         name, unit = self.cols[j], (self.units[j] or "").strip()
+        if re.match(r"(?i)просто[йия]|сверхурочн|отработан", name.strip()):
+            return True  # простои и сверхурочные часы за период — накопленное время, складываются
         if unit == "%" or self.types[j] == "percent":
             return False
         if T_LEVEL_UNIT.search(unit) or T_LEVEL_NAME.search(name) or name.strip().upper() in T_CURRENCY:
@@ -2797,6 +2799,8 @@ class Raw:
         if not unit and re.fullmatch(r"[А-ЯЁ][а-яё]+(?:ов|ев|ей|ий)", name.strip()) and self.vals(j) \
                 and all(float(v).is_integer() and v >= 0 for v in self.vals(j)):
             return True  # «Рейсов», «Возвратов», «Заказов» целыми — счёт
+        if re.fullmatch(r"(?i)(?:абонент|клиент|пользовател|сотрудник|подписчик)[ыи]", name.strip()):
+            return True  # «Абоненты», «Клиенты» — счёт людей
         if re.fullmatch(r"(?:пн|вт|ср|чт|пт|сб|вс|(?:19|20)\d\d)", name.strip().lower()) and T_FLOW.search(self.title):
             return True  # колонка-день или колонка-год о величине не говорит: «Заказы ресторана по часам» — счёт
         if T_LEVEL_TITLE.search(self.title):
@@ -2814,6 +2818,14 @@ class Raw:
                                             self.cols[j] + " " + (self.units[j] or ""), re.I)]
         if goal and rate and re.search(r"обеспеченн|уровн|на душу|на человека", goal, re.I):
             return rate[0]  # «по уровню преступности», «по обеспеченности врачами» — величина на душу
+        if goal:
+            # одинаковые имена, разные единицы («Экспорт, т» и «Экспорт, $»): «по объёму» — натуральная, «в деньгах» — $
+            vol = re.search(r"объ[её]м|тонн|натур|вес\b|штук|литр", goal, re.I)
+            mon = re.search(r"выручк|деньг|денеж|стоимост|доллар|рубл", goal, re.I)
+            if vol and not mon:
+                tw = [j for j in ms if re.search(r",\s*(?:т|кг|л|шт\.?|м³)$", self.cols[j])]
+                if tw:
+                    return tw[0]
         if goal and re.search(r"быстрее|медленнее|дольше|скорост", goal, re.I):
             # «кто обрабатывает заказы быстрее» — время, а не число заказов
             dur = [j for j in ms if re.search(r"врем|срок|длительн", self.cols[j], re.I)
@@ -2846,8 +2858,8 @@ class Raw:
                                              not self.additive(j), j))
                 return tied[0]
         tj = self.total_col()
-        if task == "comparison" and tj is not None:
-            return tj
+        if task in ("comparison", "shares") and tj is not None:
+            return tj  # колонка-итог при колонках-периодах: доли и сравнение — по ней, а не по первому кварталу
         money = [j for j in ms if T_MONEY.search(self.units[j] or "") and self.additive(j)]
         if not money:  # деньги без единицы (выгрузка 1С): по названию
             money = [j for j in ms if re.search(r"выручк|доход|продаж|оборот", self.cols[j], re.I) and self.additive(j)]
@@ -2903,7 +2915,8 @@ def _labels(t: Table, prof=None, specs: Optional[dict] = None) -> list[str]:
     for r in t.rows:
         out += [str(v) for v in r if isinstance(v, str)]
         out += [str(int(v)) for j, v in enumerate(r) if isinstance(v, (int, float)) and not isinstance(v, bool)
-                and j < len(roles) and roles[j] != "metric" and float(v).is_integer()]
+                and j < len(roles) and roles[j] not in ("metric", "id") and float(v).is_integer()]
+        # (номера строк «1…250» — не имена: «1» внутри «1 991» — не подпись)
     for b in (specs or {}).values():
         if isinstance(b, ChartSpec):
             out += [str(c) for c in b.categories] + [x.name for x in b.series if x.name] + [b.y_title or ""]
@@ -3255,6 +3268,39 @@ def _check_guards(raw: Raw, p: DatasetPlan, specs: dict, facts) -> list[str]:
     return bad
 
 
+def _dominant_typo(raw: Raw, j: int) -> list[int]:
+    """Опечатка, которая делает итог сама: больше половины суммы и в сто раз больше медианы остальных."""
+    xs = [(i, raw.num[j][i]) for i in raw.rows if raw.num[j][i] is not None]
+    tot = sum(v for _, v in xs if v > 0)
+    out = []
+    for i, v in xs:
+        rest = sorted(abs(w) for k, w in xs if k != i)
+        if not rest or tot <= 0:
+            continue
+        med = rest[len(rest) // 2]
+        if v > 0.5 * tot and med > 0 and v >= 100 * med:
+            out.append(i)
+    return out
+
+
+def _latest_rows(raw: Raw) -> list[int]:
+    """Строки последнего периода, если в таблице есть ось времени и признак (тарифы регионов по годам)."""
+    ax = raw.prof.time_axis
+    tj = raw.col(ax.column) if ax is not None else None
+    if tj is None:
+        return []
+    keys = {}
+    for i in raw.rows:
+        cell = raw.t.rows[i][tj]
+        pp = period_parts(" ".join(str(cell).split())) if cell is not None else None
+        if pp is not None:
+            keys[i] = pp[1]
+    if len(set(keys.values())) < 2:
+        return []
+    last = max(keys.values())
+    return [i for i, k in keys.items() if k == last]
+
+
 def _crosstab_leader(raw: Raw, v: float) -> bool:
     """Лидер перекрёстной таблицы (часы × дни, ученики × предметы) или таблицы одних изменений: наибольшее среди сумм
     (у потока) или средних (у уровня) строк и колонок одной единицы — или наибольшее значение колонки-изменения."""
@@ -3279,6 +3325,11 @@ def _crosstab_leader(raw: Raw, v: float) -> bool:
         for agg in (rows_, cols_):
             if agg and _close(v, max(agg), rel=1e-4, absol=0.051):
                 return True
+        # колонки, сравненные по одной строке («сравните отделы по удовлетворённости зарплатой» — строка зарплаты)
+        for i in raw.rows:
+            xs = [raw.num[j][i] for j in js if raw.num[j][i] is not None]
+            if xs and _close(v, max(xs), rel=1e-4, absol=0.051):
+                return True
     return False
 
 
@@ -3293,6 +3344,7 @@ def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> lis
     cands = [exp] if exp is not None else raw.metrics()
     dims = raw.dims()
     hits = []
+    latest_rows = _latest_rows(raw)
     for j in cands:
         add = raw.additive(j)
         # огромные рубли вывод пишет в млрд и трлн: значение факта — в его единице; единица из названия таблицы
@@ -3302,6 +3354,18 @@ def _check_categories(raw: Raw, p: DatasetPlan, specs: dict, facts, goal) -> lis
             f = 0.01
         for dj in dims:
             agg = {k: v / f for k, v in raw.by_cat(dj, j, add).items()}
+            if latest_rows and (not add or T_STOCK.search(raw.cols[j])):
+                # период × категория: уровень и остаток — по последнему периоду
+                lat: dict = {}
+                for i in latest_rows:
+                    v_ = raw.num[j][i]
+                    if v_ is not None and raw.text(i, dj):
+                        lat.setdefault(raw.text(i, dj), []).append(v_)
+                if lat and len(lat) >= 2:
+                    agg_l = {k: (sum(vs) if add else sum(vs) / len(vs)) / f for k, vs in lat.items()}
+                    real_l = {k: v for k, v in agg_l.items() if not OTHER_LAB.match(k)}
+                    if real_l and abs(max(real_l.values()) - lv.value) <= max(0.051, 1e-4 * abs(lv.value)):
+                        agg = agg_l
             real = {k: v for k, v in agg.items() if not OTHER_LAB.match(k)}
             dec = next((k for k in range(0, 7) if abs(round(lv.value, k) - lv.value) < 1e-9), 7)
             tol = min(0.051, 0.5 * 10 ** -dec + 1e-9)  # как записано в факте: 4,86 — до сотых, 413 — до целых
@@ -3715,7 +3779,8 @@ def _check_misc(raw: Raw, p: DatasetPlan, spec: Optional[ChartSpec], facts, goal
         elif not raw.additive(j):
             bad.append(f"доля топ-N у величины, которая не складывается: «{raw.cols[j]}»")
         else:
-            xs = sorted(raw.vals(j), reverse=True)
+            typo = set(_dominant_typo(raw, j))  # опечатка, которая сама делает итог, — не в долях
+            xs = sorted((raw.num[j][i] for i in raw.rows if raw.num[j][i] is not None and i not in typo), reverse=True)
             expect = sum(xs[:n_top]) / sum(xs) * 100
             if not _pct_shown(top.value, expect):
                 bad.append(f"доля топ-{n_top} {top.value} против {expect:.2f}")
@@ -3890,9 +3955,8 @@ def _conv4_cases() -> list[tuple[str, list[tuple[str, bytes]], str]]:
     return out
 
 
-# ещё не сходятся (раунд 10, следующие части): подгруппа вместо целого (04), срок вместо числа заявлений (07), сумма
-# «на врача» (10), выброс в топе (19), шапка «год → штат» (24)
-_CONV4_PENDING = {"04", "07", "10", "19", "24"}
+# ещё не сходятся (раунд 10, следующая часть — цели): срок вместо числа заявлений (07), шапка «год → штат» (24)
+_CONV4_PENDING = {"07", "24"}
 
 
 @pytest.mark.parametrize("key,files,brief", _conv4_cases(), ids=[k for k, _, _ in _conv4_cases()])

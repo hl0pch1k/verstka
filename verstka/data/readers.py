@@ -696,7 +696,7 @@ def _build_table(
             name = (first_name if (j == 0 and first_name) else None) or _name_by_values(typed_cols[pos]) \
                 or f"Колонка {pos + 1}"
         names.append(name)
-    names = _dedupe(names)
+    names = _dedupe(names, units)
     shown = raw_full if raw_full is not None else raw_names
     raw_header = [" ".join(shown[j].split()) if not shown[j].lower().startswith("unnamed:") else "" for j in keep]
     groups = [raw_groups[j] for j in keep]
@@ -945,7 +945,9 @@ def _title_unit(title_rows: list[list[Any]]) -> Optional[str]:
     for r in title_rows:
         filled = [v for v in r if v is not None]
         if len(filled) == 1 and isinstance(filled[0], str):
-            unit = split_unit(filled[0])[1]
+            # «Расходы на облако, тыс. ₽ (без НДС)»: уточнение в скобках в конце — не единица, единица — перед ним
+            text = re.sub(r"\s*\([^()]*\)\s*$", "", filled[0]) if not split_unit(filled[0])[1] else filled[0]
+            unit = split_unit(text)[1]
             if unit:
                 return unit
     return None
@@ -973,13 +975,29 @@ def _names_the_unit(name: str, unit: str) -> bool:
     return len(word) >= 3 and word in name.lower()
 
 
-def _dedupe(names: list[str]) -> list[str]:
+def _dedupe(names: list[str], units: Optional[list[Optional[str]]] = None) -> list[str]:
+    """Одинаковые имена колонок: с разными единицами — имя с единицей («Экспорт, т» и «Экспорт, $», «Брак, шт.» и
+    «Брак, ppm»), а не «Экспорт (2)»; иначе — номер."""
+    count = Counter(names)
+    if units is not None:
+        names = list(names)
+        for nm in [n for n, c in count.items() if c > 1]:
+            js = [j for j, n in enumerate(names) if n == nm]
+            us = [units[j] if j < len(units) else None for j in js]
+            if all(us) and len(set(us)) == len(us):
+                for j, u in zip(js, us):
+                    names[j] = f"{nm}, {_short_unit(u)}"
     seen: Counter = Counter()
     out = []
     for name in names:
         seen[name] += 1
         out.append(name if seen[name] == 1 else f"{name} ({seen[name]})")
     return out
+
+
+def _short_unit(u: Optional[str]) -> str:
+    """Единица в имени колонки — без множителя: «тыс. т» → «т», «млн $» → «$»."""
+    return re.sub(r"^(?:тыс\.|млн|млрд|трлн)\s*", "", (u or "").strip()) or (u or "")
 
 
 _LATIN = re.compile(r"[A-Za-z]")
@@ -1642,12 +1660,31 @@ def _text_title(lines: list[str], start: int, covered: set[int]) -> Optional[str
     if k < 0 or k in covered or start - k > 2:
         return None
     ln = " ".join(lines[k].strip().strip("#*_ ").split())
-    if not ln or len(ln) > 100 or not re.search(r"[А-Яа-яЁёA-Za-z]", ln) or _MD_FENCE.match(lines[k]):
+    if not ln or len(ln) > 160 or not re.search(r"[А-Яа-яЁёA-Za-z]", ln) or _MD_FENCE.match(lines[k]):
         return None
     body = ln.rstrip(":").strip()
-    if not (ln.endswith(":") or split_unit(body)[1]) or body.count(".") > 2:
-        return None
-    return body
+    if (ln.endswith(":") or split_unit(body)[1]) and body.count(".") <= 2 and len(ln) <= 100:
+        return body
+    # фраза с единицей счёта: «Отчёт продуктового отдела, тыс. абонентов на конец квартала.» → «Абоненты, тыс.
+    # абонентов»: имя величины и её единица, а не безликое «Значение»
+    m = re.search(r"(?:^|[\s,(])((тыс\.|млн|млрд)\s+([а-яё]{4,}))", ln)
+    if m:
+        noun = phrase_nominative(m.group(3))
+        return f"{noun}, {m.group(2)}"  # «Абоненты, тыс.»: множитель — единица, слово — имя величины
+    return None
+
+
+def phrase_nominative(gen_pl: str) -> str:
+    """Именительный по родительному множественного счёта: «абонентов» → «Абоненты», «клиентов» → «Клиенты»,
+    «пользователей» → «Пользователи»; иначе — как есть, с заглавной."""
+    w = gen_pl.lower()
+    for end, new in (("ов", "ы"), ("ев", "и"), ("ей", "и")):
+        if w.endswith(end) and len(w) > len(end) + 2:
+            nom = w[: -len(end)] + new
+            if new == "ы" and nom[-2:-1] in "гкхжшчщ":
+                nom = nom[:-1] + "и"
+            return nom[:1].upper() + nom[1:]
+    return w[:1].upper() + w[1:]
 
 
 # ======================================================================================================== XLSX

@@ -114,8 +114,8 @@ def _period_key(name: str) -> tuple[int, int]:
 
 
 def _parts_ok(group: list[Measure]) -> bool:
-    """Годы и периоды, план и факт — не части одного целого."""
-    if any(_period_name(x.name) for x in group):
+    """Годы и периоды (и месяцы без года: «Июль · Август · Сентябрь»), план и факт — не части одного целого."""
+    if any(_period_name(x.name) or season_name((split_unit(x.name)[0] or x.name).strip()) for x in group):
         return False
     return not (any(_PLAN.search(x.name) for x in group) and any(_FACT.search(x.name) for x in group))
 
@@ -181,6 +181,15 @@ def is_currency_code(name: str) -> bool:
     return base.lower() in _CURRENCY or bool(re.fullmatch(r"[A-Z]{3}\s*/\s*[A-Z]{3}", base))
 
 
+_DURATION_FLOW = re.compile(r"просто[йия]|сверхурочн|переработ|отработан|часы\s+работ|время\s+работ|наработк|"
+                            r"часов\s+(?:работ|простоя|обучени)|трудозатрат|человеко-?час", re.I)
+
+
+PER_ENTITY = re.compile(r"(?:^|[\s(/])на\s+(?:одн(?:ого|у|о)\b|1\s+[а-яё]+|врача|сотрудника|работника|ученика|студента|"
+                        r"пациента|клиента|абонента|пользователя|магазин\b|точку|смену|койку|голову|семью|"
+                        r"квартиру|автомобиль|машину|рейс|заказ\b|чек\b|визит\b)", re.I)
+
+
 def additivity(name: str, unit: Optional[str], mtype: str, title: str = "", sums: bool = False,
                duration: bool = False, ints: bool = False) -> tuple[bool, str]:
     """(складывается ли, признак). Уровень — по признаку в названии или единице; сумма — по признаку потока или счёта
@@ -195,12 +204,18 @@ def additivity(name: str, unit: Optional[str], mtype: str, title: str = "", sums
         return False, f"единица «{u}» — величина на единицу, она не складывается"
     if _STAT.search(base):
         return False, f"«{base}» — статистика, а не сумма"
+    if PER_ENTITY.search(base):
+        # «Посещений на врача», «Выручка на сотрудника», «на 1 км» — величина на единицу: её не складывают
+        return False, f"«{base}» — величина на одного, она не складывается"
     if is_currency_code(base):
         return False, f"«{base}» — курс валюты, а не сумма"
     if _LEVEL.search(base):
         return False, f"«{base}» — уровень, а не сумма"
     if sums:
         return True, "итог в таблице равен сумме"
+    if duration and _DURATION_FLOW.search(base):
+        # простои, сверхурочные, отработанные часы — накопленное время за период: складывается (683 ч за 9 месяцев)
+        return True, f"«{base}» — накопленное время, оно складывается"
     if duration:
         return False, f"«{base}» — длительность каждой строки, а не сумма"
     if u and (_EXTENSIVE_UNIT.match(u) or fmt_count(1, u) is not None):
@@ -209,6 +224,9 @@ def additivity(name: str, unit: Optional[str], mtype: str, title: str = "", sums
         return True, f"«{base}» — поток или счёт"
     if ints and re.fullmatch(r"[А-ЯЁ]{2,5}", base.strip()):
         return True, f"«{base}» — счёт событий (целые числа)"  # «ДТП», «ЧС» по часам — число случаев
+    if _STOCK.search(base) and re.fullmatch(r"[А-ЯЁ][а-яё]+[ыи]", base.strip()):
+        # «Абоненты», «Клиенты», «Сотрудники» — счёт людей, а не уровень, даже в файле «Абоненты тарифов»
+        return True, f"«{base}» — счёт людей"
     if title and _LEVEL_TITLE.search(title):
         return False, f"«{title}» — данные об уровнях (курсы, цены), их не складывают"
     th = head_word(re.sub(r"^[A-Z]\d+\s+", "", title)) if title else ""

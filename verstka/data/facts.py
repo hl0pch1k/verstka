@@ -76,8 +76,11 @@ def _pcat(d: Data, m: Optional[Measure], dim: str, keys: list[str], rank: Option
     if m is not None and m.j == -4:
         # перекрёстная таблица, сравнение колонок: значение колонки — сумма или среднее по строкам
         js = {x.name: x.j for x in d.matrix}
-        return {"op": "colrank", "cols": js, "keys": keys, "agg": agg, "skip": _skip(d), "scale": m.scale, "rank": rank,
+        out_ = {"op": "colrank", "cols": js, "keys": keys, "agg": agg, "skip": _skip(d), "scale": m.scale, "rank": rank,
                 "named": named, "col_name": m.name}
+        if d.matrix_focus_rows:
+            out_["only"] = list(d.matrix_focus_rows)  # колонки сравнивают по строке, которую назвала цель
+        return out_
     if m is not None and m.j == -3:
         # перекрёстная таблица, сравнение строк: значение строки — сумма или среднее по колонкам
         return {"op": "cat", "col": None, "rowcols": [x.j for x in d.matrix], "rowagg": agg, "by": _col_of(d, dim),
@@ -86,10 +89,14 @@ def _pcat(d: Data, m: Optional[Measure], dim: str, keys: list[str], rank: Option
     w = d.weight_of(m) if m is not None and agg == "mean" else None
     if w is not None:
         agg = "wmean"  # среднее взвешенное — тем же весом, что у графика (число чеков, ответов)
-    return {"op": "cat", "col": None if m is None else m.j, "by": _col_of(d, dim), "keys": keys, "agg": agg,
-            "w": w.j if w is not None else None,
-            "skip": _skip(d), "scale": m.scale if m is not None else 1.0, "rank": rank, "exclude": list(exclude),
-            "named": named, "col_name": m.name if m is not None else None}
+    out = {"op": "cat", "col": None if m is None else m.j, "by": _col_of(d, dim), "keys": keys, "agg": agg,
+           "w": w.j if w is not None else None,
+           "skip": _skip(d), "scale": m.scale if m is not None else 1.0, "rank": rank, "exclude": list(exclude),
+           "named": named, "col_name": m.name if m is not None else None}
+    pl = d.panel_latest
+    if pl is not None and m is not None and (m.stock or (not m.additive and w is None)) and _col_of(d, dim) != d.time_col:
+        out["only"] = sorted(pl[0])  # период × категория: уровень без веса и остаток — по последнему периоду
+    return out
 
 
 def _as_share(p: dict, total_row: Optional[int] = None) -> dict:
@@ -1449,8 +1456,23 @@ def _plan_fact(d: Data, cv: CatView) -> FactSet:
     fs.add("low_exec", round(low[2] / low[1] * 100, 1), "min", f"{low[0]}: {fmt_pct(low[2] / low[1] * 100)}% плана",
            "%", "Ниже всех по исполнению.", prov={**exg, "what": "low", "key": low[0], "tol": 0.51})
     cap = [f"Выше плана — {over} из {len(pairs)}; ниже всех — {low[0]}: {fmt_pct(low[2] / low[1] * 100)}% плана."]
+    cost = bool(_COST.search(f"{pl.name} {fa.name} {file_title(d.profile.file, d.profile.sheet)}"))
+    if cost and ex > 100.05:
+        # расходы сверх плана — перерасход, а не «план исполнен на 104%»; в подписи — у кого сильнее всех
+        ov = round(ex - 100, 1)
+        hi = max(pairs, key=lambda t: (t[2] / t[1], t[0]))
+        hp = (hi[2] / hi[1] - 1) * 100
+        fs.add("overrun", ov, "change", f"Перерасход — {fmt_num(ov)}%", "%", "Факт сверх плана в процентах плана.",
+               prov={**ex_p, "what": "overrun", "tol": 0.051})
+        fs.add("top_overrun", round(hp, 1), "max", f"{hi[0]}: +{fmt_num(round(hp, 1))}%", "%",
+               "Больше всех сверх плана.", prov={**exg, "what": "high", "key": hi[0], "tol": 0.051})
+        fs.ctx["overrun"] = True
+        cap = [f"Сверх плана — {over} из {len(pairs)}; больше всех — {hi[0]}: +{fmt_num(round(hp, 1))}%."]
     fs.ctx["caption"] = _short(cap)
     return fs
+
+
+_COST = re.compile(r"бюджет|затрат|расход|стоимост|смет|издерж|капвложен|капитальн|строительств|ремонт", re.I)
 
 
 _TEMP = re.compile(r"температур|°", re.I)
@@ -1542,8 +1564,8 @@ def _comparison(d: Data) -> FactSet:
     generic = m is not None and (_GENERIC.match(re.sub(r"\s*,.*$", "", m.name).strip()) is not None
                                  or is_total_label(m.name))
     if m is not None:
-        ph = _period_metric(d, m) or _bucket_metric(d, m) or _with_noun(d, m.name, metric_phrase(m.name, m.type),
-                                                                         m.type == "money")
+        ph = _period_metric(d, m) or _bucket_metric(d, m) or _with_twin(
+            _with_noun(d, m.name, metric_phrase(m.name, m.type), m.type == "money"), _twin_note(d, m))
         if generic or m.j in (-3, -4):
             # «Сумма», «Итого за год», итог перекрёстной таблицы — целое по названию датасета: «выручки», «заказов»
             ph = _title_whole(d) or ph
@@ -1588,7 +1610,8 @@ def _comparison(d: Data) -> FactSet:
                "Строка «Итого» в файле." if cv.total_from_row else f"Сумма по колонке «{name}».",
                prov=({"op": "colsum", "cols": [x.j for x in d.matrix], "skip": _skip(d), "scale": m.scale}
                      if m is not None and m.j in (-3, -4) else
-                     {"op": "colsum", "col": m.j, "row": trow, "skip": _skip(d), "scale": m.scale}
+                     {"op": "colsum", "col": m.j, "row": trow, "skip": _skip(d), "scale": m.scale,
+                      **({"only": _pcat(d, m, cv.dim, [])["only"]} if "only" in _pcat(d, m, cv.dim, []) else {})}
                      if m is not None else {"op": "count", "what": "rows", "skip": _skip(d)}))
         caption.append(f"{leader} — {fmt_value(lv, unit)} из {fmt_value(cv.total, unit)}.")
     others_ = tuple(x for x in cv.labels if is_other_label(x))
@@ -1673,11 +1696,19 @@ def _comparison(d: Data) -> FactSet:
                "Категорий в данных.", prov={"op": "count", "what": "groups", "by": _col_of(d, cv.dim), "skip": _skip(d)})
         caption.insert(0, f"{blab} — {fmt_value(bv, unit)}: выше — {above} из {len(real)}.")
         labels.append(blab)
+    pl = d.panel_latest if cv.dim != (d.cols[d.time_col].name if d.time_col is not None else None) else None
+    if pl is not None and m is not None:
+        # период × категория: о каком периоде числа — «2025» для уровня, «январь 2025 – сентябрь 2025» для суммы
+        fs.ctx["period_note"] = period_text(pl[1]) if (m.stock or (not m.additive and d.weight_of(m) is None)) else \
+            f"{period_text(pl[2])} – {period_text(pl[1])}"
+        fs.ctx.setdefault("labels", []).append(fs.ctx["period_note"])
     if d.ask == "total" and m is not None and m.additive and cv.total:
         fs.ctx["ask_total"] = True
     if d.ask == "min" and m is not None:
         fs.ctx["ask_min"] = True
-        if len(d.parallel) >= 2 or len(d.measures) >= 3:
+        if m.j in (-3, -4):
+            pass  # перекрёстная таблица: как собраны значения — в скобках после числа («в среднем по 8 строкам»)
+        elif len(d.parallel) >= 2 or len(d.measures) >= 3:
             fs.ctx["min_note"] = re.sub(r"\s*,[^,]*$", "", m.name).strip()  # какая из величин рядом
     if d.ask == "mean" and m is not None and not m.additive:
         # «какой средний NPS по всем продуктам»: одно среднее по строкам файла — с весом, если он есть (NPS — по
@@ -1867,6 +1898,30 @@ def _with_noun(d: Data, name: str, p: Optional[Phrase], money: bool) -> Optional
     return p
 
 
+_UNIT_WORDS = {"$": "в долларах", "₽": "в рублях", "€": "в евро", "т": "в тоннах", "кг": "в килограммах",
+               "шт.": "в штуках", "л": "в литрах", "м³": "в кубометрах", "чел.": "в людях"}
+
+
+def _twin_note(d: Data, m: Optional[Measure]) -> str:
+    """У колонки есть «близнец» с тем же именем и другой единицей («Экспорт, т» и «Экспорт, $»): в выводе сказано,
+    в чём доля — «экспорта в долларах», а не просто «экспорта»."""
+    if m is None:
+        return ""
+    base = (split_unit(m.name)[0] or m.name).strip().lower()
+    twins = [x for x in d.measures if x is not m and (split_unit(x.name)[0] or x.name).strip().lower() == base]
+    if not twins:
+        return ""
+    u = re.sub(r"^(?:тыс\.|млн|млрд|трлн)\s*", "", (m.unit_text or "").strip())
+    return _UNIT_WORDS.get(u, f"в {u}" if u else "")
+
+
+def _with_twin(p: Optional[Phrase], note: str) -> Optional[Phrase]:
+    if p is None or not note:
+        return p
+    return Phrase(f"{p.nom} {note}", f"{p.gen} {note}", f"{p.dat} {note}", f"{p.gen_pl} {note}", f"{p.dat_pl} {note}",
+                  f"{p.nom_pl} {note}", p.gender, p.sure)
+
+
 def _whole_phrase(d: Data, parts: Optional[Measure], summed: Optional[Measure] = None) -> tuple[Optional[Phrase], bool]:
     """Целое, долю которого показывают. Доли посчитаны по колонке (`summed`) — целое называется ею и только ею
     («суммы выплат», если делили суммы, «числа выплат» — если число); колонка долей («Доля рынка») — «рынка» или
@@ -1875,7 +1930,8 @@ def _whole_phrase(d: Data, parts: Optional[Measure], summed: Optional[Measure] =
         if _GENERIC.match(re.sub(r"\s*,.*$", "", summed.name).strip()):
             return _title_whole(d) or metric_phrase(summed.name, summed.type), summed.type == "money"
         p = metric_phrase(summed.name, summed.type)
-        return _with_noun(d, summed.name, p, summed.type == "money"), summed.type == "money"
+        p = _with_twin(_with_noun(d, summed.name, p, summed.type == "money"), _twin_note(d, summed))
+        return p, summed.type == "money"
     money = next((m for m in d.measures if m.additive and m is not parts and m.type == "money"), None)
     other = money or next((m for m in d.measures if m.additive and m is not parts), None)
     if other is not None:
@@ -2213,12 +2269,21 @@ def _distribution(d: Data) -> FactSet:
            prov={**pd, "stat": "p", "q": 80})
     caption = [f"Медиана — {med_txt}."]
     mean = float(np.mean(x))
+    typos = set(d.dominant_typos(m))
+    pmean = {**pd, "stat": "mean"}
+    if typos:
+        # опечатка (в сто раз больше медианы) не тянет среднее: 7 983 ₽ из-за одной строки — не «крупные значения»
+        xs_ = [float(m.values[i]) for i in d.rows_idx if m.values[i] is not None and i not in typos]  # type: ignore
+        if xs_:
+            mean = sum(xs_) / len(xs_)
+            pmean = {**pd, "stat": "mean", "skip": sorted(set(pd.get("skip", [])) | typos)}
     if med > 0 and float(x.min()) >= 0 and mean / med >= 1.25 and not duration:
         # длительности (время ответа, доставки) — вывод через долю «за N часов», как говорят о сроках;
         # скошенное распределение: середину честнее показывает медиана, а не среднее
         fs.add("mean", round(mean, 1) if abs(mean) < 100 else round(mean), "median", f"Среднее — {fmt_value(mean, unit)}",
-               unit, f"Среднее арифметическое; медиана — {fmt_value(med, unit)}: крупные значения тянут среднее вверх.",
-               prov={**pd, "stat": "mean", "tol": 0.051 if abs(mean) < 100 else 0.51})
+               unit, f"Среднее арифметическое; медиана — {fmt_value(med, unit)}: крупные значения тянут среднее вверх."
+               + (" Без выброса-опечатки." if typos else ""),
+               prov={**pmean, "tol": 0.051 if abs(mean) < 100 else 0.51})
         fs.ctx.update(skewed=True, mean_text=fmt_value(mean, unit))
         caption = [f"Медиана — {med_txt}, среднее — {fmt_value(mean, unit)}."]
     sides = []
@@ -2350,10 +2415,37 @@ def _reference(d: Data) -> FactSet:
     sk = _skip(d)
     fs.add("count", rv.n, "count", f"Всего строк — {rv.n}", None, "Строк данных в таблице.",
            prov={"op": "count", "what": "rows", "skip": sk})
-    if m is not None and rv.top_share is not None and rv.n > rv.top_n:
+    typo_note = ""
+    typos = sorted(d.dominant_typos(m))
+    if m is not None and typos and rv.top_share is not None:
+        # выброс в сто и больше раз больше медианы — в подписи, в долях его нет
+        i0 = typos[0]
+        med = float(np.median([v for i, v in enumerate(m.values) if v is not None and i in set(d.rows_idx)
+                               and i not in typos]))
+        v0 = float(m.values[i0])  # type: ignore[arg-type]
+        who = d.text(i0, rv_lab) if (rv_lab := (d.label if d.label is not None else d.id_col)) is not None else ""
+        if who.isdigit():
+            who = f"Строка № {who}"  # номер строки, а не имя
+        r_ = round(v0 / med) if med else 0
+        fs.add("typo_row", v0, "outliers", f"{who or f'Строка {i0 + 1}'}: {fmt_value(v0, m.unit_text)}", m.unit_text,
+               "В сто и больше раз больше медианы — похоже на опечатку; в долях её нет.",
+               prov={"op": "cell", "row": i0, "col": m.j, "scale": m.scale})
+        pmed = {"op": "dist", "col": m.j, "stat": "median", "skip": sorted(set(_skip(d)) | set(typos)),
+                "scale": m.scale, "tol": 0.51}
+        fs.add("typo_median", round(med, 1) if abs(med) < 100 else round(med), "median",
+               f"Медиана — {fmt_value(med, m.unit_text)}", m.unit_text, "Медиана без выброса.", prov=pmed)
+        fs.add("typo_ratio", r_, "change", f"в {fmt_num(r_)} {times_word(r_)}", "раз", "Выброс к медиане.",
+               prov={"op": "ratio", "a": {"op": "cell", "row": i0, "col": m.j, "scale": m.scale}, "b": pmed,
+                     "tol": 0.51})
+        typo_note = (f"{who or f'Строка {i0 + 1}'} — {fmt_value(v0, m.unit_text)}, в {fmt_num(r_)} "
+                     f"{times_word(r_)} больше медианы ({fmt_value(med, m.unit_text)}): похоже на опечатку, в долях её нет.")
+        if who:
+            fs.ctx.setdefault("labels", []).append(who)
+        sk = sorted(set(sk) | set(typos))
+    if m is not None and rv.top_share is not None and rv.n - len(typos) > rv.top_n:
         # суммируемая неотрицательная метрика: доля топ-10 и итог остальных
         top = rv.top_share
-        rest_n = rv.n - rv.top_n
+        rest_n = rv.n - len(typos) - rv.top_n
         rest_v = (rv.total or 0) - (rv.top_sum or 0)
         unit = m.unit_text
         what = mph.nom if mph is not None else m.name
@@ -2369,13 +2461,14 @@ def _reference(d: Data) -> FactSet:
         fs.add("rest_value", rest_v, "total", f"Остальные {rest_n} — {fmt_value(rest_v, unit)}", unit,
                "Итог строк вне топа.", prov={**pt, "what": "rest_value"})
         fs.add("rest_count", rest_n, "count", f"Остальные {rest_n}", None, "Строки, собранные в итог.",
-               prov={"op": "count", "what": "rows", "skip": sk, "minus": rv.top_n})
+               prov={"op": "count", "what": "rows", "skip": sk, "minus": rv.top_n})  # (без выброса-опечатки)
         who = f"Остальные {count_words(rest_n, *(forms or ('строка', 'строки', 'строк')))}"
         big, big_v, big_row = _biggest(d, m, ent if ent_ok else None)
         if big:
             fs.add("biggest", big_v, "max", big, unit, "Естественно большое значение строки (не выброс).",
                    prov={"op": "cell", "row": big_row, "col": m.j})
-        fs.ctx["caption"] = _short([f"{who} — {fmt_value(rest_v, unit)}, {fmt_pct(100 - top)}%.", big])
+        fs.ctx["caption"] = _short([typo_note, f"{who} — {fmt_value(rest_v, unit)}, {fmt_pct(100 - top)}%.", big],
+                                   must=(typo_note,) if typo_note else ())
         return fs
     if m is not None and rv.values and rv.values[0] is not None:
         # рейтинг, средний чек, прибыль с убытками: лидер по значению, без долей; строки без подписи — без имени

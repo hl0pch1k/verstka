@@ -82,6 +82,8 @@ def _honest_goal(decision: TaskDecision, d: Data) -> TaskDecision:
     focus = d.time.focus if decision.task == "dynamics" and d.time is not None else None
     if focus and any(stem_in(x, w) for x in [head] + [y for y in metric if len(y) >= 4] for w in stems_of(focus)):
         return decision  # цель назвала строку («облачной платформы»): ряд — по ней
+    if decision.task == "comparison" and d.matrix_focus_rows and d.matrix_axis == "col":
+        return decision  # перекрёстная таблица: колонки сравнены по строке, которую назвала цель (она в заголовке)
     if shown or (title and not d.head_in_columns):
         return decision
     if d.head_in_columns:
@@ -322,6 +324,12 @@ def _metric_ok(g: Goal, d: Data) -> bool:
     # части сложных слов тоже: «воды» — в «Водопотребление», «на человека» — в единице «л/сут на человека»
     if all(any(_near(s_, w) for w in words) for s_ in metric):
         return True
+    rj = d._matrix_rows() if d.matrix else None
+    if rj is not None:
+        # перекрёстная таблица: величина цели — строка («удовлетворённость зарплатой» — «Моя зарплата справедлива»)
+        rows_w = stems_of(" ".join(d.text(i, rj) for i in d.rows_idx))
+        if any(len(s_) >= 5 and any(_near(s_, w) for w in rows_w) for s_ in metric):
+            return True
     # цель называет колонку своими словами: «просрочка свыше 90 дней» — колонка «Свыше 90 дней» (два слова цели в
     # одном имени колонки)
     subj = [x for x in stems_of(g.phrase) if len(x) >= 3] + re.findall(r"\d+", g.phrase)

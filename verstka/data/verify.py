@@ -675,6 +675,13 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             if p.get("key") not in ex or ex[p["key"]] > min(ex.values()) + 1e-9:
                 raise _Fail(f"«{p.get('key')}» — не самое низкое исполнение")
             return ex[p["key"]], [ps, fs_]
+        if what == "high":  # перерасход: у кого факт выше плана сильнее всех (в % сверх плана)
+            ex = {k: (b / a - 1) * 100 for k, (a, b) in pairs.items()}
+            if p.get("key") not in ex or ex[p["key"]] < max(ex.values()) - 1e-9:
+                raise _Fail(f"«{p.get('key')}» — не самый большой перерасход")
+            return ex[p["key"]], [ps, fs_]
+        if what == "overrun":
+            return (fs_ / ps - 1) * 100, [ps, fs_]
         return (fs_ / ps * 100 if what == "exec" else ps if what == "plan" else fs_), [ps, fs_]
     if op == "conv":
         a, b = raw.num(p["first"], p["col"]), raw.num(p["last"], p["col"])
@@ -754,7 +761,10 @@ def _shown_as(n: float, v: float) -> bool:
 def _named_ok(named: str, col_name: str, title: str) -> bool:
     """Величина в тексте («суммы выплат») — это колонка происхождения: каждое её значимое слово есть в названии колонки
     (или в названии файла, если колонка безликая: «Сумма», «Итого за год»)."""
-    want = [s for s in stems_of(named) if len(s) >= 3 and s not in ("числ", "количеств", "доля", "дол")]
+    # «экспорта в долларах»: слово единицы — о единице колонки («Экспорт, $»), а не её имя
+    want = [s for s in stems_of(named) if len(s) >= 3 and s not in ("числ", "количеств", "доля", "дол", "всег", "всей",
+                                                                     "всех")
+            and not re.match(r"доллар|рубл|евро|тонн|штук|литр|килограмм|кубометр|люд", s)]
     have = stems_of(col_name)
     generic = bool(re.match(r"^(?:сумма|итого|всего|значение|количество|число|объ[её]м|показатель|общий итог)\b",
                             col_name.strip(), re.I))

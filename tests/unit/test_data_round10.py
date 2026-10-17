@@ -113,3 +113,77 @@ def test_integer_mean_tolerance_and_per_unit_weight():
     assert d.weight_of(rate).name.startswith("Пробег")
     assert _sp(p.headline) == "Расход топлива вырос на 1,3% за 13 недель" and not any("не подтвердил" in r
                                                                                      for r in p.task.reasons)
+
+
+# ── M1–M6: панели, подгруппы, доли счёта, ставки «на одного», выброс в топе, одинаковые имена ─────────────────────
+def test_panel_compares_the_latest_period_or_the_sum():
+    """M1: тарифы регионов по годам — сравнение по 2025 году (и год назван), а не среднее 2021–2025; простои линий по
+    месяцам — сумма за период (накопленное время складывается), а не «быстрее всего — 28,2 ч в месяц»."""
+    t, p = _conv4("09", "A")
+    assert "8,07 ₽/кВт·ч (2025 год)" in _sp(p.headline) and "1,97 ₽/кВт·ч" in _sp(p.headline), p.headline
+    t, p = _conv4("03", "A")
+    assert _sp(p.headline) == "Линия 3 — больше всех: 38% всех простоев" and "683 ч из 1 784 ч" in _sp(p.caption)
+
+
+def test_overall_column_and_departments_of_a_survey():
+    """M2: «Все сотрудники» рядом с «Продажи (n=120)» — величина таблицы; «в каком отделе хуже всего» сравнивает
+    отделы-колонки, «по удовлетворённости зарплатой» — по строке зарплаты, и это названо."""
+    t, p = _conv4("04")
+    assert _sp(p.headline) == "Я понимаю цели своего отдела впереди: 81%, Моя зарплата справедлива — 40%"
+    t, p = _conv4("04", "A")
+    assert _sp(p.headline).startswith("Меньше всего — Логистика (n=150): 51,1% (в среднем по 8 строкам)"), p.headline
+    t, p = _conv4("04", "B")
+    assert _sp(p.headline) == "ИТ (n=85) впереди: 48% («Моя зарплата справедлива»), Логистика (n=150) — 30%"
+
+
+def test_rate_over_count_and_share_wording():
+    """M3: при колонке уровня («Брак, ppm», «Доля возвратов, %») сравнивают уровень; доля счёта — «всех/всего»."""
+    t, p = _conv4("23")
+    assert _sp(p.headline) == "Выше нормы — 3 из 6: Линия Б, Линия Г и Линия Е", p.headline
+    t, p = _conv4("15")
+    assert _sp(p.headline) == "Больше всего — Одежда: 23,1%, меньше всего — Книги: 1,2%"
+    t, p = _conv4("15", "A")  # «больше всего возвратов» — счёт, его и сравнивают
+    assert _sp(p.headline) == "Одежда — половина всех возвратов: 52%", p.headline
+
+
+def test_per_entity_columns_are_not_summed():
+    """M4: «Посещений на врача» — величина на одного: без итога и «из 261», без круговой."""
+    t, p = _conv4("10", "C")
+    d = Data(t, profile_table(t))
+    m = next(x for x in d.measures if "на врача" in x.name)
+    assert not m.additive and "из" not in _sp(p.caption or "") and "pie" not in [o.kind for o in p.options]
+
+
+def test_typo_row_is_out_of_the_top_share():
+    """M5: строка в 1 546 раз больше медианы, больше половины суммы — в подписи, в долях топа её нет."""
+    t, p = _conv4("19")
+    assert _sp(p.headline) == "10 крупнейших дают 30% суммы", p.headline
+    assert _sp(p.caption).startswith("Строка № 137 — 1 500 000 ₽, в 1 546 раз больше медианы (970 ₽)")
+    t, p = _conv4("19", "A")
+    assert "среднее до 1 991 ₽" in _sp(p.headline)
+
+
+def test_same_name_columns_keep_their_units():
+    """M6: «Экспорт, тыс. т» и «Экспорт, млн $» — «Экспорт, т» и «Экспорт, $»; «по объёму» — тонны, единица названа."""
+    t, p = _conv4("13")
+    assert t.columns[1:] == ["Экспорт, т", "Экспорт, $"]
+    assert _sp(p.headline) == "Пшеница — почти половина экспорта в долларах: 44%"
+    t, p = _conv4("13", "B")
+    assert _sp(p.headline) == "Пшеница — две трети экспорта в тоннах: 69%", p.headline
+
+
+# ── W: формулировки ───────────────────────────────────────────────────────────────────────────────────────────────
+def test_wording_of_round_10():
+    t, p = _conv4("30")  # мера и единица таблицы из текста над ней, «Абоненты» — счёт людей
+    assert t.columns[-1] == "Абоненты" and _sp(p.headline) == "Абоненты выросли на 6,1% за 3 квартала"
+    t, p = _conv4("30", "B")
+    assert _sp(p.headline).startswith("Всего — 5 449 тыс.")
+    t, p = _conv4("11", "A")  # «Среднее … в среднем» — без повтора
+    assert _sp(p.headline).startswith("Среднее время решения — 6,9 ч"), p.headline
+    t, p = _conv4("18", "A")  # перерасход, а не «план исполнен на 104%»
+    assert _sp(p.headline) == "Перерасход 4,1%: 820 млн ₽ при плане 788"
+    assert _sp(p.caption) == "Сверх плана — 5 из 9; больше всех — Фасад: +19,6%."
+    t, p = _conv4("17")  # месяцы — не части; итог за квартал — величина таблицы
+    assert "часть" not in p.headline and p.headline.startswith("Виртуальные машины"), p.headline
+    t, p = _conv4("17", "B")
+    assert _sp(p.headline).startswith("Расходы: от 4 645 тыс. ₽ (июль)"), p.headline

@@ -418,8 +418,12 @@ def columns_time_view(d: "Data") -> Optional[TimeView]:
         xs = [m.values[i] for i in rows if m.values[i] is not None]
         vals.append((float(sum(xs)) if add else float(sum(xs) / len(xs))) if xs else None)
     periods = [_iso(freq, pp[1]) for pp, _ in cols]
-    # имя ряда — по названию датасета («Выручка по кварталам 2025» → «Выручка»)
-    head = head_word(re.sub(r"^(?:[\w-]*\d[\w-]*\s+)+", "", title))
+    # имя ряда — по строке-названию над таблицей («Расходы на облачную инфраструктуру, тыс. ₽» → «Расходы»), иначе по
+    # названию датасета («Выручка по кварталам 2025» → «Выручка»)
+    first = (d.table.notes or "").strip().split("\n")[0] if d.table.notes else ""
+    head = head_word(re.sub(r"\s*[,(].*$", "", first)) if first and len(first) <= 120 else ""
+    if not head or head in ("отчёт", "отчет", "данные", "таблица", "итоги", "сводка", "выгрузка"):
+        head = head_word(re.sub(r"^(?:[\w-]*\d[\w-]*\s+)+", "", title))
     hp = phrase(head) if head else None
     name = hp.nom[:1].upper() + hp.nom[1:] if hp is not None and hp.sure else "Сумма"
     if focus:

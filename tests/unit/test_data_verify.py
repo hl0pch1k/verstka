@@ -316,7 +316,8 @@ def test_mean_of_means_without_the_weight_is_caught():
     v = verify(t, [simple], prov, "Арбат впереди: 1 373 ₽", None, ["Арбат"])
     assert not v.headline_ok and "среднее без веса" in v.failed["leader_value"]
     p = plan_datasets([t], "Сравните магазины по среднему чеку")[0]
-    assert _sp(p.headline) == "Тверская впереди: 1 323 ₽, Арбат — 1 085 ₽", p.headline
+    # магазины по месяцам: среднее с весом за весь период, и период назван (раунд 10, M1)
+    assert _sp(p.headline) == "Тверская впереди: 1 323 ₽ (июль 2026 – сентябрь 2026), Арбат — 1 085 ₽", p.headline
     fs, v = _recheck(t, p)
     assert not v.failed and v.headline_ok
 
@@ -376,7 +377,7 @@ def test_residual_count_is_a_label_and_the_plain_title_keeps_the_column_name():
     files = next(fs_ for k, fs_, _, _ in tf.corpus_conv3() if k == "05")
     t = read_bytes(*files[0])[0]
     p = plan_datasets([t], "")[0]
-    assert _sp(p.headline) == "VK Teams — четверть купленных мест: 25%", p.headline
+    assert _sp(p.headline) == "VK Teams — четверть всех купленных мест: 25%", p.headline
     d = data_of(p, t)
     assert plan_mod.plain_headline("comparison", d, own=True) == "Куплено мест по продуктам"
 

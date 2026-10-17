@@ -210,7 +210,8 @@ def _two_floor(rnd: random.Random) -> Case:
     group, leaves, names, units, kinds = rnd.choice([
         ("Цена", ["Мин", "Макс"], ["Мин", "Макс"], [None, None], ["number", "number"]),
         ("План", ["Год", "Месяц"], ["Год", "Месяц"], [None, None], ["number", "number"]),
-        ("Выручка", ["млн ₽", "%"], ["Выручка", "Выручка (2)"], ["млн ₽", "%"], ["money", "percent"]),
+        # одно имя, разные единицы — имя с единицей (раунд 10, M6), а не «Выручка (2)»
+        ("Выручка", ["млн ₽", "%"], ["Выручка, ₽", "Выручка, %"], ["млн ₽", "%"], ["money", "percent"]),
     ])
     n = rnd.randint(3, 6)
     labels = [f"Товар {i + 1}" for i in range(n)]
