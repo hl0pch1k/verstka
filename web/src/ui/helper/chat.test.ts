@@ -287,8 +287,10 @@ test("U2, V2: несвежесть не от помощника не «ожив�
   assert.deepEqual(noteView(b, { stale: null, live: false, latest: true, open: "g1" }), { text: REFRESHED, refresh: false });
 });
 
-test("подсказка поля на телефоне: длинная — короче, остальные как есть", () => {
+test("подсказка поля на телефоне: длинные — короче на месте, остальные как есть", () => {
   assert.equal(shortPlaceholder("Вопрос или текст презентации", true), "Вопрос или текст");
   assert.equal(shortPlaceholder("Вопрос или текст презентации", false), "Вопрос или текст презентации");
-  assert.equal(shortPlaceholder("Что поменять на слайде 3?", true), "Что поменять на слайде 3?");
+  assert.equal(shortPlaceholder("Что поменять на слайде 3?", true), "Слайд 3: что поменять?");
+  assert.equal(shortPlaceholder("Что поменять на слайде 12?", false), "Что поменять на слайде 12?");
+  assert.equal(shortPlaceholder("Вопрос о сборке", true), "Вопрос о сборке");
 });
