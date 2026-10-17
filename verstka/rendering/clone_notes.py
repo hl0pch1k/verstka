@@ -41,6 +41,30 @@ def _paints(el) -> bool:
     return False
 
 
+def turned_box(el, box: Bbox) -> Bbox:
+    """`box` — a part of the shape `el` (its letters), in slide EMU as if the shape were not turned — as it stands on
+    the slide: the box around its corners turned with the shape about the shape's centre. `box` itself when the shape
+    is not turned (or has no geometry)."""
+    import math
+
+    tag = etree.QName(el).localname
+    xfrm = el.find(q("p:grpSpPr") + "/" + q("a:xfrm")) if tag == "grpSp" else (el.find(q("p:spPr") + "/" + q("a:xfrm")) if el.find(q("p:spPr")) is not None else None)
+    eb = element_bbox(el)
+    try:
+        rot = int(xfrm.get("rot") or 0) / 60000.0 if xfrm is not None else 0.0
+    except ValueError:
+        rot = 0.0
+    a = ((rot + 180.0) % 360.0) - 180.0
+    if abs(a) < 0.5 or not eb:
+        return box
+    t = math.radians(a)
+    cx, cy = eb[0] + eb[2] / 2.0, eb[1] + eb[3] / 2.0
+    pts = [(cx + (px - cx) * math.cos(t) - (py - cy) * math.sin(t), cy + (px - cx) * math.sin(t) + (py - cy) * math.cos(t)) for px in (box.x, box.x2) for py in (box.y, box.y2)]
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    return Bbox(x=int(x0), y=int(y0), w=max(int(x1 - x0), 1), h=max(int(y1 - y0), 1))
+
+
 def _content_extent(slide, pattern: Pattern, W: int, H: int) -> Optional[tuple[int, int, int]]:
     """(left, right, bottom) of what the slide shows, its chrome, full-slide grounds and the marks at its foot aside."""
     chrome = set(pattern.chrome_shape_ids)
@@ -175,6 +199,9 @@ def _room_under_heading(slide, pattern: Pattern, manifest: TemplateManifest, W: 
     ib = ink_box(t_el, manifest.tokens.typography.primary_family)
     if ib is None:
         return None
+    # a heading turned with its band: its letters as they stand on the slide — the line under the unturned letters ran
+    # over the low end of the tilted heading
+    ib = turned_box(t_el, ib)
     safe = manifest.tokens.spacing.safe_area
     x = ib.x
     width = int(safe.x2 * W) - x

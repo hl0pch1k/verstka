@@ -116,7 +116,15 @@ def _layout_for(builder: DeckBuilder, manifest: TemplateManifest, family: Family
         [p for p in known if p.family == family],
         known,
     ]
-    for prefs in tiers:
+    for i, prefs in enumerate(tiers):
+        if i == 2 and kind not in _COVER_KINDS and known and not any(p.kind not in _COVER_KINDS for p in known):
+            # no sample of the template is a content page (a LibreOffice template's empty «title, content» slide reads
+            # as a divider): a content slide takes the package's layout with a heading at the top whose content band
+            # is freest of drawn art — never the cover's layout, its heading mid-slide in a cloud over trees and grass
+            # (unseen template, a 160 pt band left for a chart)
+            lay = _clean_layout(builder, manifest)
+            if lay is not None and lay[1] >= 0.7:
+                return lay[0], _layout_family(manifest, str(lay[0].part.partname).lstrip("/"), family)
         if prefs:
             part = Counter(p.layout_part for p in prefs).most_common(1)[0][0]
             return by_partname[part], _layout_family(manifest, part, family)
@@ -1993,7 +2001,11 @@ def _keep_turned_heading(title_ph, manifest: TemplateManifest, W: int, H: int, w
         x, w = max(ink.x - insets[0], box.x), need
     t = math.radians(a)
     cx, cy = x + w / 2.0, box.y + box.h / 2.0
-    pts = [(cx + dx * math.cos(t) - dy * math.sin(t), cy + dx * math.sin(t) + dy * math.cos(t)) for dx in (-w / 2.0, w / 2.0) for dy in (-box.h / 2.0, box.h / 2.0)]
+
+    def turned(x0: float, y0: float, x1: float, y1: float) -> list[tuple[float, float]]:
+        return [(cx + (px - cx) * math.cos(t) - (py - cy) * math.sin(t), cy + (px - cx) * math.sin(t) + (py - cy) * math.cos(t)) for px in (x0, x1) for py in (y0, y1)]
+
+    pts = turned(x, box.y, x + w, box.y2)
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     mx, my = 0.02 * W, 0.02 * H
     dx = (mx - min(xs)) if min(xs) < mx else ((W - mx) - max(xs) if max(xs) > W - mx else 0.0)
@@ -2001,7 +2013,11 @@ def _keep_turned_heading(title_ph, manifest: TemplateManifest, W: int, H: int, w
     title_ph.left, title_ph.top, title_ph.width = Emu(int(x + dx)), Emu(int(box.y + dy)), Emu(int(w))
     if dx or dy or w != box.w:
         warnings.append("turned heading narrowed to its letters and kept on the slide")
-    return int(max(ys) + dy)
+    # the lowest point of the turned letters, not of the turned box: a box taller than its line (the heading centred
+    # in it) set the content a tenth of the slide under the end of the line (a tilted band: a chart flattened under
+    # air)
+    low = max(p[1] for p in turned(ink.x, ink.y, ink.x2, ink.y2))
+    return int(min(low, max(ys)) + dy)
 
 
 def _set_size(title_ph, default: float) -> float:

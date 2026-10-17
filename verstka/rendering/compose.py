@@ -1580,7 +1580,14 @@ class Composer:
             self.chart_pair(area)
         elif comp in ("table",) and c.table is not None or comp in ("chart_text", "chart") and c.chart is None and c.table is not None:
             # (a data chart whose rows did not fit is the same data as a table, set again on every pass — `_chart_failed`)
-            with self._lines_under(area, list(c.bullets)) as main:
+            lines = list(c.bullets)
+            lead_n = max((i + 1 for i, t in enumerate(lines) if t.rstrip().endswith(":")), default=0)
+            if lead_n and not intro:
+                # a line that announces the table («Динамика активных пользователей пилота:») and the lines before it
+                # read over the table, not under it: the reader meets the colon before what it introduces
+                area = self._intro(" ".join(t.strip() for t in lines[:lead_n]), area)
+                lines = lines[lead_n:]
+            with self._lines_under(area, lines) as main:
                 self.table(main, c.table)
         elif comp in ("chart_text", "chart") and c.chart is not None:
             self.chart(area)
@@ -2125,6 +2132,20 @@ class Composer:
             if best is not None and best[0][0] > reading(chosen) + 0.05:
                 _, cols, rows, badge, (cw, pad, inner_w, chosen) = best
                 self.warnings.append(f"карточки {cols}×{rows}{' без номеров' if badge is None and badge0 in ('index', 'index_s', 'index_h') else (' с малыми номерами' if badge == 'index_s' else (' с номерами сбоку' if badge == 'index_h' else ''))}: текст {reading(chosen):g} пт")
+        if badge == "figure" and all(i.number for i in items) and (forced or reading(chosen) < k.body - 0.05):
+            # cards led by their figures that no grid of the area holds at the body size — four slivers in a column
+            # between trees, two rows in a band too short for them (unseen template: words broken letter by letter,
+            # the cards run down into the art): one item a row, the figure at the left and its words beside it, in one
+            # or two columns — taken when it reads larger than the grid (or the grid does not fit at all)
+            rows_plan = None
+            for c_ in ((1, 2) if n <= 4 else (2, 1)):
+                got = self._figure_rows_plan(area, items, c_)
+                if got is not None and (rows_plan is None or got["ls"] > rows_plan["ls"] + 0.05):
+                    rows_plan = got
+            if rows_plan is not None and (forced or rows_plan["ls"] > reading(chosen) + 0.05):
+                self.warnings.append(f"{n} карточек с цифрами не помещаются сеткой: цифры строками, слова рядом ({rows_plan['ls']:g} пт)")
+                self._kpi_rows_draw(area.x, area.y, rows_plan)
+                return
         ts, bs, content_h = chosen
         max_row_h = int((area.h - k.vgap * (rows - 1)) / rows)
         if content_h > max_row_h and rows == 1 and 2 <= n <= 3 and any(it.bullets for it in items):
@@ -2711,6 +2732,48 @@ class Composer:
                 if total <= avail.h:
                     return dict(fs=fs, fw=fw, lw=lw, gap=gap, between=between, figs=[p for p, _ in figs], labs=labs, rows_h=level, fig_h=fig_h,
                                 w=cw, h=total, cols=cols, per=per, col_gap=col_gap)
+        return None
+
+    def _figure_rows_plan(self, avail: Bbox, items: list[SlideItem], cols: int) -> Optional[dict]:
+        """Cards led by their figures set as rows (`_kpi_rows_draw`'s form): each figure on one line at the left, the
+        item's title (bold, the heading colour) and its words beside it, hairlines between the rows, in `cols` columns.
+        The words at the body size — under it only on the dense pass, to its floor —, every word whole; the figure 1.6
+        times the words at the least and never wider than 45 % of a column. None when no size fits `avail`."""
+        k = self.kit
+        colors = k.colors
+        n = len(items)
+        if not n:
+            return None
+        gap = int(k.gap * 1.5)
+        dense = getattr(self, "_dense", False)
+        between = int(k.vgap * (0.8 if dense else (1.0 if cols > 1 else 1.4)))
+        col_gap = k.gap * 2
+        cw = int((avail.w - col_gap * (cols - 1)) / cols)
+        per = math.ceil(n / cols)
+        floor = k.text_floor
+        if dense:
+            floor = min(floor, max(self._dense_floor(), k.small * 0.85))
+        titles = [it.title for it in items if it.title]
+        texts = [it.text for it in items if it.text]
+        # (the title and the words as two paragraphs: a card's words are often a data slide's conclusion said again,
+        # which the audit knows whole — never run into the title)
+        for ls in dict.fromkeys([k.body] + [x for x in reversed(k.sizes) if floor - 0.05 <= x < k.body - 0.05]):
+            for fs in k.figure_sizes(k.figure_cap(max(per, 2), False, self.strategy), FIG_RATIO * ls - 0.3):
+                figs = [self.figure_para(it.number or "", fs, colors.figure, colors.muted) for it in items]
+                fw = _emu(max(w for _, w in figs) / 0.94)
+                if fw > 0.45 * cw:
+                    continue
+                lw = cw - fw - gap
+                if not (self.fits_width(titles, ls, k.bold, lw) and self.fits_width(texts, ls, False, lw - _emu(ls * 1.1))):
+                    continue
+                labs = [[self.P(it.title, ls, colors.heading, bold=k.bold)] * bool(it.title) + [self.P(it.text, ls, colors.text)] * bool(it.text) for it in items]
+                fig_h = _emu(fs * max(1.15, k.line))
+                rows_h = [max(fig_h, self.h(lp, lw)) for lp in labs]
+                level = [max(rows_h[r + c * per] for c in range(cols) if r + c * per < n) for r in range(per)]
+                total = sum(level) + (per - 1) * between
+                if total <= avail.h:
+                    return dict(fs=fs, fw=fw, lw=lw, gap=gap, between=between, figs=[p for p, _ in figs], labs=labs, rows_h=level, fig_h=fig_h,
+                                w=cw, h=total, cols=cols, per=per, col_gap=col_gap, ls=ls)
         return None
 
     def _kpi_rows_draw(self, x: int, y0: int, plan: dict) -> None:
@@ -3477,14 +3540,21 @@ class Composer:
                 def room(pl: dict) -> int:
                     return int((bottom - pl["h"] - gap - area.y) * 0.92)
 
+                # the strip's padding goes first — the same words as the accent bar and the line, at the same size —
+                # (a tilted heading band and a footer triangle left a 0.2-high frame for 21 months: the strip took 8 %
+                # of the slide for one line)
+                if room(plan) < need and plan.get("strip") and not plan.get("fig"):
+                    p2 = self._takeaway_plan(take, area.w, figure=False, sizes=(plan["size"],), strip=False)
+                    if p2["h"] < plan["h"]:
+                        plan = p2
                 # (never under the body size: a conclusion in small print helps no plot enough to be worth it)
                 if room(plan) < need and k.body < plan["size"] - 0.05:
-                    p2 = self._takeaway_plan(take, area.w, figure=False, sizes=(k.body,))
+                    p2 = self._takeaway_plan(take, area.w, figure=False, sizes=(k.body,), strip=False if not plan.get("strip") else None)
                     if p2["h"] < plan["h"]:
                         plan = p2
                 short = _first_sentence(take) if room(plan) < need else ""
                 if short and short != take:
-                    p2 = self._takeaway_plan(short, area.w, figure=False, sizes=(plan["size"],))
+                    p2 = self._takeaway_plan(short, area.w, figure=False, sizes=(plan["size"],), strip=False if not plan.get("strip") else None)
                     if p2["h"] < plan["h"] and room(p2) >= min(need, room(plan) + int(0.06 * area.h)):
                         plan = p2
                         rest = take[len(short):].strip(" .")
@@ -3656,6 +3726,7 @@ class Composer:
             return
         foot_box, plan, area = notes
         k = self.kit
+        block_bottom = self._content_bottom(n0)  # (the block itself, before the conclusion is set under it)
         if plan is not None:
             spot = self._conclusion_spot(n0, last=True)
             said = self._said()
@@ -3693,6 +3764,14 @@ class Composer:
                 self.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
         if foot_box is not None:
             box, para = foot_box
+            gap = int(k.vgap * 0.6)
+            if block_bottom is not None and block_bottom + gap > box.y:
+                # the block ran past its area all the same (a table of ten rows the densest setting does not hold): the
+                # source line goes under what the slide really shows — never printed over its last rows
+                bottom = max(block_bottom, self._content_bottom(n0) or block_bottom)
+                if bottom + gap + box.h <= k.H - int(0.02 * k.H):
+                    box = Bbox(x=box.x, y=bottom + gap, w=box.w, h=box.h)
+                    self.warnings.append("the footnote set under the content: the content runs past its area")
             self.cv.text(box, para, name="Footnote")
 
     def _undo(self, n0: int) -> None:
@@ -4333,19 +4412,28 @@ class Composer:
         if deltas:
             x = area.x + width + k.gap * 2
             w = area.x + area.w - x
-            paras: list[Para] = []
-            for value, label, span in deltas[:2]:
-                fs = k.display
-                for s_ in k.figure_sizes(k.figure_cap(2, False, self.strategy), k.h3):
-                    fs = s_
-                    if self.figure_para(value, s_, k.colors.figure, k.colors.muted)[1] <= _pt(w) * 0.8:
-                        break
-                paras.append(Para(self.figure_para(value, fs, k.colors.figure, k.colors.muted)[0].runs, space_after=2))
-                paras.append(self.P(label, k.body, k.colors.text, space_after=1))
-                paras.append(self.P(span, k.small, k.colors.muted, space_after=k.body * 1.3))
-            hh = self.h(paras, w)
-            self.cv.line(x - k.gap, area.y, x - k.gap, area.y + total_h, k.colors.divider, 1.0)  # as tall as the table
-            self.cv.text(Bbox(x=x, y=area.y, w=w, h=min(hh, area.h)), paras, name="Takeaway")
+            hh = 0
+            for keep in (2, 1):
+                paras: list[Para] = []
+                for value, label, span in deltas[:keep]:
+                    fs = k.display
+                    for s_ in k.figure_sizes(k.figure_cap(2, False, self.strategy), k.h3):
+                        fs = s_
+                        if self.figure_para(value, s_, k.colors.figure, k.colors.muted)[1] <= _pt(w) * 0.8:
+                            break
+                    paras.append(Para(self.figure_para(value, fs, k.colors.figure, k.colors.muted)[0].runs, space_after=2))
+                    paras.append(self.P(label, k.body, k.colors.text, space_after=1))
+                    paras.append(self.P(span, k.small, k.colors.muted, space_after=k.body * 1.3))
+                # (measured a little narrower than it is, as the column beside a chart: the renderer sets a line a
+                # little wider than measured — two changes in a quarter of the slide ran a sixth past their box)
+                hh = self.h(paras, int(w * self.WORD_ROOM))
+                if hh <= area.h:
+                    break
+            if hh <= area.h:
+                self.cv.line(x - k.gap, area.y, x - k.gap, area.y + total_h, k.colors.divider, 1.0)  # as tall as the table
+                self.cv.text(Bbox(x=x, y=area.y, w=w, h=hh), paras, name="Takeaway")
+            else:
+                self.warnings.append("what changed most is not set beside the table: no room for it")
 
     # ---- chart slides: one content, three presentations ------------------------------------------------------------
     #

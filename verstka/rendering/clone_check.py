@@ -737,6 +737,52 @@ def closing_trouble(slide, body: float, headline: Optional[str] = None) -> Optio
     return None
 
 
+def heading_off_its_ground(slide, pattern: Pattern, manifest: TemplateManifest) -> Optional[str]:
+    """The sample's heading, filled with the slide's headline, runs off the ground it is coloured for: a part of its
+    letters reads (3:1) and a part does not (under 2:1) — a white headline longer than the sample's on a teal band cut
+    on the diagonal ran onto the white page, «38% выручки» white on white. Measured along each line of its letters on
+    what the layout and the master really paint there (their shapes' outlines), else the sample's ground."""
+    from verstka.rendering.layers import ground_under
+    from verstka.rendering.textfill import inherited_color
+    from verstka.schemas.common import Bbox, contrast_ratio
+
+    t = next((s_ for s_ in pattern.slots if s_.role == SlotRole.title), None)
+    if t is None:
+        return None
+    shape = next((sh for sh in slide.shapes if str(sh.shape_id) == str(t.shape_id)), None)
+    if shape is None or not shape.has_text_frame or not shape.text_frame.text.strip():
+        return None
+    try:
+        if abs(((float(shape.rotation or 0.0) + 180.0) % 360.0) - 180.0) > 1.5:
+            return None  # a turned heading: its band is turned with it (`synth._keep_turned_heading`)
+        col = inherited_color(shape)
+    except Exception:  # noqa: BLE001
+        return None
+    if not col:
+        return None
+    W = manifest.slide_size.w
+    bg = next((b.hex for b in manifest.tokens.backgrounds if pattern.source_slide in b.slides and b.hex), None)
+    bg = bg or manifest.tokens.color_for("background.dark" if pattern.family.value == "dark" else "background.light")
+    reads, fails = 0, 0
+    for ln in ink_lines(shape._element, manifest.tokens.typography.primary_family):
+        for i in range(10):
+            px = ln.x + (i + 0.5) * ln.w / 10
+            probe = Bbox(x=int(px - 0.004 * W), y=ln.y + ln.h // 4, w=max(int(0.008 * W), 1), h=max(ln.h // 2, 1))
+            try:
+                got = ground_under(slide, probe, min_share=0.5)
+            except Exception:  # noqa: BLE001
+                return None
+            g = got[0] if got is not None else bg
+            if not g:
+                continue
+            cr = contrast_ratio(col, g)
+            reads += cr >= 3.0
+            fails += cr < 2.0
+    if reads and fails >= 2:
+        return "the headline runs off the ground its colour is set for: a part of its letters does not read"
+    return None
+
+
 def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, warnings: list[str]) -> Optional[str]:
     """Why a content slide set on `pattern` must not be shown, or None."""
     for w in warnings:
@@ -757,6 +803,12 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
     ghosts = _layout_plates_left_empty(slide, manifest)
     if ghosts:
         return f"{ghosts} plates of the layout's placeholders stay empty on the slide"
+    try:
+        off = heading_off_its_ground(slide, pattern, manifest)
+    except Exception:  # noqa: BLE001 - a measure never refuses a sample by failing
+        off = None
+    if off:
+        return off
     H = manifest.slide_size.h
     hpt = H / EMU_PER_PT
     typo = manifest.tokens.typography
