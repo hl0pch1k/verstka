@@ -148,7 +148,19 @@ def fmt_value(x: float, unit: Optional[str], case: str = "nom") -> str:
     s = fmt_num(x, _nines(x) if unit == "%" else None)
     if not unit:
         return s
+    forms = _NOUN_UNITS.get(unit.strip().lower())
+    if forms is not None:
+        # «74 балла», «83 балла», «81 балл», «74,6 балла» — единица-слово по числу (F12: не «83 баллов»)
+        if not float(x).is_integer():
+            return s + NBSP + forms[1]
+        n = abs(int(x))
+        k = forms[0] if n % 10 == 1 and n % 100 != 11 else forms[1] if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else forms[2]
+        return s + NBSP + k
     return s + unit if unit == "%" else s + NBSP + unit
+
+
+_NOUN_UNITS = {u: f for f in (("балл", "балла", "баллов"), ("очко", "очка", "очков"), ("пункт", "пункта", "пунктов"))
+               for u in f + ((f[2][:-2] + "ы",) if f[0] == "балл" else ())}
 
 
 def _nines(x: float) -> Optional[int]:
@@ -473,6 +485,14 @@ def phrase(name: Optional[str]) -> Optional[Phrase]:
         return None
     toks = s.split(" ")
     low = [t.lower() for t in toks]
+    if low[0] == "не":
+        return None  # «Не сдали» — глагол с отрицанием, а не название («Ня сдали», F12)
+    if len(toks) == 1 and re.fullmatch(r"[А-ЯЁ]{2,6}", toks[0]):
+        return Phrase(s, s, s, s, s, s, "m", sure=True)  # «ДМС», «КАСКО», «РИНЦ» — несклоняемые (не «ДМСА»)
+    if len(toks) >= 2 and any(re.fullmatch(r"[А-ЯЁ][а-яё]+", t) for t in toks[1:]):
+        return None  # «Бюджет Заявлений» — две строки шапки в одной: склонять как фразу нельзя («бюджета Заявлений»)
+    if len(toks) >= 2 and re.fullmatch(r"[а-яё]+(?:ано|ено|ено|ято|ыто|ото)", low[0]):
+        return None  # «Выдано кредитов» — краткое причастие, а не существительное («выдана кредитов»)
     # главное слово — первое не-прилагательное (одно слово — всегда существительное)
     h = 0
     while h < len(toks) - 1 and _is_adj(low[h]):

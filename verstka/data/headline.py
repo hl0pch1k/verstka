@@ -117,8 +117,12 @@ def compose(task: TaskKind, fs: FactSet) -> tuple[str, Optional[str]]:
         "dynamics": _dynamics, "comparison": _comparison, "shares": _shares, "distribution": _distribution,
         "reference": _reference, "kpi": _kpi, "relationship": _relationship,
     }[task]
-    head, caption = fn(fs)
-    head = head.strip()
+    try:
+        head, caption = fn(fs)
+    except (KeyError, TypeError, IndexError):
+        # факты без нужного слова (лидера, подписи): тема вместо вывода, а не падение всей колоды (F9)
+        head, caption = fs.ctx.get("plain") or "", fs.ctx.get("caption")
+    head = (head or "").strip()
     if head.endswith(".") and not re.search(r"(?:^|\s)(?:п|п\.п|чел|шт|тыс|руб|дн|мин|кв|млн|млрд|ч|г)\.$", head):
         head = head[:-1]  # точку после сокращения («+6 п.») не трогаем
     head = _cap(head)
@@ -182,6 +186,14 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
         if cv_ is not None and cur_when:
             head += f", сейчас — {fmt_value(cv_.value, cv_.unit)} ({cur_when})"
         return head, c.get("caption")
+    pmj = c.get("period_majority")
+    if pmj and _f(fs, "majority_up") is not None:
+        # «по большинству культур»: у скольких выше, а не среднее несопоставимых рядов (F8)
+        name, up, n, a_txt, b_txt, down = pmj
+        verdict = "у большинства" if up * 2 > n else "не у большинства"
+        ya, yb = re.fullmatch(r"(\d{4}) год", a_txt or ""), re.fullmatch(r"(\d{4}) год", b_txt or "")
+        when = f"В {yb.group(1)} году выше, чем в {ya.group(1)}," if ya and yb else f"{upper_first(b_txt)} — выше, чем {a_txt},"
+        return f"{when} — у {up} из {n}: {verdict}", c.get("caption")
     pc = c.get("period_compare")
     if pc and _f(fs, "period_change") is not None and _f(fs, "period_b") is not None:
         # цель сравнивает два периода: B против A («к тому же периоду 2024», «до и после»)
@@ -190,14 +202,14 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
         vb, va = _f(fs, "period_b").value, _f(fs, "period_a").value
         if yoy:
             return f"{name}: {ch} к тому же периоду {ya} ({b_txt})", c.get("caption")
-        avg = "" if add else " в среднем"
+        avg = "" if add or re.search(r"(?i)(?:^|\s|:\s)средн", name) else " в среднем"
         return (f"{name}{avg}: {fmt_value(vb, u)} ({b_txt}) против {fmt_value(va, u)} ({a_txt}), {ch}",
                 c.get("caption"))
     nc, ch_ = c.get("named_cat"), _f(fs, "cat_change")
     if nc and ch_ is not None:
         # цель назвала одну категорию ряда: «Базовый: −14% за 3 квартала»
         name, pct, span = nc
-        return f"{name}: {fmt_signed(ch_.value if pct >= 0 else -ch_.value, '%')} за {span}", c.get("caption")
+        return f"{name}: {fmt_signed(abs(ch_.value) if pct >= 0 else -abs(ch_.value), '%')} за {span}", c.get("caption")
     pt = _f(fs, "period_total")
     if c.get("period_total") and pt is not None:
         # «сколько заработали за ноябрь и как это соотносится с октябрём»: итог месяца, потом к базе
@@ -208,7 +220,7 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
             base = period_acc(c["period_base"])
             if c["period_base"][:4] == c["period_total"][:4]:
                 base = re.sub(r"\s+\d{4}$", "", base)  # тот же год — без года: «чем за октябрь»
-            head += f": на {fmt_pct(ch.value)}% {'больше' if c.get('period_up') else 'меньше'}, чем за {base}"
+            head += f": на {fmt_pct(abs(ch.value))}% {'больше' if c.get('period_up') else 'меньше'}, чем за {base}"
         return head, c.get("caption")
     if c.get("years"):
         return _dynamics_years(fs)
@@ -567,7 +579,11 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         how = f" ({c.get('matrix_note') or c.get('period_note')})" if c.get("matrix_note") or c.get("period_note") else ""
         return (f"{low}{note} — {c['last_label']}: {fmt_value(lo_f.value, u)}{how}, {top} — {c['leader']}: "
                 f"{fmt_value(hi_f.value, u)}"), c.get("caption")
-    leader = c["leader"]
+    leader = c.get("leader")
+    if not leader:
+        # цель назвала категории, но не величину (F9: «конверсия от отклика до оффера» по строкам-этапам): лидера нет —
+        # тема, а не KeyError
+        return c.get("plain", ""), c.get("caption")
     pl = "pl" if c.get("lead_plural") or is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
     grow_leader = c.get("growth_leader")
@@ -684,7 +700,9 @@ def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
         if major:
             return f"{major}{w} — {a0}: {fmt_pct(p0.value)}%", c.get("caption")
         return (f"{parts[0]} — крупнейшая часть{w}: {fmt_pct(p0.value)}%, {a1} — {fmt_pct(p1.value)}%"), c.get("caption")
-    leader = c["leader"]
+    leader = c.get("leader")
+    if not leader:
+        return c.get("plain", ""), c.get("caption")
     pl = "pl" if is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
     whole: Optional[Phrase] = c.get("whole")

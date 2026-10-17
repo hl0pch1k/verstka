@@ -68,7 +68,10 @@ MAX_VALUES = 8  # distinct values of a category column shown to the model
 MAX_PERIODS = 24  # periods of a time axis listed one by one; longer — first … last
 
 TASKS = ("dynamics", "comparison", "shares", "distribution", "relationship", "kpi", "reference")
-ASKS = ("max", "min", "total", "mean", "fastest", "margin", "above", "below", "spike", "meet")
+ASKS = ("max", "min", "total", "mean", "fastest", "margin", "above", "below", "spike", "meet", "top_n", "share", "product",
+        "compare_columns")
+# что колода не считает (F2): ответа нет — видимая пометка, а не итог вместо ответа
+UNMET = "по данным этот вопрос не посчитан"
 AGGS = ("sum", "mean", "weighted_mean", "latest", "total_row")
 PERIODS = ("all", "latest", "range", "compare")
 TARGETS = ("plan", "target", "previous_period", "column", "category")
@@ -91,6 +94,13 @@ class ModelPeriod(BaseModel):
     end: Optional[str] = Field(None, description="range: последний период")
     base: Optional[str] = Field(None, description="compare: с чем сравнивают — период A (или его начало)")
     target: Optional[str] = Field(None, description="compare: что сравнивают — период B (или его начало)")
+    base_end: Optional[str] = Field(None, description="compare: последний период A, когда A — диапазон")
+    target_end: Optional[str] = Field(None, description="compare: последний период B, когда B — диапазон")
+
+
+class ModelRatio(BaseModel):
+    num: str = Field("", description="колонка-числитель, точное имя («Выручка» в «выручка на посетителя»)")
+    den: str = Field("", description="колонка-знаменатель, точное имя («Посетители»)")
 
 
 class ModelCompare(BaseModel):
@@ -105,15 +115,30 @@ class ModelGoal(BaseModel):
     metric: Optional[str] = Field(None, description="точное имя колонки-величины из данных; null — величина не названа")
     dimension: Optional[str] = Field(None, description="точное имя колонки-разреза (категории или время); null — разрез по данным")
     categories: list[str] = Field(default_factory=list, description="значения категорий, названные в брифе, точно как в данных")
-    ask: Optional[str] = Field(None, description="max | min | total | mean | fastest | margin | above | below | spike | meet; null — общий вывод")
-    aggregation: Optional[str] = Field(None, description="sum | mean | weighted_mean | latest | total_row; null — как принято для величины")
+    ask: Optional[str] = Field(None, description=(
+        "max | min | total | mean | fastest | margin | above | below | spike | meet | top_n (доля N крупнейших, n) | "
+        "share (доля названных категорий) | compare_columns (строки, где одна колонка меньше/больше другой: compare_to "
+        "column) | product (ожидаемое значение, сумма × вероятность — колода его не считает); null — общий вывод"))
+    aggregation: Optional[str] = Field(None, description=(
+        "sum | mean | weighted_mean | latest | total_row; null — как принято для величины. Величина на единицу («на "
+        "посетителя», «за сеанс», «на место») — не weighted_mean, а ratio"))
     weight: Optional[str] = Field(None, description="weighted_mean: колонка-вес, точное имя")
     period: Optional[ModelPeriod] = None
     direction: Optional[str] = Field(None, description="higher | lower — какое значение величины лучше")
     threshold: Optional[ModelThreshold] = None
     compare_to: Optional[ModelCompare] = None
     yes_no: bool = Field(False, description="вопрос «да или нет» («вырос ли», «укладываются ли»)")
+    ratio: Optional[ModelRatio] = Field(None, description="величина на единицу: num / den («на посетителя», «за сеанс»)")
+    n: Optional[int] = Field(None, description="top_n: сколько первых категорий («пять крупнейших» → 5)")
     confidence: float = Field(0.7, description="0…1")
+
+    @field_validator("n", mode="before")
+    @classmethod
+    def _n(cls, v: Any) -> Any:
+        try:
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
 
     @field_validator("period", mode="before")
     @classmethod
@@ -191,6 +216,9 @@ class UnderstoodGoal(BaseModel):
     threshold: Optional[ModelThreshold] = None
     compare_to: Optional[ModelCompare] = None
     yes_no: bool = False
+    ratio: Optional[dict] = None  # {"num", "den", "name", …}: колонка-отношение (verstka/data/derive.py)
+    n: Optional[int] = None
+    versus: Optional[str] = None  # колонка, с которой сравнивают по строкам
     confidence: float = 1.0
     source: Literal["model", "rules"] = "model"
     label: str = ""  # «Сравнение категорий · «Срок рассмотрения» · где больше всего»
@@ -207,6 +235,7 @@ class IntentNote(BaseModel):
     dataset: Optional[str] = None
     file: Optional[str] = None
     source: Literal["model", "rules"] = "model"
+    weak: bool = False  # причина модели пустая или с чужими числами: цель правил о тех же словах — главнее (F14)
 
 
 @dataclass
@@ -225,6 +254,9 @@ class GoalsRead:
     cached: bool = False
     seconds: float = 0.0
     raw: Optional[dict] = None  # the model's answer, as parsed
+    # таблицы с колонками-отношениями целей («выручка на одного посетителя»): план строится по ним; None — как есть
+    tables: Optional[list] = None
+    profiles: Optional[list] = None
 
     def payload(self) -> dict:
         """The answer of POST /api/goals («Цели из текста»): each goal with its human label, the sentences without an
@@ -279,9 +311,25 @@ class _Ctx:
         self.datas = [Data(t, p) for t, p in zip(self.tables, self.profiles)]
         self.scores = [task_scores(d) for d in self.datas]
         self._periods: dict[int, list[str]] = {}
+        self.derived: dict[int, list[dict]] = {}  # колонки-отношения целей, добавленные к таблицам
 
     def __len__(self) -> int:
         return len(self.tables)
+
+    def derive(self, k: int, spec: dict) -> None:
+        """Колонка-отношение цели («выручка на одного посетителя») — в таблицу датасета `k`: план и проверка видят её
+        как данные (`verstka/data/derive.py`)."""
+        from verstka.data.derive import apply
+
+        t = apply(self.tables[k], spec)
+        if t is self.tables[k]:
+            return
+        self.tables[k] = t
+        self.profiles[k] = profile_table(t)
+        self.datas[k] = Data(t, self.profiles[k])
+        self.scores[k] = task_scores(self.datas[k])
+        self._periods.pop(k, None)
+        self.derived[k] = [*self.derived.get(k, []), spec]
 
     def index(self, ref: Optional[str]) -> Optional[int]:
         """The dataset the model named: «d2», the dataset's id, or its file name."""
@@ -389,8 +437,21 @@ class _Ctx:
             return True
         ta = self.profiles[k].time_axis
         if ta is not None and re.match(r"^\d{4}", x):
-            return _iso_le(_norm(ta.start), x) and _iso_le(x, _norm(ta.end))
+            return _iso_le(_week_date(_norm(ta.start)), x) and _iso_le(x, _week_date(_norm(ta.end), last=True))
         return False
+
+
+def _week_date(iso: str, last: bool = False) -> str:
+    """«2026-w23» (неделя ISO) → дата её понедельника (воскресенья — `last`): с ней сравниваются месяцы и дни."""
+    import datetime as _dt
+
+    m = re.fullmatch(r"(\d{4})-w(\d{1,2})", iso or "")
+    if not m:
+        return iso
+    try:
+        return _dt.date.fromisocalendar(int(m.group(1)), int(m.group(2)), 7 if last else 1).isoformat()
+    except ValueError:
+        return iso
 
 
 def _norm(s: Optional[str]) -> str:
@@ -637,6 +698,7 @@ def _validate(reading: GoalReading, brief: str, ctx: _Ctx) -> tuple[list[Underst
             continue
         quote = _quote(brief, *span)
         reason = _clean_reason(mm.reason, brief, ctx)
+        weak = not reason
         if not reason:
             refused.append({"quote": quote, "why": "причина пустая или с числами, которых нет ни в брифе, ни в данных"})
             reason = "в данных нет того, о чём это предложение"
@@ -644,7 +706,7 @@ def _validate(reading: GoalReading, brief: str, ctx: _Ctx) -> tuple[list[Underst
         if any(g.at <= span[0] < g.at + len(g.quote) or span[0] <= g.at < span[1] for g in goals):
             continue  # the same words already hold a goal: the goal wins
         notes.append(IntentNote(quote=quote, reason=reason, at=span[0], dataset=ctx.ids[k] if k is not None else None,
-                                file=ctx.profiles[k].file if k is not None else None))
+                                file=ctx.profiles[k].file if k is not None else None, weak=weak))
     goals.sort(key=lambda g: g.at)
     notes.sort(key=lambda n: n.at)
     return goals, notes, refused
@@ -723,11 +785,28 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
             task = best  # «какие серверы выше 80%»: порог отвечает и тогда, когда сравнивать нечем (plan.py, th_goal)
         else:
             return None, _why_not(task, d)
+    mm = ctx.measure(k, metric) if metric else None
+    if task == "shares" and mm is not None and not (mm.additive or mm.stock) and scores.get("comparison", 0.0) >= FEASIBLE:
+        # «покажите долю электронных выдач по филиалам» — колонка уже доля каждой строки: её не складывают в целое, а
+        # сравнивают по строкам (F14: иначе план показал бы свою колонку)
+        dropped.append(f"«{metric}» — не части целого: доли сравнены по строкам")
+        task = "comparison"
     # what is asked
     threshold = mg.threshold
     if ask is not None and ask not in ASKS:
         dropped.append(f"вопрос «{ask}» неизвестен")
         ask = None
+    versus = None
+    if thresholdish and threshold is None:
+        # «где платных заявлений меньше, чем платных мест» — порог не число, а другая колонка (F2): сравнение по строкам
+        versus = _versus_column(mg, quote, k, ctx, metric)
+        if versus is None and len(cats) >= 2:
+            ask, thresholdish = None, False  # «правда ли, что на «Ледокол-2» продано больше, чем на «Северный ветер»» — строки
+        elif versus is None:
+            return None, f"{UNMET}: «{'меньше' if ask == 'below' else 'больше'}, чем …» — с чем сравнивать, в данных не нашлось"
+    if versus is not None:
+        ask = "versus_lt" if ask == "below" else "versus_gt"
+        thresholdish = False
     if thresholdish:
         if threshold is None:
             dropped.append("порог без числа")
@@ -744,6 +823,57 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
                 ask = f"{ask}:{_num(threshold.value)}"
     elif threshold is not None and ask is None:
         threshold = None
+    pc = _period_columns_named(quote, k, ctx)
+    if pc is not None and re.search(r"(?i)просел|просад|упал|паден|снизил|сниж|сократ|уменьш|меньше|вырос|рост|увелич|больше",
+                                    quote or ""):
+        # «сравни июль и сентябрь по маршрутам — где просело»: два периода-колонки одной таблицы — по строкам (F2)
+        later, earlier = pc
+        down = bool(re.search(r"(?i)просел|просад|упал|паден|снизил|сниж|сократ|уменьш|меньше", quote or ""))
+        metric, versus, task = later, earlier, "comparison"
+        ask = "versus_lt" if down else "versus_gt"
+        thresholdish = False
+        period = None
+        mg = mg.model_copy(update={"period": None})
+    if ask == "compare_columns":
+        versus = _versus_column(mg, quote, k, ctx, metric)
+        if versus is None and len(cats) >= 2:
+            ask = None  # две названные строки, а не две колонки: сравнение категорий (их значения — на обложке)
+        elif versus is None:
+            return None, f"{UNMET}: сравнение двух колонок — вторая колонка в данных не нашлась"
+        else:
+            ask = "versus_lt" if re.search(r"(?i)меньше|ниже|не\s+хватает", quote) else "versus_gt"
+    if ask == "product":
+        return None, f"{UNMET}: ожидаемое значение (сумма × вероятность) колода не считает — на слайде сумма без учёта вероятности"
+    n_top = mg.n
+    if ask != "top_n" and (mg.task or "").lower() in ("shares", "comparison") and not mg.categories:
+        n_top = _top_n_of(quote)  # «какую долю перевозят пять крупнейших маршрутов вместе»
+        if n_top:
+            ask = "top_n"
+    if ask == "top_n":
+        n_top = n_top or _top_n_of(quote)
+        if not n_top or n_top < 1:
+            return None, f"{UNMET}: сколько крупнейших — не названо числом"
+        mg = mg.model_copy(update={"n": n_top})
+    if ask == "share":
+        ask = "share_of" if mg.categories else None
+    if ask == "meet" and task == "comparison" and metric:
+        # «какие станции выполнили план, а какие нет»: факт и план — две колонки одной единицы, по строкам; колонка
+        # «Выполнение, %» — своя логика плана (цель 100%)
+        plan_col = _plan_column(mg, k, ctx, metric)
+        if plan_col is not None:
+            ask, versus = "met", plan_col
+    if ask in ("min", "max") and task == "dynamics" and not mg.categories and not (mg.period and (mg.period.kind or "") == "compare"):
+        ask = "period_min" if ask == "min" else "period_max"  # «в каком месяце загрузка сети была самой низкой»
+    if task == "comparison" and mg.yes_no and len(mg.categories) == 1 and ask in (None, "max", "min", "mean"):
+        ask = "position"  # «правда ли, что «Ночная» хуже остальных»: где она среди всех
+    if len(cats) == 2 and task == "comparison" and ask in (None, "total", "mean") and _own_rows(ctx, k, cats) and \
+            re.search(r"(?i)конверси|из\s+тех|из\s+них|дош[её]?л|доход|доля|сколько\s+(?:из|процент)", quote or ""):
+        ask = "row_ratio"  # «конверсия от отклика до оффера», «сколько дошли до выхода из откликнувшихся»: строка от строки
+    elif cats and _own_rows(ctx, k, cats):
+        pass  # названные строки — сами категории («СБП» среди способов оплаты): доля — обычный вывод слайда
+    elif mg.categories and ask in (None, "total") and ((mg.task or "").lower() == "shares"
+                                                    or re.search(r"(?i)(?<![а-яё])дол[яюие]\w*", quote or "")):
+        ask = "share_of"  # «какая доля выработки приходится на астраханские станции»
     if ask in ("fastest",) and not ctx.has_time(k):
         dropped.append("«быстрее всех» — без оси времени не посчитать")
         ask = None
@@ -753,12 +883,41 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
     agg = (mg.aggregation or "").strip().lower() or None
     weight = ctx.column(k, mg.weight) if mg.weight else None
     m = ctx.measure(k, metric)
+    if agg == "ratio":
+        # модель назвала отношение агрегацией: числитель — величина, знаменатель — вес (ниже это `ratio`)
+        agg = "weighted_mean" if mg.weight else None
     if agg is not None and agg not in AGGS:
         dropped.append(f"агрегация «{agg}» неизвестна")
         agg = None
     if agg == "sum" and m is not None and not m.additive:
         dropped.append(f"сумма «{metric}» не имеет смысла — это не слагаемое (доля, среднее или уровень)")
         agg = None
+    ratio = None
+    rq = mg.ratio
+    if rq is None and re.search(r"(?i)\bконкурс", quote or ""):
+        rq = _contest(k, ctx, metric)  # «самый большой конкурс на бюджет» — заявлений на одно место
+    wm = ctx.measure(k, weight) if weight else None
+    if agg == "weighted_mean" and m is not None and m.additive and wm is not None:
+        # «выручка на посетителя», «зрителей за сеанс» понятые как среднее с весом: у суммы средних с весом нет — это
+        # отношение колонок; вес-доля («с учётом вероятности») — произведение, его колода не считает (F2)
+        if wm.type == "percent" or (wm.unit or "") == "%" or re.search(r"(?i)вероятн|доля|процент", weight or ""):
+            return None, f"{UNMET}: ожидаемое значение («{metric}» × «{weight}») колода не считает — на слайде сумма без учёта вероятности"
+        rq = ModelRatio(num=metric, den=weight)
+    if rq is not None and rq.num and rq.den:
+        num, den = ctx.column(k, rq.num), ctx.column(k, rq.den)
+        spec = None
+        if num and den and ctx.is_measure(k, num) and ctx.is_measure(k, den):
+            from verstka.data.derive import ratio_spec
+
+            spec = ratio_spec(ctx.tables[k], num, den, quote)
+        if spec is None:
+            return None, f"{UNMET}: «{rq.num}» на «{rq.den}» — таких колонок с числами в данных нет"
+        ctx.derive(k, spec)
+        ratio = spec
+        metric, weight, agg = spec["name"], spec["den"], "weighted_mean"
+        m = ctx.measure(k, metric)
+        if task not in ("comparison", "dynamics"):
+            task = "comparison"
     if agg == "weighted_mean":
         if weight is not None and not ctx.is_measure(k, weight):
             dropped.append(f"вес «{weight}» — не числа")
@@ -780,6 +939,8 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
         agg = None
     # the period
     period = mg.period
+    if (period is None or (period.kind or "all") == "all") and ctx.has_time(k):
+        period = _season_of(quote, ctx.periods(k)) or period  # «сократилось ли ожидание за лето» — июнь–август
     if period is not None:
         kind = (period.kind or "all").strip().lower()
         if kind not in PERIODS:
@@ -789,7 +950,7 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
             dropped.append("в данных нет периодов — период не выбрать")
             period = None
         else:
-            ends = [period.start, period.end, period.base, period.target]
+            ends = [period.start, period.end, period.base, period.target, period.base_end, period.target_end]
             bad = [v for v in ends if v and not ctx.known_period(k, v)]
             if bad:
                 dropped.append(f"периодов {', '.join('«' + b + '»' for b in bad)} в данных нет — границы сняты")
@@ -800,6 +961,8 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
                     period = None  # «с начала года», «за квартал» — the range is all the data has
             if period is not None and period.kind == "all":
                 period = None
+            if period is not None and period.kind == "compare" and not (period.base_end or period.target_end):
+                period = _ranges_of(period, quote, ctx.periods(k))
     direction = (mg.direction or "").strip().lower() or None
     if direction not in (None, "higher", "lower"):
         direction = None
@@ -821,9 +984,184 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
         dimension=dimension, categories=cats, ask=ask, aggregation=agg, weight=weight, period=period,
         direction=direction, threshold=threshold if ask and ask.startswith(("above:", "below:")) else None,
         compare_to=target, yes_no=bool(mg.yes_no), confidence=max(0.0, min(1.0, float(mg.confidence or 0.0))),
-        source="model", dropped=dropped)
+        source="model", dropped=dropped, ratio=ratio, n=mg.n if ask == "top_n" else None, versus=versus)
     u.label = label_of(u)
     return u, None
+
+
+_NUM_WORDS = {"два": 2, "двух": 2, "три": 3, "трёх": 3, "трех": 3, "четыре": 4, "четырёх": 4, "четырех": 4, "пять": 5,
+              "пяти": 5, "шесть": 6, "шести": 6, "семь": 7, "семи": 7, "восемь": 8, "восьми": 8, "девять": 9, "девяти": 9,
+              "десять": 10, "десяти": 10}
+
+
+def _top_n_of(quote: str) -> Optional[int]:
+    """«пять крупнейших маршрутов», «топ-3», «три самых больших» → число; None — не о первых N."""
+    q = (quote or "").lower().replace("ё", "е")
+    m = re.search(r"(?:топ[-\s]?(\d+))|(\d+|" + "|".join(_NUM_WORDS) + r")\s+(?:крупнейш|самы[хе]\s+(?:больш|крупн)|первы[хе]|"
+                  r"лидирующ|ведущ)", q)
+    if not m:
+        return None
+    tok = m.group(1) or m.group(2)
+    return int(tok) if tok.isdigit() else _NUM_WORDS.get(tok)
+
+
+def _contest(k: int, ctx: _Ctx, metric: Optional[str]) -> Optional["ModelRatio"]:
+    """«Конкурс» — заявлений на одно место: колонка заявлений (та, что назвала цель, если она о заявлениях) на колонку
+    мест той же группы («Бюджет Заявлений» / «Бюджет Мест»)."""
+    names = [c.name for c in ctx.profiles[k].columns if ctx.is_measure(k, c.name)]
+    apps = [n for n in names if re.search(r"(?i)заявлен|заявок|заявк", n)]
+    if not apps:
+        return None
+    num = metric if metric in apps else apps[0]
+    grp = re.sub(r"(?i)\s*заявлен\w*|\s*заявок|\s*заявк\w*", "", num).strip().lower()
+    seats = [n for n in names if re.search(r"(?i)мест", n)]
+    den = next((n for n in seats if grp and grp in n.lower()), seats[0] if seats else None)
+    return ModelRatio(num=num, den=den) if den else None
+
+
+_SEASONS = {"лет": (6, 8), "зим": (12, 2), "весн": (3, 5), "осен": (9, 11)}
+
+
+def _season_of(quote: str, periods: Sequence[str]) -> Optional[ModelPeriod]:
+    """«За лето», «летом», «этой зимой» → диапазон месяцев сезона в году данных (F5); None — сезона в брифе нет или
+    данные не по месяцам/дням."""
+    m = re.search(r"(?i)(?:за|в\s+течение|этим|этой|прошл\w+)?\s*(лет(?:о|ом|а)|зим(?:а|ой|у)|весн(?:а|ой|у)|осен(?:ь|ью))\b",
+                  quote or "")
+    if not m:
+        return None
+    key = m.group(1).lower()[:4].rstrip("оаьую")
+    key = next((k for k in _SEASONS if key.startswith(k)), None)
+    import datetime as _dt
+
+    isos = []
+    for p in periods:
+        p = str(p)
+        w = re.fullmatch(r"(\d{4})-W(\d{1,2})", p)
+        if w:  # неделя ISO — месяц её понедельника
+            try:
+                p = _dt.date.fromisocalendar(int(w.group(1)), int(w.group(2)), 1).isoformat()
+            except ValueError:
+                continue
+        if re.match(r"^\d{4}-\d{2}", p):
+            isos.append(p)
+    isos.sort()
+    if key is None or not isos:
+        return None
+    a, b = _SEASONS[key]
+    year = isos[-1][:4]
+    if a > b:  # зима — декабрь прошлого года по февраль
+        start, end = f"{int(year) - 1:04d}-{a:02d}", f"{year}-{b:02d}"
+    else:
+        start, end = f"{year}-{a:02d}", f"{year}-{b:02d}"
+    if not any(start <= p[:7] <= end for p in isos):
+        return None
+    return ModelPeriod(kind="range", start=start, end=end)
+
+
+def _ranges_of(period: ModelPeriod, quote: str, periods: Sequence[str]) -> ModelPeriod:
+    """Сравнение диапазонов, названных словами брифа, когда модель дала только их начала (F5): «во втором полугодии,
+    чем в первом» — шесть месяцев от каждого начала, «… квартале» — три, «июль с августом–сентябрём» — B до последнего
+    названного месяца."""
+    q = (quote or "").lower().replace("ё", "е")
+    b, t = period.base or "", period.target or ""
+    if not (re.fullmatch(r"\d{4}-\d{2}", b) and re.fullmatch(r"\d{4}-\d{2}", t)):
+        return period
+    months = 6 if re.search(r"полугоди", q) else 3 if re.search(r"квартал", q) else 0
+
+    def plus(iso: str, n: int) -> str:
+        y, m = int(iso[:4]), int(iso[5:7]) - 1 + n
+        return f"{y + m // 12:04d}-{m % 12 + 1:02d}"
+
+    if months:
+        return period.model_copy(update={"base_end": plus(b, months - 1), "target_end": plus(t, months - 1)})
+    rng = re.search(r"(январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s*[–—-]\s*"
+                    r"(январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)", q)
+    if rng:
+        names = ["январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"]
+        end = next((i + 1 for i, x in enumerate(names) if rng.group(2).startswith(x)), None)
+        if end is not None:
+            te = f"{t[:4]}-{end:02d}"
+            if te > t and any(str(p).startswith(te) for p in periods):
+                return period.model_copy(update={"target_end": te, "base_end": b})
+    return period
+
+
+def _period_columns_named(quote: str, k: int, ctx: _Ctx) -> Optional[tuple[str, str]]:
+    """(позднее, раннее): две колонки-периода таблицы («Июль», «Сентябрь»), которые называет бриф; None — нет."""
+    from verstka.data.parse import season_name
+
+    q = (quote or "").lower().replace("ё", "е")
+    cols = [c.name for c in ctx.profiles[k].columns if ctx.is_measure(k, c.name)
+            and (season_name(c.name) or re.fullmatch(r"(?:19|20)\d\d", c.name.strip()))]
+    hit = []
+    for c in cols:
+        w = stem(c.lower().replace("ё", "е"))
+        if len(w) >= 3 and re.search(r"(?<![а-яё0-9])" + re.escape(w[:max(3, len(w) - 1)]), q):
+            hit.append(c)
+    if len(hit) != 2:
+        return None
+    a, b = hit
+    order = [c.name for c in ctx.profiles[k].columns]
+    return (b, a) if order.index(b) > order.index(a) else (a, b)
+
+
+def _own_rows(ctx: _Ctx, k: int, cats: Sequence[str]) -> bool:
+    """Названные категории — значения главной колонки категорий (строки сравнения), а не группа строк другой колонки
+    («Астраханская область» у станций)."""
+    d = ctx.datas[k]
+    try:
+        j = d.cat_dim()
+    except Exception:  # noqa: BLE001
+        j = None
+    if j is None:
+        j = d.label
+    if j is None:
+        return False
+    vals = {d.text(i, j).strip().lower() for i in d.rows_idx}
+    return all(c.strip().lower() in vals for c in cats)
+
+
+def _plan_column(mg: ModelGoal, k: int, ctx: _Ctx, metric: str) -> Optional[str]:
+    """Колонка плана той же единицы, что факт («План янв–сен 2026, МВт·ч» к «Выработка янв–сен 2026, МВт·ч»); None —
+    факт в процентах плана или плана нет."""
+    m = ctx.measure(k, metric)
+    if m is None or m.type == "percent" or (m.unit or "") == "%":
+        return None
+    names = []
+    t = mg.compare_to
+    if t is not None and t.name:
+        names.append(ctx.column(k, t.name))
+    names += [c.name for c in ctx.profiles[k].columns if re.search(r"(?i)план|норматив|цел[ьи]", c.name)]
+    for n in names:
+        if not n or n == metric or not ctx.is_measure(k, n):
+            continue
+        b = ctx.measure(k, n)
+        if b is not None and (b.unit or "") == (m.unit or "") and b.type != "percent":
+            return n
+    return None
+
+
+def _versus_column(mg: ModelGoal, quote: str, k: int, ctx: _Ctx, metric: Optional[str]) -> Optional[str]:
+    """Вторая колонка сравнения по строкам: названная моделью (`compare_to` колонка) или словами брифа после «чем»
+    («меньше, чем платных мест» → «Платное Мест», «больше, чем ушедших» → «Ушли за квартал»)."""
+    t = mg.compare_to
+    if t is not None and (t.kind or "").lower() == "column" and t.name:
+        c = ctx.column(k, t.name)
+        if c and c != metric and ctx.is_measure(k, c):
+            return c
+    m = re.search(r"(?i)\bчем\s+(?:у\s+|на\s+|в\s+)?([а-яё\s-]{3,40})", quote or "")
+    if not m:
+        return None
+    words = [w for w in re.findall(r"[а-яё]{3,}", m.group(1).lower()) if w not in ("было", "были", "стало", "есть")][:3]
+    best, score = None, 0
+    for c in ctx.profiles[k].columns:
+        if c.name == metric or not ctx.is_measure(k, c.name):
+            continue
+        cs = [stem(x) for x in stems_of(c.name)]
+        hit = sum(1 for w in words if any(stem(w)[:4] == x[:4] or stem(w)[:3] == x[:3] and len(x) >= 3 for x in cs))
+        if hit > score:
+            best, score = c.name, hit
+    return best
 
 
 def _iso_le(a: str, b: str) -> bool:
@@ -874,7 +1212,9 @@ def _clean_reason(reason: str, brief: str, ctx: _Ctx) -> str:
 # ── labels for the person ────────────────────────────────────────────────────────────────────────────────────────────
 _ASK_WORDS = {"max": "кто больше всего", "min": "кто меньше всего", "total": "итог", "mean": "среднее по всем",
               "fastest": "кто растёт быстрее", "margin": "отрыв лидера", "spike": "был ли всплеск",
-              "meet": "выполнен ли план или цель"}
+              "meet": "выполнен ли план или цель", "met": "кто выполнил план, кто нет",
+              "top_n": "доля крупнейших", "share_of": "доля названных категорий", "versus_lt": "меньше другой колонки",
+              "versus_gt": "больше другой колонки", "period_min": "самый низкий период", "period_max": "самый высокий период"}
 _AGG_WORDS = {"sum": "сумма", "mean": "среднее", "weighted_mean": "средневзвешенное", "latest": "последний период",
               "total_row": "строка итога"}
 
@@ -1040,6 +1380,13 @@ def _merge(brief: str, goals: list[UnderstoodGoal], notes: list[IntentNote], ctx
     for r in rules:
         rs = (r.at, r.at + len(r.quote))
         over = [u for u in kept_goals if _overlap(spans[id(u)], rs)]
+        weak = [n for n in kept_notes if n.weak and _overlap((n.at, n.at + len(n.quote)), rs)]
+        if weak and not over:
+            # модель сказала «нет в данных» без причины, а правила видят цель на тех же словах: цель правил (F14)
+            for n in weak:
+                kept_notes.remove(n)
+                log_.append({"quote": n.quote, "why": "пометка модели без причины — цель правил на тех же словах"})
+            nspans = [(n.at, n.at + len(n.quote)) for n in kept_notes]
         over_notes = [s for s in nspans if _overlap(s, rs)]
         if not over and not over_notes:
             kept_goals.append(r)
@@ -1119,7 +1466,9 @@ def _engine_ask(u: UnderstoodGoal, ctx: Optional[_Ctx] = None) -> Optional[str]:
             # план берёт сам (`Goal.weight`)
             u.dropped.append(f"среднее с весом по «{u.weight}»: такой колонки нет — общее среднее не показано")
             return None
-    if a.startswith(("above:", "below:")) or a in _ENGINE_ASKS or a in ("max", "spike", "meet"):
+    from verstka.data.asks import ASKS as _ANSWERED
+
+    if a.startswith(("above:", "below:")) or a in _ENGINE_ASKS or a in ("max", "spike", "meet") or a in _ANSWERED:
         return a
     return None
 
@@ -1146,7 +1495,8 @@ def _to_goal(u: UnderstoodGoal, ctx: _Ctx) -> Goal:
         period = GoalPeriod(**u.period.model_dump())
     return Goal(phrase=phrase, task=task, viz=viz, to=to, subject=subject, metric=metric, at=u.at, ask=ask, head=head,
                 negate=negate, given=True, column=column, dimension=u.dimension, categories=list(u.categories),
-                weight=u.weight if u.aggregation == "weighted_mean" else None, period=period)
+                weight=u.weight if u.aggregation == "weighted_mean" else None, period=period, n=u.n, versus=u.versus,
+                derive=u.ratio)
 
 
 def _fit(g: Goal, u: UnderstoodGoal, ctx: _Ctx) -> Goal:
@@ -1314,8 +1664,11 @@ def read_goals(brief: str, tables: Sequence[Table], profiles: Optional[Sequence[
     for u in goals:
         if not u.label:
             u.label = label_of(u)
-    return GoalsRead(source="model", goals=plan_goals, understood=goals, notes=notes, dropped=refused + merged,
-                     model=model, cached=cached, seconds=time.monotonic() - t0, raw=raw)
+    out = GoalsRead(source="model", goals=plan_goals, understood=goals, notes=notes, dropped=refused + merged,
+                    model=model, cached=cached, seconds=time.monotonic() - t0, raw=raw)
+    if ctx.derived:
+        out.tables, out.profiles = list(ctx.tables), list(ctx.profiles)
+    return out
 
 
 def _rules_goal(u: UnderstoodGoal, regex: Sequence[Goal], brief: str) -> Optional[Goal]:

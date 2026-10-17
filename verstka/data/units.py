@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from verstka.data.parse import parse_quantity, period_parts, quantity, season_name, split_unit
 from verstka.data.views import Measure
@@ -28,7 +28,7 @@ _LEVEL = re.compile(
     r"nps|csat|индекс|средн|рейтинг|оценк|балл|очк[иоа]|конверси|(?<!\d)(?<!\d\s)курс(?:ы|а|ов)?(?![а-яё])|цен[аы]|"
     r"(?:^|[^а-яё])ставк|температур|доля|коэффициент|уровень|процент|медиан|время|срок|скорост|длительн|возраст|удовлетвор|загрузк|"
     r"маржа|маржин|рентабельн|плотност|(?:^|[^а-яё])чек(?!ов|и\b)|урожайн|на\s+душу|на\s+(?:1|одного|одну|человека|жителя|сотрудника)\b|"
-    r"(?:^|\s)за\s+(?:м²|м2|кв|кг|шт|ед|единиц|час|1\b)",
+    r"(?:^|\s)за\s+(?:м²|м2|кв(?![а-яё])|кг|шт|ед(?![а-яё])|единиц|час(?![а-яё])|1\b|сеанс|визит|смену|рейс)",
     re.I,
 )
 # статистика величины: минимум, максимум, медиана, среднее — не складываются
@@ -41,6 +41,7 @@ _EXTENSIVE_UNIT = re.compile(
     r"^(?:(?:тыс|млн|млрд|трлн)\.?\s*)?(?:шт|штук|ед|единиц|чел|человек|экз|пар|мест|кг|г|т|тонн|ц|л|мл|м|км|м²|м2|"
     r"кв\.?\s*м|м³|м3|куб\.?\s*м|га|квт·ч|квт\*ч|квтч|мвт·ч|гвт·ч|гкал|гб|тб|мб|байт|голов|посещений|визитов|"
     r"заказов|сделок|статей|публикаций|заявок|обращений|клиентов|студентов|сотрудников|пользователей|проектов|патентов|"
+    r"пасс|посет|зрит|чит|"
     r"звонков|рейсов|поездок|операций|транзакций)\.?$", re.I)
 # потоки денег и счёт событий, предметов, людей по названию
 _FLOW = re.compile(
@@ -162,13 +163,39 @@ def kpi_change(label: str, cur: float, prev: float, unit: Optional[str]) -> Opti
         return (cur / prev - 1) * 100, "%"
     return None
 
-def _time_unit_of(name: str, unit: Optional[str]) -> Optional[str]:
-    """Единица длительности колонки: из единицы («мин») или из имени («Минут до ответа», «Время, ч»)."""
+def _time_unit_of(name: str, unit: Optional[str], siblings: Sequence[str] = (), values: Sequence[Optional[float]] = ()) -> Optional[str]:
+    """Единица длительности колонки: из единицы («мин») или из имени («Минут до ответа», «Время, ч»). «Мин» без единицы —
+    чаще минимум, чем минуты («Мин | Макс», «Мин цена», «Мин температура»): минуты — только когда колонка так и
+    названа одним словом, рядом нет «Макс», а значения похожи на длительности (не отрицательны)."""
     if unit:
         u = unit.strip().lower()
+        if u in ("мин", "мин.") and not _minutes_ok(name, siblings, values, by_unit=True):
+            return None
         return u if u in TO_MINUTES else None
-    first = re.split(r"[\s,()]+", name.strip().lower())[0] if name.strip() else ""
+    words = re.split(r"[\s,()]+", name.strip().lower()) if name.strip() else [""]
+    first = words[0]
+    if first in ("мин", "мин.") and not _minutes_ok(name, siblings, values):
+        return None
     return _TIME_NAME.get(first)
+
+
+_TIME_WORDS = re.compile(r"(?i)врем|ожидан|длительн|просто|задерж|срок|ответ|в\s+пути|обработк|минут|разговор|звонк|"
+                         r"восстановл|ремонт|доставк|поездк|сеанс")
+
+
+def _minutes_ok(name: str, siblings: Sequence[str], values: Sequence[Optional[float]], by_unit: bool = False) -> bool:
+    """«Мин» — минуты, а не минимум: у имени нет другого слова-величины («Мин цена», «Мин температура»), рядом нет
+    колонки «Макс…», значения не отрицательны. С единицей «мин» («Время ответа, мин») — минуты, пока имя говорит о
+    времени или рядом нет «Макс»."""
+    base = (split_unit(name)[0] or name).strip().lower()
+    timed = bool(_TIME_WORDS.search(base))
+    maxed = any(re.match(r"(?i)\s*макс", s or "") for s in siblings if s != name)
+    if by_unit:
+        return timed or not maxed
+    rest = [w for w in re.split(r"[\s,().]+", base) if w and w not in ("мин", "мин.")]
+    if maxed or (rest and not timed):
+        return False
+    return not any(v is not None and v < 0 for v in values)
 
 
 
@@ -186,9 +213,13 @@ _DURATION_FLOW = re.compile(r"просто[йия]|сверхурочн|пере
                             r"часов\s+(?:работ|простоя|обучени)|трудозатрат|человеко-?час", re.I)
 
 
-PER_ENTITY = re.compile(r"(?:^|[\s(/])на\s+(?:одн(?:ого|у|о)\b|1\s+[а-яё]+|врача|сотрудника|работника|ученика|студента|"
-                        r"пациента|клиента|абонента|пользователя|магазин\b|точку|смену|койку|голову|семью|"
-                        r"квартиру|автомобиль|машину|рейс|заказ\b|чек\b|визит\b)", re.I)
+# величина на единицу (F3): «на 100 км», «на 1 000 жителей», «на посетителя», «на одного читателя», «за сеанс», «в расчёте
+# на…» — не складывается, какой бы ни была единица («л» у «Расход на 100 км, л»)
+PER_ENTITY = re.compile(r"(?:^|[\s(/])(?:в\s+расч[её]те\s+)?на\s+(?:одн(?:ого|у|о)\b|единицу\b|\d[\d\s\u00a0]*\s*[а-яёa-z]+|врача|"
+                        r"сотрудника|работника|ученика|студента|пациента|клиента|абонента|пользователя|посетител[яь]|"
+                        r"читател[яь]|член[аов]*\b|участника|жител[яь]|душу|место\b|мест\b|сеанс\b|магазин\b|точку|"
+                        r"смену|койку|голову|семью|квартиру|автомобиль|машину|рейс|заказ\b|чек\b|визит\b)|"
+                        r"(?:^|\s)за\s+(?:один\s+|1\s+)?(?:сеанс|визит|смену|рейс)\b", re.I)
 
 
 # «Посещений в смену», «Заказов в день» — за единицу времени; «Пробег за месяц» — итог месяца, он складывается
@@ -287,7 +318,7 @@ def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     if not unit and not mixed and re.fullmatch(r"\s*(?:19|20)\d\d\s*", name):
         # колонка-год («2024», «2025») без единицы: единица — из названия файла («Перевозки пассажиров, тыс. чел.»)
         unit = split_unit(file_title(d.profile.file, d.profile.sheet))[1] or unit
-    tu = _time_unit_of(name, unit)
+    tu = _time_unit_of(name, unit, [x.name for x in d.profile.columns], vals)
     present = [v for v in vals if v is not None]
     # колонка-значение признака («Пн», «Январь», «2025», «Алгебра» в перекрёстной таблице) о величине не говорит —
     # складывается ли она, решает название датасета («Заказы ресторана по часам»)

@@ -169,7 +169,7 @@ def _dynamics_named_cat(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
            unit, f"«{sv.name}», {period_text(pf)}.", prov=_ptime(d, tv, "at", to=pf, cat=sv.name))
     fs.add("cat_last", round(b_, 1) if abs(b_) < 100 else round(b_), "total", f"{sv.name} — {fmt_value(b_, unit)}",
            unit, f"«{sv.name}», {period_text(pl)}.", prov=_ptime(d, tv, "at", to=pl, cat=sv.name))
-    fs.add("cat_change", round_pct(abs(pct)), "change", fmt_signed(round_pct(pct), "%"), "%",
+    fs.add("cat_change", round_pct(pct), "change", fmt_signed(round_pct(pct), "%"), "%",
            f"«{sv.name}»: {period_text(pl)} к {period_text(pf)}.",
            prov={**_ptime(d, tv, "change", frm=pf, to=pl, kind="pct", cat=sv.name), "tol": 0.51})
     fs.add("cat_span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None, "Периодов между концами ряда.",
@@ -292,11 +292,21 @@ def _period_compare(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
     freq = {4: "year", 10: "day"}.get(cut) or ("quarter" if any("Q" in x[:cut] for x in isos) else "month")
     ks = sorted({x[:cut] for x in isos})
     b0, t0 = base[:min(cut, len(base))], target[:min(cut, len(target))]
+    ranged = False
     if by_year:
         B = [u for u in ks if u[:4] == target[:4]]
         A = [u for u in ks if u[:4] == base[:4] and u[4:] in {x[4:] for x in B}]
         B = [u for u in B if u[4:] in {x[4:] for x in A}]
         yoy = True
+    elif per.get("base_end") or per.get("target_end"):
+        # диапазоны цели (F5): «первое полугодие против второго», «июль против августа–сентября» — A от base до
+        # base_end, B от target до target_end; у уровня — среднее (с весом) по диапазону, у потока — сумма
+        be = str(per.get("base_end") or "")[:cut] or None
+        te = str(per.get("target_end") or "")[:cut] or None
+        A = [u for u in ks if b0 <= u < t0 and (be is None or u <= be)]
+        B = [u for u in ks if u >= t0 and (te is None or u <= te)]
+        yoy = False
+        ranged = True
     else:
         A = [u for u in ks if b0 <= u < t0]
         B = [u for u in ks if u >= t0]
@@ -309,6 +319,8 @@ def _period_compare(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
         elif m.additive and not m.stock:
             B = B[:len(A)]
             A = A[:len(B)]
+    # диапазоны разной длины («июль против августа–сентября»): у потока — в среднем за период, а не суммы (F5)
+    per_period = ranged and m.additive and not m.stock and len(A) != len(B)
     if not A or not B:
         return False
     add = m.additive and not m.stock
@@ -317,14 +329,14 @@ def _period_compare(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
     points = (m.stock or bool(re.search(r"(?i)\b(?:mau|dau|wau)\b", m.name))) and not yoy
     if points:
         A, B = A[:1], B[-1:]
-    elif not yoy and not m.additive and b0 in ks and t0 in ks and len(base) == len(target) and not by_year:
+    elif not yoy and not ranged and not m.additive and b0 in ks and t0 in ks and len(base) == len(target) and not by_year:
         A, B, points = [b0], [t0], True
     w = d.weight_of(m) if not m.additive else None
     pbase = {"op": "series", "time": tj, "freq": freq, "week_src": False, "ax_start": None,
              "w": w.j if w is not None else None, "col": m.j, "cols": None,
              "agg": "sum" if m.additive else ("wmean" if w is not None else "mean"), "by": None, "cat": None,
              "skip": _skip_t(d, m), "scale": m.scale, "kind": None}
-    mode = "sum" if add else "mean"
+    mode = "mean" if per_period or not add else "sum"
     pa = {**pbase, "mode": mode, "from": A[0], "to": A[-1]}
     pb = {**pbase, "mode": mode, "from": B[0], "to": B[-1]}
     va, vb = recompute(d.table, pa), recompute(d.table, pb)
@@ -336,28 +348,76 @@ def _period_compare(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
     ra = round(va, 1) if abs(va) < 100 else round(va)
     rb = round(vb, 1) if abs(vb) < 100 else round(vb)
     ta, tb = _span_text(A), _span_text(B)
-    what = "сумма" if add else ("значение" if points else "среднее")
-    fs.add("period_a", ra, "total", f"{ta} — {fmt_value(va, unit)}", unit, f"«{m.name}», {ta}: {what}.",
+    what = "сумма" if add and not per_period else ("значение" if points else "среднее")
+    # названные категории («в Сибири», «в Заречном») — в тексте фактов и вывода: число — о них, а не о всей сети (F5)
+    scope = join_and(list(d.categories)) if d.categories and d.scoped_out else ""
+    pre = f"{scope}, " if scope else ""
+    fs.add("period_a", ra, "total", f"{pre}{ta} — {fmt_value(va, unit)}", unit, f"«{m.name}», {ta}: {what}.",
            prov={**pa, "tol": 0.051 if abs(va) < 100 else 0.51})
-    fs.add("period_b", rb, "total", f"{tb} — {fmt_value(vb, unit)}", unit, f"«{m.name}», {tb}: {what}.",
+    fs.add("period_b", rb, "total", f"{pre}{tb} — {fmt_value(vb, unit)}", unit, f"«{m.name}», {tb}: {what}.",
            prov={**pb, "tol": 0.051 if abs(vb) < 100 else 0.51})
     if level_pp:
         dv = vb - va
-        fs.add("period_change", round(abs(dv), 1), "change", fmt_signed(round(dv, 1), "п.п."), "п.п.",
+        fs.add("period_change", round(dv, 1), "change", fmt_signed(round(dv, 1), "п.п."), "п.п.",
                f"{tb} против {ta}.", prov={"op": "change2", "base": pa, "cur": pb, "kind": "abs", "tol": 0.051})
         ch = fmt_signed(round(dv, 1), "п.п.")
     else:
-        fs.add("period_change", round_pct(abs(pct)), "change", fmt_signed(round_pct(pct), "%"), "%",
+        fs.add("period_change", round_pct(pct), "change", fmt_signed(round_pct(pct), "%"), "%",
                f"{tb} против {ta}.", prov={"op": "change2", "base": pa, "cur": pb, "kind": "pct", "tol": 0.51})
         ch = fmt_signed(round_pct(pct), "%")
     mp = metric_phrase(m.name, m.type)
     name = mp.nom if mp is not None and mp.sure else re.sub(r"\s*,.*$", "", m.name)
-    fs.ctx["period_compare"] = (name, ch, ta, tb, yoy, A[0][:4], add or points)
+    if scope:
+        name = f"{scope}: {lower_first(name) if mp is not None and mp.sure else name}"
+        fs.ctx.setdefault("labels", []).extend(list(d.categories))
+    if per_period:
+        name = f"{name} в среднем за {'месяц' if freq == 'month' else 'день' if freq == 'day' else 'период'}"
+    fs.ctx["period_compare"] = (name, ch, ta, tb, yoy, A[0][:4], (add and not per_period) or points or per_period)
     fs.ctx["unit_short"] = unit
     fs.ctx.setdefault("labels", []).extend([ta, tb] + [period_text(u) for u in A + B] + [A[0][:4], B[0][:4]])
     fs.ctx["caption"] = _short([f"{upper_first(tb)} — {fmt_value(vb, unit)}, {ta} — "
-                                f"{fmt_value(va, unit)}{'' if add or points else ' в среднем'}."])
+                                f"{fmt_value(va, unit)}{'' if (add and not per_period) or points else ' в среднем'}{' за месяц' if per_period and freq == 'month' else ''}."])
+    _period_majority(d, tv, m, fs, pa, pb, ta, tb, name)
     return True
+
+
+def _period_majority(d: Data, tv: TimeView, m: Measure, fs: FactSet, pa: dict, pb: dict, ta: str, tb: str, name: str) -> None:
+    """«Был ли 2026 год лучше 2025-го по большинству культур» (F8): у каждой категории ряда своё сравнение — у скольких
+    из N значение выше. Не среднее всех вместе: свёкла (450 ц/га) и пшеница (40 ц/га) не усредняются."""
+    from verstka.data.verify import recompute
+
+    if tv is None or not tv.dim or not any(str(x).startswith(("большинств", "кажд", "всех")) for x in d.subject):
+        return
+    j = _col_of(d, tv.dim)
+    if j is None:
+        return
+    cats = sorted({d.text(i, j) for i in d.rows_idx if d.text(i, j)})
+    if len(cats) < 3:
+        return
+    up = down = 0
+    for c in cats:
+        a_ = recompute(d.table, {**pa, "cat": (j, c)})
+        b_ = recompute(d.table, {**pb, "cat": (j, c)})
+        if a_ is None or b_ is None:
+            continue
+        up += b_ > a_
+        down += b_ < a_
+    n = up + down
+    if n < 3:
+        return
+    fs.add("majority_up", up, "count", f"выше — у {up} из {len(cats)}", None, f"Категорий, где {tb} выше, чем {ta}.",
+           prov={"op": "count", "what": "value", "value": up})
+    fs.add("majority_of", len(cats), "count", f"из {len(cats)}", None, "Категорий ряда.",
+           prov={"op": "count", "what": "value", "value": len(cats)})
+    fs.ctx["period_majority"] = (name, up, len(cats), ta, tb, down)
+    # среднее несопоставимых рядов — не факт этого вывода: модель не скажет «урожайность снизилась на 2,3%»
+    fs.facts = [f for f in fs.facts if f.id not in ("period_a", "period_b", "period_change")]
+    for k_ in ("period_a", "period_b", "period_change"):
+        fs.prov.pop(k_, None)
+    fs.add("majority_down", down, "count", f"ниже — у {down}", None, f"Категорий, где {tb} ниже, чем {ta}.",
+           prov={"op": "count", "what": "value", "value": down})
+    # подпись — не среднее несопоставимых рядов («94,4 ц/га»), а счёт
+    fs.ctx["caption"] = f"Выше — у {up}, ниже — у {down} из {len(cats)}."
 
 
 def _period_totals(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
@@ -410,7 +470,7 @@ def _period_totals(d: Data, tv: TimeView, m: Measure, fs: FactSet) -> bool:
         fs.add("period_base", round(v1, 1) if abs(v1) < 100 else round(v1), "total",
                f"За {period_acc(k1)} — {fmt_value(v1, unit)}", unit, f"Сумма колонки «{m.name}» за {period_acc(k1)}.",
                prov={**base_p, "mode": "at", "to": k1, "tol": 0.051 if abs(v1) < 100 else 0.51})
-        fs.add("period_change", round_pct(abs(pct)), "change", f"{fmt_signed(round_pct(pct), '%')}", "%",
+        fs.add("period_change", round_pct(pct), "change", f"{fmt_signed(round_pct(pct), '%')}", "%",
                f"{period_text(k0)} к {period_dative(k1) or period_text(k1)}.",
                prov={**base_p, "mode": "change", "from": k1, "to": k0, "kind": "pct", "tol": 0.51})
         fs.ctx["period_base"] = k1
@@ -1982,7 +2042,10 @@ def _comparison(d: Data) -> FactSet:
     name = m.name if m is not None else "Число строк"
     shares = cv.shares
     caption = []
-    if shares is not None and cv.total and len(lead_ks) == 1 and not (grouped and fs.ctx["wording"] == "most"):
+    # названные цели строки (две из восьми) — не целое: «половина всех зрителей» о двух фильмах — неправда (conv5 23c)
+    subset = bool(d.categories) and bool(d.scoped_out)
+    if shares is not None and cv.total and len(lead_ks) == 1 and not (grouped and fs.ctx["wording"] == "most") \
+            and not subset:
         p = shares[leader_k]
         trow = _total_row(d, m) if cv.total_from_row else None
         if p >= 15:

@@ -130,6 +130,14 @@ _OTHER = re.compile(r"^(?:прочее|прочие|прочая|прочий|д
                     re.I)
 
 
+def _no_period(name: str) -> str:
+    """Имя колонки без периода: «Выработка янв–сен 2026» → «выработка», «2025» → «», «Июль» → «»."""
+    t = re.sub(r"(?:19|20)\d\d", " ", (split_unit(name)[0] or name).lower())
+    t = re.sub(r"(?i)\b(?:янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек)[а-яё]*\b|[IV]+\s*кв\.?|квартал\w*|"
+               r"полугоди\w*|[–—-]", " ", t)
+    return " ".join(t.split())
+
+
 def is_other_label(label: str) -> bool:
     return bool(_OTHER.match(" ".join(str(label).split())))
 
@@ -262,14 +270,16 @@ class Data:
                 last = max(ords.values())
                 out |= {i for i, o in ords.items() if o != last}
         cats = [c for c in self.categories if c]
-        if len(cats) >= 2:
+        # одна названная категория — тоже срез, когда цель сравнивает периоды («в Сибири во втором полугодии против
+        # первого», «в Заречном до и после ремонта»): иначе сравнивались бы периоды всей сети (F5)
+        if len(cats) >= 2 or (cats and per.get("kind") == "compare"):
             cands = [j for j, c in enumerate(cols) if c.name == self.dimension] + \
                 [j for j, c in enumerate(cols) if c.role in ("dimension", "text", "id") and c.name != self.dimension]
             for j in cands:
                 vals = {str(self.table.rows[i][j]).strip() for i in rows if j < len(self.table.rows[i])
                         and self.table.rows[i][j] is not None}
                 hit = [c for c in cats if c in vals]
-                if len(hit) >= 2:
+                if len(hit) >= min(2, len(cats)):
                     out |= {i for i in rows if str(self.table.rows[i][j]).strip() not in hit}
                     break
         return out if len(out) < len(rows) else set()
@@ -411,6 +421,10 @@ class Data:
             named = next((m for m in ms if m.name == self.column or f"{m.name}, {m.unit or ''}" == self.column
                           or f"{m.name}, {m.unit_text or ''}" == self.column), None)
             sib = [m for m in ms if _period_name(m.name) or season_name((split_unit(m.name)[0] or m.name).strip())]
+            if named is not None and named in sib:
+                # «Выработка янв–сен 2026» рядом с «План янв–сен 2026» — две величины одного периода, а не два периода
+                base = _no_period(named.name)
+                sib = [m for m in sib if _no_period(m.name) == base]
             if named is not None and not (named in sib and len(sib) >= 2):
                 # колонка-период («2025» рядом с «2024») — не величина, а точка оси: её не навязывают
                 return named
@@ -627,6 +641,11 @@ class Data:
             if m.additive or m.stock or m.change:
                 continue
             den = per_unit_denominator(m.unit_text or "")
+            if den is None:
+                # «Расход на 100 км, л» — знаменатель в имени: вес — колонка километров («Пробег за квартал, км»), как у
+                # «л/100 км» (conv5 22a: средний расход типа — по пробегу, а не среднее машин)
+                mm = re.search(r"(?i)(?:^|\s)на\s+\d[\d\s]*\s*(км|ч|час|м²|м2|кг|т|шт|чел)\b", m.name or "")
+                den = mm.group(1).lower() if mm else None
             if den is not None:
                 # расход «л/100 км» — на километр: вес — колонка километров («Пробег, км»), а не рейсы; нет её — без веса
                 w = next((x for x in self.measures if x is not m and x.additive and not x.change
@@ -831,8 +850,10 @@ class Data:
         m, j = self.main, self.label
         if m is None or j is None or not m.additive:
             return False
-        vals = [m.values[i] for i in self.rows_idx]
-        if len(vals) < 3 or any(v is None for v in vals):
+        allv = [m.values[i] for i in self.rows_idx]
+        vals = [v for v in allv if v is not None]
+        # этап, которого у этой воронки нет («Тестовое задание» только у IT), — пропуск, а не конец воронки
+        if len(vals) < 3 or (len(allv) - len(vals)) * 3 > len(allv) or allv[0] is None:
             return False
         dec = all(a > b for a, b in zip(vals, vals[1:]))  # type: ignore[operator]
         named = bool(re.search(r"этап|стади|шаг|воронк|funnel|stage", self.cols[j].name, re.I))
@@ -1486,6 +1507,13 @@ class Data:
         driver = x is not None
         if x is None or y is None:
             x, y = ms[0], ms[1]
+        named = next((m for m in ms if self.column and m.name == self.column), None)
+        if named is not None:
+            # колонку назвала цель («связана ли доля доставки с выручкой»): она — одна ось, вторая — колонка, которую
+            # называют слова цели («выручкой»), а не первая попавшаяся пара (conv5 10c)
+            other = [m for m in ms if m is not named and self.subject and stem_hits(self.subject, m.name) > 0]
+            if other:
+                x, y, driver = named, other[0], False
         lab_j = self.label if self.label is not None else self.id_col
         xs, ys, labels = [], [], []
         for i in self.rows_idx:

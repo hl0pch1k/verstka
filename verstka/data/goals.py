@@ -40,6 +40,9 @@ class GoalPeriod(BaseModel):
     end: Optional[str] = None
     base: Optional[str] = None
     target: Optional[str] = None
+    # сравнение диапазонов («первое полугодие против второго», «июль против августа–сентября»): концы A и B
+    base_end: Optional[str] = None
+    target_end: Optional[str] = None
 
 
 class Goal(BaseModel):
@@ -70,6 +73,11 @@ class Goal(BaseModel):
     categories: list[str] = Field(default_factory=list)  # названные строки или колонки («Москва и Казань»)
     weight: Optional[str] = None  # среднее с весом по этой колонке
     period: Optional[GoalPeriod] = None
+    # вопросы, на которые отвечает `verstka/data/asks.py`: N крупнейших (`n`), колонка против колонки (`versus` —
+    # вторая колонка); колонка-отношение «на единицу», добавленная к таблице (`verstka/data/derive.py`)
+    n: Optional[int] = None
+    versus: Optional[str] = None
+    derive: Optional[dict] = None
 
 
 _V = r"(?:покажи(?:те)?|показать|отрази(?:те)?|отразить|продемонстрируй(?:те)?|визуализируй(?:те)?)"

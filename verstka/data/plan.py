@@ -111,7 +111,8 @@ def _honest_goal(decision: TaskDecision, d: Data, goal: Optional[Goal] = None) -
     return decision.model_copy(update={"reasons": reasons + [note]})
 
 
-_SPEC_FIELDS = ("head", "metric", "negate", "ask", "column", "dimension", "categories", "weight", "period")
+_SPEC_FIELDS = ("head", "metric", "negate", "ask", "column", "dimension", "categories", "weight", "period", "n", "versus",
+                "derive")
 
 
 def goal_spec(g: Optional[Goal]) -> Optional[dict]:
@@ -135,8 +136,10 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
     задаёт всё сама — колонку, разрез, категории, вес, период и вопрос (и «max» — тоже ответ: фразу не разбирают);
     разбор фразы — для целей из текста. Состояние — только в аргументах: ничего не помнится между вызовами."""
     if goal is not None and goal.given:
+        from verstka.data.asks import ASKS
+
         phrase = phrase or goal.phrase
-        ask = None if goal.ask in (None, "max", "null") else goal.ask
+        ask = None if goal.ask in (None, "max", "null") or goal.ask in ASKS else goal.ask
         if ask == "meet" and goal_ask(phrase or "") == "miss":
             ask = "miss"  # «какие магазины не выполнили план» — кто ниже плана, а не исполнение в целом
         metric = list(goal.metric)
@@ -163,10 +166,13 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
             # всплеск ищут на всём ряду (неделя всплеска — в названном месяце); итог месяца считают по дням месяца,
             # а сравнение с другим месяцем — по всему файлу
             period = None
+        if goal.ask == "period_min":
+            ask = None
+        cats = () if goal.ask in ("share_of", "top_n", "position") else tuple(goal.categories)  # доля названных — от всех строк
         return Data(table, profile, subject=tuple(stems_of(phrase or "")), compare=compare, head=head,
                     negate=tuple(negate), qualifiers=tuple(x for x in metric if x != head), ask=ask,
                     ask_unit=unit, ask_periods=tuple(dict.fromkeys(months)), column=goal.column,
-                    dimension=goal.dimension, categories=tuple(goal.categories), weight=goal.weight, period=period)
+                    dimension=goal.dimension, categories=cats, weight=goal.weight, period=period)
     if not phrase:
         return Data(table, profile, compare=compare)
     metric, head, negate = goal_focus(phrase)
@@ -253,7 +259,13 @@ _MONTH_RX = re.compile(r"\b(январ|феврал|март|апрел|ма(?=[
 
 def data_of(plan: DatasetPlan, table: Table) -> Data:
     """Тот же `Data`, что видел план (главная метрика — по цели, которая решила задачу; у сравнения — колонка-итог;
-    цель, понятая моделью, — по её полям из `TaskDecision.spec`, без разбора фразы)."""
+    цель, понятая моделью, — по её полям из `TaskDecision.spec`, без разбора фразы). Колонка-отношение цели
+    («выручка на одного посетителя») добавляется к таблице файла снова (`derive.apply`), если её там нет."""
+    from verstka.data.derive import apply as derive_apply
+
+    spec = plan.task.spec or {}
+    if spec.get("derive"):
+        table = derive_apply(table, spec["derive"])
     return goal_data(table, plan.profile, plan.task.goal, compare=plan.task.task == "comparison",
                      goal=_given_of(plan.task.spec, plan.task.goal))
 
@@ -329,8 +341,15 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
                     break
     fs = facts_for(task, d)
     headline, caption = compose(task, fs)
-    extra = _other_mean(rel, decision.goal, table, profile, d, fs) if task == "comparison" else None
-    if task == "comparison" and not extra:
+    # вопрос, на который обычный вывод не отвечает (N крупнейших, доля названных, колонка против колонки, самый низкий
+    # период): ответ — свои факты, проверенные тем же `verify` (F2)
+    from verstka.data.asks import answer_ask
+
+    asked = answer_ask(g_dec, d, task, fs) if g_dec is not None and g_dec.given else None
+    if asked is not None:
+        headline, caption, fs = asked
+    extra = _other_mean(rel, decision.goal, table, profile, d, fs) if task == "comparison" and asked is None else None
+    if task == "comparison" and not extra and asked is None:
         extra = _other_extreme(rel, decision.goal, table, profile, d, fs, f"{headline} {caption or ''}")
     if extra:
         caption = f"{extra} {caption}" if caption else extra
