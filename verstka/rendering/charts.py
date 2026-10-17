@@ -733,7 +733,8 @@ def _picture_cover_of(blob: bytes, region=None) -> Optional[tuple[str, float]]:
             x0, y0, x1, y1 = (max(0.0, min(1.0, v)) for v in region)
             if x1 - x0 > 0.01 and y1 - y0 > 0.01:
                 im = im.crop((int(x0 * w), int(y0 * h), max(int(x0 * w) + 1, int(x1 * w)), max(int(y0 * h) + 1, int(y1 * h))))
-        px = list(im.resize((24, 24)).getdata())
+        small = im.resize((24, 24))
+        px = list(small.get_flattened_data() if hasattr(small, "get_flattened_data") else small.getdata())
         wsum = sum(p[3] for p in px)
         cover = wsum / (255.0 * len(px))
         if wsum <= 0:
@@ -777,7 +778,8 @@ def _picture_mean(part, rid: str, region=None) -> Optional[str]:
         im = im.resize((24, 24))
         bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
         bg.alpha_composite(im)
-        px = list(bg.convert("RGB").getdata())
+        rgb = bg.convert("RGB")
+        px = list(rgb.get_flattened_data() if hasattr(rgb, "get_flattened_data") else rgb.getdata())
         rgb = [sum(p[i] for p in px) / len(px) for i in range(3)]
         return "".join(f"{int(round(x)):02X}" for x in rgb)
     except Exception:  # noqa: BLE001
