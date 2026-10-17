@@ -1636,9 +1636,9 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
         cell_titles = [(e, s) for e, s in cell_titles if id(e) not in handled]
         cell_bodies = [(e, s) for e, s in cell_bodies if id(e) not in handled]
     # one size for the same role in every card: the smallest that fits all of them, grown along the scale when all have room
-    _harmonize(ctx, cell_bodies, cap=_text_cap(ctx))
+    _harmonize(ctx, cell_bodies, cap=_text_cap(ctx, wide=False))
     # thesis cards (a heading and nothing under it) are read like running text: they may grow the same way
-    _harmonize(ctx, cell_titles, cap=None if cell_bodies else _text_cap(ctx))
+    _harmonize(ctx, cell_titles, cap=None if cell_bodies else _text_cap(ctx, wide=False))
     _keep_title_above_body(ctx, cell_titles, cell_bodies)
     if cell_titles and cell_bodies:
         ctx.heads_over.append((list(cell_titles), list(cell_bodies)))
@@ -1899,7 +1899,7 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
     b_fam = (b_style.font_family if b_style and b_style.font_family else None) or ctx.typo.primary_family
     t_bold = bool(t_style and t_style.bold)
     ratio = max(ts0 / bs0, 1.1) if bs0 else 1.25
-    cap = _text_cap(ctx)
+    cap = _text_cap(ctx, wide=False)
     from verstka.rendering.clone_check import readable_floor
 
     lo = max(bs0 * 0.9, readable_floor(ctx.manifest) - 0.05)
@@ -2028,9 +2028,16 @@ def _breathe(ctx: _SlideCtx, el: Optional[etree._Element]) -> None:
     paras = [p for p in el.iter(q("a:p")) if "".join(x.text or "" for x in p.iter(q("a:t"))).strip()]
     b = element_bbox(el)
     ib = ink_box(el, ctx.typo.primary_family)
-    if len(paras) < 2 or not b or ib is None:
+    if not paras or not b or ib is None:
         return
     ins = _body_insets(el)
+    if len(paras) < 2:
+        # one paragraph that takes under 45 % of a big box stands in its middle, not over an empty foot (Lights: three
+        # lines at the top of a white panel two thirds of the slide high)
+        bp = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
+        if bp is not None and bp.get("anchor", "t") == "t" and ib.h < 0.45 * (b[3] - ins[1] - ins[3]) and b[3] >= 0.25 * ctx.H and _centre_clear(ctx, el, b, ins, ib, ib.h):
+            bp.set("anchor", "ctr")
+        return
     want = 0.6 * (b[3] - ins[1] - ins[3])
     if ib.h >= want:
         return
@@ -2038,8 +2045,11 @@ def _breathe(ctx: _SlideCtx, el: Optional[etree._Element]) -> None:
     size = max(sizes) if sizes else ctx.typo.size_for("body", 14.0)
     per = min((want - ib.h) / EMU_PER_PT / (len(paras) - 1), size * 1.2 * 1.6)
     bp = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
-    if bp is not None and ib.h + per * EMU_PER_PT * (len(paras) - 1) < 0.5 * (b[3] - ins[1] - ins[3]):
-        bp.set("anchor", "ctr")  # still under half the box: the list stands in its middle, not huddled at its top
+    grown = ib.h + int(max(per, 0) * EMU_PER_PT) * (len(paras) - 1)
+    if bp is not None and bp.get("anchor", "t") == "t" and grown < 0.7 * (b[3] - ins[1] - ins[3]) and b[3] >= 0.25 * ctx.H and _centre_clear(ctx, el, b, ins, ib, grown):
+        # still under 70 % of a big box: the list stands in its middle, not over an empty foot (Lights: three rows in
+        # the top half of a white panel two thirds of the slide high)
+        bp.set("anchor", "ctr")
     if per < size * 0.3:
         return
     for p in paras[1:]:
@@ -2054,12 +2064,84 @@ def _breathe(ctx: _SlideCtx, el: Optional[etree._Element]) -> None:
         insert_ordered(pPr, sb, _PPR_ORDER)
 
 
-def _text_cap(ctx: _SlideCtx) -> float:
+def _roomy(slot: Slot) -> bool:
+    """A box a short text may grow large in: an eighth of the slide at least, 40 % of its width, inside the slide (a
+    narrow side box at the slide's edge keeps the usual cap — its lines grew past the edge, Freshes p6)."""
+    b = slot.bbox
+    return b.area >= 0.12 and b.w >= 0.4 and b.x >= -0.005 and b.x + b.w <= 1.005
+
+
+def _box_on_art(ctx: _SlideCtx, slot: Slot) -> bool:
+    """The slot's box runs over the template's art (a sample's body box over the light bulb at the foot of its
+    slide): its text does not grow past the usual cap there — larger lines ran onto the art."""
+    el = ctx.els.get(slot.shape_id)
+    b = element_bbox(el) if el is not None else None
+    if not b:
+        return False
+    try:
+        from verstka.rendering.layers import art_layers, painted_share
+
+        box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+        return any(painted_share(a, box) > 0.02 for a in art_layers(ctx.slide, skip=[el]))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _centre_clear(ctx: _SlideCtx, el, b, ins, ib: Bbox, block_h: int) -> bool:
+    """The text set in the middle of its box stays as clear of the template's art as at its top: a sample's body box
+    may run over the art at the foot of its slide (a light bulb at the bottom right — the sample's own lines stay over
+    it); centred, the lines went down onto it."""
+    try:
+        from verstka.rendering.layers import art_layers, painted_share
+
+        arts = art_layers(ctx.slide, skip=[el])
+    except Exception:  # noqa: BLE001 - unread art: the text keeps its top
+        return False
+    usable = b[3] - ins[1] - ins[3]
+    top = Bbox(x=ib.x, y=ib.y, w=ib.w, h=max(block_h, 1))
+    mid = Bbox(x=ib.x, y=b[1] + ins[1] + max((usable - block_h) // 2, 0), w=ib.w, h=max(block_h, 1))
+    if sum(painted_share(a, mid) for a in arts) > sum(painted_share(a, top) for a in arts) + 0.01:
+        return False
+    # nor onto the slide's other content (a chart, a picture, a text the box overlaps — a sample's paragraph box that
+    # runs down beside or behind its chart): a panel or card the text stands in is its ground, not in its way
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    for o in tree:
+        if o is el or etree.QName(o).localname not in ("sp", "pic", "graphicFrame", "grpSp"):
+            continue
+        ob = element_bbox(o)
+        if not ob or ob[2] <= 0 or ob[3] <= 0:
+            continue
+        if ob[0] <= b[0] and ob[1] <= b[1] and ob[0] + ob[2] >= b[0] + b[2] and ob[1] + ob[3] >= b[1] + b[3]:
+            continue  # the ground the box stands on
+        if etree.QName(o).localname == "sp" and not shape_text(o).strip():
+            continue  # a bare shape: decoration the art test reads
+        o_box = Bbox(x=ob[0], y=ob[1], w=ob[2], h=ob[3])
+        if o_box.intersection(mid) > o_box.intersection(top) + 0.01 * mid.area:
+            return False
+    return True
+
+
+def _short_cap(ctx: _SlideCtx) -> float:
+    """How far a short text (a lone paragraph, a list of a few short lines) in a big box may grow: a clear step under
+    the deck's heading (0.84 of it, as a composed slide's statement), never under `_text_cap`."""
+    head = float(ctx.slide.__dict__.get("_verstka_head_size") or 0.0) or ctx.typo.size_for("h1", 0.0)
+    return max(_text_cap(ctx), head * 0.84) if head else _text_cap(ctx)
+
+
+def _text_cap(ctx: _SlideCtx, wide: bool = True) -> float:
     """How far running text may grow when it has room: to a comfortable reading size on a slide (16 pt, or 1.4× the
     template's body when that is larger), always clearly below the slide heading. VK Tech's body is 9 pt: three
     bullets in a panel two thirds of the slide high at 9–12 pt read as a mistake."""
     body = ctx.typo.size_for("body", 14.0)
     h1 = ctx.typo.size_for("h1", body * 2)
+    # a template whose own scale says nothing of its headings (a LibreOffice template: its samples empty, its scale
+    # derived — «h1» 14 pt as its body) caps nothing at its body size: the heading the deck really sets is the bound
+    # (Lights, Pencil: lone paragraphs stayed 14 pt in a panel two thirds of the slide high)
+    # (`wide`: only for a box with room — a narrow side box keeps the scale's own bound: its lines grew past the slide's
+    # edge, Freshes p6)
+    head = float(ctx.slide.__dict__.get("_verstka_head_size") or 0.0)
+    if wide and h1 < body * 1.25 and head > h1:
+        h1 = head
     return max(body, min(max(body * 1.4, 16.0), h1 * 0.8))
 
 
@@ -2386,7 +2468,7 @@ def _harmonize_siblings(ctx: _SlideCtx, heads: list[Slot], bodies: list[Slot]) -
 
     head_pairs, body_pairs = filled(heads), filled(bodies)
     if len(body_pairs) >= 2:
-        _harmonize(ctx, body_pairs, cap=_text_cap(ctx))
+        _harmonize(ctx, body_pairs, cap=_text_cap(ctx, wide=False))
     if len(head_pairs) >= 2:
         _harmonize(ctx, head_pairs, cap=None)
     if head_pairs and body_pairs:
@@ -6777,7 +6859,10 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
             short = len(c.bullets) <= 5 and sum(len(b) for b in c.bullets) <= 320 and big.bbox.area >= 0.12
             # a short list in a big box (LCT p13: three lines in a card over most of the slide) is set as a composed
             # slide sets it: up to the second heading size, its rows breathing over the box
-            cap = max(text_cap, min(ctx.typo.size_for("h2", text_cap), ctx.typo.size_for("h1", text_cap * 1.5) * 0.8)) if short else text_cap
+            tc = text_cap if _roomy(big) else _text_cap(ctx, wide=False)
+            cap = max(tc, min(ctx.typo.size_for("h2", tc), ctx.typo.size_for("h1", tc * 1.5) * 0.8)) if short else tc
+            if short and sum(len(b) for b in c.bullets) <= 240 and len(c.bullets) <= 3 and _roomy(big) and not _box_on_art(ctx, big):
+                cap = max(cap, _short_cap(ctx))
             ctx.fill_slot(big, [ParagraphSpec(b, bullet=True) for b in c.bullets], size_hint=_running_size(big), grow_to=cap)
             if short:
                 _breathe(ctx, ctx.els.get(big.shape_id))
@@ -6797,7 +6882,7 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
                 and sl.shape_id not in ctx.item_slot_ids]
         if free:
             big = ctx.largest(free)
-            hint, grow = _running_size(big), text_cap
+            hint, grow = _running_size(big), (text_cap if _roomy(big) else _text_cap(ctx, wide=False))
             under = ctx.items_text_size()
             if under:
                 hint = min(hint or big.style.size_pt or under, under)
@@ -6814,8 +6899,14 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         if target:
             big = ctx.largest(target)
             lone = len(c.paragraphs) == 1 and len(c.paragraphs[0].split()) <= 25 and not c.bullets and not items
-            cap = max(body_cap, ctx.typo.size_for("h1", body_cap) * 0.75) if lone else text_cap
+            cap = max(body_cap, ctx.typo.size_for("h1", body_cap) * 0.75) if lone else (text_cap if _roomy(big) else _text_cap(ctx, wide=False))
+            if len(c.paragraphs) == 1 and len(c.paragraphs[0]) <= 320 and not c.bullets and not items and _roomy(big) and not _box_on_art(ctx, big):
+                cap = max(cap, _short_cap(ctx))
             ctx.fill_slot(big, [ParagraphSpec(p, bullet=False) for p in c.paragraphs], size_hint=_running_size(big), grow_to=cap)
+            if len(c.paragraphs) == 1 and not c.bullets and not items and c.chart is None and c.table is None and big.bbox.area >= 0.12:
+                # (one paragraph alone on its slide stands in the middle of its box; text beside a chart or a table keeps
+                # the sample's place)
+                _breathe(ctx, ctx.els.get(big.shape_id))
         elif _texts_beside_chart(ctx, oslide):
             ctx.slide.__dict__["_verstka_text_by_chart"] = True
         elif oslide.kind not in (PatternKind.chart, PatternKind.table) or any(tiers):

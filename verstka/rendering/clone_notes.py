@@ -264,6 +264,26 @@ def _draw_conclusion(comp, plan: dict, x: int, y: int) -> None:
     comp.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
 
 
+def _chart_down_to(slide, content_bottom: int, to_y: int, left: int, right: int, H: int) -> None:
+    """The slide's chart grows down to the conclusion set at the foot (`to_y`): the room the renderer kept for the
+    conclusion is measured for its widest form, the strip drawn is often a line or two shorter — the band between the
+    chart and the strip stayed empty (VK Tech, data slides: 53 pt under a 150 pt chart). Only a chart whose foot is the
+    content's foot and that stands over the strip; a table keeps its rows' height."""
+    from verstka.rendering.deck import set_element_pos
+
+    if to_y - content_bottom < int(0.03 * H):
+        return
+    tree = slide._element.cSld.find(q("p:spTree"))
+    for el in tree:
+        if etree.QName(el).localname != "graphicFrame" or not any(True for _ in el.iter("{http://schemas.openxmlformats.org/drawingml/2006/chart}chart")):
+            continue
+        b = element_bbox(el)
+        if not b or abs(b[1] + b[3] - content_bottom) > int(0.01 * H) or min(b[0] + b[2], right) - max(b[0], left) <= 0:
+            continue
+        # (never more than half again its height: a chart is not stretched into a tower)
+        set_element_pos(el, h=min(to_y - b[1], int(b[3] * 1.5)))
+
+
 def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, manifest: TemplateManifest, pattern: Pattern) -> Optional[str]:
     """Set the slide's conclusion and footnote under its content. Returns why they did not fit, or None."""
     from verstka.rendering.synth import _content_bottom_limit
@@ -357,6 +377,8 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
         x = left
         if aside is not None:
             x, y, width = aside[0], min(aside[1], room_bottom - plan["h"]), aside[2]
+        if aside is None:
+            _chart_down_to(slide, content_bottom, y - gap, left, right, H)
         # the template's art standing in the strip's band (a 3D render at the foot): the strip takes the widest free
         # stretch beside it, set again for that width
         arts = slide.__dict__.get("_verstka_art_boxes") or []
@@ -397,6 +419,8 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
             comp.cv.rect(Bbox(x=bx, y=by, w=plan["bar_w"], h=max(plan["text_h"] - _emu(plan["size"] * 0.24), plan["bar_w"] * 3)), plan["colors"].accent, name="Conclusion bar")
             tx = bx + plan["bar_w"] + plan["bar_gap"]
             comp.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
+    if foot_draw is not None and plan is None and not take:
+        _chart_down_to(slide, content_bottom, room_bottom - gap, left, right, H)
     if foot_draw is not None:
         # (a vertical rule of the sample's grid running down to the foot ends above the small print, as above the strip)
         _cut_rules(slide, foot_draw[0], int(0.02 * H), W, H)

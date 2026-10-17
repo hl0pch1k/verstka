@@ -1440,24 +1440,36 @@ def _choose_photo_place(builder: DeckBuilder, manifest: TemplateManifest, ds: "D
     return cands[0][4]
 
 
-PHOTO_FILL_CONTRAST = (1.15, 1.6)  # the free photo place reads as a place on its ground, quietly
+PHOTO_FILL_CONTRAST = (1.08, 1.6)  # the free photo place reads as a place on its ground, quietly
+
+
+def _photo_accent(kit, pal: "_Palette") -> Optional[str]:
+    acc = getattr(getattr(kit, "colors", None), "accent", None) or getattr(pal, "accent", None)
+    return acc.upper() if isinstance(acc, str) and len(acc) == 6 else None
+
+
+def _sat(hex_: str) -> float:
+    r, gg, b = (int(hex_[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    mx, mn = max(r, gg, b), min(r, gg, b)
+    return 0.0 if mx == 0 else (mx - mn) / mx
 
 
 def _photo_fill(kit, pal: "_Palette", ground: Optional[str] = None) -> str:
-    """A quiet, neutral colour for the free photo place that still reads on the ground it stands on (1.15–1.6:1): the
-    template's own card fill or surface when it is a neutral (never an accent-coloured card), else a neutral of the
-    template's palette, else white on a light ground or black on a dark one, else the text colour laid over the ground
-    just enough."""
+    """The free photo place's colour: a light tint of the template's accent over the ground it stands on (1.08–1.6:1) —
+    a place the deck designed for the photo, in its own colour, not a grey stub (owner, 17.10: «серая «Место под
+    изображение»»). Without an accent that tints (a grey accent, an accent too close to the ground): the template's own
+    card fill or surface when it is a neutral, else a neutral of its palette, else the text colour laid over the
+    ground just enough."""
     from verstka.rendering.compose import _mix
 
     g = ground or pal.bg
     lo, hi = PHOTO_FILL_CONTRAST
-
-    def sat(hex_: str) -> float:
-        r, gg, b = (int(hex_[i:i + 2], 16) / 255 for i in (0, 2, 4))
-        mx, mn = max(r, gg, b), min(r, gg, b)
-        return 0.0 if mx == 0 else (mx - mn) / mx
-
+    acc = _photo_accent(kit, pal)
+    if acc and _sat(acc) >= 0.25:
+        for share in (0.08, 0.1, 0.12, 0.15, 0.18, 0.22, 0.26):
+            c = _mix(acc, g, share)
+            if contrast_ratio(c, g) >= lo:
+                return c if contrast_ratio(c, g) < hi else _mix(acc, g, 0.08)
     manifest = getattr(kit, "manifest", None)
     try:
         own = list(manifest.tokens.palette()) if manifest is not None else []
@@ -1465,16 +1477,40 @@ def _photo_fill(kit, pal: "_Palette", ground: Optional[str] = None) -> str:
         own = []
     for c in (getattr(kit.card, "fill", None), pal.surface, pal.card_fill, *own, "FFFFFF", "000000"):
         c = (c or "").upper()
-        if len(c) == 6 and sat(c) < 0.2 and lo <= contrast_ratio(c, g) < hi:
+        if len(c) == 6 and _sat(c) < 0.2 and max(lo, 1.15) <= contrast_ratio(c, g) < hi:
             return c
     ink = "FFFFFF" if relative_luminance(g) < 0.4 else "000000"
-    if contrast_ratio(pal.text, g) >= 3.0 and sat(pal.text) < 0.3:
+    if contrast_ratio(pal.text, g) >= 3.0 and _sat(pal.text) < 0.3:
         ink = pal.text
     for share in (0.06, 0.08, 0.1, 0.12, 0.15, 0.18, 0.22):
         c = _mix(ink, g, share)
-        if contrast_ratio(c, g) >= lo:
+        if contrast_ratio(c, g) >= max(lo, 1.15):
             return c
     return _mix(ink, g, 0.22)
+
+
+def _photo_outline(kit, pal: "_Palette", fill: str) -> str:
+    """The place's dashed edge: the accent (else the text colour) half-way to the place's fill — it draws the frame of
+    the photo-to-be without shouting."""
+    from verstka.rendering.compose import _mix
+
+    acc = _photo_accent(kit, pal)
+    base = acc if acc and _sat(acc) >= 0.25 else (getattr(pal, "text", None) or "808080")
+    return _mix(base, fill, 0.55)
+
+
+def _style_photo_place(el, kit, pal: "_Palette", fill: str) -> None:
+    """The place's look: its tint and a dashed hairline edge in the accent (`_photo_outline`)."""
+    sppr = el.find(q("p:spPr"))
+    if sppr is None:
+        return
+    for old in sppr.findall(q("a:ln")):
+        sppr.remove(old)
+    ln = etree.SubElement(sppr, q("a:ln"))
+    ln.set("w", str(int(1.25 * EMU_PER_PT)))
+    sf = etree.SubElement(ln, q("a:solidFill"))
+    etree.SubElement(sf, q("a:srgbClr")).set("val", _photo_outline(kit, pal, fill).upper())
+    etree.SubElement(ln, q("a:prstDash")).set("val", "dash")
 
 
 def _ground_at(slide: Slide, box: Bbox) -> Optional[str]:
@@ -1536,8 +1572,7 @@ def _empty_photo_place(slide: Slide, ids: set[str], kit, pal: "_Palette", name: 
         fill = _photo_fill(kit, pal, _ground_at(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3])))
         sf = etree.SubElement(sppr, q("a:solidFill"))
         etree.SubElement(sf, q("a:srgbClr")).set("val", fill.upper())
-        ln = etree.SubElement(sppr, q("a:ln"))
-        etree.SubElement(ln, q("a:noFill"))
+        _style_photo_place(sp, kit, pal, fill)
         parent.insert(at, sp)
         made += 1
     return made
@@ -1574,31 +1609,57 @@ def place_head(photo_slot: Optional[str]) -> str:
 
 
 def photo_caption(slide: Slide, box: Bbox, kit, hint: Optional[str], fill: Optional[str] = None, head_text: Optional[str] = None) -> None:
-    """What the user's picture will show, written quietly in the middle of its free place («Место под изображение»
-    over the author's own description of it): the place reads as the picture's, not as a gap. The description is
-    shortened by whole sentences only; the caption is a text box of its own the user deletes with the frame."""
+    """What the user's picture will show, in the middle of its free place: a small picture pictogram in the place's
+    edge colour, «Место под изображение» at the template's body size and the author's own description of it under it
+    (shortened by whole sentences only) — the place reads as one the deck designed for the photo, not as a gap. The
+    caption and the pictogram are shapes of their own («Photo caption…»): they go when the photo comes in."""
     from verstka.planning.faithful import sentences as _sentences
-    from verstka.rendering.compose import Canvas, Para, Run
+    from verstka.rendering.compose import Canvas, Para, Run, block_height_pt
+    from verstka.ru import typeset
 
     if box.w < 0.12 * kit.W or box.h < 0.12 * kit.H:
         return
     ground = fill or _ground_at(slide, box) or "FFFFFF"
-    ink = kit.colors.muted if contrast_ratio(kit.colors.muted, ground) >= 3.0 else kit.colors.text
+    colors = getattr(kit, "colors", None)
+    cands = [c for c in (getattr(colors, "accent_text", None), getattr(colors, "muted", None), getattr(colors, "text", None)) if c]
+    ink = next((c for c in cands if contrast_ratio(c, ground) >= 4.5), cands[-1] if cands else "000000")
     pad = int(min(box.w, box.h) * 0.1)
     w = box.w - 2 * pad
-    size = max(min(kit.small, 0.026 * kit.hpt), 9.0)
-    head = Para([Run(head_text or "Место под изображение", size * 1.1, ink, True, kit.font)], align="ctr", space_after=size * 0.6)
+    body = float(getattr(kit, "body", 0) or 0) or max(min(kit.small, 0.026 * kit.hpt), 9.0)
+    small = float(getattr(kit, "small_text", 0) or 0) or body
+    size = max(min(body, 0.034 * kit.hpt), 9.0)
+    note = max(min(small, size), 8.0)
+    head = Para([Run(typeset(head_text or "Место под изображение"), size, ink, True, kit.font)], align="ctr", space_after=note * 0.6)
     ss = _sentences(hint or "")
     cv = Canvas(slide, kit)
-    from verstka.rendering.compose import block_height_pt
-    from verstka.ru import typeset
-
+    ic_h = int(min(max(min(box.w, box.h) * 0.14, 0.045 * kit.H), 0.09 * kit.H))
+    gap = int(ic_h * 0.35)
     for k_ in range(len(ss), -1, -1):
-        paras = [head] + ([Para([Run(typeset(" ".join(ss[:k_])), size, ink, False, kit.font)], align="ctr")] if k_ else [])
+        paras = [head] + ([Para([Run(typeset(" ".join(ss[:k_])), note, ink, False, kit.font)], align="ctr")] if k_ else [])
         hh = int(block_height_pt(paras, w / EMU_PER_PT, kit.line) * EMU_PER_PT) + int(2 * EMU_PER_PT)
+        icon = hh + ic_h + gap <= box.h - 2 * pad
         if hh <= box.h - 2 * pad:
-            cv.text(Bbox(x=box.x + pad, y=box.y + (box.h - hh) // 2, w=w, h=hh), paras, name="Photo caption")
+            total = hh + (ic_h + gap if icon else 0)
+            y = box.y + (box.h - total) // 2
+            if icon:
+                _photo_pictogram(cv, Bbox(x=box.x + (box.w - int(ic_h * 1.25)) // 2, y=y, w=int(ic_h * 1.25), h=ic_h), ink, ground)
+                y += ic_h + gap
+            cv.text(Bbox(x=box.x + pad, y=y, w=w, h=hh), paras, name="Photo caption")
             return
+
+
+def _photo_pictogram(cv, box: Bbox, ink: str, ground: str) -> None:
+    """A picture pictogram — a rounded frame, a sun, a mountain — drawn in shapes, its colour the caption's laid half-way
+    to the place's fill (a sign of the photo-to-be, quieter than the words)."""
+    from verstka.rendering.compose import _mix
+
+    c = _mix(ink, ground, 0.6)
+    lw = max(1.0, box.h / EMU_PER_PT * 0.06)
+    cv.rect(box, None, line=c, radius_emu=int(box.h * 0.14), line_w_pt=lw, name="Photo caption icon")
+    sun = int(box.h * 0.2)
+    cv.rect(Bbox(x=box.x + int(box.w * 0.62), y=box.y + int(box.h * 0.2), w=sun, h=sun), c, geom="ellipse", name="Photo caption icon")
+    cv.rect(Bbox(x=box.x + int(box.w * 0.14), y=box.y + int(box.h * 0.38), w=int(box.w * 0.5), h=int(box.h * 0.48)), c, geom="triangle", name="Photo caption icon")
+    cv.rect(Bbox(x=box.x + int(box.w * 0.5), y=box.y + int(box.h * 0.56), w=int(box.w * 0.36), h=int(box.h * 0.3)), c, geom="triangle", name="Photo caption icon")
 
 
 def _photo_frame_beside(slide: Slide, area: Bbox, kit, pal: "_Palette", name: str, W: int, H: int, left: bool = False) -> Bbox:
@@ -1614,7 +1675,9 @@ def _photo_frame_beside(slide: Slide, area: Bbox, kit, pal: "_Palette", name: st
         pw = max(area.w - g - int(0.3 * W), int(0.25 * area.w))
     frame = Bbox(x=area.x if left else area.x2 - pw, y=area.y, w=pw, h=area.h)
     cv = Canvas(slide, kit)
-    el = cv.rect(frame, _photo_fill(kit, pal, _ground_at(slide, frame)), radius_emu=int(getattr(kit.card, "radius_emu", 0) or 0), name=PHOTO_PLACE_NAME)
+    fill = _photo_fill(kit, pal, _ground_at(slide, frame))
+    el = cv.rect(frame, fill, radius_emu=int(getattr(kit.card, "radius_emu", 0) or 0), name=PHOTO_PLACE_NAME)
+    _style_photo_place(el, kit, pal, fill)
     nv = el.find(".//" + q("p:cNvPr"))
     if nv is not None:
         nv.set("name", PHOTO_PLACE_NAME)
@@ -1774,7 +1837,9 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
                     # the sample's picture did not survive the canvas: a frame stands at its place
                     from verstka.rendering.compose import Canvas
 
-                    el = Canvas(slide, kit).rect(place.box, _photo_fill(kit, pal, _ground_at(slide, place.box)), name=PHOTO_PLACE_NAME)
+                    fill0 = _photo_fill(kit, pal, _ground_at(slide, place.box))
+                    el = Canvas(slide, kit).rect(place.box, fill0, name=PHOTO_PLACE_NAME)
+                    _style_photo_place(el, kit, pal, fill0)
                     nv = el.find(".//" + q("p:cNvPr"))
                     if nv is not None:
                         nv.set("name", PHOTO_PLACE_NAME)
@@ -1972,6 +2037,7 @@ def _ink_pass(slide: Slide, added: list, pal: "_Palette", manifest: TemplateMani
 
     inks = _inks(pal, manifest)
     changed = plated = 0
+    plates: list = []  # (text element, its plate)
     for el in added:
         if etree.QName(el).localname != "sp" or el.find(q("p:txBody")) is None or _paints(el):
             continue
@@ -2016,8 +2082,16 @@ def _ink_pass(slide: Slide, added: list, pal: "_Palette", manifest: TemplateMani
                 pick = best
             clr.set("val", pick)
             changed += 1
-        if unread and _plate_under(slide, el, unread, pal, manifest):
-            plated += 1
+        if unread:
+            plate = _plate_under(slide, el, unread, pal, manifest)
+            if plate is not None:
+                plated += 1
+                plates.append((el, plate))
+    if plates:
+        try:
+            _one_plate_per_list(slide, added, plates, pal, manifest)
+        except Exception:  # noqa: BLE001 - the plates stand as made, one per line
+            log.warning("one plate under the list not made", exc_info=True)
     if changed:
         warnings.append(f"{changed} text run(s) recoloured for the ground under them")
     if plated:
@@ -2031,11 +2105,121 @@ def _letter_grounds(slide: Slide, el, manifest: TemplateManifest) -> list[str]:
     return list(dict.fromkeys(letter_grounds(slide, el, manifest.tokens.typography.primary_family)))
 
 
-def _plate_under(slide: Slide, el, unread: list, pal: "_Palette", manifest: TemplateManifest) -> bool:
+def _texts_of(added: list) -> list:
+    out = []
+    for el in added:
+        if etree.QName(el).localname != "sp" or el.find(q("p:txBody")) is None or _paints(el):
+            continue
+        if not any((r.findtext(q("a:t")) or "").strip() for r in el.iter(q("a:r"))):
+            continue
+        b = element_bbox(el)
+        if b and b[2] > 0 and b[3] > 0:
+            out.append((el, b))
+    return out
+
+
+def _one_plate_per_list(slide: Slide, added: list, plates: list, pal: "_Palette", manifest: TemplateManifest) -> None:
+    """The lines of one block (the rows of a list, the cards' words in a column) stand on one plate: a plate under one
+    row of three (the row over the photo's glow) read as a highlighted item, not as a ground (Lights, round 2). The
+    texts that start at the plated text's left edge and follow each other down (gaps under 8 % of the slide) form the
+    block; the plates of its rows go, one plate goes under the whole block — under its markers and rules too — and every
+    run of the block takes a colour that reads on it."""
+    from verstka.rendering.clone_check import ink_lines
+    from verstka.rendering.compose import Canvas
+
+    W = int(slide.part.package.presentation_part.presentation.slide_width)
+    H = int(slide.part.package.presentation_part.presentation.slide_height)
+    texts = _texts_of(added)
+    done: set = set()
+    for el, plate in plates:
+        if id(el) in done:
+            continue
+        b0 = element_bbox(el)
+        if not b0:
+            continue
+        col = sorted([(e, b) for e, b in texts if abs(b[0] - b0[0]) <= int(0.03 * W) or abs((b[0] + b[2]) - (b0[0] + b0[2])) <= int(0.01 * W) and abs(b[0] - b0[0]) <= int(0.06 * W)], key=lambda t: t[1][1])
+        # the contiguous run of the column that holds the plated text
+        idx = next((i for i, (e, _b) in enumerate(col) if e is el), None)
+        if idx is None:
+            continue
+        lo = hi = idx
+        while lo > 0 and col[lo][1][1] - (col[lo - 1][1][1] + col[lo - 1][1][3]) <= int(0.08 * H):
+            lo -= 1
+        while hi < len(col) - 1 and col[hi + 1][1][1] - (col[hi][1][1] + col[hi][1][3]) <= int(0.08 * H):
+            hi += 1
+        group = col[lo:hi + 1]
+        mine = {id(e) for e, _b in group}
+        fill = None
+        for e, p_ in plates:
+            if id(e) in mine:
+                sp = p_.find(q("p:spPr") + "/" + q("a:solidFill") + "/" + q("a:srgbClr"))
+                fill = fill or (sp.get("val") if sp is not None else None)
+                if p_.getparent() is not None:
+                    p_.getparent().remove(p_)
+                done.add(id(e))
+        if not fill:
+            continue
+        # the plate holds every text standing on it whole (their boxes, not only their letters: the audit reads a text
+        # whose box runs past its plate as text out of its card) — a text it reaches joins the block
+        group = list(group)
+        for _ in range(6):
+            x0 = min(b[0] for _e, b in group)
+            y0 = min(b[1] for _e, b in group)
+            x1 = max(b[0] + b[2] for _e, b in group)
+            y1 = max(b[1] + b[3] for _e, b in group)
+            ids = {id(e) for e, _b in group}
+            more = [(e, b) for e, b in texts if id(e) not in ids and b[0] < x1 and b[0] + b[2] > x0 and b[1] < y1 and b[1] + b[3] > y0]
+            if not more:
+                break
+            group += more
+        mine = {id(e) for e, _b in group}
+        for e, p_ in plates:
+            if id(e) in mine and p_.getparent() is not None:
+                sp = p_.find(q("p:spPr") + "/" + q("a:solidFill") + "/" + q("a:srgbClr"))
+                fill = fill or (sp.get("val") if sp is not None else None)
+                p_.getparent().remove(p_)
+                done.add(id(e))
+        # the list's markers and rules at its left and between its rows are part of the block
+        for m in added:
+            mb = element_bbox(m)
+            if not mb or id(m) in mine or etree.QName(m).localname not in ("sp", "cxnSp"):
+                continue
+            # (a marker or an accent bar at the rows' left, a rule between them that starts inside the block)
+            if mb[1] >= y0 - int(0.01 * H) and mb[1] + mb[3] <= y1 + int(0.01 * H) and x0 - int(0.06 * W) <= mb[0] <= x1 and mb[0] + mb[2] <= x1 + int(0.25 * W):
+                x0, x1 = min(x0, mb[0]), max(x1, mb[0] + mb[2])
+        px, py = int(0.016 * W), int(0.016 * H)
+        box = Bbox(x=max(x0 - px, 0), y=max(y0 - py, 0), w=min(x1 + px, W) - max(x0 - px, 0), h=min(y1 + py, H) - max(y0 - py, 0))
+        plate = Canvas(slide).rect(box, fill, None, radius_emu=min(_card_radius_emu(manifest), int(0.03 * H)), name="Plate")
+        tree = plate.getparent()
+        firsts = [m for m in added if m.getparent() is tree and element_bbox(m) and _inside(element_bbox(m), box)]
+        first = min(firsts, key=lambda m: tree.index(m)) if firsts else group[0][0]
+        first.addprevious(plate)
+        inks = _inks(pal, manifest)
+        best = max(inks, key=lambda c: contrast_ratio(c, fill))
+        for e, _b in group:
+            for r in e.iter(q("a:rPr")):
+                clr = r.find(q("a:solidFill") + "/" + q("a:srgbClr"))
+                if clr is not None and clr.get("val") and contrast_ratio(clr.get("val"), fill) < 4.5 and contrast_ratio(best, fill) >= 4.5:
+                    clr.set("val", best)
+        # the markers and the rules of the block read on the plate too
+        for m in added:
+            mb = element_bbox(m)
+            if not mb or id(m) in mine or not _inside(mb, box):
+                continue
+            for clr in m.iter(q("a:srgbClr")):
+                if clr.get("val") and contrast_ratio(clr.get("val"), fill) < 1.6 and contrast_ratio(best, fill) >= 3.0:
+                    clr.set("val", best)
+
+
+def _inside(b, box: Bbox) -> bool:
+    return b[0] >= box.x - 1 and b[1] >= box.y - 1 and b[0] + b[2] <= box.x2 + 1 and b[1] + b[3] <= box.y2 + 1
+
+
+def _plate_under(slide: Slide, el, unread: list, pal: "_Palette", manifest: TemplateManifest):
     """A plate under a text no colour of the template reads on everywhere (a line across the dark half of a gradient
     and a white glow): a rectangle in the template's ground — the palette's, else its dark or light one — on which the
     text's own colour reads (4.5:1), drawn under the text's lines with a little air; the runs that did not read take
-    that colour. False when no plate colour holds the text."""
+    that colour. Returns the plate; None when no plate colour holds the text."""
     from verstka.rendering.clone_check import ink_lines
     from verstka.rendering.compose import Canvas
 
@@ -2048,7 +2232,7 @@ def _plate_under(slide: Slide, el, unread: list, pal: "_Palette", manifest: Temp
         fill = fills[0]
         ink = max(_inks(pal, manifest), key=lambda c: contrast_ratio(c, fill))
         if contrast_ratio(ink, fill) < 4.5:
-            return False
+            return None
     try:
         rows = ink_lines(el, t.typography.primary_family)
     except Exception:  # noqa: BLE001
@@ -2080,7 +2264,7 @@ def _plate_under(slide: Slide, el, unread: list, pal: "_Palette", manifest: Temp
     el.addprevious(plate)
     for clr, _need in unread:
         clr.set("val", ink)
-    return True
+    return plate
 
 
 def _keep_turned_heading(title_ph, manifest: TemplateManifest, W: int, H: int, warnings: list[str]) -> Optional[int]:
