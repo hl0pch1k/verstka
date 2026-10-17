@@ -27,7 +27,8 @@ test("стили сцены: 1 — ничего; меньше — страниц
   const s = stageStyles(k);
   assert.equal(s.fit?.height, 760);
   assert.equal(s.fit?.overflow, "clip");
-  assert.equal(s.root?.transform, `scale(${k})`);
+  // всегда свой слой: наведение внутри не переводит страницу из документа в слой и обратно (Safari, скрин 20)
+  assert.equal(s.root?.transform, `scale(${k}) translateZ(0)`);
   assert.equal(s.root?.transformOrigin, "0 0");
   assert.equal(s.root?.height, STAGE_H);
   assert.equal(parseFloat(String(s.root?.width)) * k, 100 + 0); // 100 % окна после уменьшения

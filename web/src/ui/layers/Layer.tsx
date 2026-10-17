@@ -86,8 +86,9 @@ function LayerSlot({ open, top, z, height = 812, label, children, onClose, id, r
     onClose();
   };
   return (
+    // всегда свой слой, как место плиты (Plate.tsx): наведение внутри не сдвигает слой в уменьшенной сцене (Safari)
     <div ref={slot} id={id} className={cls("p2-slot p2-lay", !on && "p2-lay-off")} onKeyDown={onKey} aria-hidden={on ? undefined : true}
-      style={{ position: "absolute", left: 0, right: 0, top: 0, height, zIndex: z, transform: `translateY(${on ? top : OFF_Y}px)` }}>
+      style={{ position: "absolute", left: 0, right: 0, top: 0, height, zIndex: z, transform: `translateY(${on ? top : OFF_Y}px) translateZ(0)` }}>
       {bare ? children : (
         <section ref={plate} className={cls("p2-plate", tone === "dark" && "p2-dark")} role={role} aria-modal={role === "dialog" ? true : undefined}
           aria-label={label} tabIndex={-1}

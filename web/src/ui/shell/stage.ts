@@ -23,6 +23,11 @@ export function stageScale(height: number, desktop: boolean): number {
   return Math.max(STAGE_MIN, height / STAGE_H);
 }
 
+/** Страница в уменьшенной сцене — всегда свой слой (`translateZ(0)`): иначе Safari делает её слоем только на время
+ *  наведения (у кнопки или миниатюры внутри начался ход transform — уменьшенный предок обязан стать слоем) и снова
+ *  рисует её в документ по окончании; при дробном масштабе пиксели при этом округляются по-разному, и вся страница
+ *  на миг сдвигается — слайд «подпрыгивает», правая колонка съезжает (замечание владельца 18.10, скрин 20). Слой
+ *  растеризуется в своём масштабе (3D-перенос нулевой, will-change не замораживает растр). */
 /** Стили обёртки и страницы при масштабе `k`: обёртка — высотой с уменьшенную сцену (страница не прокручивается,
  *  лишнее — clip, без полосы и без прокрутки фокусом; высота — вниз до целого px, иначе дробная доля
  *  пикселя дала бы прокрутку на 1 px), страница — шире окна в 1/k раз и уменьшена от левого верхнего
@@ -31,7 +36,7 @@ export function stageStyles(k: number): { fit?: Record<string, string | number>;
   if (!(k > 0) || k >= 1) return {};
   return {
     fit: { height: Math.floor(STAGE_H * k + 0.001), overflow: "clip", background: "#F3F4F1" },
-    root: { width: `${100 / k}%`, height: STAGE_H, minHeight: 0, transform: `scale(${k})`, transformOrigin: "0 0" },
+    root: { width: `${100 / k}%`, height: STAGE_H, minHeight: 0, transform: `scale(${k}) translateZ(0)`, transformOrigin: "0 0" },
   };
 }
 
