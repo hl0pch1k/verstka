@@ -75,7 +75,7 @@ def test_the_summary_headline_says_only_what_its_cards_back(sales):
     st = _story(sales, SALES_BRIEF, {"summary_title": "Рост выручки опережает рост клиентской базы"})
     assert _summary(st.outline).headline == "Рост выручки опережает рост клиентской базы"
     st = _story(sales, SALES_BRIEF, {"summary_title": "Пик выручки пришёлся на декабрь"})  # no card speaks of the months
-    assert _summary(st.outline).headline == "Четыре главных вывода"
+    assert _summary(st.outline).headline == "Выручка растёт быстрее числа клиентов; Москва даёт 41% выручки"
     assert any(r["what"] == "summary_title" and "карточках" in r["why"] for r in st.rejected)
     ok = _story(sales, SALES_BRIEF, {"summary_title": "Рост держится на Москве и прямых продажах"})
     assert _summary(ok.outline).headline == "Рост держится на Москве и прямых продажах"
@@ -223,7 +223,7 @@ def test_the_summary_cards_lead_with_their_key_figure_and_the_steps_are_numbered
     assert key_figure("Каждый час подготовки в неделю — около +1,9 к среднему баллу ЕГЭ") == "+1,9"
     assert key_figure("NPS вырос в 2026 году") is None
     o = build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales)
-    assert [i.number for i in _summary(o).content.items] == ["+23%", "41%", "46%", "80%"]
+    assert [i.number for i in _summary(o).content.items] == ["+23%", "41%", "46%", "20%"]  # (the weak spot: its tail, qa4 S3)
     st = _story(sales, SALES_BRIEF, {"next_steps": ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]})
     steps = next(s for s in st.outline.slides if s.id == "next-steps")
     assert steps.kind.value == "process" and [i.title for i in steps.content.items] == ["Сократить хвост обращений дольше двух часов", "Развивать партнёрский канал в Казани"]

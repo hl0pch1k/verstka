@@ -5,6 +5,13 @@ Brief (what the person wrote):
 Audience: {{ audience }}
 {% endif %}
 
+{% if questions %}
+Questions of the brief (answer them first — the title answers the main one):
+{% for q in questions %}
+- {{ q }}
+{% endfor %}
+
+{% endif %}
 Draft title: {{ title }}
 Draft subtitle: {{ subtitle or "—" }}
 {% if context %}

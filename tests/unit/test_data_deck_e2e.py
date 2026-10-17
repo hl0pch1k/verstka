@@ -261,6 +261,8 @@ def test_the_closing_slides_read_as_a_deliberate_end(templates, tmp_path):
             else:
                 yield x
 
+    head = norm(next(s for s in o.slides if s.id == "summary").headline).lower()
+
     def sizes(slide, texts: list[str], exact: bool) -> list[float]:
         keys = [norm(t) for t in texts if norm(t)]
         out = []
@@ -269,6 +271,8 @@ def test_the_closing_slides_read_as_a_deliberate_end(templates, tmp_path):
                 continue
             for p in shape.text_frame.paragraphs:
                 t = norm(p.text)
+                if t.lower() == head:
+                    continue  # (the summary's headline says its two strongest conclusions — qa4 NEW-S1)
                 if t and any(t == x if exact else t[:16] == x[:16] for x in keys):
                     out += [r.font.size.pt for r in p.runs if r.font.size]
         return out

@@ -95,11 +95,12 @@ def test_the_summary_says_the_goals_conclusions(sales_story):
     summary = sales_story.outline.slides[-1]
     assert summary.id == "summary" and summary.kind.value == "cards"
     # by weight, not by slide order (live QA, N-S1): the key figures, the brief's goals (the revenue line's +23% is the
-    # key figures' own — said once), the weak spot the brief asks about («где узкие места»)
-    assert [it.title for it in summary.content.items] == ["Итоги квартала", "Выручка по регионам", "Каналы продаж", "Время ответа поддержки"]
-    assert summary.headline == "Четыре главных вывода"
+    # key figures' own — said once), the weak spot the brief asks about («где узкие места») said as one; the cards'
+    # topics, never a file's name; the headline is the two strongest conclusions (qa4 NEW-S1, S3, NEW-S4)
+    assert [it.title for it in summary.content.items] == ["Выручка и клиенты", "Выручка по регионам", "Каналы продаж", "Узкое место: время ответа поддержки"]
+    assert summary.headline == "Выручка растёт быстрее числа клиентов; Москва даёт 41% выручки"
     heads = {s.headline for s in sales_story.outline.slides if s.data}
-    assert all(it.text in heads for it in summary.content.items)
+    assert all(it.text in heads for it in summary.content.items[:3])
 
 
 def test_the_story_logs_what_the_analyst_decided(sales, sales_story):
@@ -233,7 +234,7 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
             assert data_text_ok(s.headline, s, years=["2026"]), s.headline
     summary = next(s for s in o.slides if s.id == "summary")
     assert summary.headline == "Рост держится на Москве и прямых продажах"
-    assert [it.title for it in summary.content.items] == ["Итоги квартала", "Выручка по регионам", "Каналы продаж", "Время ответа поддержки"]
+    assert [it.title for it in summary.content.items] == ["Выручка и клиенты", "Выручка по регионам", "Каналы продаж", "Узкое место: время ответа поддержки"]
     steps = next(s for s in o.slides if s.id == "next-steps")
     assert [i.title for i in steps.content.items] == ["Разобрать узкие места поддержки", "Сократить время ответа поддержки"]
     assert o.planned_by == "model" and st.model == "qwen-test" and st.model_used
@@ -344,7 +345,7 @@ def test_true_numbers_recombined_across_slides_are_refused(sales):
     st = build_data_story(Brief(text=SALES_BRIEF, slide_count=10), sales, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
     summary = next(s for s in st.outline.slides if s.id == "summary")
     det_summary = next(s for s in det.slides if s.id == "summary")
-    assert summary.headline == det_summary.headline == "Четыре главных вывода"
+    assert summary.headline == det_summary.headline != "Четыре главных вывода"
     assert [(i.title, i.text) for i in summary.content.items] == [(i.title, i.text) for i in det_summary.content.items]
     refused = {r["to"] for r in st.rejected}
     assert {"Выручка выросла на 41%", "Выручка выросла на 41% к сентябрю", "Москва даёт 23% выручки", "Прямые продажи — 52% выручки"} <= refused

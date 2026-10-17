@@ -29,6 +29,10 @@ from typing import Any, Callable, Optional, Sequence, Union
 
 from pydantic import BaseModel, Field
 
+from verstka.data.answer import (
+    card_label, plan_vocab, question_goals, route, rows_answer, step_grounded, steps_basis, summary_headline, topic_only,
+    weak_card,
+)
 from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
@@ -118,6 +122,11 @@ class DataStory:
     rephrased: list[dict] = field(default_factory=list)  # {"what", "slide", "from", "to", "accepted", "why"}
     stats: list = field(default_factory=list)  # the storyteller's model calls (what they cost)
     seconds: float = 0.0
+    # the brief's questions and the files that answer them, in the story's order: {"question", "file"} (qa4 NEW-S2)
+    questions: list[dict] = field(default_factory=list)
+    # the summary's cards: the data slide each was made of and what it says (answer | weak | conclusion) — the model's
+    # rewording of a card is checked against that slide (not saved)
+    cards: list[dict] = field(default_factory=list)
 
     @property
     def rejected(self) -> list[dict]:
@@ -144,6 +153,7 @@ class DataStory:
             "rephrased": sum(1 for r in self.rephrased if r.get("accepted")),
             "rejected": [{k: r.get(k) for k in ("what", "slide", "to", "why")} for r in self.rejected],
             "seconds": round(self.seconds, 2),
+            **({"questions": list(self.questions)} if self.questions else {}),
         }
 
     def save(self, path: Path) -> Path:
@@ -572,23 +582,6 @@ def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[Numb
     return out
 
 
-def _summary_lines(plans: Sequence[DatasetPlan], order: Sequence[int], heads: Optional[dict] = None) -> list[tuple[str, str]]:
-    """(topic, conclusion) of the first three datasets of the story: the goals' first; `heads` — the headlines their
-    slides carry (the story's self-check may have replaced the plan's)."""
-    out = []
-    for k in order:
-        p = plans[k]
-        head = (heads or {}).get(k, p.headline)
-        if p.slides <= 0 or not head or head == p.plain_headline:
-            continue
-        out.append((p.plain_headline or p.profile.file, head))
-        if len(out) == 4:
-            break
-    return out
-
-
-_COUNT_WORD = {1: "Главный вывод", 2: "Два главных вывода", 3: "Три главных вывода", 4: "Четыре главных вывода"}
-
 # the brief asks where it goes wrong («где узкие места», «какие риски»): the summary names a weak spot
 _BOTTLENECK_RE = re.compile(r"(?i)узк\w*\s+мест|проблем|риск|слаб\w*\s+мест|отста|теря|потер")
 
@@ -610,12 +603,13 @@ def key_figure(text: str) -> Optional[str]:
     return None
 
 
-def _summary_pick(plans: Sequence[DatasetPlan], kept: Sequence[int], order: Sequence[int], brief_text: str, heads: dict) -> list[int]:
-    """The datasets whose conclusions make the summary, by weight, not by slide order (live QA, N-S1): the key figures'
-    slide (it says the period's result: «Выручка растёт быстрее числа клиентов»), the brief's goals in the brief's order,
-    and a weak spot when the brief asks for one (a distribution's tail, then a concentration); a conclusion whose
-    figures another card already says is left out (the revenue line's +23% beside the key figures' +23%). Three cards,
-    four when the key figures and a weak spot both stand beside two goals."""
+def _summary_pick(plans: Sequence[DatasetPlan], kept: Sequence[int], order: Sequence[int], brief_text: str, heads: dict, answers: Sequence[int] = ()) -> list[int]:
+    """The datasets whose conclusions make the summary, by weight, not by slide order (live QA, N-S1): the answers to
+    the brief's questions first, one card each (qa4 NEW-S2), the key figures' slide (it says the period's result:
+    «Выручка растёт быстрее числа клиентов»), the brief's goals in the brief's order, and a weak spot when the brief
+    asks for one (a distribution's tail, then a concentration); a conclusion whose figures another card already says is
+    left out (the revenue line's +23% beside the key figures' +23%). Three cards, four when the key figures and a weak
+    spot both stand beside two goals or when the questions take them."""
     def head(k: int) -> str:
         return heads.get(k, plans[k].headline) or ""
 
@@ -639,19 +633,118 @@ def _summary_pick(plans: Sequence[DatasetPlan], kept: Sequence[int], order: Sequ
         picked.append(k)
         said.update(f)
 
+    for k in answers:
+        if k in ok and len(picked) < 4:
+            take(k)
     for k in kpi[:1]:
-        take(k)
+        if len(picked) < 4:
+            take(k)
     for k in goals:
         if len(picked) >= (2 if weak else 3) + (1 if kpi and weak else 0):
             break
         take(k)
     for k in weak[:1]:
-        take(k)
+        if len(picked) < 4:
+            take(k)
     for k in goals + rest:
         if len(picked) >= 3:
             break
         take(k)
     return picked[:4]
+
+
+def _answers(brief_text: str, goals: Sequence[Any], plans: Sequence[DatasetPlan], tables: Sequence[Table]) -> list[dict]:
+    """The brief's questions with the datasets that answer them, one dataset a question: {"question", "plan", "goal",
+    "rows"} — `rows`, the answer about the rows the question names (`answer.rows_answer`), or None."""
+    out: list[dict] = []
+    for g, q in question_goals(brief_text, goals):
+        if any(a["question"] == q for a in out):
+            continue
+        k = route(g, plans, tables, [a["plan"] for a in out])
+        if k is None or any(a["plan"] == k for a in out):
+            continue
+        out.append({"question": q, "plan": k, "goal": g, "rows": rows_answer(q, tables[k] if k < len(tables) else None)})
+    return out
+
+
+def _add_facts(slide: Optional[OutlineSlide], facts: Sequence[HeadlineFact]) -> None:
+    """Facts the story said of a data slide's file (a row the question names, a weak spot's tail) join the slide's own:
+    every figure of the deck stays one of its data's (the audit's figure checks read them)."""
+    if slide is None or slide.data is None:
+        return
+    have = {f.id for f in slide.data.headline_facts}
+    for f in facts:
+        if f.id not in have:
+            slide.data.headline_facts.append(f)
+            have.add(f.id)
+
+
+def _proper_names(slides: Sequence[OutlineSlide]) -> list[str]:
+    """One-word names of the data's categories («Москва», «Казань»): kept capitalised inside a sentence."""
+    out = []
+    for s in slides:
+        p = s.data.prepared if s.data is not None else None
+        names = (list(p.categories) + [str(r[0]) for r in p.rows if r]) if p is not None else []
+        out += [x.strip() for x in names if x and len(x.split()) == 1 and x.strip()[:1].isupper()]
+    return list(dict.fromkeys(out))
+
+
+def _card_figure(text: str, facts: Sequence[HeadlineFact]) -> Optional[str]:
+    """A card's key figure with its sign: a change the conclusion says «на 6% больше» is set «+6%» (qa4 NEW-S4)."""
+    fig = key_figure(text)
+    if not fig or fig[:1] in "+-−–" or not re.search(r"\bна\s+" + re.escape(fig.split()[0]), text or ""):
+        return fig
+    n = numbers_in(fig)
+    signs = {f.value > 0 for f in facts if f.kind == "change" and n and abs(abs(f.value) - n[0]) < 0.051}
+    return ("+" if signs.pop() else "−") + fig if len(signs) == 1 else fig
+
+
+def _answer_cover(brief: Optional[Brief], answers: Sequence[dict], heads: dict, firsts: dict, title: str, subtitle: Optional[str]) -> tuple[str, Optional[str]]:
+    """(title, subtitle) of a question brief's cover: the main question's answer — about the rows it names, or its
+    dataset's conclusion — over the question as asked; a title the person gave stays, the answer under it."""
+    a = answers[0]
+    rows = a.get("rows")
+    if rows is not None:
+        _add_facts(firsts.get(a["plan"]), rows.facts)
+    line = (rows.short if rows is not None else heads.get(a["plan"])) or ""
+    line = _cut(" ".join(line.split()).rstrip(". "), MAX_TITLE)
+    if not line or topic_only(line):
+        return title, subtitle
+    if brief is not None and brief.title_hint:
+        return title, line
+    asked = " ".join(dict.fromkeys(x["question"] for x in answers))
+    return line, (asked if len(asked) <= MAX_TITLE + 30 else answers[0]["question"])
+
+
+def _summary_cards(plans: Sequence[DatasetPlan], picked: Sequence[int], heads: dict, firsts: dict, answers: Sequence[dict], *, weak_asked: bool) -> list[dict]:
+    """The summary's cards: {"title", "text", "number", "conclusion", "plan"}. A question's card says its answer — the
+    rows it names with their figures, or its dataset's conclusion; a weak spot the brief asks about is said as one
+    (qa4 S3); the title is the card's topic, never a file's name, and the figure keeps its sign (qa4 NEW-S4)."""
+    out = []
+    for k in picked:
+        p = plans[k]
+        head = heads.get(k, p.headline)
+        if p.slides <= 0 or not head or head == p.plain_headline:
+            continue
+        slide = firsts.get(k)
+        title, text, kind = card_label(p, head), head, "conclusion"
+        facts = list(slide.data.headline_facts) if slide is not None and slide.data is not None else []
+        a = next((x for x in answers if x["plan"] == k), None)
+        if a is not None:
+            kind = "answer"
+            if a.get("rows") is not None:
+                title, text = a["rows"].title, a["rows"].text
+                _add_facts(slide, a["rows"].facts)
+                facts += a["rows"].facts
+        elif weak_asked and p.task.task == "distribution":
+            weak = weak_card(p)
+            if weak is not None:
+                title, text, extra = weak
+                kind = "weak"
+                _add_facts(slide, extra)
+                facts += extra
+        out.append({"title": title, "text": text, "number": _card_figure(text, facts), "conclusion": head, "plan": k, "kind": kind})
+    return out
 
 
 @dataclass
@@ -695,6 +788,16 @@ def build_data_story(
     files = [{"id": i, "file": t.file, "sheet": t.sheet, "sha256": _table_sha(t)} for i, t in zip(ids, tables)]
     notes = [{"file": t.file, "text": " ".join(t.notes.split())[:1500]} for t in tables if (t.notes or "").strip()]
     story = DataStory(outline=DeckOutline(title=""), plans=plans, files=files, dataset_ids=ids, notes=notes, brief_text=brief_text)
+
+    # the brief's questions, each with the dataset that answers it: those slides come first, each question gets a card
+    # of the summary and the main one is answered on the cover (qa4 NEW-S2)
+    answers = _answers(brief_text, goals if goals is not None else goals_of(brief_text), plans, tables)
+    if answers:
+        ks = [a["plan"] for a in answers]
+        order = ks + [k for k in order if k not in ks]
+        story.questions = [{"question": a["question"], "file": plans[a["plan"]].profile.file} for a in answers]
+        for a in answers:
+            voice.say(f"вопрос «{a['question']}» — отвечают данные «{plans[a['plan']].profile.file}»: их слайд — в начале, ответ — в итоге", 0.04)
 
     # what the analyst decided, dataset by dataset
     for k in order:
@@ -760,6 +863,8 @@ def build_data_story(
                 keep = 90 if is_kpi else (60 + (n_data - pos) if p.task.goal else 30 + (n_data - pos))
                 if appendix:
                     keep = 1
+                if any(a["plan"] == k for a in answers):
+                    keep = 92  # (a question's answer stays whatever the slide count)
             else:
                 role, keep = ("appendix" if appendix else "part"), (0 if appendix else 10)
             data_entries.append(_Entry(s, role, k, keep))
@@ -772,7 +877,11 @@ def build_data_story(
     kpi_first = [e for e in data_entries if e.role == "kpi"]
     body = [e for e in data_entries if e.role in ("data", "part")]
     appendix = [e for e in data_entries if e.role == "appendix"]
-    entries = entries[:1] + [e for e in entries[1:] if e.role == "context"] + kpi_first + [e for e in entries if e.role == "facts"] + body
+    # a question brief is answered first: the answering slides before the key figures (qa4 NEW-S2)
+    asked = [e for a in answers for e in body + kpi_first if e.plan_index == a["plan"]]
+    kpi_first = [e for e in kpi_first if e not in asked]
+    body = [e for e in body if e not in asked]
+    entries = entries[:1] + [e for e in entries[1:] if e.role == "context"] + asked + kpi_first + [e for e in entries if e.role == "facts"] + body
     summary_at = len(entries)
     entries += appendix
 
@@ -809,17 +918,27 @@ def build_data_story(
             voice.say(f"Слайдов просили {limit}: без {count_words(len(story.dropped), 'слайда', 'слайдов', 'слайдов')} — {', '.join('«' + h + '»' for h in story.dropped[:4])}{' и др.' if len(story.dropped) > 4 else ''}", 0.08)
 
     kept = {e.plan_index for e in entries if e.plan_index is not None}
-    # the summary's conclusions: the key figures, the goals (what the text asked about), a weak spot when asked for
+    # the summary's conclusions: the questions' answers, the key figures, the goals (what the text asked about), a weak
+    # spot when asked for
     heads = {e.plan_index: e.slide.headline for e in entries if e.plan_index is not None and e.slide.data is not None and e.slide.data.part[0] == 1}
-    lines = _summary_lines(plans, _summary_pick(plans, sorted(kept), order, brief_text, heads), heads)
-    if want_summary and lines:
+    firsts = {e.plan_index: e.slide for e in entries if e.plan_index is not None and e.slide.data is not None and e.slide.data.part[0] == 1}
+    if answers and entries[0].role == "title":
+        # the cover answers the main question (qa4 NEW-S2: «Что показывают данные» over a question brief)
+        title, subtitle = _answer_cover(brief, answers, heads, firsts, title, subtitle)
+        entries[0].slide.headline, entries[0].slide.subtitle = title, subtitle
+    picked = _summary_pick(plans, sorted(kept), order, brief_text, heads, answers=[a["plan"] for a in answers if a["plan"] in kept])
+    cards = _summary_cards(plans, picked, heads, firsts, answers, weak_asked=bool(_BOTTLENECK_RE.search(brief_text or "")))
+    if want_summary and cards:
         # each card leads with its conclusion's key figure, set large (qa3 N-L3: three columns of 9 pt text)
-        items = [SlideItem(title=topic, text=concl, number=key_figure(concl)) for topic, concl in lines]
+        items = [SlideItem(title=c["title"], text=c["text"], number=c["number"]) for c in cards]
         if not all(it.number for it in items):
             items = [it.model_copy(update={"number": None}) for it in items]  # all cards with a figure, or none
-        summary = OutlineSlide(id="summary", kind=PatternKind.cards, headline=_COUNT_WORD.get(len(items), "Главные выводы"), content=SlideContent(items=items), rationale="Выводы из фактов данных: ключевые цифры, то, о чём спрашивает бриф, и слабое место, когда о нём спрашивают.")
+        # the headline says the two strongest conclusions, never «Четыре главных вывода» (qa4 NEW-S1)
+        head = summary_headline([c["conclusion"] for c in cards], _proper_names(firsts.values())) or "Главные выводы"
+        summary = OutlineSlide(id="summary", kind=PatternKind.cards, headline=head, content=SlideContent(items=items), rationale="Выводы из фактов данных: ответы на вопросы брифа, ключевые цифры, то, о чём спрашивает бриф, и слабое место, когда о нём спрашивают.")
         body_n = len([e for e in entries if e.role != "appendix"])
         entries.insert(body_n, _Entry(summary, "summary", keep=95))
+        story.cards = [{"slide": firsts[c["plan"]].id if c["plan"] in firsts else None, "kind": c["kind"]} for c in cards]
 
     slides = [e.slide for e in entries]
     outline = DeckOutline(title=title, subtitle=subtitle, audience=brief.audience if brief is not None else None, purpose="report", strategy="structured", language=(brief.language if brief is not None else "ru") or "ru", planned_by="rules", slides=slides)
@@ -827,7 +946,7 @@ def build_data_story(
 
     # the model writes the connecting text; every figure it writes is checked
     if use_llm and skills is not None and providers is not None and _has_llm(providers):
-        _tell(story, brief, voice, skills, providers, deadline=deadline, limit=limit)
+        _tell(story, brief, voice, skills, providers, deadline=deadline, limit=limit, tables=tables)
 
     _say_designs(voice, outline)
     outline.agent_log = list(voice.lines) + list(outline.agent_log)
@@ -870,8 +989,10 @@ def _facts_payload(fs: Sequence[HeadlineFact]) -> list[dict]:
     return [{"text": f.text, "value": f.value, "unit": f.unit} for f in fs]
 
 
-def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, providers: Any, *, deadline: Optional[float], limit: Optional[int] = None) -> None:
-    """One call of `data_storyteller`; what it wrote replaces the deterministic wording where the checks pass."""
+def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, providers: Any, *, deadline: Optional[float], limit: Optional[int] = None, tables: Optional[Sequence[Table]] = None) -> None:
+    """One call of `data_storyteller`; what it wrote replaces the deterministic wording where the checks pass.
+    `tables`: the files read — a true figure of a file a line names (its cell, the number in a fact's words) is
+    accepted and joins that slide's facts (qa4 NEW-S3)."""
     from verstka.pipeline.generate import _recording
 
     o = story.outline
@@ -895,6 +1016,7 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
         "summary": [it.text for it in summary.content.items] if summary is not None else [],
         "audience": (brief.audience if brief is not None else None) or "",
         "notes": list(story.notes),
+        "questions": [q["question"] for q in story.questions],
     }
     voice.say("модель формулирует связку истории и проверяет заголовки-выводы", 0.1)
     rec, answered = _recording(providers, story.stats)
@@ -924,19 +1046,24 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     def clean(x: str, n: int) -> str:
         return " ".join(str(x or "").split()).strip().rstrip(".") if len(" ".join(str(x or "").split())) <= n else ""
 
-    source = _Attribution(data_slides)
+    source = _Attribution(data_slides, extra=_file_values(story, data_slides, tables))
+    asked = bool(story.questions)
 
     def framed(x: str) -> tuple[bool, str]:
-        """The title's and the subtitle's numbers: the brief's, or one data slide's when the line names its subject."""
+        """The title's and the subtitle's numbers: the brief's, or one data slide's when the line names its subject;
+        a year or a quarter dates the deck («Итоги III квартала 2026»), it is no figure (qa4 NEW-S2)."""
+        x = _YEAR_RE.sub(" ", x)
         if _numbers_from(x, brief_nums):
             return True, ""
-        ok, why = source.free_or_attributed(x)
+        ok, why = source.accept(x)
         return ok, "" if ok else f"{why} и не из текста"
 
-    # the title and the subtitle
+    # the title and the subtitle; a question brief's cover keeps its answer unless the model's title is an answer too
     t = clean(w.title, MAX_TITLE)
     if t and t != o.title:
         ok, why = framed(t)
+        if ok and asked and topic_only(t):
+            ok, why = False, "это тема, а не ответ на вопрос брифа"
         note("title", "title", o.title, t, ok, why)
         if ok:
             o.title = t
@@ -945,6 +1072,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     st = clean(w.subtitle, MAX_TITLE + 30)
     if st and st != (o.subtitle or ""):
         ok, why = framed(st)
+        if ok and asked:
+            ok, why = False, "под ответом на обложке остаётся вопрос брифа"
         note("subtitle", "title", o.subtitle or "", st, ok, why)
         if ok:
             o.subtitle = st
@@ -959,7 +1088,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
         new = clean(by_id.get(s.id, ""), MAX_HEADLINE)
         if not new or new == s.headline:
             continue
-        bad = bad_numbers(new, s, years=brief_years)
+        # (a true figure of the slide's file — «онлайн — лишь 9%» from its share column — counts, qa4 NEW-S3)
+        bad = bad_numbers(new, s, values=source.values(s), years=brief_years)
         ok = not bad
         why = ""
         if not ok:
@@ -968,8 +1098,11 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
             ok, why = False, "это тема, а не вывод"
         elif is_description(new) and not is_description(s.headline):
             ok, why = False, "это описание чисел, а не вывод"
+        elif source.wrong_category(new, s):
+            ok, why = False, "число в данных относится к другой категории"
         note("headline", s.id, s.headline, new, ok, why)
         if ok:
+            source.ground(new, s)
             old = s.headline
             s.headline = new
             for c in o.slides:
@@ -986,32 +1119,44 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     # the line names that slide's own subject; true numbers recombined across slides («Выручка выросла на 41%», where
     # 41% is Moscow's share) are refused
     if summary is not None:
-        cards = [(it, _item_slide(it, data_slides, summary_slides)) for it in summary.content.items]
-        lines = [clean(x, MAX_LINE) for x in w.summary][:3]
+        by_slide = {s.id: s for s in data_slides}
+        if len(story.cards) == len(summary.content.items):
+            # (the card's own slide, also for a question's answer and a weak spot, whose text is no slide's headline)
+            cards = [(it, by_slide.get(c.get("slide") or ""), c.get("kind")) for it, c in zip(summary.content.items, story.cards)]
+        else:
+            cards = [(it, _item_slide(it, data_slides, summary_slides), "conclusion") for it in summary.content.items]
+        lines = [clean(x, MAX_LINE) for x in w.summary][:4]
         taken: set[str] = set()
         for x in [x for x in lines if x]:
             src, why = source.of(x)
-            slot = next((it for it, sl in cards if sl is not None and src is not None and sl.id == src.id and sl.id not in taken), None)
+            slot = next((it for it, sl, kind in cards if sl is not None and src is not None and sl.id == src.id and sl.id not in taken), None)
+            kind = next((kind for it, sl, kind in cards if it is slot), None)
             if src is not None and slot is None:
                 src, why = None, "о файле, которого нет среди выводов итога"
-            if src is not None and is_description(x):
+            if src is not None and is_description(x) and kind != "answer":
                 src, why = None, "это описание чисел, а не вывод"
+            if src is not None and kind == "weak" and not _BOTTLENECK_SAID_RE.search(x):
+                # a weak spot the brief asks about stays a weak spot, not a success (qa4 S3)
+                src, why = None, "узкое место, о котором спрашивает бриф, сказано как успех"
             note("summary", "summary", "", x, src is not None, why)
             if src is not None and slot is not None:
+                source.ground(x, src)
                 slot.text = x  # one for one: the conclusion of the same slide, the others stay
                 if slot.number and key_figure(x):
-                    slot.number = key_figure(x)
+                    slot.number = _card_figure(x, src.data.headline_facts if src.data is not None else [])
                 taken.add(src.id)
                 used = True
         sh = clean(w.summary_title, MAX_HEADLINE)
         if sh and sh != summary.headline:
-            ok, why = source.free_or_attributed(sh)
+            ok, why = source.accept(sh)
             # the summary's headline says what its cards back: a subject of no card («…опережает рост клиентской базы»
             # over cards about revenue, regions and channels) is refused
-            backs = {sl.id for _, sl in cards if sl is not None}
+            backs = {sl.id for _, sl, _ in cards if sl is not None}
             named = source.subjects(sh)
             texts = [x for it in summary.content.items for x in (it.title or "", it.text or "")]
-            if ok and ((named and not named <= backs) or source.unbacked(sh, backs, texts)):
+            if ok and topic_only(sh):
+                ok, why = False, "это тема, а не вывод"  # «Ключевые итоги года», «Четыре главных вывода» (qa4 NEW-S1)
+            elif ok and ((named and not named <= backs) or source.unbacked(sh, backs, texts)):
                 ok, why = False, "заголовок итога говорит о том, чего нет в его карточках"
             note("summary_title", "summary", summary.headline, sh, ok, why)
             if ok:
@@ -1021,12 +1166,20 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     steps = [x for x in steps if x]
     good_steps = []
     explained = _explained(story.notes)
+    # a step stands on the files' own proposal or on a weak spot of the data, never on the model's invention (qa4
+    # NEW-S5)
+    basis = steps_basis(story.notes)
+    weak_words = set().union(*(plan_vocab(p) for p in story.plans if p.slides > 0 and p.task.task == "distribution")) if story.plans else set()
+    data_words = set().union(*(plan_vocab(p) for p in story.plans if p.slides > 0)) if story.plans else set()
     for x in steps:
         ok, why = source.free_or_attributed(x)
         if ok and explained and _asks_why_missing(x):
             ok, why = False, "это объясняют сами файлы: " + explained
+        if ok:
+            ok, why = step_grounded(x, basis, weak_words, data_words)
         note("next_step", "next", "", x, ok, why)
         if ok:
+            source.accept(x)  # (its figures join the facts of the file it names)
             good_steps.append(x)
     if len(good_steps) >= 2 and (limit is None or len(o.slides) < limit):
         at = next((k + 1 for k, s in enumerate(o.slides) if s.id == "summary"), len(o.slides))
@@ -1154,6 +1307,50 @@ def _stem_hit(word: str, own: set[str]) -> Optional[str]:
     return None
 
 
+# a weak spot said as one: a tail, a wait, a loss — not «80% обращений получают ответ за 2 часа» (qa4 S3)
+_BOTTLENECK_SAID_RE = re.compile(r"(?i)хвост|дольше|больше|долг|ждут|ожида|выброс|задерж|медлен|отста|теря|потер|узк|проблем|слаб|не\s+успева|превыша|сверх")
+
+
+def _file_values(story: DataStory, slides: Sequence[OutlineSlide], tables: Optional[Sequence[Table]]) -> dict:
+    """What a line may say of each data slide beyond its facts: {slide id: (values, {value: the rows it is in}, {value:
+    where it comes from})} — the slide's own values (chart, table, caption), the numbers inside its facts' words
+    («больше 10 часов» of a 600-minute bound) and the cells of its file («Онлайн — Доля: 9»), qa4 NEW-S3."""
+    from verstka.data.answer import label_column
+    from verstka.data.words import fmt_exact
+
+    by_id = {}
+    for i, t in zip(story.dataset_ids, tables or []):
+        by_id[i] = t
+        by_id.setdefault(t.id, t)
+    out = {}
+    for s in slides:
+        if s.data is None:
+            continue
+        vals: list[float] = list(slide_values(s))
+        rows: dict = {}
+        src: dict = {}
+        years = data_years(s)
+        for f in s.data.headline_facts:
+            for n in numbers_in(_without_years(f.text or "", years)):
+                vals.append(n)
+                src.setdefault(round(n, 4), f.text)
+        t = by_id.get(s.data.dataset_id)
+        if t is not None and len(t.rows) <= 300:
+            j0 = label_column(t)
+            for r in t.rows:
+                lab = str(r[j0]).strip() if j0 is not None and j0 < len(r) and isinstance(r[j0], str) else ""
+                for j, c in enumerate(r):
+                    if j == j0 or not isinstance(c, (int, float)) or isinstance(c, bool):
+                        continue
+                    v = float(c)
+                    vals.append(v)
+                    rows.setdefault(round(v, 4), set()).add(lab.lower())
+                    col = t.columns[j] if j < len(t.columns) else ""
+                    src.setdefault(round(v, 4), f"{lab} — {col}: {fmt_exact(v)}" if lab else f"{col}: {fmt_exact(v)}")
+        out[s.id] = (vals, rows, src)
+    return out
+
+
 class _Attribution:
     """Which data slide a sentence of the model speaks of. Each slide's own subject — the words of its topic, file
     name and labels (categories, series, row names, cards) that no other data slide has («месяц», «сен» for the revenue
@@ -1162,8 +1359,9 @@ class _Attribution:
     slide's, and a number tied to a category («Москва — 41%») is said of that category, not of another («Казань
     выросла на 41%»). The slide's own headline, said again, belongs to it."""
 
-    def __init__(self, slides: Sequence[OutlineSlide]) -> None:
+    def __init__(self, slides: Sequence[OutlineSlide], extra: Optional[dict] = None) -> None:
         self.slides = [s for s in slides if s.data is not None]
+        self.extra = extra or {}  # `_file_values`: the true figures of each slide's file beyond its facts
         self.labels = {s.id: data_labels(s) for s in self.slides}
         self.cats = {s.id: self._categories(s) for s in self.slides}
         vocab = {}
@@ -1203,8 +1401,10 @@ class _Attribution:
         if len(speaks) > 1:
             return None, "вывод смешивает данные разных файлов"
         s = speaks[0]
-        if not data_text_ok(line, s):
+        if not data_text_ok(line, s, values=self.values(s)):
             return None, "числа не из фактов того файла, о котором говорит вывод"
+        if self.wrong_category(line, s):
+            return None, "число в данных относится к другой категории"
         # a number of a fact about one category, said of another («Казань выросла на 41%», where 41% is Moscow's)
         low_line = line.lower()
         cats = [c for c in self.cats[s.id] if c and c.lower() in low_line]
@@ -1216,6 +1416,53 @@ class _Attribution:
                 if hits and not any(c.lower() in (f.text or "").lower() for f in hits for c in cats):
                     return None, f"число {_num(n)} в данных относится к другой категории"
         return s, ""
+
+    def values(self, s: OutlineSlide) -> list[float]:
+        return list(self.extra.get(s.id, ((), {}, {}))[0])
+
+    def wrong_category(self, line: str, s: OutlineSlide) -> bool:
+        """A figure of a file's cell said of another row than its own («Партнёры — 9%», where 9% is Онлайн's)."""
+        rows = self.extra.get(s.id, ((), {}, {}))[1]
+        if not rows:
+            return False
+        low = line.lower()
+        named = {c.lower() for c in self.cats.get(s.id, []) if c and c.lower() in low}
+        if not named:
+            return False
+        from verstka.data.headline import _matches
+
+        for n in numbers_in(_without_years(line, data_years(s)), self.labels.get(s.id, [])):
+            if any(_matches(n, f.value) for f in s.data.headline_facts):
+                continue
+            where = set().union(*(r for v, r in rows.items() if _matches(n, v))) if rows else set()
+            if where and not (where & named):
+                return True
+        return False
+
+    def ground(self, line: str, s: OutlineSlide) -> None:
+        """The figures of an accepted line that are no fact of its slide yet (a cell of its file, a number in a fact's
+        words) join the slide's facts: the deck's every figure stays one of its data's, for the audit too."""
+        if s is None or s.data is None:
+            return
+        from verstka.data.headline import _matches
+
+        src = self.extra.get(s.id, ((), {}, {}))[2]
+        for n in numbers_in(_without_years(line, data_years(s)), self.labels.get(s.id, [])):
+            if any(_matches(n, f.value) for f in s.data.headline_facts):
+                continue
+            where = next((t for v, t in src.items() if _matches(n, v)), None)
+            if where is None:
+                continue
+            s.data.headline_facts.append(HeadlineFact(id=f"story_{len(s.data.headline_facts)}", text=where, value=float(n), kind="count"))
+
+    def accept(self, line: str) -> tuple[bool, str]:
+        """`free_or_attributed`, and an attributed line's new figures join its slide's facts (`ground`)."""
+        if not numbers_in(line, self.all_labels):
+            return True, ""
+        src, why = self.of(line)
+        if src is not None:
+            self.ground(line, src)
+        return src is not None, why
 
     def subjects(self, line: str) -> set[str]:
         """The data slides whose own subject the line names."""

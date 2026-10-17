@@ -2314,7 +2314,7 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
                 )
             except ValueError as e:
                 msg = str(e)
-                return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False}
+                return {"reply": _refused_reply(msg), "changed": False}
             focus = i
         version = None
         if undone is not None:
@@ -2342,6 +2342,12 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
     return run
 
 
+def _refused_reply(msg: str) -> str:
+    """«Не получилось: …» — a refusal's own sentence once, with one period (qa4 E3: «512 строк не показать..»)."""
+    m = " ".join((msg or "").split()).rstrip(" .")
+    return f"Не получилось: {m[:1].lower() + m[1:]}."
+
+
 def _data_form_change(gid: str, strategy: str, vdir: Path, meta: dict, manifest, outline: DeckOutline, n: int, option: int, message: str, job: Job) -> dict:
     """A chat request that names another form of a data slide, done as «Пересобрать слайд так» with that option."""
     from verstka.data.rebuild import RebuildRefused, load_rebuild, rebuild_data_slide
@@ -2354,7 +2360,7 @@ def _data_form_change(gid: str, strategy: str, vdir: Path, meta: dict, manifest,
         rp = load_rebuild(vdir.parent, outline, n, option, store.read_dataset)
     except RebuildRefused as e:
         msg = str(e)
-        return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False, "slide": n, "strategy": strategy}
+        return {"reply": _refused_reply(msg), "changed": False, "slide": n, "strategy": strategy}
     job.emit(f"Пересобираю слайд {n}: {rp.title.lower()}", 0.1)
     res = rebuild_data_slide(
         vdir, strategy, rp, manifest=manifest, ws=store.workspace(meta["template_id"]), template_source=store.workspace(meta["template_id"]).source,
@@ -2591,7 +2597,7 @@ def change_slide_picture(gid: str, strategy: str, n: int, body: PictureBody) -> 
                 )
             except ValueError as e:
                 msg = str(e)
-                return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
+                return {"reply": _refused_reply(msg), "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
             except Exception as e:  # noqa: BLE001 - the model failed: the slide stays as it was
                 from verstka.providers.base import ProviderError
 
