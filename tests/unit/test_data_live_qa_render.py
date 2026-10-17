@@ -236,10 +236,10 @@ def test_the_audit_sees_a_logo_missing_or_in_another_corner(tmp_path):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
     W, H = 12192000, 6858000
-    for k in range(5):
+    for k in range(6):  # (the first and the last slide — cover and closing — are not counted)
         sl = prs.slides.add_slide(prs.slide_layouts[6])
         sl.shapes.add_textbox(Emu(600000), Emu(600000), Emu(6000000), Emu(800000)).text_frame.text = f"Слайд {k + 1}"
-        if k in (0, 1, 2):
+        if k in (0, 1, 2, 5):
             _logo_pic(sl, 0.88 * W, 0.9 * H, 0.08 * W, 0.04 * H, png)
         elif k == 3:
             _logo_pic(sl, 0.03 * W, 0.9 * H, 0.08 * W, 0.04 * H, png)

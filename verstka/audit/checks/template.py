@@ -502,18 +502,26 @@ def brand_logo_place(ctx: AuditContext) -> list[Issue]:
     corners: dict[int, Optional[str]] = {}
     any_logo = False
     for k, (slide, s) in enumerate(zip(prs.slides, ctx.ir.slides), 1):
-        if kinds.get(s.outline_id or "") in ("title", "section", "thanks") or (ctx.outline is None and k == 1):
+        # (a slide the deck's marks no longer name — a finished file audited again — is a cover or a closing slide when
+        # it is the first or the last one)
+        if kinds.get(s.outline_id or "") in ("title", "section", "thanks") or (not s.outline_id and k in (1, len(ctx.ir.slides))):
             continue
         corner = None
         own = [el for el in slide._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}pic") if is_brand_logo(el)]
         # (the slide's own logo, else the one its layout draws)
         drawn = own or [el for el in slide.slide_layout._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}pic") if is_brand_logo(el)]
         for el in drawn:
-            off = el.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}off")
-            ext = el.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}ext")
-            if off is None or ext is None:
+            from lxml import etree as _et
+
+            from verstka.rendering.deck import element_bbox
+
+            top = el  # (a logo inside a group sits in the group's coordinates: the group's own box says where it is)
+            while top.getparent() is not None and _et.QName(top.getparent()).localname not in ("spTree",):
+                top = top.getparent()
+            b = element_bbox(top)
+            if not b or b[2] <= 0 or b[3] <= 0:
                 continue
-            cx, cy = float(off.get("x")) + float(ext.get("cx")) / 2, float(off.get("y")) + float(ext.get("cy")) / 2
+            cx, cy = b[0] + b[2] / 2, b[1] + b[3] / 2
             corner = ("сверху" if cy < H / 2 else "снизу") + " " + ("слева" if cx < W / 3 else ("справа" if cx > 2 * W / 3 else "по центру"))
             any_logo = True
             break

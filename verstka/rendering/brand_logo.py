@@ -162,8 +162,13 @@ def put_back_brand_logos(slide, warnings: list[str], corner: bool = True):
     return slide, warnings
 
 
+def _xfrm(el: etree._Element):
+    """A picture's or a group's own frame (spPr / grpSpPr)."""
+    return el.find(f"{{{_P}}}spPr/{{{_A}}}xfrm") if etree.QName(el).localname != "grpSp" else el.find(f"{{{_P}}}grpSpPr/{{{_A}}}xfrm")
+
+
 def _place(el: etree._Element, box: tuple[float, float, float, float]) -> None:
-    xfrm = el.find(f"{{{_P}}}spPr/{{{_A}}}xfrm")
+    xfrm = _xfrm(el)
     off = xfrm.find(f"{{{_A}}}off") if xfrm is not None else None
     ext = xfrm.find(f"{{{_A}}}ext") if xfrm is not None else None
     if off is None or ext is None:
@@ -183,7 +188,7 @@ def _remove(slide, el: etree._Element) -> None:
 
 
 def _box(el: etree._Element) -> Optional[tuple[float, float, float, float]]:
-    xfrm = el.find(f"{{{_P}}}spPr/{{{_A}}}xfrm")
+    xfrm = _xfrm(el)
     off = xfrm.find(f"{{{_A}}}off") if xfrm is not None else None
     ext = xfrm.find(f"{{{_A}}}ext") if xfrm is not None else None
     if off is None or ext is None:
@@ -274,8 +279,19 @@ def one_corner(prs, skip: frozenset | set = frozenset()) -> int:
         return ("l" if b[0] + b[2] / 2 < W / 2 else "r", "t" if b[1] + b[3] / 2 < H / 2 else "b")
 
     def logos(holder) -> list:
-        # (top-level pictures only: a logo inside a group sits in the group's coordinates)
-        return [el for el in holder._element.iter(f"{{{_P}}}pic") if is_brand_logo_any(el) and etree.QName(el.getparent()).localname == "spTree"]
+        # top-level pictures, or the top-level group a logo picture sits in (the template's own lockup kept with the
+        # brand's picture in it — VK Tech «логотип как в шаблоне»): the group moves whole
+        out = []
+        tree = holder._element.find(f".//{{{_P}}}spTree")
+        for el in (tree if tree is not None else []):
+            tag = etree.QName(el).localname
+            if tag == "pic" and is_brand_logo_any(el):
+                out.append(el)
+            elif tag == "grpSp" and any(is_brand_logo_any(x) for x in el.iter(f"{{{_P}}}pic")):
+                b = _box(el)
+                if b is not None and b[2] * b[3] < 0.05 * W * H:
+                    out.append(el)
+        return out
 
     shown: dict = {}
     layouts: dict = {}
@@ -307,25 +323,31 @@ def one_corner(prs, skip: frozenset | set = frozenset()) -> int:
             b = _box(el)
             if b is None or b[3] <= 0 or corner_of(b) == corner:
                 continue
-            w = h * b[2] / b[3]
-            x = dx if corner[0] == "l" else W - dx - w
-            y = dy if corner[1] == "t" else H - dy - h
             pad = 0.01 * H
-            tgt = (x - pad, y - pad, w + 2 * pad, h + 2 * pad)
 
-            def hits(holder) -> bool:
+            def hits(holder, tgt) -> bool:
                 for o in holder._element.iter(f"{{{_P}}}sp", f"{{{_P}}}pic", f"{{{_P}}}graphicFrame", f"{{{_P}}}grpSp"):
                     if o is el or o.getparent() is None or etree.QName(o.getparent()).localname not in ("spTree",):
                         continue
                     ob = element_bbox(o)
                     if not ob or ob[2] * ob[3] >= 0.85 * W * H:
                         continue
+                    if ob[0] + ob[2] > 1.15 * W or ob[1] + ob[3] > 1.15 * H or ob[2] * ob[3] >= 0.25 * W * H:
+                        continue  # a band or a shape bleeding off the slide: the ground the template draws under its corner
                     if min(ob[0] + ob[2], tgt[0] + tgt[2]) - max(ob[0], tgt[0]) > 0 and min(ob[1] + ob[3], tgt[1] + tgt[3]) - max(ob[1], tgt[1]) > 0:
                         return True
                 return False
 
-            if hits(lay) or any(hits(sl) for sl in slides):
-                continue
-            _place(el, (x, y, w, h))
-            moved += 1
+            # the deck's place first; then a little smaller, or nudged inside the corner's zone (up, in), when that
+            # is what frees it (qa3: VK Tech's layout keeps a mark at the very corner)
+            for scale, ux, uy in ((1.0, 0, 0), (0.85, 0, 0), (1.0, 0, 0.04), (1.0, 0.05, 0), (0.85, 0.05, 0.04), (0.7, 0, 0)):
+                hh = h * scale
+                w = hh * b[2] / b[3]
+                x = (dx + ux * W) if corner[0] == "l" else W - dx - ux * W - w
+                y = (dy + uy * H) if corner[1] == "t" else H - dy - uy * H - hh
+                tgt = (x - pad, y - pad, w + 2 * pad, hh + 2 * pad)
+                if not hits(lay, tgt) and not any(hits(sl, tgt) for sl in slides):
+                    _place(el, (x, y, w, hh))
+                    moved += 1
+                    break
     return moved
