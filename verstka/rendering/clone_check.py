@@ -219,6 +219,45 @@ def figure_trouble(slide, oslide: OutlineSlide, skip: Optional[set] = None) -> O
     return None
 
 
+def _panel_left_empty(slide, oslide: OutlineSlide, chrome: set, manifest: TemplateManifest) -> Optional[str]:
+    """A sample's big panel (a plate of a fifth of the slide and more) that the slide's text leaves nearly empty — one
+    paragraph at the top of ЛЦТ's white half-slide panel, the rest a white field (qa4 NEW-L5: slides 6–8 % filled):
+    the composer sets the same words at the size the area gives them. Why, or None."""
+    from verstka.rendering.clone_notes import _paints
+    from verstka.rendering.deck import element_bbox
+    from verstka.schemas.common import Bbox
+
+    if oslide.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote, PatternKind.big_number):
+        return None
+    c = oslide.content
+    if c.chart is not None or c.table is not None or c.chart2 is not None or (c.code is not None) or (c.formula or "").strip():
+        return None
+    W, H = manifest.slide_size.w, manifest.slide_size.h
+    fam = manifest.tokens.typography.primary_family
+    tree = slide._element.cSld.find(q("p:spTree"))
+    panels, inks = [], []
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") in chrome:
+            continue
+        b = element_bbox(sp)
+        if b and _paints(sp) and b[2] * b[3] >= 0.2 * W * H and b[2] * b[3] < 0.9 * W * H:
+            panels.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+        if _shape_text(sp).strip():
+            ib = ink_box(sp, fam)
+            if ib is not None and ib.area > 0:
+                inks.append(ib)
+    for pnl in panels:
+        inside = [ib for ib in inks if pnl.contains_point(ib.x + ib.w / 2, ib.y + ib.h / 2)]
+        if not inside:
+            continue
+        top, bottom = min(ib.y for ib in inside), max(ib.y2 for ib in inside)
+        area = sum(ib.area for ib in inside)
+        if bottom - top < 0.3 * pnl.h and area < 0.2 * pnl.area:
+            return f"панель образца осталась бы почти пустой: текст занимает {(bottom - top) / pnl.h:.0%} её высоты"
+    return None
+
+
 def _marks_trouble(slide, oslide: OutlineSlide, marks: list, chrome: set, manifest: TemplateManifest) -> Optional[str]:
     """The marks the ground picture draws in the sample's cells (`clone._render_clone`: (cell, mark) boxes) — VK Tech's
     «01»…«04» watermarks, its numerals over the cards (qa4 NEW-L3): no text of the slide over a mark, no cell with a
@@ -792,6 +831,9 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
     closing = closing_trouble(slide, body, oslide.headline)
     if closing:
         return closing
+    sparse = _panel_left_empty(slide, oslide, chrome, manifest)
+    if sparse:
+        return sparse
     marks = slide.__dict__.get("_verstka_cell_marks") or []
     if marks:
         why = _marks_trouble(slide, oslide, marks, chrome, manifest)
