@@ -40,13 +40,23 @@ def _image_class(pkg: PptxPackage, part: Optional[str], cache: dict[str, str]) -
     return cls
 
 
-def _font_face() -> str:
+def _font_face(families: Optional[set[str]] = None) -> str:
+    """Play и шрифты Verstka, которыми набрана колода (`verstka/fonts/**`: подобранная пара — brand/fontpick.py), —
+    внутри страницы: HTML открывается с теми же шрифтами, что и PPTX."""
+    from verstka.brand.fontembed import bundled_family, bundled_fonts
+
     faces = []
     for name, weight in (("Play-Regular.ttf", 400), ("Play-Bold.ttf", 700)):
         p = FONT_DIR / name
         if p.exists():
             b64 = base64.b64encode(p.read_bytes()).decode("ascii")
             faces.append(f"@font-face{{font-family:'Play';font-weight:{weight};src:url(data:font/ttf;base64,{b64}) format('truetype');}}")
+    for fam in sorted({f for f in (bundled_family(x) for x in (families or ())) if f and f != "Play"}):
+        for kind, weight in (("regular", 400), ("bold", 700)):
+            p = bundled_fonts().get(fam, {}).get(kind)
+            if p is not None:
+                b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+                faces.append(f"@font-face{{font-family:'{html.escape(fam)}';font-weight:{weight};src:url(data:font/ttf;base64,{b64}) format('truetype');}}")
     return "\n".join(faces)
 
 
@@ -312,6 +322,15 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
     return ""
 
 
+def _families_of(pptx: Path) -> set[str]:
+    try:
+        from verstka.brand.fontembed import used_families
+
+        return used_families(pptx)
+    except Exception:  # noqa: BLE001 - без списка — только Play
+        return set()
+
+
 def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | None = None, title: Optional[str] = None, ir: Optional[DeckIR] = None) -> Path:
     pptx = Path(pptx)
     out = Path(out) if out else pptx.with_suffix(".html")
@@ -357,7 +376,7 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
     page = f"""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title or pptx.stem)}</title>
 <style>
-{_font_face()}
+{_font_face(_families_of(pptx) | {default_font})}
 :root{{color-scheme:light}}
 body{{margin:0;background:#1e1e22;font-family:'{html.escape(default_font)}',Play,Arial,sans-serif;padding:24px 16px}}
 .deck{{max-width:1280px;margin:0 auto}}

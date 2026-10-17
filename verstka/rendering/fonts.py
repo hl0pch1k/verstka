@@ -86,12 +86,15 @@ def is_pinned(family: Optional[str]) -> bool:
 
 @lru_cache(maxsize=1)
 def _bundled_index() -> dict[tuple[str, bool], str]:
-    """(normalised family, bold) → file of the fonts LibreOffice ships (Noto Sans, Liberation, DejaVu, Carlito…)."""
+    """(normalised family, bold) → file of the fonts Verstka ships (verstka/fonts/**: Play and the fonts the font pick
+    writes into a template copy, embedded in its decks — brand/fontpick.py) and of the fonts LibreOffice ships (Noto
+    Sans, Liberation, DejaVu, Carlito…). The bundled files come first: a deck set in Manrope is measured with the very
+    file embedded in it, on every machine."""
     out: dict[tuple[str, bool], str] = {}
-    for d in _lo_font_dirs():
+    for d in [FONT_DIR, *_lo_font_dirs()]:
         if not d.is_dir():
             continue
-        for f in sorted(d.iterdir()):
+        for f in sorted(d.rglob("*") if d == FONT_DIR else d.iterdir()):
             if f.suffix.lower() not in (".ttf", ".otf"):
                 continue
             try:
