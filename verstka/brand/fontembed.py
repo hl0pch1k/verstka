@@ -1,6 +1,6 @@
 """Шрифты внутри PPTX (ECMA-376, ч. 1, §13.3.? «Font Part», PresentationML `p:embeddedFontLst`).
 
-Подобранные Verstka шрифты (Manrope, Lora, Unbounded… — `verstka/fonts/<семейство>/`, OFL) есть не у всех: колода,
+Подобранные Verstka шрифты (Manrope, Literata, Unbounded… — `verstka/fonts/<семейство>/`, OFL) есть не у всех: колода,
 открытая у жюри в PowerPoint без них, набралась бы Arial. Поэтому их файлы кладутся в саму колоду — так, как это делает
 PowerPoint при «Внедрить шрифты»:
 
@@ -144,6 +144,56 @@ def bundled_family(name: Optional[str]) -> Optional[str]:
     """Имя семейства Verstka, совпадающее с `name` без учёта регистра и пробелов, или None."""
     key = re.sub(r"[\s_\-]+", "", (name or "").lower())
     return next((f for f in bundled_fonts() if re.sub(r"[\s_\-]+", "", f.lower()) == key), None) if key else None
+
+
+SIGNS = "→₽№×"  # знаки колод Verstka: «61 → 35», «900 ₽», «№ 3», «×2»
+
+
+@lru_cache(maxsize=64)
+def figures_report(family: str) -> tuple[bool, str]:
+    """(цифры выравненные — одной высоты, на линии шрифта; знаки из `SIGNS`, которых в шрифте нет) для шрифта Verstka.
+    Старостильные цифры («1 240» прыгает по высоте) и стрелка из запасного шрифта портят KPI и таблицы."""
+    from PIL import ImageFont
+
+    path = (bundled_fonts().get(family) or {}).get("regular")
+    if path is None:
+        return False, SIGNS
+    f = ImageFont.truetype(str(path), 200)
+    cmap_missing = "".join(ch for ch in SIGNS if not _maps(path, ch))
+    tops, bottoms = [], []
+    for d in "0123456789":
+        bb = f.getbbox(d, anchor="ls")
+        tops.append(bb[1])
+        bottoms.append(bb[3])
+    cap = -f.getbbox("H", anchor="ls")[1]
+    lining = (max(tops) - min(tops)) < 0.08 * cap and max(bottoms) < 0.05 * cap
+    return lining, cmap_missing
+
+
+def _maps(path: Path, ch: str) -> bool:
+    """Шрифт сам рисует `ch` (cmap), а не «.notdef»."""
+    data = path.read_bytes()
+    t = _tables(data)
+    off, _ = t[b"cmap"]
+    n = struct.unpack(">H", data[off + 2 : off + 4])[0]
+    cp = ord(ch)
+    for i in range(n):
+        pid, eid, sub = struct.unpack(">HHI", data[off + 4 + 8 * i : off + 12 + 8 * i])
+        so = off + sub
+        fmt = struct.unpack(">H", data[so : so + 2])[0]
+        if fmt == 4 and cp <= 0xFFFF:
+            segx2 = struct.unpack(">H", data[so + 6 : so + 8])[0]
+            ends = struct.unpack(f">{segx2 // 2}H", data[so + 14 : so + 14 + segx2])
+            starts = struct.unpack(f">{segx2 // 2}H", data[so + 16 + segx2 : so + 16 + 2 * segx2])
+            if any(st <= cp <= en for st, en in zip(starts, ends) if en != 0xFFFF or st != 0xFFFF):
+                return True
+        elif fmt == 12:
+            ng = struct.unpack(">I", data[so + 12 : so + 16])[0]
+            for g in range(ng):
+                st, en, _ = struct.unpack(">III", data[so + 16 + 12 * g : so + 28 + 12 * g])
+                if st <= cp <= en:
+                    return True
+    return False
 
 
 # ============================================================================================ встраивание

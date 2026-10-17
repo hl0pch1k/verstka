@@ -47,7 +47,7 @@ from verstka.schemas.template import TemplateManifest
 
 log = logging.getLogger(__name__)
 
-PICK_VERSION = "3"
+PICK_VERSION = "4"
 FONTS_FILE = "fonts.json"
 
 # Стандартные/системные шрифты — их ставит программа, а не дизайнер, поэтому их место свободно для подбора:
@@ -96,19 +96,22 @@ class FontPair:
 # насыщенных пикселей; earthy — бежевые, песочные, коричневые тона; achrom — палитра без цвета; round — скругления
 # среди фигур; angular — острые углы; diagonal — косые края и повёрнутые фигуры; curvy — свободные кривые;
 # thin — тонкие линии; photo — фотографии и фоновые картинки; serif — шрифт шаблона антиква; narrow — узкий.
+# Каждый шрифт пар — с выравненными (лайнинговыми) цифрами и знаками «→ ₽ № ×» (тест test_pairs_cover_figures_and_signs):
+# KPI, таблицы и стрелки «61 → 35» не берутся из запасного шрифта и не «прыгают» по высоте. Шрифт заголовков ставится
+# только заголовкам (и крупным цифрам), всё остальное — основным шрифтом.
 PAIRS: tuple[FontPair, ...] = (
     FontPair("modern", "современный нейтральный", "Manrope", "Onest", (), bias=0.35),
     FontPair("strict", "строгий деловой", "IBM Plex Sans", "IBM Plex Sans", (("cool", 0.45), ("angular", 0.35), ("achrom", 0.25), ("round", -0.4), ("warm", -0.3), ("dark", -0.15))),
-    FontPair("tech", "технологичный", "Exo 2", "Manrope", (("dark_cool", 1.1), ("angular", 0.25), ("round", -0.2), ("earthy", -0.5))),
+    FontPair("tech", "технологичный", "Geologica", "Manrope", (("dark_cool", 1.1), ("angular", 0.25), ("round", -0.2), ("earthy", -0.5))),
     FontPair("bright", "яркий, смелый", "Unbounded", "Onest", (("colorful_warm", 0.95), ("colorful", 0.25), ("earthy", -0.6), ("dark", -0.2))),
-    FontPair("friendly", "мягкий, дружелюбный", "Comfortaa", "Nunito", (("round", 0.75), ("colorful", 0.2), ("angular", -0.35), ("achrom", -0.3))),
-    FontPair("natural", "природный, живой", "Lora", "Nunito", (("green", 0.85), ("curvy", 0.35), ("dark", -0.3))),
-    FontPair("elegant", "элегантный, контрастный", "Playfair Display", "Raleway", (("achrom_contrast", 0.85), ("thin", 0.25), ("serif", 0.2), ("colorful", -0.4))),
-    FontPair("warm", "тёплый, человечный", "Bitter", "Nunito", (("warm", 0.45), ("curvy", 0.3), ("colorful", -0.15), ("dark", -0.3), ("cool", -0.3))),
-    FontPair("vintage", "винтажный", "Old Standard TT", "PT Serif", (("earthy", 1.2), ("serif", 0.25), ("photo", 0.15), ("cool", -0.3))),
+    FontPair("friendly", "мягкий, дружелюбный", "Comfortaa", "Manrope", (("round", 0.75), ("colorful", 0.2), ("angular", -0.35), ("achrom", -0.3))),
+    FontPair("natural", "природный, живой", "Literata", "Fira Sans", (("green", 0.85), ("curvy", 0.35), ("dark", -0.3))),
+    FontPair("elegant", "элегантный, контрастный", "Spectral", "Manrope", (("achrom_contrast", 0.85), ("thin", 0.25), ("serif", 0.2), ("colorful", -0.4))),
+    FontPair("warm", "тёплый, человечный", "Bitter", "Fira Sans", (("warm", 0.45), ("curvy", 0.3), ("colorful", -0.15), ("dark", -0.3), ("cool", -0.3))),
+    FontPair("vintage", "винтажный", "Old Standard TT", "Source Serif 4", (("earthy", 1.2), ("serif", 0.25), ("photo", 0.15), ("cool", -0.3))),
     FontPair("academic", "классический, академический", "IBM Plex Serif", "IBM Plex Sans", (("serif", 0.85), ("cool", 0.15), ("earthy", -0.3))),
-    FontPair("dynamic", "динамичный", "Oswald", "IBM Plex Sans", (("diagonal", 0.8), ("narrow", 0.7), ("round", -0.3))),
-    FontPair("geometric", "геометрический минимализм", "Jost", "Jost", (("circles_light", 0.7), ("thin", 0.2), ("colorful", -0.2))),
+    FontPair("dynamic", "динамичный", "Fira Sans Condensed", "IBM Plex Sans", (("diagonal", 0.8), ("narrow", 0.7), ("round", -0.3))),
+    FontPair("geometric", "геометрический минимализм", "Geologica", "Onest", (("circles_light", 0.7), ("thin", 0.2), ("colorful", -0.2))),
 )
 PAIR_BY_KEY = {p.key: p for p in PAIRS}
 
@@ -540,6 +543,55 @@ def apply_fonts(src: Path | str, out: Path | str, manifest: TemplateManifest, ch
     return res
 
 
+# роли образцов, которые остаются в шрифте заголовков; крупная цифра — если у шрифта заголовков выравненные цифры
+_HEAD_ROLES = {"title"}
+_FIGURE_ROLES = {"number"}
+
+
+def heading_figures_ok(family: Optional[str]) -> bool:
+    """У шрифта заголовков выравненные цифры и все знаки колоды (`fontembed.SIGNS`) — им можно набрать крупную цифру."""
+    from verstka.brand.fontembed import figures_report
+
+    if not family:
+        return False
+    lining, missing = figures_report(family)
+    return lining and not missing
+
+
+def retune_roles(manifest: TemplateManifest, ch: FontChoice) -> bool:
+    """Разбор копии → роли шрифтов: основной шрифт — первым в `typography.families` (`primary_family` — шрифт, которым
+    вёрстка набирает свой текст: списки, карточки, подписи, таблицы, графики), слоты образцов и стиль графиков не в
+    роли заголовка — основным шрифтом. У копии без текста на образцах разбор ставит первым шрифт темы major
+    (заголовков) — и весь текст колоды шёл бы шрифтом заголовков. True — разбор изменён."""
+    from verstka.schemas.template import FontUsage
+
+    head, body = ch.heading, ch.body
+    if not ch.apply or not body:
+        return False
+    changed = False
+    fams = manifest.tokens.typography.families
+    i = next((k for k, f in enumerate(fams) if f.family == body), None)
+    if i is None:
+        fams.insert(0, FontUsage(family=body, weight=0.0, source="theme"))
+        changed = True
+    elif i:
+        fams.insert(0, fams.pop(i))
+        changed = True
+    if head and head != body:
+        keep = _HEAD_ROLES | (_FIGURE_ROLES if heading_figures_ok(head) else set())
+        for pat in manifest.patterns:
+            for sl in pat.slots:
+                role = getattr(sl.role, "value", sl.role)
+                if sl.style.font_family == head and role not in keep:
+                    sl.style.font_family = body
+                    changed = True
+        cs = manifest.components.chart_style
+        if cs.font_family == head:
+            cs.font_family = body
+            changed = True
+    return changed
+
+
 def fonted_id(template_id: str, ch: FontChoice) -> str:
     return hashlib.sha256(f"{template_id}|{ch.heading}|{ch.body}|{PICK_VERSION}|fonts".encode()).hexdigest()[:16]
 
@@ -641,8 +693,12 @@ def fonted_template(
             tmpj.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             os.replace(tmpj, d / FONTS_FILE)
         report("разбираю шаблон с новыми шрифтами", 0.05)
-        analyze_template(
+        copy = analyze_template(
             d / "source.pptx", workspace_root=root, use_llm=False, use_vlm=False, render=render, force=True,
             progress=(lambda stage, frac: report(stage, 0.05 + 0.95 * frac)) if progress else None,
         )
+        if retune_roles(copy, ch):
+            tmpm = d / ".manifest.json.tmp"
+            tmpm.write_text(copy.model_dump_json(indent=2), encoding="utf-8")
+            os.replace(tmpm, d / "manifest.json")
         return key, ch

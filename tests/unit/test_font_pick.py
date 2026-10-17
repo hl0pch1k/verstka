@@ -24,8 +24,8 @@ from verstka.schemas.template import TemplateManifest, TypeStep
 
 ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / "tests" / "fixtures" / "tpl_audit"
-PICKED = {"Manrope", "Onest", "Unbounded", "Raleway", "Jost", "Exo 2", "IBM Plex Sans", "IBM Plex Serif", "PT Serif", "Lora",
-          "Playfair Display", "Old Standard TT", "Comfortaa", "Bitter", "Nunito", "Oswald"}
+PICKED = {"Manrope", "Onest", "Unbounded", "IBM Plex Sans", "IBM Plex Serif", "Old Standard TT", "Comfortaa", "Bitter",
+          "Geologica", "Literata", "Source Serif 4", "Fira Sans", "Fira Sans Condensed", "Spectral"}
 
 
 def _analyze(path: Path, ws: Path) -> TemplateManifest:
@@ -52,19 +52,19 @@ def test_bundled_fonts_regular_bold_cyrillic_ofl():
 
 
 def test_bundled_family_matches_names():
-    assert bundled_family("exo 2") == "Exo 2" and bundled_family("IBMPlexSans") == "IBM Plex Sans"
+    assert bundled_family("fira sans") == "Fira Sans" and bundled_family("IBMPlexSans") == "IBM Plex Sans"
     assert bundled_family("Arial") is None and bundled_family("") is None
 
 
 def test_layout_measures_with_bundled_files():
     from verstka.rendering.fonts import is_installed, is_measured, text_width_pt
 
-    for fam in ("Manrope", "Unbounded", "Old Standard TT", "Exo 2"):
+    for fam in ("Manrope", "Unbounded", "Old Standard TT", "Fira Sans Condensed"):
         assert is_installed(fam) and is_measured(fam), fam
     s = "Выручка выросла на 26 %"
-    # широкий Unbounded шире Manrope, узкий Oswald уже — меряется сам файл, а не коэффициент
+    # широкий Unbounded шире Manrope, узкий Fira Sans Condensed уже — меряется сам файл, а не коэффициент
     assert text_width_pt(s, "Unbounded", 24) > text_width_pt(s, "Manrope", 24) * 1.15
-    assert text_width_pt(s, "Oswald", 24) < text_width_pt(s, "Manrope", 24) * 0.9
+    assert text_width_pt(s, "Fira Sans Condensed", 24) < text_width_pt(s, "Manrope", 24) * 0.92
 
 
 # ---------------------------------------------------------------------------------------------- встраивание
@@ -207,6 +207,7 @@ def test_fonted_template_copy_analyzed_embedded_cached(tmp_path, monkeypatch):
     # разбор копии видит новые шрифты, стандартных в тексте не осталось
     m2 = TemplateManifest.model_validate_json((d / "manifest.json").read_text(encoding="utf-8"))
     fams = {f.family for f in m2.tokens.typography.families}
+    assert m2.tokens.typography.primary_family == ch.body  # вёрстка набирает свой текст основным шрифтом
     assert {ch.heading, ch.body} & fams and not {"Arial", "DejaVu Sans"} & {f.family for f in m2.tokens.typography.families if f.source == "text"}
     with zipfile.ZipFile(d / "source.pptx") as z:
         theme = z.read("ppt/theme/theme1.xml").decode()
@@ -276,3 +277,40 @@ def test_roles_placeholders_and_size(tmp_path):
         r = sh.text_frame.paragraphs[0].runs[0]
         got[sh.text_frame.text] = r.font.name
     assert got == {"Итоги года": "Unbounded", "Выручка выросла на 20 %": "Onest", "+20 %": "Unbounded", "подпись": "Onest", "бренд": "Georgia"}
+
+
+def test_pairs_cover_figures_and_signs():
+    """Каждый шрифт каждой пары: выравненные цифры (KPI и таблицы не «прыгают») и «→ ₽ № ×» свои, не из запасного."""
+    from verstka.brand.fontembed import figures_report
+    from verstka.brand.fontpick import PAIRS
+
+    for pair in PAIRS:
+        for fam in (pair.heading, pair.body):
+            assert fam in PICKED, fam
+            assert figures_report(fam) == (True, ""), (pair.key, fam, figures_report(fam))
+    assert figures_report("Play")[1] == "→"  # проверка видит нехватку знака
+
+
+def test_retune_roles_body_font_reaches_text(tmp_path):
+    """Разбор копии без текста на образцах ставит первым шрифт темы major: после `retune_roles` основной шрифт —
+    первый (им вёрстка набирает свой текст), слоты не-заголовков и графики — основным шрифтом, заголовки — нет."""
+    from verstka.schemas.template import FontUsage
+
+    m = _analyze(FIX / "templates" / "lo_focus.pptx", tmp_path / "ws")
+    m.tokens.typography.families = [FontUsage(family="Bitter", source="theme"), FontUsage(family="Fira Sans", source="theme")]
+    roles = set()
+    for pat in m.patterns:
+        for sl in pat.slots:
+            sl.style.font_family = "Bitter"
+            roles.add(getattr(sl.role, "value", sl.role))
+    m.components.chart_style.font_family = "Bitter"
+    ch = fpk.FontChoice(apply=True, heading="Bitter", body="Fira Sans")
+    assert fpk.retune_roles(m, ch)
+    assert m.tokens.typography.primary_family == "Fira Sans"
+    assert m.components.chart_style.font_family == "Fira Sans"
+    for pat in m.patterns:
+        for sl in pat.slots:
+            role = getattr(sl.role, "value", sl.role)
+            assert sl.style.font_family == ("Bitter" if role in ("title", "number") else "Fira Sans"), role
+    assert "title" in roles and len(roles) > 1
+    assert not fpk.retune_roles(m, ch)  # повтор ничего не меняет
