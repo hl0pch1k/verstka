@@ -359,6 +359,8 @@ export function ParamsMore() {
       aria-expanded={more} aria-controls="p2-b3m" aria-label={more ? "Свернуть параметры" : "Открыть все параметры"} title={more ? "Свернуть" : "Все параметры"}
       style={{ position: "absolute", left: 48, top: 140, zIndex: 1 }}>
       <span className="p2-more-w" aria-hidden="true">03</span>
+      {/* колода стопкой (md, телефон): у стрелки — подпись строкой, номер над названием шага (create.css) */}
+      <span className="p2-more-t" aria-hidden="true">{more ? "Свернуть параметры" : "Все параметры"}</span>
       {/* как в V2: 64 px, толщина 2.25 — цифра «03» рядом той же прозрачности */}
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M6.5 9.5L12 15l5.5-5.5" />

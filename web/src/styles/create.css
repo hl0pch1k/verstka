@@ -112,7 +112,7 @@
 .tx-ring::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px #DC2626;opacity:0;pointer-events:none;transition:opacity 240ms var(--ease)}
 .tx-ring.ce-bad::after{opacity:1}
 /* «Улучшить готовую»: рамка фокуса — по всему полю, вместе с ростом вниз (сдвиг и рост поля — ниже, по высоте заметки) */
-@media (min-width: 901px){
+@media (min-width: 1280px){
 .tx-fw-imp .p2-field.tx-ring:has(.p2-ta:focus){box-shadow:none}
 .tx-fw-imp .tx-ring:has(.p2-ta:focus)::after{opacity:1;box-shadow:0 0 0 2px #2563EB;transition:none}
 .tx-fw-imp .tx-ring.ce-bad:has(.p2-ta:focus)::after{box-shadow:0 0 0 2px #DC2626}
@@ -124,12 +124,11 @@
 .tx-take:hover{transform:translateY(-2px)}
 .tx-take:active{transform:scale(.98)}
 .tx-take.p2-none{display:none}
-@media (max-width: 900px){.tx-strip,.tx-scrim{display:none !important}.tx-note{position:static;margin-bottom:16px}.tx-err{flex-wrap:wrap;white-space:normal !important}}
 /* «Улучшить готовую»: поле уходит под заметку и вырастает вниз — низ поля и строка под текстом встают туда же, где на
    доске C-improve; всё едет transform'ом вместе с плитой. Заметка бывает выше двух строк (при 1280 px, с помощником):
    поле уходит под неё на её высоту + 16 и растёт вниз меньше (TextBody ставит --tx-sh и --tx-gr по высоте заметки).
    Без переменных — числа доски: 88 и 16 */
-@media (min-width: 901px){
+@media (min-width: 1280px){
 .tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
 .tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}
 .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-gr,16px) * -1)}
@@ -141,7 +140,6 @@
 .p2-more:hover{opacity:.56;transform:translateY(2px)}
 .p2-more:active{transform:translateY(2px) scale(.96)}
 .p2-more:focus-visible{outline:2px solid rgba(255,255,255,.64);outline-offset:4px}
-@media (max-width: 900px){.p2-more{display:none !important}}
 /* Раскрытие «Все параметры»: плита 03 поднимается, полное меню проявляется лесенкой, стрелка поворачивается */
 .cp-fbox{position:relative;display:flex;flex-direction:column;justify-content:center;gap:4px;height:88px;padding:0 24px}
 .cp-fbox:has(.cp-ctl:focus){box-shadow:inset 0 0 0 1px rgba(255,255,255,.1),0 0 0 2px #38BDF8}
@@ -160,7 +158,6 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-more-up svg{transform:rotate(180deg)}
 .p2-more-up:hover{transform:translateY(-2px)}
 .p2-more-up:active{transform:translateY(-2px) scale(.96)}
-@media (max-width: 900px){.p2-more-body{display:none !important}}
 /* «03 Параметры и запуск»: переключатель, который сейчас не действует (модель не подключена), — как недоступные p2-rb */
 .p2-p3 .p2-sw:disabled{opacity:.32;cursor:default}
 /* Короткий ряд (V2 `#p2-b3`): степпер, варианты, переключатели — дорожки и как они меняются вместе с колодой — ниже, в
@@ -222,10 +219,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-root .hp-sw > *{grid-area:1 / 1}
 /* сайт: стопки в потоке флекса — во всю свою клетку и при ≤ 900 px (там узкой копии нет, поле — одно) */
 .hp-txf{flex:1 1 0%;min-width:0}
-@media (max-width: 900px){
-  .hp-tx.hp-txa{display:flex;flex:1 1 0%;min-width:0;min-height:0}
-}
-@media (min-width: 901px){
+@media (min-width: 1280px){
   .p2-ttl-sz{transition:font-size 340ms var(--ease)}
   .p2-ttl-v{transition:transform 340ms var(--ease)}
   .hp-nar .p2-ttl-sz{font-size:24px;transition-duration:520ms}
@@ -385,7 +379,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 @property --hpp{syntax:'<number>';inherits:false;initial-value:0}
 /* ширина мягкого края растущей копии (ниже) — тоже не наследуется: иначе каждый кадр пересчитывался бы стиль всего её текста */
 @property --hpf{syntax:'<length>';inherits:false;initial-value:0px}
-@media (min-width: 901px){
+@media (min-width: 1280px){
   .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
   .hp-tx.hp-txf{flex:1 1 0%}
   span.hp-tx{display:grid}
@@ -413,17 +407,6 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   [data-tx="c-swt"]{--hpd:138.667px}
   [data-tx="c-ta"]{--hpd:416px}
   [data-tx="c-vhint"]{--hpd:-33.333px}
-}
-@media (max-width: 900px){
-  .hp-txn{display:none !important}
-  .hp-no{display:none !important}
-  .p2-fxbox{position:static;width:auto !important;padding:0}
-  .p2-hx{flex-wrap:wrap;height:auto;row-gap:16px}
-  .p2-ttl-box{height:auto}
-  .p2-ttl-sz{display:none}
-  .p2-ttl-v{position:static;transform:none !important}
-  .tp-row{display:contents}
-  .pp-err{position:static}
 }
 /* ═══ Данные и брендбук (модуль ds) — вторая ступень: файлы с данными и брендбук на шагах 01 и 02. Дословно из
    boards/V2.dc.html версии 105 (<helmet><style>, блок «Данные и брендбук»); «сайт:» — сверх доски. Без файлов и
@@ -556,7 +539,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-gt{display:inline-block;max-width:var(--gtw,220px);overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
 .dt-zone{z-index:5}
 .dt-gc-x{visibility:hidden}
-@media (min-width: 901px){
+@media (min-width: 1280px){
   /* узкая колода: панель «Данные» 400 → 320 (сайт: в тесной колоде — у́же, --dtn: dataRules `dataPanel`), поле — копии
      текста (c-tad); «→ тип графика» у целей сжимается и гаснет; в разборе брендбука вторая дорожка сжимается до нуля
      (как у разбора шаблона) */
@@ -593,13 +576,141 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   [data-tx="c-tad"]{--hpd:336px}
 }
 /* сайт: окно уже 900 — поле, под ним панель «Данные» и цели одной колонкой */
-@media (max-width: 900px){
+
+.p2-more-t{display:none}
+/* ═══ Колода стопкой (окно уже 1280, styles/stack.css): шаги «Создать». Те же плиты, кнопки и ходы; меняется раскладка
+   внутри плит — тела шагов под названием (lg) или во всю ширину (md, телефон), ряды переносятся, а не обрезаются ═══ */
+@media (max-width: 1279.98px){
+  /* тела шагов 01 и 02 — от колонки номера (lg) или от края (md, телефон) */
+  #p2-b1,#p2-b2{margin:24px 0 0 var(--body) !important}
+  /* 01 · лента: дорожки по ширине; ряды по четыре — одной сеткой (ряды холста нужны только ходу помощника) */
+  #p2-b1{grid-template-columns:repeat(var(--tpc),minmax(0,1fr)) !important;gap:24px 16px !important}
+  #p2-b1 > .tp-row{display:contents}
+  .tp-row > .tp-cell,.tp-cut{min-width:0}
+  #p2-b1.tp-anl{grid-template-columns:minmax(0,1fr) !important}
+  .tt-tile,.an-tile,#p2-b1 .tp-cell{container-type:inline-size}
+  :is(.tt-tile,.an-tile) .p2-cover{height:auto;aspect-ratio:16 / 9}
+  :is(.tt-tile,.an-tile) .p2-cover img,:is(.tt-tile,.an-tile) .p2-cover .tp-wf{height:100% !important}
+  .tt-eye,.an-eye{top:calc(56.25cqw - 40px)}
+  .an-sk{height:auto;aspect-ratio:16 / 9}
+  .an-box{height:auto;min-height:0;gap:24px}
+  /* 01 · шапка: брендбук, шаблон и «Сменить» — переносятся строкой, подписи шаблона — целиком в две строки */
+  .bb-tpl > div > span{white-space:normal !important}
+  .p2-hx .bb-fg{flex:0 1 auto}
+  .tx-menu.bb-menu{width:min(320px,calc(100vw - 2 * var(--gut) - 2 * var(--px)))}
+  /* 02 · шапка: подсказки о готовом тексте в ряду шапки стопкой нет (как p2-hide-s холста на узком окне) — то же говорит
+     строка под полем («Готовый текст — агент разложит его по слайдам»), а скрытая держала бы в шапке лишнюю строку */
+  .tx-top{display:none !important}
+  .tx-closed{flex:1 1 100%}
+  .tx-closed > span{max-width:none !important}
+  .tx-menu.tx-menu2,.tx-menu.bb-menu{max-width:calc(100vw - 2 * var(--gut) - 2 * var(--px))}
+  /* 02 · «Улучшить готовую»: как на компьютере — поле уходит под заметку и растёт вниз transform'ом (TextBody меряет
+     заметку в этой ширине: --tx-sh, --tx-gr); колода прибавляет сдвиг и рост к низу шага (useStackMetrics) */
+  .tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
+  .tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}
+  .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-gr,16px) * -1)}
+  .tx-fw-imp .p2-field.tx-ring:has(.p2-ta:focus){box-shadow:none}
+  .tx-fw-imp .tx-ring:has(.p2-ta:focus)::after{opacity:1;box-shadow:0 0 0 2px #2563EB;transition:none}
+  /* 02 · шапка: «Из файла», подсказка о готовом тексте и свёрнутый шаг (текст и «Изменить») — свёрнутый встаёт на место
+     кнопки (на компьютере он справа в той же строке) */
+  .p2-p2 .p2-hx .tx-closed{position:absolute;top:0;bottom:0;right:0;max-width:100%}
+  /* 01 · подписи ленты: название над числом слайдов (в узкой плитке оба целиком) */
+  .tt-cap,.an-cap{flex-direction:column;align-items:flex-start;height:auto;gap:0}
+  .tt-name,.an-name{max-width:100%}
+  /* служебные плитки ленты: пояснение переносится, плитка — по его высоте (не ниже обложки рядом) */
+  .p2-cover:is(.tt-act,.an-act){height:auto !important;aspect-ratio:auto;min-height:100%;padding:16px 8px}
+  .p2-card:has(> .p2-cover:is(.tt-act,.an-act)){display:flex;flex-direction:column;height:100%}
+  .p2-card > .p2-cover:is(.tt-act,.an-act){flex:1 0 auto;min-height:56.25cqw}
+  :is(.tt-note,.an-note){height:auto;white-space:normal}
+  :is(.tt-note,.an-note) span{overflow:visible;white-space:normal}
+  /* 01 · шапка: брендбук, шаблон и «Сменить» переносятся целыми; подпись шаблона сжимается до 160 и переносится */
+  .p2-p1 .p2-hx > div{flex-wrap:wrap;row-gap:12px;column-gap:16px !important}
+  .p2-p1 .p2-hx > div > span:has(.bb-tpl){flex:1 1 160px;min-width:160px}
+  .bb-tpl{flex:1 1 auto}
+  /* 02 · подсказка «Исправьте…» справа в строке под текстом не держит места (ошибке — вся строка) */
+  .tx-fixw{max-width:0;overflow:hidden}
+  /* 02 · цели из текста: строка переносится */
+  .dt-gl{white-space:normal;align-items:flex-start}
+  .dt-gl .hp-sw > span{white-space:normal}
+  /* 02 · строка под текстом: переносится в две строки, не обрезается */
+  .tx-ring .p2-wrap{height:auto !important;align-items:flex-start !important}
+  .tx-ring .p2-wrap p,.tx-ring .p2-wrap p > span:last-child{white-space:normal !important}
+  .tx-err{flex-wrap:wrap;white-space:normal !important}
+  /* 02 · данные: lg — панель 320 справа; md и телефон — под полем, цели — под панелью */
+  .tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr) 320px}
+  .tx-fw.dt-w .tx-fixw{max-width:0;overflow:hidden}
+  /* 03 · шапка, строка ошибки, «Все параметры» и короткий ряд — одна сетка: «Все параметры» сразу под шапкой, меню и
+     короткий ряд — в одной клетке (сменяют друг друга проявлением, как на компьютере) */
+  .p2-p3 .p2-fxbox{display:grid;grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "hx" "err" "tog" "par";align-content:start;row-gap:0}
+  .p2-p3 .p2-fxbox > .p2-hrow,.p2-p3 .p2-fxbox > .p2-sb{display:contents !important}
+  .p2-p3 .p2-head{grid-area:head;align-self:start}
+  .p2-p3 .p2-hx{grid-area:hx;margin:16px 0 0 var(--body);justify-content:space-between}
+  .p2-p3 .p2-hx > span:first-child{display:none}
+  .p2-hx .pp-sum{display:flex;flex:1 1 auto;min-width:0;overflow:visible}
+  .pp-sumt{white-space:normal}
+  .pp-err{grid-area:err;position:static;justify-content:flex-start;margin-top:12px}
+  .pp-err > p{white-space:normal}
+  .p2-more{grid-area:tog;position:static !important;flex-direction:row;justify-self:start;gap:8px;height:48px;margin:16px 0 0 var(--body);padding:0 16px 0 12px;border-radius:999px;background:rgba(255,255,255,.06);opacity:1;font-family:'Manrope',sans-serif;font-size:15px;font-weight:700;line-height:24px;color:#FFFFFF}
+  .p2-more:hover{opacity:1;background:rgba(255,255,255,.1);transform:translateY(-2px)}
+  .p2-more-up:hover{transform:translateY(-2px)}
+  .p2-more .p2-more-w{display:none}
+  .p2-more svg{width:24px;height:24px;flex:none}
+  .p2-more-t{display:inline}
+  #p2-b3,#p2-b3m{grid-area:par;align-self:start;margin:24px 0 0 var(--body) !important}
+  #p2-b3m{position:static !important;left:auto !important;right:auto !important;top:auto !important}
+  /* короткий ряд: степпер и варианты — переключатели в «Все параметры» */
+  #p2-b3{display:grid;grid-template-columns:200px !important;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:16px;height:auto}
+  #p2-b3 > *{margin-right:0 !important}
+  #p2-b3 .pp-swc{display:none}
+  #p2-b3 .pp-vd,#p2-b3 .pp-vdi{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #p2-b3 .pp-vb2{display:none}
+  /* «Все параметры»: первый ряд и переключатели — по месту */
+  #p2-b3m .pp-r1{grid-template-columns:repeat(3,minmax(0,1fr)) !important}
+  #p2-b3m .cp-vc{height:auto;min-height:120px}
+  #p2-b3m .pp-th{display:none}
+}
+@media (max-width: 1023.98px){
+  /* шапки шагов: то, что справа от названия, — строкой под ним, от левого края */
+  .p2-hx > span:empty{display:none}
+  .p2-p2 .p2-hx{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start;align-items:center}
+  .p2-p2 .p2-hx > *{grid-area:1 / 1}
+  .p2-p2 .p2-hx .tx-closed{position:static;display:flex;flex-wrap:wrap;row-gap:8px;column-gap:16px}
+  .tx-closed > span{white-space:normal !important}
+  /* «Брендбук» под названием шага, у левого края — меню раскрывается от кнопки вправо */
+  .tx-menu.bb-menu{left:0;right:auto;transform-origin:top left}
   .tx-fw.dt-g,.tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr);row-gap:16px}
-  .dt-g>.p2-field,.dt-cell,.dt-on>.dt-cell,.dt-goalw{grid-column:1;grid-row:auto}
-  .tx-fw.dt-g:not(.dt-w)>.dt-cell{display:none}
-  .tx-menu.tx-menu2{width:min(608px,calc(100vw - 48px)) !important}
-  /* панель в потоке колонки (её клетка не тянется на две строки): видна целиком, список прокручивается в 296 px */
+  .dt-g > .p2-field,.dt-cell,.dt-on > .dt-cell,.dt-goalw{grid-column:1;grid-row:auto}
+  .tx-fw.dt-g:not(.dt-w) > .dt-cell{display:none}
   .dt-cell{position:static;overflow:visible}
   .dt-pan{position:static}
   .dt-list{max-height:296px}
+  .dt-goal{height:auto;min-height:88px;padding:16px 24px}
+  .dt-gcs{flex-wrap:wrap}
+  #p2-b3m .pp-r1{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .pp-swl > .p2-box{align-items:flex-start}
+  .pp-swn{flex-direction:column;align-items:flex-start;gap:2px}
+  .pp-swn > .cp-nm,.pp-swh{white-space:normal !important;overflow:visible}
+  #p2-b3{grid-template-columns:160px !important}
+  #p2-b3 .pp-stc > .p2-box{padding:0 12px !important}
+  #p2-b3 .pp-vc{height:auto;min-height:88px;padding:12px}
+  #p2-b3 .pp-vd,#p2-b3 .pp-vdi{white-space:normal;overflow:visible}
+  #p2-b3m .pp-r1 > :first-child{grid-column:1 / -1}
+  #p2-b3m > .p2-params{grid-template-columns:minmax(0,1fr) !important}
+}
+@media (max-width: 767.98px){
+  /* служебные плитки ленты на телефоне: пояснение мельче, плитка — по его высоте (не ниже обложки рядом) */
+  .p2-cover:is(.tt-act,.an-act){min-height:84px;padding:12px 8px}
+  :is(.tt-note,.an-note){padding:0 4px;font-size:12px;line-height:16px}
+  .p2-field.tx-ring{padding:16px !important;height:232px !important}
+  /* короткий ряд на телефоне: степпер во всю ширину, варианты — строками */
+  #p2-b3{grid-template-columns:minmax(0,1fr) !important;grid-auto-flow:row;gap:8px}
+  #p2-b3 .pp-vc{height:auto;min-height:64px;gap:2px;padding:12px 16px}
+  #p2-b3m .pp-r1{grid-template-columns:minmax(0,1fr) !important}
+  #p2-b3m .cp-vc{min-height:0}
+  /* меню «Из файла»: одна колонка — текст, под ним данные */
+  .tx-menu.tx-menu2{grid-template-columns:minmax(0,1fr)}
+  .tx-mcol + .tx-mcol::before{display:none}
+  .tx-mcol + .tx-mcol{margin-top:4px;padding-top:4px;box-shadow:0 -1px 0 rgba(11,18,32,.08)}
+  .p2-more{align-self:stretch;justify-self:stretch;justify-content:space-between}
+  .p2-hx .pp-cta{flex:1 1 100%}
 }
