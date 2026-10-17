@@ -371,8 +371,8 @@ _OTHER_ON_CHART_RE = re.compile(r"плашк|текст\w*\s+(?:блок|пол�
 
 
 def _on_chart(slide_ir: Any, e: Any) -> list[Any]:
-    """The slide's other elements that stand on the chart's plot: they cross its frame and their centre is inside the
-    plot (the frame without its top 5% and its bottom 12%, where the axis labels and titles are)."""
+    """The slide's other elements that stand on the chart's plot: they start inside its frame, cross it, and their
+    centre is inside the plot (the frame without its top 5% and its bottom 12%, where the axis labels and titles are)."""
     f = e.bbox_frac
     top, bottom = f.y + 0.05 * f.h, f.y + f.h * 0.88
     out = []
@@ -380,6 +380,8 @@ def _on_chart(slide_ir: Any, e: Any) -> list[Any]:
         if o is e or o.type not in ("text", "shape", "picture", "table") or getattr(o, "nested", False):
             continue
         g = o.bbox_frac
+        if g.y < f.y:
+            continue  # it starts above the chart (the headline's tall box): its text is above, not on the plot
         cx, cy = g.x + g.w / 2, g.y + g.h / 2
         ix = min(f.x + f.w, g.x + g.w) - max(f.x, g.x)
         iy = min(f.y + f.h, g.y + g.h) - max(f.y, g.y)

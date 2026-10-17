@@ -95,3 +95,12 @@ def test_a_strip_over_the_chart_is_verified_by_its_geometry():
     sl.elements += [strip]
     verdict, why = E.check_problem(remark, sl, DATA, [])
     assert verdict == "verified" and "Conclusion strip" in why
+
+
+def test_a_tall_headline_box_above_the_chart_is_not_on_it():
+    # the relayout that cured u2's overlap: the headline's text box runs down past the chart's top, its text does not
+    sl = _chart_slide(["a", "b"], [1, 2], kind="line", frac=(0.069, 0.275, 0.859, 0.322))
+    head = IRElement(id="2", type="text", name="Headline", bbox=Bbox(x=int(0.056 * W), y=int(0.101 * H), w=int(0.89 * W), h=int(0.508 * H)),
+                     bbox_frac=BboxFrac(x=0.056, y=0.101, w=0.89, h=0.508))
+    sl.elements.append(head)
+    assert E._on_chart(sl, sl.elements[0]) == []
