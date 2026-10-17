@@ -1005,8 +1005,9 @@ def _two_floor_xlsx(group: str, leaves: list[str]) -> bytes:
 
 
 @pytest.mark.parametrize("group, leaves, columns, units", [
-    ("Цена", ["Мин", "Макс"], ["Товар", "Мин", "Макс"], [None, None, None]),
-    ("План", ["Год", "Месяц"], ["Товар", "Год", "Месяц"], [None, None, None]),
+    # слово-подпись под группой («Мин», «Год») — не имя само по себе: «Цена Мин», а не «Мин» (минуты, final review)
+    ("Цена", ["Мин", "Макс"], ["Товар", "Цена Мин", "Цена Макс"], [None, None, None]),
+    ("План", ["Год", "Месяц"], ["Товар", "План Год", "План Месяц"], [None, None, None]),
     ("Выручка", ["млн ₽", "%"], ["Товар", "Выручка, ₽", "Выручка, %"], [None, "млн ₽", "%"]),
 ])
 def test_second_floor_words_are_names_unless_all_are_units(group, leaves, columns, units):

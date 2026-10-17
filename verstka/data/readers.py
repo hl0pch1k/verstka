@@ -449,7 +449,10 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
     if leaves and len(leaves) == sum(1 for g in groups if g):
         leaf_names = [split_unit(v)[0] for v in leaves.values()]
         others = {split_unit(names[j])[0] for j in range(width) if j not in leaves}
-        if len(set(leaf_names)) == len(leaf_names) and not set(leaf_names) & others:
+        # «Цена | Мин · Макс» — «Цена Мин», а не «Мин» (минуты): слово-подпись под группой само именем не бывает
+        labelish = any(x.strip().lower().rstrip(".") in _LABEL_WORDS or x.strip().lower() in _LABEL_WORDS
+                       for x in leaf_names)
+        if len(set(leaf_names)) == len(leaf_names) and not set(leaf_names) & others and not labelish:
             for j, v in leaves.items():
                 names[j] = v
     return names, groups, raw
@@ -1913,6 +1916,23 @@ def _fill_merged(rows: list[list[Any]], merges: list[tuple[int, int, int, int]])
                 row[c1] = top
 
 
+# книга Excel: строк листа читается не больше этого (дальше — «прочитаны первые …», как у API), а листы в распакованном
+# виде больше предела не открываются вовсе — сжатый XML может развернуться в гигабайты (I6)
+XLSX_MAX_ROWS = 200_000
+XLSX_MAX_XML_BYTES = 300 * 1024 * 1024
+
+
+def _xlsx_too_big(data: bytes) -> bool:
+    """Листы и общие строки книги в распакованном виде больше `XLSX_MAX_XML_BYTES` (по оглавлению ZIP, не распаковывая)."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            total = sum(i.file_size for i in z.infolist()
+                        if i.filename.startswith("xl/worksheets/") or i.filename == "xl/sharedStrings.xml")
+    except (zipfile.BadZipFile, OSError, ValueError):
+        return False
+    return total > XLSX_MAX_XML_BYTES
+
+
 def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
     try:
         import openpyxl
@@ -1923,6 +1943,10 @@ def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
             "Книга защищена паролем или сохранена в старом формате .xls — сохраните её как .xlsx без пароля или как CSV",
             file=name,
         )
+    if _xlsx_too_big(data):
+        raise DataReadError(
+            f"Книга Excel слишком большая: листы в распакованном виде больше {XLSX_MAX_XML_BYTES // (1024 * 1024)} МБ — "
+            "сохраните нужный лист как CSV или уменьшите книгу", file=name)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -1946,9 +1970,13 @@ def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
             merges, formula_cols = _sheet_extras(wb, ws, hidden)
             rows: list[list[Any]] = []
             empty_run = 0
+            cut = False
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 for row in ws.iter_rows():
+                    if len(rows) > XLSX_MAX_ROWS:
+                        cut = True  # строка сверх предела прочитана — значит, лист длиннее: дальше не читаем
+                        break
                     vals = [_xlsx_cell(c) for c in row]
                     while vals and (vals[-1] is None or (isinstance(vals[-1], str) and not vals[-1].strip())):
                         vals.pop()
@@ -1959,8 +1987,12 @@ def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
                     else:
                         empty_run = 0
                     rows.append(vals)
+            if cut:
+                rows = rows[:XLSX_MAX_ROWS]
             _fill_merged(rows, merges)
             notes_here = [FORMULA_NOTE] if formula_cols else []
+            if cut:
+                notes_here.append(f"Лист длиннее {XLSX_MAX_ROWS:,} строк — прочитаны первые {XLSX_MAX_ROWS:,}".replace(",", "\u00a0"))
             hidden_note = _drop_hidden(rows, hidden)
             if hidden_note:
                 notes_here.append(hidden_note)

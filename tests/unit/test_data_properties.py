@@ -208,8 +208,9 @@ def _semicolon_in_comma_file(rnd: random.Random) -> Case:
 
 def _two_floor(rnd: random.Random) -> Case:
     group, leaves, names, units, kinds = rnd.choice([
-        ("Цена", ["Мин", "Макс"], ["Мин", "Макс"], [None, None], ["number", "number"]),
-        ("План", ["Год", "Месяц"], ["Год", "Месяц"], [None, None], ["number", "number"]),
+        # слово-подпись под группой — не имя само по себе: «Цена Мин» (не минуты), «План Год» (final review)
+        ("Цена", ["Мин", "Макс"], ["Цена Мин", "Цена Макс"], [None, None], ["money", "money"]),
+        ("План", ["Год", "Месяц"], ["План Год", "План Месяц"], [None, None], ["number", "number"]),
         # одно имя, разные единицы — имя с единицей (раунд 10, M6), а не «Выручка (2)»
         ("Выручка", ["млн ₽", "%"], ["Выручка, ₽", "Выручка, %"], ["млн ₽", "%"], ["money", "percent"]),
     ])

@@ -143,6 +143,9 @@ _SCALE_HEAD = re.compile(
 )
 
 
+_COUNT_NOUN = re.compile(r"[а-я]{3,}(?:ов|ев|ей|ий)")
+
+
 def _base_unit(text: str, strict: bool) -> Optional[str]:
     """Каноническая единица без множителя («руб.» → «₽», «процентов» → «%»); strict — только известные."""
     t = " ".join(text.split()).strip(" ,;:")
@@ -161,6 +164,10 @@ def _base_unit(text: str, strict: bool) -> Optional[str]:
             if left and right and (known or not strict):
                 return f"{left}/{right}"
         return None
+    # счётное слово ячейки во множественном числе («120 договоров», «12 филиалов», «40 заявлений»): в таблице показателей
+    # по строкам у каждой строки своё слово — оно и единица строки (I2); подписи («5А», «11 кл.», «1 курс») — нет
+    if not strict and _COUNT_NOUN.fullmatch(low):
+        return low
     # только известные единицы: число с незнакомым словом или буквой — подпись («5А», «11 кл.», «1 курс»), а не величина
     return None
 
@@ -239,6 +246,18 @@ _PCT_YOY = re.compile(r"^%\s*(?:г/г|г\.\s?г\.|y/y|yoy|к\s+прошлому\
                       r"годовые|p\.a\.|per\s+annum|в\s+месяц|в\s+день)$", re.IGNORECASE)
 
 
+# «тыс. пасс.», «млн чел.», «тыс. посет.» — множитель и сокращённое имя счёта: единица целиком, а не часть имени (F12)
+_SCALED_COUNT = re.compile(r"^(?:тыс|млн|млрд)\.?\s*[а-яё]{2,7}\.$", re.IGNORECASE)
+
+
+def scaled_count_unit(text: str) -> Optional[str]:
+    t = " ".join(str(text or "").split())
+    if _SCALED_COUNT.match(t):
+        sc, _, noun = t.partition(" ") if " " in t else (t, "", "")
+        return f"{sc if sc.endswith('.') or sc.lower() != 'тыс' else sc + '.'} {noun}".strip() if noun else t
+    return None
+
+
 def compound_unit(text: str) -> Optional[str]:
     """Составная единица после запятой: «л/100 км», «мг/л», «л/сут на человека» — как написана; «% г/г», «% годовых»
     → «%»."""
@@ -268,7 +287,7 @@ def split_unit(header: Any) -> tuple[str, Optional[str]]:
     if "," in text:
         parts = [p.strip() for p in text.split(",")]
         for k in range(len(parts) - 1, 0, -1):
-            unit = header_unit(parts[k]) or compound_unit(parts[k])
+            unit = header_unit(parts[k]) or compound_unit(parts[k]) or scaled_count_unit(parts[k])
             if unit and parts[0]:
                 rest = [p for i, p in enumerate(parts) if i != k and p]
                 return _clean_name(", ".join(rest)), unit
