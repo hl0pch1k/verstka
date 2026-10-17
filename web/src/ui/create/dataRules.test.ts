@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
   brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsFit,
-  fmtLabel, foldBrandEvent, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelShort, panelStatus, parseManifest, runWord, sizeProblem, type DataCard,
+  fmtLabel, foldBrandEvent, goalChips, goalNoteLine, goalsKey, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelShort, panelStatus, parseManifest, runWord, sizeProblem, type DataCard,
 } from "./dataRules";
 import type { BrandConflict, BrandSpec, DatasetSummary, JobEvent } from "../../types";
 
@@ -182,4 +182,25 @@ test("манифест примера: текст, число слайдов, ф
   }
   assert.ok(threw);
   assert.equal(parseManifest({ brandbook: { name: "b.pdf", url: "/b" } }, "bb").files.length, 0);
+});
+
+test("цели из текста — как их поймёт сборка: таблетки по ответу сервера, без него — прикидка по тексту; строка без ответа", () => {
+  const g = (patch: Record<string, unknown>) => ({ quote: "Покажи рост выручки.", dataset_id: "d1", file: "Выручка.csv", task: "dynamics", task_title: "Динамика",
+    viz: "line", viz_title: "линейный график", label: "Динамика · «выручка»", ...patch });
+  const server = { goals: [g({}), g({ quote: "покажи рост выручки" }), g({ quote: "«сравни регионы»", task: "comparison", viz_title: null, label: "Сравнение категорий", file: null })] };
+  assert.deepEqual(goalChips(server as never, goalsOf("покажи долю")), [
+    { key: "dynamics|покажи рост выручки", q: "покажи рост выручки", to: "линейный график", title: "Динамика · «выручка» · Выручка.csv" },
+    { key: "comparison|сравни регионы", q: "сравни регионы", to: null, title: "Сравнение категорий" },
+  ]);
+  // сервер ответил «целей нет» — таблеток нет (прикидка не подмешивается)
+  assert.deepEqual(goalChips({ goals: [] }, goalsOf("покажи рост выручки")), []);
+  // ответа нет — прикидка
+  assert.deepEqual(goalChips(null, goalsOf("Покажи рост выручки")).map((c) => [c.q, c.to]), [["покажи рост выручки", "линейный график"]]);
+  assert.equal(goalNoteLine([]), null);
+  assert.deepEqual(goalNoteLine([{ quote: "Где узкие места?", reason: "в данных нет мощностей." }, { quote: "что с планом", reason: "плана нет" }]), {
+    line: "«где узкие места» — в данных нет мощностей · и ещё 1",
+    all: "«где узкие места» — в данных нет мощностей\n«что с планом» — плана нет",
+  });
+  assert.equal(goalsKey("  Покажи   рост ", ["d1", "d2"], true), "1|d1,d2|Покажи рост");
+  assert.ok(goalsKey("x", ["d1"], true) !== goalsKey("x", ["d1"], false));
 });

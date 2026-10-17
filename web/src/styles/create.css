@@ -533,6 +533,14 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-gl .hp-sw{min-width:0}
 .dt-gl .hp-sw>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .dt-gcs{display:flex;align-items:center;gap:8px;min-width:0;overflow:clip}
+/* сайт: ряд таблеток держит свою высоту и без целей — подпись не прыгает, когда цели появляются и уходят; цели и строка
+   «без ответа в данных» (dt-gn) — те, что возьмёт сборка (POST /api/goals) */
+.dt-gcs{min-height:32px}
+/* строка «без ответа в данных» берёт только то, что осталось за подписью (основа 0): подпись не сжимается из-за неё */
+.dt-gl>.hp-sw{flex:0 1 auto}
+.dt-gn{display:flex;align-items:center;gap:6px;flex:1 1 0%;min-width:0;padding-left:8px;font-weight:500;color:#5A6272;overflow:hidden}
+.dt-gn svg{flex:none;color:#B45309}
+.dt-gn>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dt-gc{display:inline-flex;align-items:center;flex:none;height:32px;padding:0 12px;border-radius:999px;background:#E9F1FF;font-size:13px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap}
 .dt-gt{display:inline-block;max-width:var(--gtw,220px);overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
 .dt-zone{z-index:5}
@@ -621,7 +629,10 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   /* 02 · подсказка «Исправьте…» справа в строке под текстом не держит места (ошибке — вся строка) */
   .tx-fixw{max-width:0;overflow:hidden}
   /* 02 · цели из текста: строка переносится */
-  .dt-gl{white-space:normal;align-items:flex-start}
+  .dt-gl{white-space:normal;align-items:flex-start;flex-wrap:wrap;row-gap:4px}
+  /* подпись — рядом со значком; строка «без ответа в данных» — под ней, одной строкой (целиком — в подсказке) */
+  .dt-gl>.hp-sw{flex:1 1 0%}
+  .dt-gn{flex:1 1 100%;margin-left:24px;padding-left:0}
   .dt-gl .hp-sw > span{white-space:normal}
   /* 02 · цели из текста (I4): все цели видны — коробка по высоте, таблетки переносятся рядами, длинная цель — своими
      строками (стопкой их не прячет `goalsFit`: GoalsBox) */

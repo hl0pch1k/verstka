@@ -9,6 +9,17 @@ import { parseManifest, type ExampleManifest } from "./ui/create/dataRules";
 /** Разобранный брендбук (итог задачи POST /api/brandbooks и ответ GET /api/brandbooks/{id}): что прочитано и чем он
  *  расходится с шаблоном (`result` расхождения — при «брендбук важнее»). */
 export interface BrandbookResult { brand: BrandSpec; conflicts: BrandConflict[] }
+/** Цель брифа, как её поняла сборка (POST /api/goals, verstka/data/intent.py `GoalsRead.payload`). */
+export interface ServerGoal {
+  quote: string; dataset_id: string | null; file: string | null; sheet?: string | null; task: string; task_title: string;
+  viz: string | null; viz_title: string | null; label: string; source?: string; confidence?: number;
+}
+/** Предложение брифа, на которое данные не отвечают, и почему («в данных нет плана»). */
+export interface GoalNote { quote: string; reason: string; dataset_id?: string | null; file?: string | null; source?: string }
+export interface GoalsAnswer {
+  source: string; model: string | null; cached: boolean; seconds: number; error: string | null; skipped: string | null;
+  goals: ServerGoal[]; notes: GoalNote[];
+}
 /** Пример: манифест и его файлы, уже скачанные (данные — по порядку, брендбук — отдельно). */
 export interface ExampleBundle { manifest: ExampleManifest; files: File[]; brandbook: File | null }
 
@@ -121,6 +132,9 @@ export const api = {
     for (const f of files) fd.append("files", f, f.name);
     return request<DatasetSummary[]>("/api/datasets", { method: "POST", body: fd });
   },
+  /** «Цели из текста» так, как их поймёт сборка: цели брифа над приложенными наборами и предложения без ответа в данных. */
+  goals: (body: { brief: string; dataset_ids: string[]; use_models: boolean }, signal?: AbortSignal) =>
+    request<GoalsAnswer>("/api/goals", { ...json(body), signal }),
   /** Набор по id (карточка «Изменить текст» презентации): поля карточки (`DatasetSummary`) и полный профиль. */
   getDataset: (id: string) => request<DatasetSummary & { profile?: unknown; plan?: unknown }>(`/api/datasets/${encodeURIComponent(id)}`),
   deleteDataset: (id: string) => request<{ deleted: boolean }>(`/api/datasets/${encodeURIComponent(id)}`, { method: "DELETE" }),

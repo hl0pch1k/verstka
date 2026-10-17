@@ -6,6 +6,7 @@ import type {
   BrandColorRole, BrandConflict, BrandPriority, BrandSpec, DatasetSummary, JobEvent, SourceKind, TaskKind,
 } from "../../types";
 import { plural } from "../../lib/utils";
+import type { GoalNote, GoalsAnswer } from "../../api";
 import { HELPER_COL, PLATE_PAD } from "../deck/layout";
 
 // ── файлы с данными
@@ -162,6 +163,42 @@ export function goalsOf(text: string): Goal[] {
     return { q: q.charAt(0).toLowerCase() + q.slice(1), to, task };
   });
 }
+
+/** Таблетка «Цели из текста»: цитата, к чему ведёт («линейный график») и как цель понята (подсказка). */
+export interface GoalChip { key: string; q: string; to: string | null; title: string }
+const quoteOf = (s: string) => {
+  const q = s.trim().replace(/\s+/g, " ").replace(/^[«"“]+|[»"”]+$/g, "").replace(/[\s.,;:!?…]+$/, "");
+  return q.charAt(0).toLowerCase() + q.slice(1);
+};
+/** Таблетки целей: как их поняла сборка (POST /api/goals), а пока ответа нет (или без файлов, или запрос не удался) —
+ *  мгновенная прикидка по тексту (`goalsOf`). Одинаковые (та же задача и цитата) — один раз. */
+export function goalChips(server: Pick<GoalsAnswer, "goals"> | null, fallback: Goal[]): GoalChip[] {
+  const out: GoalChip[] = [];
+  const seen = new Set<string>();
+  const push = (c: GoalChip) => {
+    if (!c.q || seen.has(c.key)) return;
+    seen.add(c.key);
+    out.push(c);
+  };
+  if (server) {
+    for (const g of server.goals) {
+      const q = quoteOf(g.quote);
+      push({ key: `${g.task}|${q}`, q, to: g.viz_title || null, title: [g.label || g.task_title, g.file].filter(Boolean).join(" · ") });
+    }
+  } else {
+    for (const g of fallback) push({ key: `${g.task}|${g.q}`, q: g.q, to: g.to, title: `«${g.q}» → ${g.to}` });
+  }
+  return out;
+}
+/** Предложения брифа без ответа в данных — одной тихой строкой: первое и сколько ещё; целиком — в подсказке. */
+export function goalNoteLine(notes: Pick<GoalNote, "quote" | "reason">[]): { line: string; all: string } | null {
+  const ns = notes.filter((n) => n.quote.trim() && n.reason.trim());
+  if (!ns.length) return null;
+  const say = (n: Pick<GoalNote, "quote" | "reason">) => `«${quoteOf(n.quote)}» — ${n.reason.trim().replace(/[.\s]+$/, "")}`;
+  return { line: say(ns[0]) + (ns.length > 1 ? ` · и ещё ${ns.length - 1}` : ""), all: ns.map(say).join("\n") };
+}
+/** Ключ запроса целей: текст (без лишних пробелов), наборы по порядку и пишет ли модель. */
+export const goalsKey = (brief: string, ids: string[], models: boolean): string => `${models ? 1 : 0}|${ids.join(",")}|${brief.trim().replace(/\s+/g, " ")}`;
 
 /** Подпись коробки целей: в широкой колоде и в узкой (V2 `dtGoalLbl`, `dtGoalLblN`). */
 export const goalsLabel = (n: number): { wide: string; narrow: string } =>
