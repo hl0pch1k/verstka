@@ -38,7 +38,6 @@ from typing import Callable, Optional
 
 from lxml import etree
 
-from verstka.brand.baked import erase_partner_marks
 from verstka.brand.logos import brand_logos, find_template_logos, find_text_logos, load_logo, logo_path
 from verstka.brand.package import A, C, P, Package
 from verstka.brand.palette import (
@@ -61,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "8"
+APPLY_VERSION = "9"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -388,7 +387,6 @@ class ApplyResult:
     # поставлен справа внизу» (или «оставлен слева внизу: угол из брендбука занят»)
     logo_note: Optional[str] = None
     logo_covers: int = 0  # обложек, разделов и финальных слайдов, получивших логотип бренда (у шаблона там его не было)
-    partner_marks: int = 0  # знаков партнёров, убранных с фоновых картинок шаблона
     caps_changed: int = 0  # стилей заголовков, где капс снят или поставлен по правилу брендбука
     refit: int = 0  # строк образцов, подогнанных после смены шрифта
     warnings: list[str] = field(default_factory=list)
@@ -543,15 +541,8 @@ def apply_brand(
         elif brand.logo_place or has_own:
             res.warnings.append("В брендбуке нет файлов логотипа — " + ("логотип шаблона оставлен." if has_own else "логотип бренда не поставлен."))
 
-    if priority == "brand" and images:
-        # чужие знаки (партнёры шаблона), впечатанные в фоновые картинки, — не в колоде другого бренда
-        n_marks, n_images = erase_partner_marks(pkg)
-        if n_marks:
-            from verstka.data.words import plural
-
-            res.partner_marks = n_marks
-            res.warnings.append(f"Знаки партнёров шаблона на фоновых картинках убраны: {n_marks} {plural(n_marks, 'знак', 'знака', 'знаков')} "
-                                f"на {n_images} {plural(n_images, 'картинке', 'картинках', 'картинках')}.")
+    # знаки партнёров шаблона (у ЛЦТ — организаторы, впечатаны в фоны) не трогаются: брендбук заменяет логотип самого
+    # шаблона, а не чужие знаки, которые принадлежат содержанию
     caps = caps_rule(brand) if priority == "brand" else None
     if caps is not None:
         res.caps_changed = _set_title_caps(pkg, caps)

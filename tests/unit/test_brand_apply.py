@@ -1910,54 +1910,16 @@ def test_missing_logo_files_reach_the_brandbook_layer(tmp_path, monkeypatch):
     assert row["brand"] == "в брендбуке нет файлов логотипа" and row["result"] == "логотип шаблона оставлен"
 
 
-def _gradient_with_marks(path: Path, marks: int, busy: bool = False, dark_marks: bool = False) -> Path:
-    """Фоновая картинка 1600 × 900: ровный градиент (или пёстрое фото) и ряд знаков в верхней полосе справа."""
-    import numpy as np
-
-    h, w = 900, 1600
-    y = np.linspace(0, 1, h)[:, None]
-    x = np.linspace(0, 1, w)[None, :]
-    base = np.stack([60 + 40 * x + 10 * y, 20 + 10 * y + 0 * x, 100 + 30 * x + 0 * y], axis=-1) * np.ones((h, w, 1))
-    if busy:
-        base = np.random.default_rng(3).uniform(0, 255, (h, w, 3))
-    im = Image.fromarray(base.astype("uint8"), "RGB")
+def test_background_pictures_with_partner_marks_stay_as_they_are(tmp_path, fonts_here):
+    """Знаки партнёров шаблона (у ЛЦТ — организаторы, впечатаны в фон) принадлежат содержанию: копия под брендбук
+    фоновые картинки не трогает ни при каком приоритете."""
+    bg = tmp_path / "src" / "bg.png"
+    bg.parent.mkdir(parents=True, exist_ok=True)
+    im = Image.new("RGB", (1600, 900), (70, 25, 110))
     d = ImageDraw.Draw(im)
-    ink = (20, 20, 20) if dark_marks else (255, 255, 255)
-    for k in range(marks):
-        x0 = 900 + k * 170
-        d.rectangle([x0, 40, x0 + 40, 90], outline=ink, width=4)
-        d.rectangle([x0 + 55, 50, x0 + 130, 62], fill=ink)
-        d.rectangle([x0 + 55, 72, x0 + 115, 82], fill=ink)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    im.save(path)
-    return path
-
-
-def test_partner_marks_baked_into_a_background_are_found_and_erased(tmp_path):
-    """Ряд знаков партнёров, впечатанный в ровный фон (как у ЛЦТ), находится и закрашивается тем же фоном; одиночный
-    знак, пёстрое фото и середина картинки — не трогаются."""
-    import io as _io
-
-    import numpy as np
-
-    from verstka.brand import baked
-
-    four = _gradient_with_marks(tmp_path / "bg4.png", 4).read_bytes()
-    boxes = baked.find_marks(four)
-    assert len(boxes) == 4 and all(b[1] < 0.15 and b[0] > 0.5 for b in boxes)
-    clean = Image.open(_io.BytesIO(baked.erase(four, boxes))).convert("L")
-    ref = Image.open(_io.BytesIO(_gradient_with_marks(tmp_path / "bg0.png", 0).read_bytes())).convert("L")
-    diff = np.abs(np.asarray(clean, dtype=float) - np.asarray(ref, dtype=float))
-    assert diff.max() < 8  # знаков нет, фон — тот же градиент
-    assert baked.find_marks(_gradient_with_marks(tmp_path / "dark.png", 3, dark_marks=True).read_bytes())  # тёмные на светлом — тоже
-    assert baked.find_marks(_gradient_with_marks(tmp_path / "one.png", 1).read_bytes()) == []
-    assert baked.find_marks(_gradient_with_marks(tmp_path / "busy.png", 4, busy=True).read_bytes()) == []
-
-
-def test_partner_marks_go_only_when_the_brand_has_its_own_logo(tmp_path, fonts_here):
-    """Брендбук важнее и у него свои логотипы — знаки партнёров с фоновых картинок копии убраны, и это сказано; при
-    приоритете шаблона и у брендбука без файлов логотипа — остаются."""
-    bg = _gradient_with_marks(tmp_path / "src" / "bg.png", 4)
+    for k in range(4):
+        d.rectangle([900 + k * 170, 40, 1030 + k * 170, 90], outline=(255, 255, 255), width=4)
+    im.save(bg)
     prs = Presentation()
     prs.slide_width, prs.slide_height = Emu(W), Emu(H)
     for i in range(3):
@@ -1968,18 +1930,12 @@ def test_partner_marks_go_only_when_the_brand_has_its_own_logo(tmp_path, fonts_h
     src = tmp_path / "src" / "partners.pptx"
     prs.save(src)
     m = _analyze(src, tmp_path / "ws")
-    out = tmp_path / "p-brand.pptx"
-    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
-    assert res.partner_marks == 4 and any("Знаки партнёров шаблона на фоновых картинках убраны: 4 знака" in w for w in res.warnings)
-    from verstka.brand import baked
-
-    pkg = ap.Package(out)
-    assert all(baked.find_marks(pkg.read(media)) == [] for media in baked.background_media(pkg))
-    rows = {c.what: c for c in brand_conflicts(m, _brand(), source=src, brand_dir=_brand_dir(tmp_path))}
-    assert rows["Логотипы партнёров"].result == "убраны с фоновых картинок"
-    for brand, prio in ((_brand(), "template"), (_brand(logos=[]), "brand")):
-        r2 = apply_brand(src, tmp_path / f"keep-{prio}.pptx", brand, manifest=m, priority=prio, brand_dir=_brand_dir(tmp_path))
-        assert r2.partner_marks == 0
+    before = {n: b for n, b in ((n, zipfile.ZipFile(src).read(n)) for n in zipfile.ZipFile(src).namelist()) if n.startswith("ppt/media/")}
+    for prio in ("brand", "template"):
+        out = tmp_path / f"p-{prio}.pptx"
+        apply_brand(src, out, _brand(), manifest=m, priority=prio, brand_dir=_brand_dir(tmp_path))
+        with zipfile.ZipFile(out) as z:
+            assert all(z.read(n) == b for n, b in before.items())
 
 
 def test_title_caps_follow_only_a_brandbook_rule(synthetic, fonts_here, tmp_path):

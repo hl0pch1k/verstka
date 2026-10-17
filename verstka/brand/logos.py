@@ -1814,7 +1814,6 @@ class LogoOutcome:
     covered: int = 0  # из них с логотипом бренда (заменённым, перенесённым или добавленным)
     note: Optional[str] = None  # место логотипа словами (для расхождений и предупреждений)
     covers: AddReport = field(default_factory=AddReport)  # логотип бренда на обложках, где логотипа не было
-    partner_marks: int = 0  # знаков партнёров на фоновых картинках шаблона (их копия убирает)
 
 
 _COVER_NAME_RE = re.compile(r"титул|обложк|заставк|cover|title\s*slide|спасибо|thank|финал|final|раздел|section|divider|qr", re.I)
@@ -2138,9 +2137,6 @@ def logo_outcome(src: Path | str, manifest: TemplateManifest, brand: BrandSpec, 
         pkg = Package(src)
         theme = package_theme(pkg)
         got = brand_logos(pkg, manifest, brand, images, [], src, theme.slots, (theme.major or "", theme.minor or ""), dry_run=True)
-        from verstka.brand.baked import partner_marks
-
-        got.partner_marks = sum(len(v) for v in partner_marks(pkg).values())
     except Exception as e:  # noqa: BLE001
         log.warning("logo outcome unavailable: %s", e)
         return None
