@@ -1671,6 +1671,10 @@ def _photo_frame_beside(slide: Slide, area: Bbox, kit, pal: "_Palette", name: st
 
     g = int(0.035 * W)
     pw = int(area.w * PHOTO_FRAME_SHARE)
+    # the content keeps 45 % of the slide's width where the frame can give it (an area the template's art already
+    # narrowed: four figures with their labels in a third of the slide broke their words); the frame never under 22 %
+    if area.w - pw - g < int(0.45 * W):
+        pw = max(area.w - g - int(0.45 * W), int(0.22 * W), int(0.25 * area.w)) if area.w >= int(0.6 * W) else pw
     if area.w - pw - g < int(0.3 * W):
         pw = max(area.w - g - int(0.3 * W), int(0.25 * area.w))
     frame = Bbox(x=area.x if left else area.x2 - pw, y=area.y, w=pw, h=area.h)
@@ -1770,6 +1774,16 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         warnings.append("heading set smaller to leave room for the content")
     if title_ph is not None:
         turned = _keep_turned_heading(title_ph, manifest, W, H, warnings)
+        top0, n_w = title_ph.top, len(warnings)
+        settled = _settle_turned_heading(slide, title_ph, manifest, W, H, warnings) if turned is not None else None
+        if settled is not None and _content_bottom_limit(slide, sy + sh, W, H) - _content_top(slide, max(turned, settled), h1, W, H) < int(0.4 * H):
+            # (the content's room is worth more than the heading's step off the band: a slide already cramped by the
+            # template's geometry keeps its heading where it was)
+            title_ph.top = top0
+            del warnings[n_w:]
+            settled = None
+        if settled is not None:
+            turned = max(turned, settled)
         if turned is not None and turned > heading_bottom:
             heading_bottom = turned
             below = _content_top(slide, heading_bottom, h1, W, H)
@@ -2307,6 +2321,104 @@ def _keep_turned_heading(title_ph, manifest: TemplateManifest, W: int, H: int, w
     return int(min(low, max(ys)) + dy)
 
 
+def _picture_slot(slide: Slide, box: Bbox, W: int, H: int) -> bool:
+    """The heading's box stands on a slot the template drew into its full-slide picture (a ribbon, a plaque): the
+    picture's colour inside the box differs from the colour just under it."""
+    from verstka.rendering.layers import _picture_region, drawn_layers, layer_paint_at
+
+    if box.h <= 0 or box.y2 + int(0.06 * H) > H:
+        return False
+    inside0 = Bbox(x=box.x + box.w // 4, y=box.y + box.h // 3, w=box.w // 2, h=max(box.h // 3, 1))
+    under0 = Bbox(x=box.x + box.w // 4, y=box.y2 + int(0.015 * H), w=box.w // 2, h=int(0.03 * H))
+    # the slide's background picture (its own, its layout's or its master's — the first that sets one)
+    for holder in (slide, slide.slide_layout, slide.slide_layout.slide_master):
+        bg = holder._element.find(q("p:cSld") + "/" + q("p:bg"))
+        if bg is None:
+            continue
+        blip = bg.find(".//" + q("a:blip"))
+        rid = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed") if blip is not None else None
+        if rid:
+            def frac(b: Bbox) -> tuple:
+                return (b.x / W, b.y / H, b.x2 / W, b.y2 / H)
+
+            try:
+                a, b = _picture_region(holder.part, rid, (0.0, 0.0, 0.0, 0.0), frac(inside0)), _picture_region(holder.part, rid, (0.0, 0.0, 0.0, 0.0), frac(under0))
+            except Exception:  # noqa: BLE001
+                a = b = None
+            if a and b and a[0] and b[0] and len(a[0]) == 6 and len(b[0]) == 6 and contrast_ratio(a[0], b[0]) >= 1.2:
+                return True
+        break
+    for lay in drawn_layers(slide):
+        if lay.source == "slide" or not lay.picture or lay.cover < 0.85:
+            continue
+        holder = slide.slide_layout if lay.source == "layout" else slide.slide_layout.slide_master
+        inside = Bbox(x=box.x + box.w // 4, y=box.y + box.h // 3, w=box.w // 2, h=max(box.h // 3, 1))
+        under = Bbox(x=box.x + box.w // 4, y=box.y2 + int(0.015 * H), w=box.w // 2, h=int(0.03 * H))
+        a, b = layer_paint_at(lay, inside, holder), layer_paint_at(lay, under, holder)
+        if a and b and a[0] and b[0] and len(a[0]) == 6 and len(b[0]) == 6 and contrast_ratio(a[0], b[0]) >= 1.2:
+            return True
+        # a narrow heading box centred over the picture (Metropolis: a ribbon a shade darker than the blue around it,
+        # half the slide wide) is the slot the picture draws for it, whatever its contrast
+        if box.w <= 0.7 * W and abs((box.x + box.w / 2) - W / 2) <= 0.03 * W:
+            return True
+    return False
+
+
+def _settle_turned_heading(slide: Slide, title_ph, manifest: TemplateManifest, W: int, H: int, warnings: list[str]) -> Optional[int]:
+    """A turned heading whose letters stand partly on the template's band and partly off it (Progress: the band's
+    edge tilts more steeply than the heading — the end of a line rode up onto the grey, qa5 №3) moves down, a step of
+    1 % of the slide at a time (at most 6 %), until every letter stands on one ground. Returns the new lowest point of
+    its letters, or None when it was left as it was."""
+    from verstka.rendering.clone_check import ink_lines
+    from verstka.rendering.layers import drawn_layers, painted_share
+
+    try:
+        rot = float(title_ph.rotation or 0.0)
+    except Exception:  # noqa: BLE001
+        return None
+    a = ((rot + 180.0) % 360.0) - 180.0
+    if abs(a) < 1.5:
+        return None
+    el = title_ph._element
+    fam = manifest.tokens.typography.primary_family
+    bands = [lay for lay in drawn_layers(slide) if lay.source in ("layout", "master") and lay.paints and not lay.placeholder and lay.cover < 0.85 and lay.kind in ("sp", "pic")]
+    if not bands:
+        return None
+    t = math.radians(a)
+
+    def probes(dy: int) -> list[tuple[float, float]]:
+        x, y, w, h = int(title_ph.left), int(title_ph.top) + dy, int(title_ph.width), int(title_ph.height)
+        cx, cy = x + w / 2.0, y + h / 2.0
+        out = []
+        for ln in ink_lines(el, fam) or []:
+            for k_ in range(6):
+                px = ln.x + ln.w * (k_ + 0.5) / 6.0
+                # (with air over the capitals: the renderer sets a turned line a little higher than it is measured)
+                for py in (ln.y + dy - ln.h * 0.3, ln.y + dy, ln.y + dy + ln.h * 0.5, ln.y + dy + ln.h):
+                    out.append((cx + (px - cx) * math.cos(t) - (py - cy) * math.sin(t), cy + (px - cx) * math.sin(t) + (py - cy) * math.cos(t)))
+        return out
+
+    def mixed(dy: int) -> bool:
+        pts = probes(dy)
+        if not pts:
+            return False
+        on = [any(painted_share(b, Bbox(x=int(px) - 2, y=int(py) - 2, w=4, h=4)) > 0.5 for b in bands) for px, py in pts]
+        return any(on) and not all(on)
+
+    if not mixed(0):
+        return None
+    step = int(0.01 * H)
+    for i in range(1, 7):  # (at most 6 % of the slide: further down, the content's room is the heading's price)
+        if not mixed(i * step):
+            title_ph.top = Emu(int(title_ph.top) + i * step)
+            warnings.append("turned heading moved off the band's edge")
+            ink = _heading_ink(title_ph, Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height)), manifest)
+            cx, cy = int(title_ph.left) + int(title_ph.width) / 2.0, int(title_ph.top) + int(title_ph.height) / 2.0
+            corners = [(cx + (px - cx) * math.cos(t) - (py - cy) * math.sin(t), cy + (px - cx) * math.sin(t) + (py - cy) * math.cos(t)) for px in (ink.x, ink.x2) for py in (ink.y, ink.y2)]
+            return int(max(p[1] for p in corners))
+    return None
+
+
 def _set_size(title_ph, default: float) -> float:
     """The size the heading was set at: its largest run (the canvas's nominal title size when it has no runs)."""
     if title_ph is None:
@@ -2614,12 +2726,14 @@ _KIND_LABEL = {
     PatternKind.process: "Шаги", PatternKind.timeline: "Этапы", PatternKind.cards: "Главное", PatternKind.bullets: "Тезисы",
     PatternKind.agenda: "Содержание", PatternKind.quote: "Цитата", PatternKind.team: "Команда",
 }
-_CHART_LABEL = {"pie": "Структура", "doughnut": "Структура", "line": "Динамика", "area": "Динамика", "column": "Сравнение", "bar": "Сравнение"}
+_CHART_LABEL = {"pie": "Структура", "doughnut": "Структура", "line": "Динамика", "area": "Динамика", "column": "Сравнение", "bar": "Сравнение",
+                "histogram": "Распределение", "scatter": "Связь"}
+_ASK_RE = re.compile(r"^(?:просим|прошу|прошу\s|утверд|одобр|решени|предлагаем|предлагаю|согласовать|выделить|нужно решение)", re.I)
 _COVER_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
 
 
 _NEXT_RE = re.compile(r"^(?:следующие шаги|дальнейшие шаги|что дальше|план(?:\s|$|:)|дорожная карта|next steps)", re.I)
-_PAIR_RE = re.compile(r"^(?:было|стало|до|после|сейчас|раньше|теперь|сегодня|завтра|план|факт|проблема|решение|без|с|против|vs)\b", re.I)
+_PAIR_RE = re.compile(r"^(?:было|стало|до|после|сейчас|раньше|теперь|сегодня|завтра|план|факт|цель|проблема|решение|без|с|против|vs)\b", re.I)
 
 
 def _kind_label(oslide: OutlineSlide) -> str:
@@ -2628,11 +2742,31 @@ def _kind_label(oslide: OutlineSlide) -> str:
     only when their titles pair up («Было / Стало»), a process is its steps. "" when no label says it truly (qa4: next
     steps in two columns wore «СРАВНЕНИЕ»)."""
     c = oslide.content
+    head = (oslide.headline or "").strip()
+    if _ASK_RE.match(head):
+        return "Решение"  # (qa5: «КЛЮЧЕВЫЕ ЦИФРЫ» over «Утвердить бюджет…» — the slide asks, whatever its figures)
     if oslide.kind == PatternKind.chart and c.chart is not None:
-        return _CHART_LABEL.get(str(c.chart.type or "").lower(), "Данные")
+        kind = str(c.chart.type or "").lower()
+        if kind in ("bar", "column", "stacked_bar", "stacked_column"):
+            # a bar names a trend only over time; stages of a funnel or the bins of a histogram are no «comparison»
+            # (qa5: «СРАВНЕНИЕ» on a funnel and on a histogram of checks)
+            cats = [" ".join(str(x).split()) for x in (c.chart.categories or []) if str(x).strip()]
+            try:
+                from verstka.rendering.charts import _TIME_WORD_RE
+
+                periods = sum(1 for t in cats if _TIME_WORD_RE.search(t) or re.fullmatch(r"(?:19|20)\d{2}(?:\s*г\.?)?", t))
+            except Exception:  # noqa: BLE001
+                periods = sum(1 for t in cats if re.fullmatch(r"(?:19|20)\d{2}", t))
+            if cats and len(cats) >= 3 and periods >= 0.7 * len(cats):
+                return "Динамика"
+            return "Данные"
+        return _CHART_LABEL.get(kind, "Данные")
+    if oslide.kind == PatternKind.table and c.table is not None:
+        cols = [(x or "").strip() for x in c.table.columns[1:3]]
+        return "Сравнение" if len(cols) == 2 and all(_PAIR_RE.match(t) for t in cols) else "Данные"
     if oslide.kind == PatternKind.bullets and (c.formula or "").strip():
         return "Расчёт"
-    if _NEXT_RE.match((oslide.headline or "").strip()):
+    if _NEXT_RE.match(head):
         return "План"
     if oslide.kind == PatternKind.two_column:
         titles = [(x.title or "").strip() for x in c.columns]
@@ -3071,6 +3205,11 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     rows = min(max(n, 2), 3)
     need = int((rows + 0.1) * h1 * lh * EMU_PER_PT) + insets[1] + insets[3]
     rule = _rule_under(slide, box, W, H)
+    slot = band is None and rule is None and _picture_slot(slide, box, W, H)
+    if slot:
+        # the heading's slot is drawn in the template's picture (Metropolis: a ribbon in the background): the slot's
+        # foot is the heading's limit, as a rule's would be — and its ends too (qa5 №3: three lines spilled out of it)
+        rule = box.y2 + int(0.005 * H)
     if rule is not None:
         room = rule - box.y - int(0.01 * H)  # the heading keeps above the layout's rule
         one = int(1.1 * h1 * lh * EMU_PER_PT) + insets[1] + insets[3]
@@ -3081,7 +3220,7 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
         box = Bbox(x=box.x, y=box.y, w=box.w, h=need)
     min_ratio = 0.6 if rule is not None else 0.8
     h_fit = h1
-    if rule is not None and ds is not None and ds.headlines:
+    if rule is not None and ds is not None and ds.headlines and not slot:
         # one size for the deck's headings over the rule: the largest at which four in five of its headlines keep
         # above it — not each heading its own (Классика: 24 pt on slides 2–4, 40 pt on the next ones)
         key = (box.w, box.h)
@@ -3118,6 +3257,8 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
             w_band = _free_width(slide, box, W, H, int(safe.x2 * W), skip=(title_ph._element,))
             w_band = min(w_band, cut_r - box.x) if cut_r is not None else w_band
             wide = Bbox(x=box.x, y=box.y, w=max(box.w, w_band), h=box.h)
+        if slot:
+            wide = box
         least = max(0.5 * h1, 1.1 * body_floor(manifest))
         steps = [h_fit] + sorted((x for x in scale if least - 0.05 <= x < min(h_fit, res.size_pt) - 0.05), reverse=True)
         found = None
@@ -3166,7 +3307,9 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     size = res.size_pt
     lines = res.lines
     grid_box = box  # the heading's column (a centred heading's narrowed box does not move the content column)
-    if 2 <= lines <= 3 and not res.broken_word:
+    # (a heading in a slot the picture draws keeps the slot's width: narrowed to balance its lines, the renderer's wider
+    # letters took a third line out of the ribbon)
+    if 2 <= lines <= 3 and not res.broken_word and not slot:
         # balanced lines at the final size: the narrowest box that keeps the same number of lines (no one-word last line)
         # — never narrower than its longest word (a narrower box would keep the count by breaking that word in two)
         longest = max((text_width_pt(w_, title_font, size, title_bold, **look) for w_ in head_text.split(" ") if w_), default=0.0)

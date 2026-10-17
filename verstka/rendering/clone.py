@@ -3923,6 +3923,29 @@ def _layout_placeholder(ctx: _SlideCtx, el: etree._Element) -> Optional[etree._E
     return best
 
 
+_JUSTIFIED = ("just", "dist", "justLow", "thaiDist")
+
+
+def _no_justify(ctx: _SlideCtx) -> None:
+    """Our text never set justified: a sample's justified paragraph (Progress) stretched a line of a few long Russian
+    words over the column with holes between them (qa5 №4: «Организационная   причина:   инструкция»). Explicit or
+    inherited, the alignment becomes left."""
+    for sid in list(ctx.filled):
+        el = ctx.els.get(sid)
+        if el is None or el.getparent() is None or el.find(q("p:txBody")) is None:
+            continue
+        inherited = next((lv.get("algn") for lv in _style_levels(ctx, el) if lv.get("algn")), None)
+        for p in el.find(q("p:txBody")).findall(q("a:p")):
+            ppr = p.find(q("a:pPr"))
+            algn = ppr.get("algn") if ppr is not None else None
+            if (algn or inherited) not in _JUSTIFIED:
+                continue
+            if ppr is None:
+                ppr = etree.Element(q("a:pPr"))
+                p.insert(0, ppr)
+            ppr.set("algn", "l")
+
+
 def _style_levels(ctx: _SlideCtx, el: etree._Element) -> list[etree._Element]:
     """Paragraph property levels a text shape inherits, nearest first: its own first paragraph and list style, the
     layout placeholder's, the master's title/body style."""
@@ -6953,6 +6976,7 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
     # then unfilled text slots and stray placeholder text
     _remove_empty_cells(ctx)
     _remove_placeholder_boxes(ctx)
+    _no_justify(ctx)
     for slot in list(ctx.pattern.slots):
         if slot.role not in TEXT_ROLES or slot.shape_id in ctx.filled or slot.shape_id in ctx.removed:
             continue

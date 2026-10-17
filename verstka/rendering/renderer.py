@@ -495,6 +495,11 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                     rendered.warnings.append(f"{n_fix} text run(s) all but invisible on their ground recoloured")
             except Exception:  # noqa: BLE001 - a guard, never a failure
                 log.debug("unreadable text pass failed on slide %d", i, exc_info=True)
+            from verstka.rendering.decor import clear_small_decor
+
+            n_marks = clear_small_decor(builder.created[-1])
+            if n_marks:
+                rendered.warnings.append(f"{n_marks} small mark(s) of the template's decor left out under the slide's text")
         result.slides.append(rendered)
         if progress:
             progress(f"rendered slide {i}/{n}", i / max(n, 1))

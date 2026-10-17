@@ -783,6 +783,49 @@ def heading_off_its_ground(slide, pattern: Pattern, manifest: TemplateManifest) 
     return None
 
 
+_QUOTE_GLYPHS = set("«»“”„\"‘’‚'")
+
+
+def _quote_marks_drawn(slide) -> bool:
+    """The slide's layout (or the sample itself) draws quotation marks as decoration: a text of quote glyphs only."""
+    from verstka.rendering.layers import drawn_layers
+
+    for lay in drawn_layers(slide):
+        if not lay.has_text or lay.placeholder:
+            continue
+        t = "".join(x.text or "" for x in lay.el.iter(q("a:t"))).strip()
+        if t and all(ch in _QUOTE_GLYPHS or ch.isspace() for ch in t):
+            return True
+    return False
+
+
+def text_past_the_edge(slide, pattern: Pattern, manifest: TemplateManifest) -> Optional[str]:
+    """A line of the slide's text — turned with its shape — that runs past the slide's edge (qa5 №3: Progress, a
+    longer heading in the sample's turned band cut by the top and the right edge, «…несовместимости форма»)."""
+    from verstka.rendering.clone_notes import turned_box
+
+    try:
+        pres = slide.part.package.presentation_part.presentation
+        W, H = int(pres.slide_width), int(pres.slide_height)
+    except Exception:  # noqa: BLE001
+        W, H = manifest.slide_size.w, manifest.slide_size.h
+    tol_x, tol_y = int(0.01 * W), int(0.008 * H)
+    chrome = set(pattern.chrome_shape_ids)
+    fam = manifest.tokens.typography.primary_family
+    tree = slide._element.cSld.find(q("p:spTree"))
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") in chrome or not _shape_text(sp).strip():
+            continue
+        if next(sp.iter(q("p:ph")), None) is not None and (next(sp.iter(q("p:ph"))).get("type") or "") in ("sldNum", "dt", "ftr"):
+            continue
+        for ln in ink_lines(sp, fam) or []:
+            b = turned_box(sp, ln)
+            if b.x < -tol_x or b.y < -tol_y or b.x2 > W + tol_x or b.y2 > H + tol_y:
+                return f"text «{_shape_text(sp).strip()[:24]}» runs past the slide's edge"
+    return None
+
+
 def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, warnings: list[str]) -> Optional[str]:
     """Why a content slide set on `pattern` must not be shown, or None."""
     for w in warnings:
@@ -800,6 +843,9 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
 
     if c.chart is not None and c.table is not None:
         return "a chart and a table on one slide"
+    if not (c.quote or "").strip() and oslide.kind != PatternKind.quote and (pattern.kind == PatternKind.quote or _quote_marks_drawn(slide)):
+        # (qa5: two causes of an incident set in quote marks on a tilted card — a quote's sample says «someone said this»)
+        return "a quote's sample for text that is no quote"
     ghosts = _layout_plates_left_empty(slide, manifest)
     if ghosts:
         return f"{ghosts} plates of the layout's placeholders stay empty on the slide"
@@ -809,6 +855,12 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         off = None
     if off:
         return off
+    try:
+        cut = text_past_the_edge(slide, pattern, manifest)
+    except Exception:  # noqa: BLE001
+        cut = None
+    if cut:
+        return cut
     H = manifest.slide_size.h
     hpt = H / EMU_PER_PT
     typo = manifest.tokens.typography
