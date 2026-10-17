@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from verstka.ingest.workspace import TemplateWorkspace
-from verstka.rendering.clone import KEPT_PHOTO, RenderedSlide, render_clone
+from verstka.rendering.clone import KEPT_PHOTO, RenderedSlide, SampleRefused, render_clone
 from verstka.rendering.deck import DeckBuilder
 from verstka.rendering.fallbacks import fallback_composition, prepare_slide
 from verstka.rendering.synth import render_synth
@@ -247,8 +247,13 @@ def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, pattern
             why = place_notes(builder, slide, oslide, outline, manifest, p) or content_trouble(slide, oslide, p, manifest, warns)
         except _CloneRedo:
             raise
-        except Exception as e:  # noqa: BLE001 - a sample that cannot take the slide (no room for its chart) is one more
-            # that read badly: the next alternative is tried, the pair is remembered — never the whole slide given up
+        except SampleRefused as e:
+            # the sample does not suit the slide (no room for its figures, its chart's rows…): a reason, not a failure —
+            # the next alternative is tried, the pair is remembered
+            log.info("slide %s: sample %s skipped: %s", oslide.id, pid, e)
+            why = f"skipped: {str(e)[:120]}"
+        except Exception as e:  # noqa: BLE001 - a sample that broke the renderer is one more that read badly: the next
+            # alternative is tried, the pair is remembered — never the whole slide given up
             log.info("slide %s on sample %s failed: %s", oslide.id, pid, e)
             why = f"failed: {str(e)[:120]}"
         if why is None:
@@ -294,7 +299,7 @@ _LATIN_RE = re.compile(r"[A-Za-z]{3,}")
 
 def reason_ru(text: str) -> str:
     """One reason of the renderer in Russian (`_REASONS_RU`); one already in Russian stays as it is."""
-    t = re.sub(r"^(?:failed:\s*)?(?:native object failed:\s*)?", "", (text or "").strip())
+    t = re.sub(r"^(?:(?:failed|skipped):\s*)?(?:native object failed:\s*)?", "", (text or "").strip())
     for rx, ru in _REASONS_RU:
         m = rx.search(t)
         if m:
@@ -446,6 +451,9 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
             if isinstance(e, _CoverRedo):
                 log.info("slide %d (%s): the cloned cover %s — composed instead", i, oslide.id, e)
                 rendered.warnings.append(f"the cloned cover {str(e)[:160]} — composed")
+            elif isinstance(e, SampleRefused):
+                log.info("slide %d (%s): sample %s skipped (%s) — composed", i, oslide.id, ps.pattern_id, e)
+                rendered.warnings.append(f"sample {ps.pattern_id} skipped: {str(e)[:160]} — composed")
             elif isinstance(e, _CloneRedo):
                 log.info("slide %d (%s): no template sample holds it (%s) — composed", i, oslide.id, e)
                 rendered.warnings.append(f"no template sample holds it: {str(e)[:160]} — composed")
@@ -467,6 +475,8 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                         fallback.reasons = [f"композиция {fallback.composition}: образцы шаблона не вместили содержимое ({reasons_ru(str(e))})"]
                     elif isinstance(e, _CoverRedo):
                         fallback.reasons = [f"композиция {fallback.composition}: на образце {ps.pattern_id} титул читался плохо ({reason_ru(str(e))})"]
+                    elif isinstance(e, SampleRefused):
+                        fallback.reasons = [f"композиция {fallback.composition}: образец {ps.pattern_id} не подошёл ({reason_ru(str(e))})"]
                     else:
                         fallback.reasons = [f"композиция {fallback.composition}: образец {ps.pattern_id} не отрисовался ({reason_ru(str(e))})"]
                     plan.slides = [fallback if s is ps else s for s in plan.slides]

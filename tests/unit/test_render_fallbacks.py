@@ -367,3 +367,31 @@ def test_add_chart_still_refuses_a_chart_without_data():
     s = _chart_slide(["f1"])
     with pytest.raises(ValueError):
         charts_mod.add_chart(None, None, s.content.chart, _deck(s), None, None)
+
+
+def test_a_refused_sample_is_a_reason_and_a_broken_one_a_failure(env, tmp_path, monkeypatch):
+    """A sample that does not suit the slide (`SampleRefused`: no room for its figures, its chart's rows…) is skipped
+    with its reason — the slide is composed, «Почему так» says why in Russian, no «failed» anywhere. «failed» stays for
+    a renderer that broke (a ValueError inside the clone)."""
+    from verstka.rendering import renderer as renderer_mod
+    from verstka.rendering.clone import SampleRefused
+
+    manifest, ws = env
+    pattern = next(p for p in manifest.patterns if p.kind not in (K.title, K.section, K.thanks))
+    a = OutlineSlide(id="a", kind=K.bullets, headline="Итоги пилота", content=SlideContent(bullets=["Время сократилось на 18 минут"]))
+    b = OutlineSlide(id="b", kind=K.bullets, headline="Что дальше", content=SlideContent(bullets=["Расширить пилот на два отдела"]))
+
+    def clone(builder, ps, oslide, *rest, **kw):
+        if oslide.id == "a":
+            raise SampleRefused("в карточках образца нет места для крупной цифры: она встала бы в 14 pt, нужно от 18")
+        raise ValueError("python-pptx refused the shape")
+
+    monkeypatch.setattr(renderer_mod, "render_clone", clone)
+    outline = _deck(a, b)
+    plan = LayoutPlan(strategy="structured", template_id=manifest.template_id, slides=[LayoutSlide(outline_id="a", mode="clone", pattern_id=pattern.id, score=0.9), LayoutSlide(outline_id="b", mode="clone", pattern_id=pattern.id, score=0.9)])
+    res = render_deck(outline, plan, manifest, ws, tmp_path / "deck.pptx")
+    assert [r.mode for r in res.slides] == ["synth", "synth"]
+    wa, wb = res.slides[0].warnings, res.slides[1].warnings
+    assert not any("failed" in w for w in wa) and any("skipped" in w and "крупной цифры" in w for w in wa), wa
+    assert "нет места для крупной цифры" in plan.for_outline("a").reasons[0]
+    assert any("failed" in w for w in wb), wb

@@ -37,6 +37,12 @@ from verstka.schemas.template import Pattern, RepeatGroup, Slot, TemplateManifes
 
 log = logging.getLogger(__name__)
 
+
+class SampleRefused(RuntimeError):
+    """A template sample that does not suit the slide (no room for its figures, its chart's rows, its steps unnumbered…):
+    the renderer takes the next sample or composes the slide. A reason the plan gives, never a failure — «failed»
+    stays for a renderer that broke (nothing could be composed, a native object could not be drawn)."""
+
 TEXT_ROLES = {SlotRole.title, SlotRole.subtitle, SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption}
 CELL_TEXT_ROLES = {SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.bullet_list, SlotRole.body}
 _BODY_ROLES = (SlotRole.card_body, SlotRole.bullet_list, SlotRole.body)
@@ -769,7 +775,7 @@ class _SlideCtx:
         if getattr(self, "_title_call", False) and getattr(self, "kind", None) is not None and len(head) > 32 and ob.h < 0.1 * self.H and self.kind not in _BOOKENDS:
             # a heading of a sentence is never set into a label's chip at the chip's size (ЛЦТ: «Полный запуск умных
             # напоминаний через 3 недели» in the pink pill — qa3 L4): another sample, or the slide is composed
-            raise RuntimeError(f"заголовок в {len(head)} знаков не для плашки-метки образца")
+            raise SampleRefused(f"заголовок в {len(head)} знаков не для плашки-метки образца")
         pad_r = max(ob.x2 - (bx.x + need_w), 0) if bx.x + need_w <= ob.x2 else int(0.012 * self.W)
         inner = ob.x2 - bx.x - int(0.008 * self.W)  # the label's own width is the text's to use
         width = min(max(bx.w, min(need_w, inner)), max(inner, int(0.05 * self.W)))
@@ -1648,7 +1654,7 @@ def _kpi_room(ctx: _SlideCtx, group, items: list[SlideItem], numbers_in_cells: b
         if not cell_roles & {SlotRole.card_title, SlotRole.card_body, SlotRole.body, SlotRole.bullet_list, SlotRole.number_label}:
             # cards with a figure, a topic and a sentence in a row of figure-only cells (MyBrand p12): all of it would
             # shrink into the figure's box (qa3: «+23%» at 11 pt over the conclusion)
-            raise RuntimeError("в ячейках образца место только для цифры, а у карточек есть текст")
+            raise SampleRefused("в ячейках образца место только для цифры, а у карточек есть текст")
     if not (kpis or figures) or numbers_in_cells:
         return
     if any(s.group_id != group.id for s in ctx.slots(SlotRole.number)):
@@ -1658,7 +1664,7 @@ def _kpi_room(ctx: _SlideCtx, group, items: list[SlideItem], numbers_in_cells: b
     size = max((x.style.size_pt or 0.0) for x in heads) if heads else 0.0
     floor = 0.75 * ctx.typo.size_for("h1", 24.0)
     if size and size < floor:
-        raise RuntimeError(f"в карточках образца нет места для крупной цифры: она встала бы в {size:.0f} pt, нужно от {floor:.0f}")
+        raise SampleRefused(f"в карточках образца нет места для крупной цифры: она встала бы в {size:.0f} pt, нужно от {floor:.0f}")
 
 
 def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
@@ -1711,7 +1717,7 @@ def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
         top, bottom = min(b.y for b in inks), max(b.y2 for b in inks)
         shares.append((bottom - top) / card.h)
     if shares and len(shares) >= 2 and max(shares) < 0.36:  # (about a third: the ink measure runs a little tall)
-        raise RuntimeError(f"карточки образца остались бы почти пустыми: текст занимает {max(shares):.0%} их высоты")
+        raise SampleRefused(f"карточки образца остались бы почти пустыми: текст занимает {max(shares):.0%} их высоты")
 
 
 def _top_align_rows(ctx: _SlideCtx, els: list[etree._Element]) -> None:
@@ -2852,7 +2858,7 @@ def _clear_of_decor(ctx: _SlideCtx, box: Bbox, own_area: Optional[list[Bbox]] = 
     if free.w >= 0.6 * box.w and free.h >= 0.6 * box.h and free.area >= 0.12 * ctx.W * ctx.H:
         ctx.warnings.append("диаграмма отодвинута от декора шаблона")
         return free
-    raise RuntimeError("декор шаблона лёг бы под диаграмму — образец не подходит")
+    raise SampleRefused("декор шаблона лёг бы под диаграмму — образец не подходит")
 
 
 def _texts_beside_chart(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
@@ -2981,7 +2987,7 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
     if box.area < 0.18 * ctx.W * ctx.H or box.w < 0.3 * ctx.W:
         # a chart or a table squeezed into a corner of a sample made for something else reads as a mistake: the
         # renderer takes another sample or composes the slide
-        raise RuntimeError(f"native object failed: no room for it on the sample ({box.area / (ctx.W * ctx.H):.0%} of the slide)")
+        raise SampleRefused(f"no room for it on the sample ({box.area / (ctx.W * ctx.H):.0%} of the slide)")
     # pictures the object would cover (sample screenshots, chart images marked as decoration) are removed
     gone: list[Bbox] = []
     for sid, el in list(ctx.els.items()):
@@ -3059,12 +3065,12 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
             need = comp.chart_need(c.chart)
             have = int(box.h * (0.92 if by_chart else 1.0))
             if need and have < need:
-                raise RuntimeError(f"диаграмме нужно {need / 12700:.0f} pt высоты, в образце {have / 12700:.0f} pt: образец не подходит")
+                raise SampleRefused(f"диаграмме нужно {need / 12700:.0f} pt высоты, в образце {have / 12700:.0f} pt: образец не подходит")
         if pair:
             # two charts side by side in the sample's data area, each under its own title, the slide's lines as a
             # composed pair sets them — the conclusion stays the strip under the content (`clone_notes`)
             if box.w < 0.6 * ctx.W or box.h < 0.3 * ctx.H:
-                raise RuntimeError("the pair of charts has no room side by side")
+                raise SampleRefused("the pair of charts has no room side by side")
             n0 = len(tree0)
             comp._comp = "chart_pair"
             comp.chart_pair(box)
@@ -3079,7 +3085,8 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
             # a pie in an area the width of the slide stands in its middle with its legend, not at its left edge
             err = comp._chart_block(box, c.chart, prominent=False, center=box.w >= 0.6 * ctx.W)
             if err:
-                raise RuntimeError(err)
+                # (rows that do not fit the sample's frame are the sample's: another one, or the composer's table)
+                raise (SampleRefused if "не помещаются" in err else RuntimeError)(err)
         elif c.table is not None:
             before = set(ctx.slide._element.cSld.find(q("p:spTree")))
             comp.table(box, c.table)
@@ -3098,7 +3105,9 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         # sample or to the composer
         hidden = _text_under(ctx, [x for x in tree0 if x not in before_native and etree.QName(x).localname == "graphicFrame"])
         if hidden:
-            raise RuntimeError(f"it would lie over the slide's text «{hidden[:24]}»")
+            raise SampleRefused(f"it would lie over the slide's text «{hidden[:24]}»")
+    except SampleRefused:
+        raise  # (the sample does not suit the object: a reason, the next sample is tried)
     except Exception as e:  # noqa: BLE001
         # the sample's chart or table area left empty is worse than a composed slide: the renderer rolls this clone
         # back and composes the slide, which shows its figures or its text instead
@@ -6492,13 +6501,13 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         t = next((x for x in pattern.slots if x.role == SlotRole.title), None)
         texts = [x for x in pattern.slots if x.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title)]
         if t is not None and texts and t.bbox.y >= max(x.bbox.y for x in texts) + 0.1:
-            raise RuntimeError("заголовок образца стоит под текстом: это разделитель, не слайд с содержимым")
+            raise SampleRefused("заголовок образца стоит под текстом: это разделитель, не слайд с содержимым")
     if not _is_bookend(oslide) and not c.image_hint and any(s.data is not None for s in outline.slides):
         # a data deck never lays its slide beside a sample's drawing of its own subject (Marketing Report's map of the
         # USA next to «Что дальше» of a VK Cloud sales deck — live QA, B4): another sample, or the slide is composed
         fig = _subject_drawing(ctx)
         if fig is not None:
-            raise RuntimeError(f"рисунок образца ({fig}) — о своём, не о данных колоды: образец не подходит")
+            raise SampleRefused(f"рисунок образца ({fig}) — о своём, не о данных колоды: образец не подходит")
     ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
     ctx.oslide_content = c
     ctx.data_slide = oslide.data is not None
@@ -6513,7 +6522,7 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         # a data deck's closing steps («Что дальше») are the slide's whole content: numbered steps, not three short lines
         # in a sample's ruled list or tall cards (ЛЦТ p15, VK Tech p24/p25/p28 — the steps read as a footnote): a sample
         # that numbers its steps, or the composer's numbered steps (qa3 leftovers)
-        raise RuntimeError("шаги «Что дальше» — нумерованные, а образец не нумерует свои ячейки")
+        raise SampleRefused("шаги «Что дальше» — нумерованные, а образец не нумерует свои ячейки")
     if not _is_bookend(oslide):
         # the sample's own largest empty stretch, before anything is taken off: the gate compares the slide with it;
         # and where the sample's own words stand (a text it sets over its art is the design — as far as it goes)
