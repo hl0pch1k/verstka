@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, SAMPLE_BRIEF } from "../../lib/createForm";
 import { docReadLine } from "./textRules";
-import { charsLabel, clipLine, hintText, READY_HINT, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twFreeze, twStep, twText, writerOn, type Tw } from "./textRules";
+import { charsLabel, clipLine, hintText, READY_HINT, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twRestart, twStep, twText, writerOn, type Tw } from "./textRules";
 
 /** Сервер пишет текст по теме (`health.writer`) — и без него. */
 const W = { writer: true };
@@ -87,8 +87,9 @@ test("подсказка: сначала фраза целиком держит�
   const erase = twStep(steps[4].s);
   assert.equal(erase.ms, 25);
   assert.equal(erase.s.n, TW[0].length - 1);
-  // нажали на поле посреди стирания — фраза встаёт целиком и держится
-  assert.deepEqual(twFreeze(erase.s), { i: 0, n: TW[0].length, mode: "hold", k: 0 });
+  // поле отпустили пустым посреди стирания — следующая фраза печатается заново с первого знака
+  const again = twStep(twRestart(erase.s)).s;
+  assert.deepEqual(again, { i: 1, n: 1, mode: "type", k: 0 });
 });
 test("подсказка: стёрта — пауза 400 мс, затем следующая фраза печатается по 45 мс на знак", () => {
   let s: Tw = { i: 0, n: 1, mode: "erase", k: 0 };
@@ -96,8 +97,6 @@ test("подсказка: стёрта — пауза 400 мс, затем сл�
   assert.equal(r.s.n, 0);
   assert.equal(r.s.mode, "pause");
   assert.equal(r.ms, 400);
-  // нажали в паузе — встаёт следующая фраза целиком
-  assert.deepEqual(twFreeze(r.s), { i: 1, n: TW[1].length, mode: "hold", k: 0 });
   r = twStep(r.s);
   assert.equal(r.s.i, 1);
   assert.equal(r.s.n, 1);

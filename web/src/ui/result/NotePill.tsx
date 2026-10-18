@@ -55,10 +55,7 @@ export function NotePill({ note, open, actions, line, head, short }: {
       <button type="button" className="ra-ntg" onClick={actions.onToggle} aria-expanded={open} aria-controls="ra-nd"
         title={open ? "Свернуть" : `${note.title} — показать действия`}>
         <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="info" size={20} /></span>
-        {/* в шапке: тесно (container query, result.css) — короткий заголовок вместо полного */}
-        {head && note.short !== note.title
-          ? <span className="ra-ntt"><span className="ra-ntl">{title}</span><span className="ra-nts">{note.short}</span></span>
-          : <span className="ra-ntt">{title}</span>}
+        <span className="ra-ntt">{title}</span>
         <span className="ra-chev" aria-hidden="true"><Icon name="chevron-right" size={18} /></span>
       </button>
       <div id="ra-nd" className="ra-nd">

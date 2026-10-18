@@ -155,12 +155,9 @@ export const twText = (s: Tw, list: string[] = TW) => `Например: ${list[
 export const READY_HINT = `Например: ${SAMPLE_BRIEF.split("\n")[0]}`;
 /** Текст подсказки пустого поля: агент пишет текст — печатающаяся тема (`twText`); не пишет — готовый текст (`READY_HINT`). */
 export const hintText = (s: Tw, writer: boolean, list: string[] = TW) => (writer ? twText(s, list) : READY_HINT);
-/** Печать остановлена (пользователь нажал на поле): фраза, что печаталась или стиралась, встаёт целиком и больше не
- *  меняется; в паузе между фразами — следующая. Курсора у подсказки нет (замечание владельца 18.10, скрин 10). */
-export function twFreeze(s: Tw, list: string[] = TW): Tw {
-  const i = s.mode === "pause" ? (s.i + 1) % list.length : s.i;
-  return { i, n: list[i].length, mode: "hold", k: 0 };
-}
+/** Поле отпустили пустым — подсказка печатается заново: пауза перед следующей фразой, затем она набирается с первого
+ *  знака (замечание владельца 18.10, скрин 25). Курсора у подсказки нет (скрин 10). */
+export const twRestart = (s: Tw): Tw => ({ i: s.i, n: 0, mode: "pause", k: 0 });
 
 // ── строки поля
 /** «1 551 знак» — тысячи через пробел (V2 `chars`). */

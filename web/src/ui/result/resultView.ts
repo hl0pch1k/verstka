@@ -306,8 +306,7 @@ export const workGeo = (note: NoteView | null, line: unknown, inHead = false): W
  *  `label` — о чём уведомление (имя области для чтения с экрана). */
 export interface NoteView {
   title: string;
-  /** Короткий заголовок таблетки на телефоне (в одну строку): текст написал агент — «Проверьте факты», остальное —
-   *  `title`. Целиком заголовок — в подсказке таблетки. */
+  /** Короткий заголовок таблетки (тесная шапка): сейчас — тот же `title` («Текст писал агент» короток сам). Целиком заголовок — в подсказке таблетки. */
   short: string;
   body: string;
   full: string;
@@ -337,7 +336,7 @@ export function noteView(g: Generation, v: Variant, total: number, live: LiveMod
   const title = plainNotice(n.title, labels).replace(/\.\s*$/, "");
   return {
     title,
-    short: written ? "Проверьте факты" : title,
+    short: title,
     body: help || basis,
     full: [basis, help, n.owner ?? ""].filter(Boolean).join(" "),
     label,

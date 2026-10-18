@@ -289,20 +289,11 @@ a.p2-ob:hover{color:#0B1220}
 .rt-hd .p2-ttl{font-size:32px;line-height:40px}
 /* уведомление в шапке рабочей области (замечание владельца 18.10, скрин 13): таблетка 40 первой в ряду «Слайд N из
    M», заголовок в одну строку (многоточие, целиком — в подсказке); раскрытая — текст и действия плитой под ней поверх
-   сцены, фон раскрывается тем же clip-path слева, действия — лесенкой. Сразу после сборки обводка дважды расходится от
+   сцены (вид и ход — ниже, «раскрытая таблетка»). Сразу после сборки обводка дважды расходится от
    таблетки (только transform и opacity), чтобы её заметили */
 .ra-ntt{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.ra-whx:has(.ra-note-h){position:relative;z-index:5;container-type:inline-size}
-.ra-nts{display:none}
+.ra-whx:has(.ra-note-h){position:relative;z-index:5}
 .ra-note-h + p{min-width:7.5em}
-/* тесная шапка (окно около 1100, колонка слайда уже 760): короткий заголовок таблетки, подпись «Замечания» уходит
-   (как в тесной колоде с помощником), «Слайд N из M» остаётся */
-@container (width < 760px){
-  .ra-note-h .ra-ntl{display:none}
-  .ra-note-h .ra-nts{display:inline}
-  .ra-note-h ~ .ra-whr .ra-swl{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
-  .ra-note-h ~ .ra-whr{gap:12px !important}
-}
 .ra-note-h{z-index:4;flex:0 1 auto;min-width:0;max-width:62%;height:40px}
 .ra-note-h .ra-ntg{flex:0 1 auto;min-width:0;max-width:100%;height:40px;min-height:0;gap:8px;padding:0 12px;font-size:14px;line-height:20px;white-space:nowrap;text-align:left}
 .ra-note-h .ra-ntg::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px #2563EB;opacity:0;pointer-events:none;animation:ra-ping 1200ms var(--ease) 700ms 2 both}
@@ -311,17 +302,24 @@ a.p2-ob:hover{color:#0B1220}
 .ra-note-h .ra-ntg:hover .ra-chev{transform:rotate(90deg) translateX(2px)}
 .ra-note-h.ra-note-on .ra-chev{transform:rotate(-90deg)}
 .ra-note-h.ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(-90deg) translateX(2px)}
-.ra-note-h .ra-nd{position:absolute;left:0;top:48px;z-index:4;flex-direction:column;align-items:stretch;gap:4px;width:400px;max-width:calc(100vw - 32px);height:auto;margin-left:0;padding:12px}
-.ra-note-h .ra-nbg{border-radius:24px;clip-path:inset(0 100% 0 0 round 24px);box-shadow:0 16px 48px 0 rgba(11,18,32,.12)}
-.ra-note-h.ra-note-on .ra-nbg{clip-path:inset(0 0 0 0 round 24px)}
+/* раскрытая таблетка — белая плита под ней (замечание владельца 18.10, скрин 24): основание сверху с крестиком справа,
+   под ним действия столбцом — кнопки 44 во всю ширину; плита проявляется и чуть опускается на место (opacity и
+   transform, 240 мс), действия — следом лесенкой; сворачивается быстрее (160 мс) */
+.ra-note-h .ra-nd{position:absolute;left:0;top:48px;z-index:4;display:flex;flex-direction:column;align-items:stretch;gap:8px;width:360px;max-width:calc(100vw - 32px);height:auto;margin-left:0;padding:16px;opacity:0;transform:translateY(-6px) scale(.98);transform-origin:16px 0;visibility:hidden;transition:opacity 160ms var(--ease),transform 160ms var(--ease),visibility 0s linear 160ms}
+.ra-note-h.ra-note-on .ra-nd{opacity:1;transform:none;visibility:visible;transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s}
+.ra-note-h .ra-nbg{border-radius:20px;background:#FFFFFF;clip-path:none;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12);transition:none}
+.ra-note-h.ra-note-on .ra-nbg{clip-path:none}
 .ra-note-h:not(.ra-note-on) .ra-nd{pointer-events:none}
 .ra-note-h .ra-nsp{display:none}
-.ra-note-h .ra-ni{width:100%}
-.ra-note-h .ra-ni1{padding:4px 48px 8px 8px}
-.ra-note-h .ra-src{white-space:normal}
-.ra-note-h .ra-ni .ra-nb{width:100%;justify-content:flex-start}
-.ra-note-h .ra-ni5{position:absolute;top:8px;right:8px;width:auto}
-@media (width >= 1280px) and (height >= 675px){
+.ra-note-h .ra-ni{display:flex;width:100%;transform:translateY(4px)}
+.ra-note-h.ra-note-on .ra-ni{transform:none}
+.ra-note-h .ra-ni1{min-height:32px;align-items:center;padding:0 44px 4px 4px}
+.ra-note-h .ra-src{font-size:13px;line-height:20px;white-space:normal}
+.ra-note-h .ra-ni .ra-nb{width:100%;height:44px;justify-content:flex-start;gap:10px;padding:0 14px;border:0;border-radius:14px;background:#F3F4F1;font-size:14px;font-weight:600}
+.ra-note-h .ra-ni .ra-nb:hover{background:#E9F1FF}
+.ra-note-h .ra-ni5{position:absolute;top:16px;right:16px;width:auto}
+.ra-note-h .ra-nx{width:32px;height:32px;background:#F3F4F1}
+
   /* сайт: «Скопировано» (и неудача копирования) в узкой раскладке — под кнопками, в зазоре 24 над текстом: в ряду шапки
      места нет (V2 строки не знает) */
   .hp-nar .rt-acts > .rt-cl{position:absolute;right:56px;top:calc(100% + 2px);max-width:320px}
@@ -329,113 +327,15 @@ a.p2-ob:hover{color:#0B1220}
   .rt-tight .rt-copy > .hq-obt{transition:font-size 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .rt-tight .rt-copy{padding:0 11px;gap:0;transition:transform 160ms var(--ease),padding 520ms var(--ease),gap 520ms var(--ease)}
   .hp-nar .rt-tight .rt-copy > .hq-obt{font-size:0;opacity:0;transition:font-size 520ms var(--ease),opacity 240ms var(--ease)}
-}
+
 
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): «Результат». Плита 04 — по высоте содержимого, прокручивается
    страница, а не колонка. lg — слайд слева, колонка справа (340); md и телефон — слайд во всю ширину, колонка под ним.
    Компактного вида нет: помощник стопкой не сужает колоду (он поверх неё), результат всегда полный ═══ */
-@media (width < 1280px), (height < 675px){
-  .p2-two.ra-two{grid-template-columns:minmax(0,1fr) 340px !important;column-gap:32px !important;row-gap:32px;height:auto !important}
-  .ra-two > :first-child{height:auto}
-  .ra-stage,.ra-top .ra-stage{max-width:100%}
-  .ra-two > aside{height:auto !important;margin:0 !important;align-self:start}
-  .ra-two > aside > .ra-col{height:auto !important;overflow:visible !important;padding:0 !important;-webkit-mask-image:none !important;mask-image:none !important;animation:none !important}
-  .ra-two > aside > .rp-col{flex-direction:column !important}
-  .ra-top > .rm-col,.rm-col{height:auto !important;min-height:0}
-  /* шапка рабочей области: номер и название слайда — до двух строк, кнопки — справа */
-  .ra-whx > div{height:auto !important;min-height:40px;align-items:flex-start !important}
-  .ra-whx > div > p{white-space:normal !important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-top:8px}
-  /* уведомление над рабочей областью: таблетка в ряду; раскрытая — её текст и действия плитой под ней, поверх рабочей
-     области (как меню значка «i» компактного вида), фон раскрывается тем же clip-path слева, действия — лесенкой */
-  .ra-note{z-index:3}
-  .ra-ntg{max-width:100%;height:auto;min-height:48px;white-space:normal;text-align:left}
-  .ra-nd{position:absolute;left:0;top:56px;z-index:3;flex-direction:column;align-items:stretch;gap:4px;width:min(400px,100%);height:auto;margin-left:0;padding:12px}
-  .ra-nbg{border-radius:24px;clip-path:inset(0 100% 0 0 round 24px);box-shadow:0 16px 48px 0 rgba(11,18,32,.12)}
-  .ra-note-on .ra-nbg{clip-path:inset(0 0 0 0 round 24px)}
-  .ra-note:not(.ra-note-on) .ra-nd{pointer-events:none}
-  .ra-nsp{display:none}
-  .ra-ni{width:100%}
-  .ra-ni1{padding:4px 8px 8px}
-  .ra-src{white-space:normal}
-  .ra-ni .ra-nb{width:100%;justify-content:flex-start}
-  .ra-ni5{position:absolute;top:8px;right:8px;width:auto}
-  .ra-ni1:has(+ .ra-nsp){padding-right:48px}
-  /* название презентации — до трёх строк, чуть мельче */
-  .ra-h1{font-size:32px !important;line-height:40px !important;-webkit-line-clamp:3 !important}
-  /* варианты оформления: подпись над оценкой (колонка 340 и уже — в строку три не помещаются) */
-  .ra-segs{height:auto !important;border-radius:24px !important}
-  .ra-segs .p2-rseg{height:auto;min-height:52px;padding:6px 4px;border-radius:20px}
-  .ra-segs .ra-vg{flex-direction:column;align-items:center;gap:0}
-  /* карточка «Качество»: вердикт и предупреждения переносятся строкой, не выходят за карточку */
-  .ra-qv{flex-wrap:wrap;row-gap:0;white-space:normal !important}
-}
-@media (768px <= width < 1024px){
-  /* колонка под слайдом — в две: слева название, оценка, варианты и скачивание; справа карточки и ссылки */
-  .ra-two > aside > .ra-col{display:block !important;column-count:2;column-gap:32px}
-  .ra-two > aside > .ra-col > *{break-inside:avoid}
-  .ra-two > aside > .ra-col > .ra-cards{break-before:column;margin-top:0 !important}
-}
-@media (width < 1024px){
-  .p2-two.ra-two{grid-template-columns:minmax(0,1fr) !important}
-  .ra-two > :first-child{grid-area:1 / 1 !important}
-  .ra-two > aside,.ra-two > .rm-col{grid-area:2 / 1 !important}
-}
-@media (width < 768px){
-  .ra-h1{font-size:28px !important;line-height:36px !important}
-  .ra-scr{height:56px !important;margin-top:24px !important}
-  .ra-scn{font-size:64px !important;line-height:56px !important}
-  .ra-segs .p2-rseg{min-height:56px}
-  .p2-rbl{width:44px;height:44px}
-  .ra-whx > div{flex-wrap:wrap;row-gap:8px}
-  .ra-whx > div > p{flex:1 1 100%;padding-top:0}
-  .ra-whr{margin-left:auto}
-  .p2-th{width:96px;height:54px}
-  .p2-th img{width:96px !important;height:54px !important}
-  /* ── телефон (доска M-result): плита 04 — колонка во всю видимую часть, прокрутка внутри над закреплённым рядом
-     «Скачать PowerPoint» и «…» (PhoneResult) */
-  .mr-col{position:absolute;left:16px;right:16px;top:0;display:flex;flex-direction:column;height:var(--vis)}
-  .mr-scroll{flex:1 1 auto;min-height:0;margin:0 -16px;padding:24px 16px 8px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
-  .mr-scroll::-webkit-scrollbar{display:none}
-  .mr-head{display:flex;align-items:center;justify-content:space-between;gap:16px;height:56px}
-  .mr-h1{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:24px;line-height:32px;letter-spacing:-0.03em;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .mr-line{margin:4px 0 0;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .mr-score{display:flex;align-items:center;flex:none;height:56px;padding:0;border:0;border-radius:16px;background:none;color:#0B1220;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
-  .mr-score:hover{transform:translateY(-2px)}
-  .mr-score:active{transform:scale(.98)}
-  .mr-scw{display:flex;align-items:flex-end;gap:8px}
-  .mr-scn{font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:40px;line-height:40px;letter-spacing:-0.04em}
-  .mr-sct{display:flex;flex-direction:column;padding-bottom:2px}
-  .mr-sct > span:first-child{font-size:13px;font-weight:700;line-height:16px}
-  .mr-sct > span:last-child{font-size:12px;font-weight:500;line-height:16px;color:#5A6272}
-  .mr-slide{position:relative;display:block;width:100%;margin-top:16px;padding:0;border:0;border-radius:24px;background:#F3F4F1;overflow:clip;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 24px 48px -24px rgba(11,18,32,.28);cursor:zoom-in;transition:transform 160ms var(--ease)}
-  .mr-slide:active{transform:scale(.98)}
-  .mr-stage{cursor:default}
-  .mr-stage:active{transform:none}
-  .mr-chip{position:absolute;top:12px;left:12px;z-index:3;display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#0B1220;color:#FFFFFF;font-size:12px;font-weight:700;line-height:16px;pointer-events:none}
-  .mr-col .ra-note{z-index:5}
-  /* телефон: таблетка — короткий заголовок в одну строку («Проверьте факты»), высота 44 */
-  .mr-col .ra-ntg{min-height:44px;height:44px;white-space:nowrap}
-  .mr-col .ra-note{height:44px}
-  .mr-col .p2-film{margin:0 -16px !important;padding:8px 16px}
-  .mr-col .p2-th{width:80px;height:45px}
-  .mr-col .p2-th img{width:80px !important;height:45px !important}
-  .mr-segs{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px;height:52px;margin-top:8px;padding:4px;border-radius:999px;background:#F3F4F1}
-  .mr-segs .p2-rseg{flex-direction:column;gap:0;height:44px;min-height:0;padding:0 8px}
-  .mr-sgl{max-width:100%;overflow:hidden;text-overflow:ellipsis}
-  .mr-segs .p2-rsc{line-height:16px}
-  .mr-acts{display:flex;align-items:center;justify-content:space-between;height:44px;margin:16px -12px 0}
-  .mr-acts .p2-gb{height:44px;padding:0 12px;color:#0B1220}
-  .mr-acts .p2-gb[aria-disabled="true"]{opacity:.32;cursor:default;transform:none}
-  .mr-on{background:#E9F1FF}
-  .mr-badge{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;background:#F3F4F1;color:#0B1220;font-size:12px;font-weight:700;line-height:16px}
-  .mr-badge-err{background:#FEE2E2;color:#B91C1C}
-  .mr-bar{position:relative;display:flex;align-items:center;gap:12px;flex:none;margin:0 -16px;padding:16px 16px calc(8px + var(--sab));border-top:1px solid rgba(11,18,32,.08);background:#FFFFFF}
-  .mr-bar > .p2-cta{flex:1;min-width:0;padding:0 24px}
-  .mr-bar > .p2-cta:disabled{opacity:.48;cursor:default;transform:none}
-  .mr-more{flex:none;width:56px !important;height:56px !important}
-  .mr-pop{position:absolute;right:16px;bottom:calc(100% + 8px);z-index:40;width:256px;padding:8px;border-radius:24px;background:#FFFFFF;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 24px 48px -24px rgba(11,18,32,.28);transform-origin:bottom right;opacity:0;visibility:hidden;transform:scale(.98);pointer-events:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease),visibility 0s linear 160ms}
-  .mr-pop-on{opacity:1;visibility:visible;transform:none;pointer-events:auto;transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s}
-}
+
+
+
+
 /* «Оформление»: шрифты колоды — подобранная пара или почему шрифты шаблона остались (generation.json `fonts`) */
 .ra-fonts{display:flex;flex-direction:column;gap:2px;margin-top:8px}
 .ra-fonts-t{font-size:14px;font-weight:700;line-height:20px;color:#0B1220}

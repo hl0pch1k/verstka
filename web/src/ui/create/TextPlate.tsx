@@ -30,7 +30,7 @@ import { kbHead } from "./kbRules";
 import { plural } from "../../lib/utils";
 import {
   charsLabel, DECK_ACCEPT, deckError, docReadLine, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
-  textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twFreeze, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
+  textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twRestart, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
 import { usePhone } from "../shell/tier";
 
@@ -94,11 +94,10 @@ export interface TextPlate {
   /** Номер ошибки: новая ошибка — новая строка (её `role=alert` читается заново). */
   issueSeq: number;
   /** Место печатающейся подсказки: «Взять пример» берёт её фразу, а очищенное поле продолжает с того же места. */
-  tw: MutableRefObject<{ s: Tw; started: boolean; stopped: boolean }>;
-  /** Пользователь нажал на поле: печать подсказки останавливается насовсем (фраза встаёт целиком). */
-  stopHint(): void;
-  /** Печать подсказки остановлена. */
-  hintStopped: boolean;
+  tw: MutableRefObject<{ s: Tw; started: boolean }>;
+  /** Поле в фокусе: подсказки нет; отпустили пустым — она снова печатается (`hintFocus`). */
+  hintFocus: boolean;
+  setHintFocus(on: boolean): void;
   /** Ввод в поле. */
   type(v: string): void;
   /** «Взять пример»: тема из подсказки (V2 `txTake`); агент текст не пишет — готовый текст-пример. */
@@ -139,13 +138,12 @@ export function useTextPlate(): TextPlate {
   const inputRef = useRef<HTMLInputElement>(null);
   const dataRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const tw = useRef({ s: TW0, started: false, stopped: false });
-  const [hintStopped, setHintStopped] = useState(false);
-  const stopHint = useCallback(() => {
-    if (tw.current.stopped) return;
-    tw.current.stopped = true;
-    tw.current.s = twFreeze(tw.current.s);
-    setHintStopped(true);
+  const tw = useRef({ s: TW0, started: false });
+  const [hintFocus, setFocus] = useState(false);
+  const setHintFocus = useCallback((on: boolean) => {
+    // отпустили — следующая фраза печатается заново с первого знака
+    if (!on) tw.current.s = twRestart(tw.current.s);
+    setFocus(on);
   }, []);
   const improveNow = useRef(ui.improve);
   improveNow.current = ui.improve;
@@ -346,7 +344,7 @@ export function useTextPlate(): TextPlate {
 
   const deckOff = reading ? "Презентация уже читается" : tplBusy ? TEMPLATE_BUSY : null;
   return {
-    menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading: reading ?? (docName ? `doc:${docName}` : null), deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, stopHint, hintStopped, type, take,
+    menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading: reading ?? (docName ? `doc:${docName}` : null), deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, hintFocus, setHintFocus, type, take,
     pickData, dataRef, onFiles, example,
   };
 }
@@ -354,18 +352,16 @@ export function useTextPlate(): TextPlate {
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 /** Печатающаяся подсказка поверх пустого поля (`p2-tph`), без курсора — ритм V2 `twTick` (`twStep`). Идёт, пока поле
- *  пустое, открыт «Создать» и на поле ещё не нажимали (`stopped` — нажали: фраза стоит целиком, `twFreeze`); поле
- *  очистили — продолжает через 400 мс с того же места (V2 `twWake`). При
- *  «уменьшить движение» стоит первая фраза. Агент текст не пишет (`writer` — нет: строка под полем просит готовый
- *  текст) — тему подсказка не печатает: стоит начало готового текста-примера; смена — перекрёстным затуханием. */
-function TypingHint({ live, tw, writer, stopped }: { live: boolean; tw: MutableRefObject<{ s: Tw; started: boolean; stopped: boolean }>; writer: boolean; stopped: boolean }) {
+ *  пустое, открыт «Создать» и поле не в фокусе (`hidden` — в фокусе: подсказки нет, печать стоит); отпустили пустым или
+ *  очистили — печатается заново (`twRestart`, через 400 мс, V2 `twWake`). При «уменьшить движение» стоит первая фраза.
+ *  Агент текст не пишет (`writer` — нет: строка под полем просит готовый текст) — тему подсказка не печатает: стоит
+ *  начало готового текста-примера; смена — перекрёстным затуханием. */
+function TypingHint({ live, tw, writer, hidden }: { live: boolean; tw: MutableRefObject<{ s: Tw; started: boolean }>; writer: boolean; hidden: boolean }) {
   const [s, setS] = useState(tw.current.s);
   const mode = useSwap(writer);
   useEffect(() => {
-    if (stopped) setS(tw.current.s);
-  }, [stopped, tw]);
-  useEffect(() => {
-    if (!live || !writer || stopped || reducedMotion()) return;
+    if (!live || !writer || hidden || reducedMotion()) return;
+    setS(tw.current.s);
     let t = 0;
     const tick = () => {
       const r = twStep(tw.current.s);
@@ -376,9 +372,9 @@ function TypingHint({ live, tw, writer, stopped }: { live: boolean; tw: MutableR
     t = window.setTimeout(tick, tw.current.started ? TW_WAKE_MS : TW_FIRST_MS);
     tw.current.started = true;
     return () => window.clearTimeout(t);
-  }, [live, writer, stopped, tw]);
+  }, [live, writer, hidden, tw]);
   return (
-    <span className={cls("p2-tph", mode.cls)} aria-hidden="true">
+    <span className={cls("p2-tph", mode.cls)} aria-hidden="true" style={{ opacity: hidden ? 0 : undefined, transition: "opacity 160ms var(--ease)" }}>
       {hintText(s, mode.shown)}
     </span>
   );
@@ -709,7 +705,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   const drop = useFilesDrop(body, on && !busy, tp.onFiles);
   const taProps = {
     value: brief, onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => tp.type(e.target.value), style: TA,
-    onPointerDown: tp.stopHint, onFocus: tp.stopHint,
+    onFocus: () => tp.setHintFocus(true), onBlur: () => tp.setHintFocus(false),
   };
   const describedBy = issue ? "ce-err" : factsOn ? "ct-facts" : undefined;
   return (
@@ -728,7 +724,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                   <textarea id="ct-tan" ref={narrow ? tp.taRef : otherRef} className="hp-txn p2-ta ct-ta p2-fade" {...taProps}
                     aria-invalid={!!issue} aria-describedby={narrow ? describedBy : undefined} aria-hidden={!narrow || undefined} tabIndex={narrow ? undefined : -1} />
                 </span>
-                {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} writer={writer || dataOn} stopped={tp.hintStopped} />}
+                {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} writer={writer || dataOn} hidden={tp.hintFocus} />}
               </span>
             </label>
             <div className="p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 20, marginTop: 16 }}>

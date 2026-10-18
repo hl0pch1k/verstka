@@ -189,7 +189,7 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
     const want = w.asked ?? asked;
     // the asked slide count is a promise in writer mode: any shortfall is said (not only 3 or more)
     const fewer = !!want && want > total ? ` Вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${want}.` : "";
-    return { title: "Текст написал агент — проверьте факты", basis: basis + fewer, help: null, ...none, rewrite: false, tone: "info", showText: true };
+    return { title: "Текст писал агент", basis: basis + fewer, help: null, ...none, rewrite: false, tone: "info", showText: true };
   }
   if (skeleton && (w?.status === "private" || w?.status === "refused")) {
     return {

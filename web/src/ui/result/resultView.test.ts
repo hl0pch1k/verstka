@@ -194,7 +194,7 @@ test("уведомление: текст написал агент — исто�
   const v = variant({ slides: Array(12).fill("s") });
   const n = noteView(gen({ writer: WRITER, slides: 12 }), v, 12, null);
   if (!n) throw new Error("уведомления нет");
-  assert.equal(n.title, "Текст написал агент — проверьте факты");
+  assert.equal(n.title, "Текст писал агент");
   assert.equal(n.body, "По статье Википедии «Интеграл».");
   assert.deepEqual([n.showText, n.retry, n.rewrite, n.retryWait], [true, true, true, 0]);
   assert.equal(n.label, "Уведомление о тексте, который написал агент");
@@ -371,7 +371,7 @@ test("раскладка рабочей области: уведомления �
   // таблетка в шапке рабочей области (компьютер) — ряда нет, рабочая область с самого верха; строке неудачи ряд нужен
   assert.equal(workGeo(note, null, true), "top");
   assert.equal(workGeo(note, "Не удалось открыть презентацию", true), "note");
-  assert.equal(note.short, "Проверьте факты");
+  assert.equal(note.short, "Текст писал агент");
   // строка «Не удалось открыть презентацию» или отказ «Собрать ещё раз» — тоже уведомление: ряд остаётся её местом
   assert.equal(workGeo(null, "Не удалось открыть презентацию"), "note");
   assert.deepEqual(WORK_GEO.top, { height: 612, marginTop: 0 });
