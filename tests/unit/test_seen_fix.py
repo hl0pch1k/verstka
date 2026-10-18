@@ -387,3 +387,40 @@ def test_nothing_left_to_change_says_the_remarks_are_gone(built, monkeypatch):
     assert (vdir / "deck.pptx").read_bytes() == before
     audit = json.loads((vdir / "audit_report.json").read_text(encoding="utf-8"))
     assert not any(i["id"] == remark.id for i in audit["issues"])
+
+
+def test_a_figure_hardly_larger_than_its_label_gets_its_own_large_line(simple_deck, manifest, tmp_path):
+    """The owner's card «Масштаб сил / 1213 боевых кораблей, 4126 десантных судов»: the rules' remark says what to do,
+    and it is done in place — «1213» on a line of its own at a size of the scale ≥ 1.6× the label, the words under it."""
+    from verstka.analysis.xmlns import q as qq
+    from verstka.rendering.clone_check import FIG_RATIO
+
+    prs = Presentation(str(simple_deck))
+    s = prs.slides[1]
+    W, H = prs.slide_width, prs.slide_height
+    for sh in list(s.shapes):
+        sh._element.getparent().remove(sh._element)
+    box = s.shapes.add_textbox(Emu(int(W * 0.3)), Emu(int(H * 0.3)), Emu(int(W * 0.25)), Emu(int(H * 0.45)))
+    box.text_frame.word_wrap = True
+    box.text_frame.text = "Масштаб сил"
+    box.text_frame.paragraphs[0].runs[0].font.size = Pt(15)
+    p2 = box.text_frame.add_paragraph()
+    r = p2.add_run()
+    r.text = "1213 боевых кораблей, 4126 десантных судов"
+    r.font.size = Pt(13)
+    deck = tmp_path / "fig.pptx"
+    prs.save(str(deck))
+    sid = str(box.shape_id)
+    issue = Issue(id="figure_label_ratio-2-1", slide=2, check_id="figure_label_ratio", severity="warn", kind="deterministic",
+                  message="цифра «1213 боевых кора» 13 пт почти не крупнее подписи «Масштаб сил» 15 пт", element_ids=[sid, sid],
+                  details={"figure_pt": 13.0, "label_pt": 15.0})
+    rec = SF.fix_figure_label(deck, 2, issue, manifest)
+    assert rec is not None and "«1213»" in rec["result"], rec
+    sh = _shape(deck, 2, sid)
+    para = sh._element.findall(".//" + qq("a:p"))[1]
+    runs = para.findall(qq("a:r"))
+    assert runs[0].find(qq("a:t")).text == "1213" and para.find(qq("a:br")) is not None
+    big = int(runs[0].find(qq("a:rPr")).get("sz")) / 100
+    label = max(int(rp.get("sz")) / 100 for rp in sh._element.findall(".//" + qq("a:p"))[0].iter(qq("a:rPr")) if rp.get("sz"))
+    assert big >= FIG_RATIO * label - 0.3
+    assert runs[-1].find(qq("a:t")).text.startswith("боевых кораблей")

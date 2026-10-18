@@ -663,3 +663,143 @@ def relook(image: Path, n: int, *, providers: Any, skills: Any, headline: str = 
     except Exception as e:  # noqa: BLE001 - not looked
         log.info("slide fix: the review of slide %d failed: %s", n, str(e)[:160])
         return None
+
+
+# ---------------------------------------------------------------------------- «Ключевая цифра почти не крупнее подписи»
+
+
+def fix_figure_label(pptx: Path, n: int, issue: Any, manifest: Any) -> Optional[dict]:
+    """The rules' remark «цифра почти не крупнее своей подписи» fixed by its own recipe, in place: the number that
+    starts the figure's paragraph («1213 боевых кораблей, 4126 десантных судов») gets a line of its own at a size of
+    the template's scale at least FIG_RATIO times the label's, the words go on under it at their size. When the card
+    cannot hold it, the card's other text is set at the template's body size first, then the box takes the card it
+    stands on; otherwise nothing changes (None) and the slide goes to the designer. Returns the fix record."""
+    import copy
+
+    from pptx import Presentation
+
+    from verstka.analysis.xmlns import q
+    from verstka.audit.autofix import _text_floors
+    from verstka.audit.checks.common import text_height_needed_pt, usable_height_pt
+    from verstka.audit.ir import build_deck_ir
+    from verstka.rendering.clone_check import _LEAD_FIG_RE, FIG_RATIO
+    from verstka.rendering.deck import set_element_pos, slide_shape_elements
+
+    det = getattr(issue, "details", None) or {}
+    ids = list(getattr(issue, "element_ids", None) or [])
+    if issue.check_id != "figure_label_ratio" or not ids or "figure_pt" not in det or "label_pt" not in det:
+        return None
+    label_pt = float(det["label_pt"])
+    body, least = _text_floors(manifest)
+    typo = manifest.tokens.typography
+    scale = sorted({float(x) for x in (typo.sizes_used or [st.size_pt for st in typo.scale])})
+
+    def big_for(lab: float) -> float:
+        need = FIG_RATIO * lab
+        up = [x for x in scale if x >= need - 0.01]
+        return up[0] if up else float(int(need + 0.999))
+
+    ir = build_deck_ir(pptx, with_images=False)
+    sl = ir.slides[n - 1]
+    e = next((x for x in sl.elements if str(x.id) == str(ids[0])), None)
+    prs = Presentation(str(pptx))
+    el = slide_shape_elements(prs.slides[n - 1]).get(str(ids[0]))
+    if e is None or el is None:
+        return None
+    paras = el.findall(".//" + q("a:p"))
+    k_fig, m = next(((k, _LEAD_FIG_RE.match("".join(t.text or "" for t in p.iter(q("a:t"))))) for k, p in enumerate(paras)
+                     if (mm := _LEAD_FIG_RE.match("".join(t.text or "" for t in p.iter(q("a:t"))))) and any(ch.isdigit() for ch in mm.group(1))), (None, None))
+    if k_fig is None or k_fig >= len(e.paragraphs):
+        return None
+    p = paras[k_fig]
+    text = "".join(t.text or "" for t in p.iter(q("a:t")))
+    num, rest = m.group(1).strip(), text[m.end():].lstrip("  ,—–-")
+    runs = p.findall(q("a:r"))
+    if not runs:
+        return None
+    rpr0 = runs[0].find(q("a:rPr"))
+    fig_now = float(det.get("figure_pt") or 0) or (e.paragraphs[k_fig].runs[0].size_pt if e.paragraphs[k_fig].runs else 14.0)
+
+    def measure(lab: float, fig: float, others: Optional[float], room_h: Optional[int] = None) -> bool:
+        """Whether the element holds the number at `fig` on a line of its own, the words under it, the other
+        paragraphs at `others` (None: as they are)."""
+        from verstka.schemas.deck_ir import IRParagraph, IRRun
+
+        ps = []
+        for j, pp in enumerate(e.paragraphs):
+            if j == k_fig:
+                r0 = pp.runs[0] if pp.runs else IRRun(text="")
+                ps.append(pp.model_copy(update={"text": num, "runs": [r0.model_copy(update={"text": num, "size_pt": fig, "bold": True})]}))
+                if rest:
+                    ps.append(pp.model_copy(update={"text": rest, "runs": [r0.model_copy(update={"text": rest, "size_pt": fig_now if others is None else min(fig_now, others)})], "space_before_pt": 0.0}))
+            else:
+                ps.append(pp if others is None else pp.model_copy(update={"runs": [r.model_copy(update={"size_pt": others}) for r in pp.runs]}))
+        bb = e.bbox if room_h is None else e.bbox.model_copy(update={"h": room_h})
+        e2 = e.model_copy(update={"paragraphs": ps, "bbox": bb})
+        return text_height_needed_pt(e2)[0] <= usable_height_pt(e2) * 1.03
+
+    fig = big_for(label_pt)
+    plan = None
+    if measure(label_pt, fig, None):
+        plan = (fig, None, None)
+    else:
+        lab2 = max(body, least)
+        if lab2 < label_pt:
+            fig2 = big_for(lab2)
+            if measure(lab2, fig2, lab2):
+                plan = (fig2, lab2, None)
+        if plan is None:
+            card = _holder(e, sl, float(ir.slide_w) * ir.slide_h)
+            if card is not None:
+                room = card.bbox.y2 - max(0, e.bbox.x - card.bbox.x) - e.bbox.y
+                lab2 = min(label_pt, max(body, least))
+                fig2 = big_for(lab2)
+                if room > e.bbox.h and measure(lab2, fig2, lab2 if lab2 < label_pt else None, room):
+                    plan = (fig2, lab2 if lab2 < label_pt else None, room)
+    if plan is None:
+        return None
+    fig, others, room = plan
+    # the paragraph again: the number (bold, large), a line break, the words at their size
+    for r in runs:
+        p.remove(r)
+    for br in p.findall(q("a:br")):
+        p.remove(br)
+    end = p.find(q("a:endParaRPr"))
+
+    def run_of(txt: str, size: float, bold: Optional[bool]) -> Any:
+        r = etree.Element(q("a:r"))
+        rp = copy.deepcopy(rpr0) if rpr0 is not None else etree.Element(q("a:rPr"))
+        rp.tag = q("a:rPr")
+        rp.set("sz", str(int(round(size * 100))))
+        if bold:
+            rp.set("b", "1")
+        r.append(rp)
+        t = etree.SubElement(r, q("a:t"))
+        t.text = txt
+        return r
+
+    pieces = [run_of(num, fig, True)]
+    if rest:
+        br = etree.Element(q("a:br"))
+        br.append(copy.deepcopy(pieces[0].find(q("a:rPr"))))
+        pieces += [br, run_of(rest, fig_now if others is None else min(fig_now, others), None)]
+    for x in pieces:
+        if end is not None:
+            end.addprevious(x)
+        else:
+            p.append(x)
+    if others is not None:
+        for j, pp in enumerate(paras):
+            if j == k_fig:
+                continue
+            for rp in pp.iter(q("a:rPr")):
+                rp.set("sz", str(int(round(others * 100))))
+    if room is not None:
+        set_element_pos(el, h=int(room))
+    prs.save(str(pptx))
+    said = f"Цифра «{num}» вынесена отдельной строкой кеглем {fig:g} пт — крупнее подписи"
+    if others is not None:
+        said += f"; остальной текст карточки — {others:g} пт"
+    if room is not None:
+        said += "; блок текста растянут по карточке"
+    return {"slide": n, "kind": "figure_size", "element_id": str(ids[0]), "result": said, "role": "text"}

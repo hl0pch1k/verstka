@@ -1069,6 +1069,23 @@ def fix_slide(
         rep = report
         if ids_xml:
             rep, outline, plan = inplace(report, outline, plan, ids_xml)
+        # A''. the rules' remarks with a recipe of their own and no autofix: «цифра почти не крупнее подписи» — the number
+        # on a line of its own at a size of the scale FIG_RATIO times the label's (audit/seen_fix.fix_figure_label)
+        recipe = False
+        for r in remarks:
+            if r.kind != "model" and r.check_id == "figure_label_ratio":
+                try:
+                    rec = SF.fix_figure_label(work, n, r, manifest)
+                except Exception:  # noqa: BLE001 - the designer then
+                    log.warning("slide fix: the figure's recipe failed on slide %d", n, exc_info=True)
+                    rec = None
+                if rec is not None:
+                    rec = {"iteration": 0, "action": "xml", **rec}
+                    records.append(rec)
+                    kept.append(rec)
+                    recipe = True
+        if recipe:
+            rep = run_audit(work, manifest, outline, ws, **audit_kw)
         # A'. what «Взгляд дизайнера» saw, fixed in place by measuring (audit/seen_fix.py): the text's colour or a plate
         # where it does not read on the ground the slide shows, a larger size, a box cut short of what it runs into, no
         # letter-spacing, a smaller size — on a cover too (the designer never lays a frame out again)
@@ -1122,10 +1139,27 @@ def fix_slide(
                     rp, o, pl = inplace(rp, o, pl, ids)
                 return (r, o, pl, rp), None
 
+            before_design, mark_design = scratch / "before_design.pptx", mark()
+            shutil.copy2(work, before_design)
             got, reason = design(outline0, RM.remarks_note(note_items, titles, wishes), start)
             if got is None and reason and "не изменился" in reason:
                 # the model gave the slide back as it was: once more, told so (a remark never leaves the slide as it was)
                 got, reason = design(outline0, RM.remarks_note(note_items, titles, wishes) + "\n" + RM.UNCHANGED_LINE, "пробую ещё раз — прежний ответ слайд не менял")
+            # a fix of the layout never drops a line of the slide (a point of the list gone to cure an overlap): once more,
+            # told which lines to keep, then the next rung — unless the person asked for less or the remark is about density
+            dense = {"cramped", "text_cut", "too_small"} & {SF.code_of(i) or "" for i in remarks} or {"too_many_bullets", "bullet_too_long", "text_overflow", "fill_ratio", "table_too_big", "too_many_series"} & asked_checks
+            if got is not None and not wishes and not dense:
+                from verstka.planning.slide_edit import lost_lines as _lost
+
+                gone = _lost(osl0, got[1].slides[n - 1])
+                if gone:
+                    keep = "- Keep every line of the slide; these were lost in your previous answer: " + "; ".join(f"«{g[:80]}»" for g in gone[:4])
+                    again, _ = design(outline0, RM.remarks_note(note_items, titles, wishes) + "\n" + keep, "пробую ещё раз — сохраняю весь текст слайда")
+                    got = again if again is not None and not _lost(osl0, again[1].slides[n - 1]) else None
+                    if got is None:
+                        reason = "в новом варианте пропадал текст слайда"
+                        back_to(mark_design)
+                        shutil.copy2(before_design, work)
             if got is not None:
                 r, o, pl, rp = got
                 # (any asked remark of the rules the new version still has: a figure still hardly larger than its label)
