@@ -281,7 +281,7 @@
    Многострочный текст — стопки из двух копий (kit/Tx; машинерия hp-tx — create.css), `--hpd` — ниже.
    Сайт: колода у́же полной (окно меньше 1440 — тесная колода, `.dd-tight` — sheetMorph.ts) V2 не помещается — свои
    дорожки ниже. */
-@media (width >= 1280px) and (height >= 675px){
+
   .dd-tabs .p2-rseg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
   .hp-nar .dd-tabs .p2-rseg{padding:0 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
   .dd-g{transition:grid-template-columns 340ms var(--ease)}
@@ -394,7 +394,7 @@
   [data-tx="p-cb"]{--hpd:116px}
   /* правила «Шаблона» при 1440 — та же колонка 416 (V2); в тесной колоде — 336 */
   :is([data-tx="t-rule"],[data-tx="t-cb"]){--hpd:0px}
-}
+
 
 /* ── Тесная колода (сайт: колода у́же полной — окно меньше 1440, `.dd-tight` — sheetMorph.ts; V2 версии 100 рассчитана
    на 1440 и у́же не помещается: при 1366 у полосы «Шаблона» названию 46 px («V…»), подписи макетов по 95 px, тело ряда
@@ -402,7 +402,7 @@
    V2 — дорожки с тем же числом дорожек, только-широкое сжимается и гаснет, стопки; в покое при закрытом помощнике лист
    такой же, как при 1440. Числа ниже — при 1280 / 1217 (с полосой прокрутки): дорожки тесной колоды постоянны, при окне
    шире на столько же шире резиновые колонки (1fr). */
-@media (width >= 1280px) and (height >= 675px){
+
   /* вкладки, меню варианта и ✕ — плотнее (ряд V2 761 px шире листа 720 / 705) */
   .dd-tight .dd-tabs{transition:gap 340ms var(--ease)}
   .hp-nar .dd-tight .dd-tabs{gap:2px;transition-duration:520ms}
@@ -496,7 +496,7 @@
   .dd-tight :is([data-tx="p-sub"],[data-tx="p-meta"],[data-tx="p-ctx"],[data-tx="p-ttl"],[data-tx="p-cb"]){--hpd:136px}
   /* «Текст агента»: колонка у́же на 136, «Изменить» 139.44 → 40 (замер) */
   .dd-tight [data-tx="p-ctx1"]{--hpd:36.56px}
-}
+
 
 /* «Качество», строка счёта (сайт): точка-разделитель — перед каждым числом (в поле 20 px слева), у начала строки она за
    левым краем и обрезана — при переносе строка не кончается «·» */
@@ -584,7 +584,7 @@
 .dx-not{display:flex;align-items:flex-start;gap:8px;margin:16px 0 0;padding-top:16px;border-top:1px solid rgba(11,18,32,.08);font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
 .dx-not .dd-tag{flex:none;margin-top:-2px}
 .dx-not s{text-decoration-thickness:1.5px;text-decoration-color:rgba(90,98,114,.6)}
-@media (width >= 1280px) and (height >= 675px){
+
   /* узкая колода: подпись «лучший по данным — первым» сжимается и гаснет; стопки текста — на сколько у́же их клетка
      (левая колонка 526 → 416, правая — на 306; в тесной колоде 526 → 376 и на 266) */
   .dx-capw{display:block;max-width:240px;overflow:hidden;white-space:nowrap;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
@@ -609,7 +609,7 @@
   .dd-tight :is([data-tx="x-r"],[data-tx="x-rn"]){--hpd:154px}
   .dd-tight [data-tx="x-rh"]{--hpd:90px}
   .dd-tight [data-tx="x-r2"]{--hpd:266px}
-}
+
 
 /* ═══ Колода стопкой (окно уже 1280, styles/stack.css): лист «Подробнее» ═══════════════════════════════════════════════
    Компьютер (от 1280) этих правил не видит. Лист — плита во всю высоту окна, вкладка — от шапки до низа листа, прокрутка
@@ -619,255 +619,12 @@
    общую прокрутку вкладки. Текст переносится (многоточия и line-clamp сняты), таблицы — не шире листа (перенос или
    прокрутка внутри таблицы). Телефон: поля коробок 24 → 16, текст для чтения — 16 px, касания — не меньше 44 px.
    Классы-крючки (dd-sp, dd-varw, dq-sumt, dw-nt, da-top, df-ft, dpt-hd…) стилей на компьютере не имеют. */
-@media (width < 1280px), (height < 675px){
-  /* ── шапка листа: панели с высотой холста («План», «Шаблон», «Файлы» — 508) — от шапки до низа листа */
-  .dd-top{min-width:0}
-  .dd-sheet .dd-pw{height:auto !important}
 
-  /* ── «Качество»: сводка — кнопки строкой под текстом, если рядом тесно; чипы и заголовки слайдов переносятся */
-  .dq-sum{flex-wrap:wrap;row-gap:24px}
-  .dq-sumt{flex:1 1 200px !important}
-  .dq-sumb{flex:1 1 auto !important;flex-wrap:wrap;justify-content:flex-end;row-gap:12px}
-  .dq-chips{flex-wrap:wrap;height:auto !important;row-gap:8px}
-  .dq-gh{height:auto !important;min-height:48px}
-  .dq-gt{white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  /* lg: колонки «Качества» и «Агента» 5 : 4, «Почему так» 4 : 5 (вместо 526 px) */
-  .dd-g:not(.dw-g){grid-template-columns:minmax(0,5fr) minmax(0,4fr)}
-  .dd-g.dw-g{grid-template-columns:minmax(0,4fr) minmax(0,5fr)}
 
-  /* ── «Почему так»: липкая навигация — от верха прокрутки вкладки (её поле 8, а не 24); мягкий край — только снизу (то,
-     что уходит под навигацию, закрывает её голубая подложка); заголовок слайда переносится, навигация растёт */
-  .dw-navw{top:-8px;margin-top:-8px;padding-top:8px}
-  .p2-fade.dw-fade{-webkit-mask-image:linear-gradient(to bottom,#000 0,#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,#000 0,#000 calc(100% - var(--p2-fb)),transparent 100%)}
-  .dw-navw > nav{height:auto !important;min-height:72px}
-  .dw-nt{white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  .dw-chk{height:auto;min-height:72px;padding-top:12px;padding-bottom:12px}
-  /* слайд с данными: подпись «лучший по данным — первым» — строкой под заголовком, если рядом тесно; имена файла и
-     колонок — целиком */
-  .dx-box > div:has(> .dx-capw){flex-wrap:wrap;row-gap:4px}
-  .dx-capw .dd-cap{white-space:nowrap}
-  .dx-fn,.dx-fm,.dx-cn{white-space:normal;overflow-wrap:anywhere}
-  .dx-cr{height:auto;min-height:40px;padding:8px 0}
 
-  /* ── «Агент»: шапки коробок переносятся */
-  .da-top{height:auto !important;min-height:40px;flex-wrap:wrap;row-gap:4px}
-  .da-cap{white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  .da-edh{height:auto !important;min-height:40px;flex-wrap:wrap;row-gap:8px}
 
-  /* ── «План» (lg): список и «О плане» рядом, каждый со своей прокруткой до низа листа; в ряду плана миниатюра — слева,
-     заголовок и тело — друг под другом справа; тексты — целиком */
-  #dd-panel-plan{height:auto !important;flex:1 1 0%;min-height:0;margin-top:8px !important;padding-bottom:24px;grid-template-columns:minmax(0,1fr) 300px !important;grid-template-rows:minmax(0,1fr)}
-  .dpl-listw{height:auto;min-height:0}
-  .dlp-aside{max-height:none}
-  .dpl-row{grid-template-columns:160px minmax(0,1fr);grid-template-rows:auto 1fr;row-gap:8px}
-  .dpl-row > .dpl-th{grid-row:1 / span 2}
-  .dpl-row > [data-tx="p-body"]{grid-column:2}
-  .dpl-h,.dpl-sub2,.dpl-par,.dpl-ix,.dpl-li.dpl-li-cl{display:block;-webkit-line-clamp:unset;overflow:visible}
-  .dpl-fx{white-space:normal}
-  .dpl-tr > span{min-width:0;overflow-wrap:anywhere}
-  .dpl-col{height:auto;min-height:80px;padding-top:8px;padding-bottom:8px}
-  .dpl-ch{white-space:normal}
-
-  /* ── «Шаблон»: прокрутка — до низа листа; полоса обзора — название строкой, под ним факты, шрифт, палитра;
-     «Правила оформления» 416 → 336; подписи макетов переносятся */
-  .dtp-scroll{flex:1 1 0%;height:auto;min-height:0;margin:0 calc(-1 * var(--px));padding:8px var(--px) 32px;border-radius:0;scrollbar-width:none}
-  .dtp-band{grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,1.4fr) minmax(0,2fr)}
-  .dtp-band > .dtp-name{grid-column:1 / -1;white-space:normal;overflow-wrap:anywhere}
-  .dtp-fact dt{white-space:normal}
-  .dtp-g{grid-template-columns:minmax(0,1fr) 336px !important}
-  .dtp-lr{height:auto !important;align-items:flex-start !important}
-  .dtp-lk{white-space:normal !important}
-
-  /* ── «Файлы»: прокрутка — до низа листа; ряд файла — кнопки строкой под названием, если рядом тесно; этапы, плитки
-     итога и автоисправления — подписи целиком */
-  #dd-panel-files{margin:0 calc(-1 * var(--px)) !important;padding:8px var(--px) 32px !important;border-radius:0 !important;scrollbar-width:none}
-  .df-row{flex-wrap:wrap;row-gap:8px;height:auto !important;min-height:64px;padding:12px 12px 12px 16px !important}
-  .df-ft{flex:1 1 200px}
-  /* кнопки ряда (PowerPoint, PDF, Веб) переносятся внутри ряда, а не уходят за край листа (320) */
-  .df-acts{flex:0 1 auto !important;flex-wrap:wrap;min-width:0}
-  .df-fn{white-space:normal !important;overflow-wrap:anywhere}
-  .df-st{grid-template-columns:minmax(0,1fr) minmax(64px,1fr) 48px !important;height:auto !important;min-height:24px}
-  .df-st > span:first-child{white-space:normal !important}
-  .df-tile{height:auto;min-height:96px}
-  .df-tl{white-space:normal}
-  section[aria-labelledby="df-h4"]{container-type:inline-size}
-  @container (max-width: 560px){
-    .df-tiles{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
-    .df-tiles > .df-tile{grid-column:auto !important}
-    .df-tiles > .df-tile:last-child:nth-child(odd){grid-column:1 / -1 !important}
-  }
-  section[aria-labelledby="df-h5"] .df-fx{height:auto !important;min-height:48px;padding:12px 0}
-  section[aria-labelledby="df-h5"] .df-fx > span:nth-child(2){white-space:normal !important}
-
-  /* ── «Слайд N шаблона»: полоса «Подробнее · Шаблон» — по полям листа; шапка — название и ✕, описание строкой под ними;
-     образец и сведения — с прокруткой между шапкой и листанием (оно всегда на виду); lg — образец и сведения рядом,
-     места для содержания — под ними */
-  .dpt-strip{left:var(--px);right:var(--px)}
-  .dpt-back{width:auto}
-  .dpt-strip > .dpt-smeta{min-width:0;overflow:hidden;text-overflow:ellipsis}
-  .dpt-fx{height:100% !important}
-  .dpt-hd{display:grid !important;grid-template-columns:minmax(0,1fr) auto;align-items:center !important;column-gap:16px !important;row-gap:4px;height:auto !important;min-height:64px}
-  .dpt-hd > .dpt-sp{display:none}
-  .dpt-hd > .dpt-title{grid-column:1;grid-row:1;white-space:normal}
-  .dpt-hd > .p2-rbl{grid-column:2;grid-row:1}
-  .dpt-desc{grid-column:1 / -1;grid-row:2;white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  .dpt-g{flex:1 1 0%;min-height:0;height:auto !important;margin:16px calc(-1 * var(--px)) 0 !important;padding:0 var(--px) 24px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;align-content:start;grid-template-columns:minmax(0,1fr) 296px !important;gap:24px !important}
-  /* мягкий край прокрутки — как у вкладок (p2-fade, base.css) */
-  .dpt-g,#dd-panel-plan{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);animation:p2-fade linear both;animation-timeline:scroll(self)}
-  .dpt-plc{grid-column:1 / -1}
-  .dpt-places{overflow:visible !important}
-  .dpt-ft{flex:none;height:auto !important;min-height:40px;margin-top:0 !important;padding:12px 0 16px}
-  .dpt-src,.dpt-extra,.dpt-sample{white-space:normal}
-  .dpt-vote{height:auto;min-height:24px}
-  .dpt-pl1{height:auto;min-height:20px;flex-wrap:wrap;row-gap:2px}
-}
-@media (1024px <= width < 1280px), (width >= 1280px) and (height < 675px){
-  /* lg: заголовок колоды в «О плане» (300 px) — 24 px, как узкая копия тесной колоды */
-  .dd-sheet [data-tx="p-ttl"] > .hp-txw{font-size:24px !important;line-height:32px !important}
-}
-@media (width < 1024px){
-  /* шапка листа: «вариант + ✕» строкой, под ней вкладки — в строку на всю ширину; меню варианта — от левого края кнопки */
-  .dd-top{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"v x" "t t";gap:12px 8px;height:auto}
-  .dd-top > .dd-tabs{grid-area:t}
-  .dd-top > .dd-sp{display:none}
-  .dd-top > .dd-varw{grid-area:v;justify-self:start;max-width:100%}
-  .dd-top > .p2-rbl{grid-area:x}
-  .dd-tabs .p2-rseg{flex:1 1 auto}
-  .dd-varw .df-menu{left:0;right:auto;transform-origin:top left}
-  /* колонки вкладок — одна; «Ваши правки» — не липкие */
-  .dd-g:not(.dw-g),.dd-g.dw-g{grid-template-columns:minmax(0,1fr)}
-  .da-eds{position:static !important}
-  /* «План»: одна колонка, вкладка прокручивается целиком (у списка своей прокрутки нет) */
-  #dd-panel-plan{grid-template-columns:minmax(0,1fr) !important;grid-template-rows:none;align-content:start;row-gap:16px;margin:0 calc(-1 * var(--px)) !important;padding:8px var(--px) 32px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
-  .dpl-listw,.dlp-aside{min-height:auto}
-  .dpl-list{height:auto;overflow:visible}
-  .dlp-aside{overflow:visible}
-  /* «Шаблон»: факты — по три в ряд, шрифт и палитра — по половине; правила — под макетами */
-  .dtp-band{grid-template-columns:repeat(6,minmax(0,1fr))}
-  .dtp-band .dtp-fact{grid-column:span 2}
-  .dtp-band > .dtp-font,.dtp-band > .dtp-pal{grid-column:span 3}
-  .dtp-g{grid-template-columns:minmax(0,1fr) !important}
-  /* «Файлы»: одна колонка; «Для разработчиков» — подпись строкой под названием, стрелка справа */
-  .df-grid{grid-template-columns:minmax(0,1fr) !important}
-  .df-coll{display:grid;grid-template-columns:minmax(0,1fr) 40px;column-gap:16px;row-gap:2px;height:auto;min-height:64px;padding:12px 12px 12px 24px}
-  .df-coll > .df-csp{display:none}
-  .df-coll > .df-cd{grid-column:1;white-space:normal !important}
-  .df-coll > .df-cc{grid-column:2;grid-row:1 / span 2;align-self:center}
-  /* «Слайд N шаблона»: одна колонка */
-  .dpt-g{grid-template-columns:minmax(0,1fr) !important}
-}
-@media (width < 768px){
-  /* шапка листа: под «вариант + ✕» вкладки сеткой 3 × 2 (касание 44) */
-  .dd-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));height:auto;border-radius:24px}
-  .dd-tabs .p2-rseg{padding:0 8px}
-  .dd-varw .df-mi{min-height:44px}
-  /* коробки — поля 16 */
-  .dd-sheet :is(.dd-box,.dtp-box,.df-card){padding:16px}
-  .dd-sheet .dq-more{padding:0 16px !important}
-  .dpt-box{padding:16px}
-
-  /* «Качество»: кнопки сводки — столбцом во всю ширину; у слайда число замечаний не показывается (оно в списке), «Показать»
-     — строкой под заголовком, если рядом тесно; флажок — касание 44 */
-  /* сводка: кольцо, под ним заголовок и счёт (рядом с кольцом 88 слово «предупреждений» не помещается), кнопки — ниже */
-  .dq-sum{flex-direction:column;align-items:stretch !important}
-  .dq-sum > .dq-ring{align-self:flex-start}
-  .dq-sumt{flex:none !important}
-  .dq-sumb{flex-direction:column;align-items:stretch}
-  .dq-sumb > *,.dq-sumb .dq-allw > button{width:100%}
-  .dq-sumb .p2-cta{height:auto;min-height:56px;padding:12px 20px;white-space:normal;text-align:center}
-  .dq-gh{flex-wrap:wrap;row-gap:4px}
-  .dq-gcnt{display:none}
-  .dq-gt{flex:1 1 160px}
-  .dq-gh > .p2-gb{margin-left:auto}
-  .dq-rows{padding-left:0}
-  .dq-cb{position:relative}
-  .dq-cb::before{content:"";position:absolute;inset:-10px}
-
-  /* «Почему так»: навигация по слайдам — не липкая (заголовок в несколько строк занял бы треть окна), мягкий край —
-     сверху и снизу, как у остальных вкладок */
-  .dw-navw{position:static;margin-top:0;padding:0 0 16px}
-  .p2-fade.dw-fade{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
-  .dw-nt{font-size:16px;line-height:22px}
-  .dw-build{grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr) !important}
-  .dw-alts{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
-  .dw-row{flex-wrap:wrap;row-gap:8px}
-  .dw-chk{gap:12px;padding:12px 16px}
-  /* слайд с данными: колонки файла — имя, тип и роль; варианты — эскиз над доводом; снимок слайда — над ключевым числом */
-  .dx-cr{grid-template-columns:minmax(0,1fr) auto auto}
-  .dx-fr{grid-template-columns:96px minmax(0,1fr)}
-  .dx-v{grid-template-columns:24px minmax(0,1fr);row-gap:12px}
-  .dx-v > .dx-miw,.dx-v > .dx-vt{grid-column:2}
-  .dx-slot{height:auto;min-height:44px}
-  .dx-hl{grid-template-columns:minmax(0,1fr);row-gap:12px}
-  .dx-hli{max-width:320px}
-  .dx-vh{white-space:normal !important}
-
-  /* «Агент»: номер слайда — касание 44 */
-  .da-sl{position:relative}
-  .da-sl::before{content:"";position:absolute;left:-6px;right:-6px;top:-10px;bottom:-10px}
-
-  /* «План»: миниатюра 96, тело ряда — во всю ширину под ней */
-  .dpl-row{grid-template-columns:96px minmax(0,1fr);column-gap:12px;padding:8px}
-  .dpl-th{width:96px;height:54px}
-  .dpl-row > .dpl-th{grid-row:auto}
-  .dpl-row > [data-tx="p-body"]{grid-column:1 / -1}
-  .dpl-c2,.dpl-c3{grid-template-columns:minmax(0,1fr)}
-  .dpl-tr{grid-template-columns:96px minmax(0,1fr)}
-  .dd-sheet [data-tx="p-ttl"] > .hp-txw{font-size:24px !important;line-height:32px !important}
-
-  /* «Шаблон»: факты — по три в ряд, шрифт и палитра — во всю ширину; макеты — по два; цвет палитры — касание 44 */
-  .dtp-band{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-  .dtp-band .dtp-fact{grid-column:auto}
-  .dtp-band > .dtp-font,.dtp-band > .dtp-pal{grid-column:1 / -1}
-  .dtp-tile{height:auto;min-height:72px;padding:8px 12px}
-  .dtp-name{font-size:24px;line-height:32px}
-  .dtp-lays{grid-template-columns:repeat(2,minmax(0,1fr))}
-  /* палитра: образцы — не уже 44 (касание), не помещаются в ряд — переносятся отдельными таблетками */
-  .dtp-rib{flex-wrap:wrap;gap:4px;height:auto}
-  .dtp-rib::after{display:none}
-  .dtp-sw{position:relative;flex:1 0 44px;border-radius:999px !important}
-  .dtp-sw::before{content:"";position:absolute;left:0;right:0;top:-10px;bottom:-10px}
-
-  /* «Файлы»: шапки карточек переносятся; автоисправление — слайд и проход строкой, текст под ними; «Для
-     разработчиков» — подписи строк под названием, выбор запуска — во всю ширину (16 px: iOS не увеличивает страницу),
-     таблицы — с прокруткой внутри себя */
-  .df-hd{flex-wrap:wrap;height:auto;min-height:28px;row-gap:4px}
-  .df-tile{padding:16px 12px}
-  .df-tl{gap:6px}
-  .df-tl > svg{flex:none}
-  .df-tl > span{min-width:0;hyphens:auto}
-  section[aria-labelledby="df-h5"] .df-fx{grid-template-columns:minmax(0,1fr) auto !important;column-gap:12px !important;row-gap:4px}
-  section[aria-labelledby="df-h5"] .df-fx > span:nth-child(2){grid-column:1 / -1;grid-row:2}
-  #df-dev{padding:0 16px 16px !important}
-  .df-dr{display:grid !important;grid-template-columns:minmax(0,1fr) 18px;column-gap:12px !important;row-gap:2px;height:auto !important;min-height:48px;padding:12px 0 !important}
-  .df-dr > .df-drh{grid-column:1;margin-left:0 !important}
-  .df-dr > svg{grid-column:2;grid-row:1 / span 2;align-self:center}
-  .df-cmp{flex-wrap:wrap}
-  .df-cmp > select{height:44px !important;font-size:16px !important}
-  .df-cmp > select:first-child{flex:1 1 100% !important}
-  .df-cmp > select:nth-child(2){flex:1 1 0% !important;width:auto !important}
-  #df-dev .dpl-tbl{overflow-x:auto;overscroll-behavior-x:contain}
-  #df-dev .dpl-tr{min-width:600px}
-
-  /* «Слайд N шаблона»: в полосе — без сведений о шаблоне; название 24 px; разметка — касание 44 */
-  .dpt-strip > .dpt-smeta{display:none}
-  .dpt-title{font-size:24px;line-height:32px}
-  .dpt-mrow{height:auto !important;min-height:44px}
-  .dpt-pl{min-height:44px;justify-content:center}
-  .dpt-back::before{content:"";position:absolute;left:0;right:0;top:-4px;bottom:0}
-
-  /* текст для чтения (пояснения, абзацы, пункты списков) — 16 px; подписи и мета (13–14) — как были */
-  .dd-sheet :is([data-tx="q-msg"],[data-tx="q-eye"],[data-tx="q-ex1"],[data-tx="q-ex2"],[data-tx="q-kept"],[data-tx="w-why"],[data-tx="w-dd"],[data-tx="w-form"],[data-tx="w-sim"],[data-tx="a-q"],[data-tx="a-a"],[data-tx="a-hint2"],[data-tx="p-sub"]) > .hp-txw{font-size:16px !important;line-height:24px !important}
-  .dq-row,.dw-ok,.dw-cr,.da-ln,.da-sum,.dx-tw,.dx-vn,.dx-vr,.dx-from,.dx-not,.dx-fr dd,.dpl-h,.dpl-par,.dpl-li,.dlp-tt,.dtp-rule{font-size:16px;line-height:24px}
-  .dpl-li::before{top:10px}
-  .dtp-rule::before{margin-top:8px}
-  .dpt-decor,section[aria-labelledby="df-h5"] .df-fx > span:nth-child(2){font-size:16px !important;line-height:24px !important}
-  .dpt-role,.dpt-extra{font-size:16px;line-height:24px}
-  .dpl-it,.dpl-ix{font-size:16px;line-height:24px}
-  .dd-sheet section.p2-pop > p{font-size:16px !important;line-height:24px !important}
-}
 /* «Почему так» колоды по базе знаний: документ и место каждого источника слайда */
 .dw-kb{display:flex;flex-direction:column;gap:8px;margin:8px 0 0;padding:0;list-style:none}
 .dw-kb>li{display:flex;align-items:flex-start;gap:8px;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
 .dw-kb svg{flex:none;margin-top:2px;color:#2563EB}
-@media (width < 768px){.dw-kb>li{font-size:16px;line-height:24px}}
+

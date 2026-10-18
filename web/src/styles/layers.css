@@ -96,7 +96,7 @@
 .gh-moving .gh-grid > li:not(.gh-vis){content-visibility:auto}
 .gh-grid > li.gh-snap *{transition:none !important}
 .gh-body .p2-ttl{font-size:32px;line-height:40px}
-@media (width >= 1280px) and (height >= 675px){
+
   [data-tx="h-ttl"]{--hpd:104px}
   /* название карточки — ровно две строки: копии стопки обрезаются со своим полем 8 px (create.css), и верх третьей строки
      выглядывал над метой; по вертикали — точно по краю копии, по горизонтали поле остаётся */
@@ -120,21 +120,21 @@
   .hp-nar .p2-lay .hp-txm{--hpp:1;transition-duration:520ms}
   .p2-lay .hp-txm > .hp-txn{transition:--hpp 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
   .hp-nar .p2-lay .hp-txm > .hp-txn{transition:--hpp 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
-}
+
 /* if() — только Chrome 137+. Значение с if() и var() другой браузер принимает при разборе и роняет при вычислении (unset):
    узкая копия встала бы во весь рост и в широкой раскладке. Поэтому if() — только под @supports; без него стопка в покое
    и на ходу — auto (бо́льшая из копий, как у V2), узкая копия — от нуля до своей высоты по ходу (--hn·p, без if(): в
    покое 0 и --hn — те же высоты) */
 @supports (height: if(style(--x: 0): 0px; else: 1px)){
-  @media (width >= 1280px) and (height >= 675px){
+  
     .p2-lay .hp-txm{height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)))}
     .p2-lay .hp-txm > .hp-txn{height:if(style(--hpp: 0): 0px; style(--hpp: 1): auto; else: calc(var(--hn, 0px) * var(--hpp))) !important}
-  }
+  
 }
 @supports not (height: if(style(--x: 0): 0px; else: 1px)){
-  @media (width >= 1280px) and (height >= 675px){
+  
     .p2-lay .hp-txm > .hp-txn{height:calc(var(--hn, 0px) * var(--hpp)) !important}
-  }
+  
 }
 /* замер стопки (kit/Tx): узкая копия на время чтения — во весь свой рост, без перехода (и на обратном шаге — hp-txz);
    метка замера ставится тоже без переходов (hp-txz у самой стопки: её --hpp в узкой раскладке — сразу 1) */
@@ -152,7 +152,7 @@
    колоды в покое и --lgone с задержкой 520 мс). Пока слой уходит, он перестраивается вместе с колодой, как открытый. */
 @property --lgone{syntax:'<number>';inherits:true;initial-value:0}
 @property --lcv{syntax:'<number>';inherits:true;initial-value:0}
-@media (width >= 1280px) and (height >= 675px){
+
   .hp-wrap .dd-pw.p2-off{--lgone:1;--lcv:1;width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 96px);transition:opacity 240ms var(--ease),visibility 0s linear 240ms,--lgone 0s linear 240ms,--lcv 0s linear 240ms,width 0s linear 240ms;transition-behavior:allow-discrete}
   .hp-wrap.hp-nar .dd-pw.p2-off{width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 512px)}
   /* сайт: невыбранная вкладка, когда догасла, ещё и не рисуется (content-visibility: hidden у её содержимого; с тех пор как
@@ -168,7 +168,7 @@
   @container style(--lgone: 1){
     .p2-lay *{transition:none !important}
   }
-}
+
 /* Слой «Брендбук» (модуль ds, V2 версии 105, `#bb-lay`): слева что извлечено (палитра, шрифты, логотипы), справа
    расхождения с шаблоном, что важнее, правила. Дословно из V2; «сайт:» — сверх доски */
 .bb-g{display:grid;grid-template-columns:minmax(0,1fr) 416px;gap:24px;align-items:start}
@@ -199,11 +199,11 @@
    значения короткие); расхождений нет — тихая строка */
 .bb-cfv>span:not(.bb-dot),.bb-win>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .bb-none{margin:16px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
-@media (width >= 1280px) and (height >= 675px){
+
   /* узкая колода: слой «Брендбук» — правая колонка 416 → 376 той же кривой */
   .bb-g{transition:grid-template-columns 340ms var(--ease)}
   .hp-nar .bb-g{grid-template-columns:minmax(0,1fr) 376px;transition-duration:520ms}
-}
+
 
 /* ═══ Колода стопкой (окно уже 1280): разделы и слои ═══
    Разделы «Шаблоны» и «Мои презентации», «Слайды шаблона», «Удалить шаблон?», «Брендбук», «Текст презентации», «На весь
@@ -213,136 +213,11 @@
    карточек — строками, а не многоточием; на телефоне текст для чтения — 16 px, касания — не меньше 44. Крючки классов —
    ly-hd/ly-hc/ly-ttl/ly-sub (шапки), gh-hd/gh-cnt/gh-err, pv-nmr/pv-edr/pv-mr/pv-acts, dl-hd/dl-nm/dl-acts, bb-mr,
    rt-body/rt-sp/rt-box/rt-src/rt-q, lb-hd/lb-t/lb-stage/lb-keys (в слоях; на компьютере у них правил нет). */
-@media (width < 1280px), (height < 675px){
-  /* шапки слоёв: высота по содержимому, заголовок и подпись переносятся словами, ✕ — справа сверху */
-  .ly-hd{flex:none;height:auto !important;min-height:64px;align-items:flex-start !important;column-gap:16px !important}
-  .ly-hc{flex:1 1 0%}
-  .ly-ttl{white-space:normal !important;overflow:visible !important;text-overflow:clip !important;overflow-wrap:break-word}
-  .ly-sub{white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  .pv-nmr{height:auto !important;min-height:40px;align-items:flex-start !important}
-  .pv-nmr > .pv-edit{margin-top:4px}
-  .pv-mr,.bb-mr{height:auto !important;min-height:24px;flex-wrap:wrap;row-gap:4px !important;column-gap:12px !important;margin-top:4px}
-  .pv-edr{height:auto !important;min-width:0}
-  .pv-edr > label{flex:1 1 auto;min-width:0}
-  .pv-name{width:min(400px,100%);min-width:0}
-  /* белая коробка — до низа плиты, поле снизу — как по бокам */
-  .ga-box,.pv-box{flex:1 1 auto;height:auto;min-height:0;margin-bottom:var(--px)}
-  /* «Шаблоны»: подписи плиток — строками; таблетка «Слайды» — над нижним краем обложки, как бы ни выросла подпись */
-  .ga-name,.ga-meta{white-space:normal;overflow-wrap:break-word}
-  .ga-tile{container-type:inline-size}
-  .ga-eye{top:calc(100cqw * 9 / 16 - 40px);bottom:auto}
-  /* «Мои презентации»: шапка переносится; низ списка не прилипает к краю окна */
-  .gh-hd{height:auto !important;min-height:64px;flex-wrap:wrap;row-gap:4px !important;column-gap:16px !important}
-  .gh-list{padding-bottom:var(--pt)}
-  .gh-meta{white-space:normal}
-  /* название карточки — до трёх строк: в колонке рядом с оценкой две строки обрывали название посреди */
-  .gh-title{-webkit-line-clamp:3}
-  /* «Слайды шаблона», «Брендбук»: ряд действий переносится */
-  .pv-foot{height:auto;min-height:56px;flex-wrap:wrap;row-gap:12px;margin:16px 24px 24px}
-  .pv-acts{flex-wrap:wrap;justify-content:flex-end;row-gap:12px !important}
-  /* «Удалить шаблон?»: во всё окно, плита не шире окна, подписи переносятся */
-  .dl-scrim.tp-dls,.dl-wrap.tp-dlw{position:fixed}
-  .dl-wrap.tp-dlw{padding:16px}
-  .dl-dlg{width:min(560px,100%);max-height:100%;overflow:auto}
-  .dl-nm{white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  .dl-acts{flex-wrap:wrap;row-gap:12px !important}
-  /* «Брендбук»: подписи палитры и логотипов, шрифты, расхождения — строками */
-  .bb-role,.bb-lgc{white-space:normal;overflow-wrap:break-word}
-  #bb-lay .bb-font{height:auto;min-height:72px;padding:12px 16px}
-  #bb-lay .bb-font .bb-cn,#bb-lay .bb-font .bb-cm{white-space:normal;overflow:visible}
-  .bb-cfv{flex-wrap:wrap;white-space:normal;row-gap:4px}
-  .bb-cfv>span:not(.bb-dot),.bb-win>span{overflow:visible}
-  .bb-win{white-space:normal;align-items:flex-start}
-  .bb-win svg{margin-top:2px}
-  /* «Текст презентации»: слой — до низа плиты; шапка — заголовок, кнопки и ✕ строкой, подпись — строкой под ней */
-  .rt-body{flex:1 1 auto;height:auto !important;min-height:0}
-  .rt-hd .p2-hrow{flex-wrap:wrap;height:auto !important;min-height:64px;align-items:center !important;column-gap:16px !important;row-gap:8px !important}
-  .rt-hd .rt-head,.rt-hd .rt-acts{display:contents !important}
-  .rt-hd .rt-sp{display:none}
-  .rt-hd .rt-head > .p2-ttl{order:1;flex:1 1 0% !important;min-width:0;white-space:normal}
-  .rt-hd .rt-copy{order:2}
-  .rt-hd .rt-acts > .p2-cta{order:3}
-  .rt-hd .rt-x{order:4}
-  .rt-hd .rt-sub{order:5;flex:1 1 100%;white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
-  /* «Скопировано» (и неудача копирования) — под рядом кнопок справа, в зазоре над текстом: ряд не перестраивается */
-  .rt-hd{position:relative}
-  .rt-hd .rt-cl{position:absolute;right:0;top:100%}
-  .rt-box{margin-bottom:var(--px)}
-  .rt-src{height:auto !important;min-height:64px;padding:12px 16px 12px 24px !important}
-  .rt-q{white-space:normal !important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  /* «На весь экран»: кадр вписан в место по ширине и высоте (пропорция шаблона — --lb-ar, Lightbox), подпись — строками */
-  .lb-hd{height:auto !important;min-height:40px;align-items:flex-start !important}
-  .lb-hd > h2{white-space:normal !important;align-items:flex-start !important;padding-top:6px}
-  .lb-t{overflow:visible !important;text-overflow:clip !important;padding-top:2px}
-  .lb-stage{container-type:size}
-  .lb-frame{width:min(calc(100cqw - 128px), calc(100cqh * var(--lb-ar, 1.7778))) !important}
-}
-@media (width < 1024px){
-  .ga-grid,.pv-grid,.gh-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-  /* «Брендбук» — одной колонкой: что извлечено, под ним расхождения и правила */
-  .bb-g{grid-template-columns:minmax(0,1fr);row-gap:32px}
-  .bb-logos2{grid-template-columns:repeat(3,minmax(0,1fr))}
-  /* «Текст презентации»: кнопки — строкой под заголовком, текст — одной колонкой */
-  .rt-hd .rt-x{order:2}
-  .rt-hd .rt-sub{order:3}
-  .rt-hd .rt-copy{order:4}
-  .rt-hd .rt-acts > .p2-cta{order:5}
-  .rt-grid{grid-template-columns:minmax(0,1fr) !important}
-}
-@media (768px <= width < 1024px){
-  /* md: у ряда кнопок справа есть место — «Скопировано» стоит в нём, рядом с кнопками */
-  .rt-hd .rt-cl{position:static;order:6;margin-left:8px}
-}
-@media (width < 768px){
-  .ly-ttl,.gh-body .gh-hd > .p2-ttl,.rt-hd .p2-ttl{font-size:24px !important;line-height:32px !important}
-  .ly-hd > .p2-rbl,.gh-hd > .p2-rbl{flex:none}
-  .ga-scroll,.pv-scroll{padding:16px}
-  /* пояснения под заголовками — 16 px */
-  #p2-lay-t .ly-sub,.rt-hd .rt-sub,.gh-list > p{font-size:16px !important}
-  .ga-grid,.pv-grid,.gh-grid{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}
-  /* «Мои презентации»: заголовок и ✕ — строкой, под заголовком — сколько презентаций, ниже — строка неудачи */
-  .gh-hd{display:grid !important;grid-template-columns:minmax(0,1fr) auto;align-items:start !important;row-gap:0 !important}
-  .gh-hd > .p2-ttl{grid-area:1 / 1;padding-top:6px}
-  .gh-hd > .gh-cnt{grid-area:2 / 1;justify-self:start}
-  .gh-hd > .gh-err{grid-area:3 / 1 / 4 / 3;justify-content:flex-start !important}
-  .gh-hd > .gh-err:empty{display:none !important}
-  .gh-hd > .p2-rbl{grid-area:1 / 2}
-  /* карточка: название — во всю ширину карточки (до трёх строк), оценка или бейдж — строкой под ним */
-  .gh-row{flex-wrap:wrap;row-gap:4px;margin-top:8px}
-  .gh-row > .hp-tx{flex:1 1 100%}
-  /* ряд действий: «Удалить» и «Разбор» — строкой, главная кнопка — во всю ширину под ними */
-  .pv-foot{margin:12px 16px 16px;column-gap:12px}
-  .pv-acts{display:contents !important}
-  .pv-acts > .p2-ob{margin-left:auto}
-  .pv-foot .pv-cta{flex:1 1 100%;height:48px}
-  /* «Удалить шаблон?» */
-  .dl-dlg{padding:24px;border-radius:32px}
-  .dl-dlg #dl-desc{font-size:16px !important}
-  .dl-acts > button{flex:1 1 auto}
-  /* «Брендбук»: палитра и логотипы — по две; текст для чтения — 16 px */
-  .bb-sws,.bb-logos2{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .bb-cfk,.bb-none{font-size:16px;line-height:24px}
-  #bb-lay .dtp-rule{font-size:16px;line-height:24px}
-  #bb-lay .dtp-rule::before{margin-top:8px}
-  /* «Текст презентации»: текст — 16 px, кнопки делят строку */
-  .rt-hd .rt-copy,.rt-hd .rt-acts > .p2-cta{flex:1 1 0% !important;min-width:0;height:48px !important;padding:0 16px}
-  .rt-scroll{padding:16px !important}
-  .rt-grid p{font-size:16px !important;line-height:24px !important}
-  /* строка «Источник»: цитата — во всю строку рядом со значком, ссылка — под ней справа */
-  .rt-src{flex-wrap:wrap;column-gap:12px !important;row-gap:0 !important;padding:12px 16px 4px !important}
-  .rt-q{flex:1 1 calc(100% - 32px) !important;-webkit-line-clamp:3}
-  .rt-src > .p2-gb{margin-left:auto}
-  /* «На весь экран»: кадр во всю ширину, стрелки (48) — строкой под ним по краям */
-  .lb-stage{flex-wrap:wrap;align-content:center}
-  .lb-stage::after{content:"";order:1;flex:0 0 100%;height:0}
-  .lb-frame{order:0;width:min(100cqw, calc((100cqh - 64px) * var(--lb-ar, 1.7778))) !important}
-  .lb-arrow{position:relative !important;order:2;top:auto !important;left:auto !important;right:auto !important;margin-top:16px}
-  .lb-stage > .lb-arrow:first-child{margin-right:auto}
-}
-@media (width < 1280px) and (hover: none) and (pointer: coarse), (height < 675px) and (hover: none) and (pointer: coarse){
-  /* «На весь экран» на сенсорном экране: подсказка клавиш не нужна — листают стрелки */
-  .lb-keys{display:none !important}
-}
+
+
+
+
+
 /* сайт: что не прочиталось или не встало — тихими строками над палитрой (I5) */
 .bb-wl{display:flex;flex-direction:column;gap:6px;margin:12px 0 0;padding:0;list-style:none}
 .bb-wl>li{display:flex;align-items:flex-start;gap:8px;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
@@ -386,22 +261,6 @@
 .kb-chip:active{transform:scale(.98)}
 .kb-chip .dt-ic{flex:none}
 .kb-chip .kb-cc{min-width:0;overflow:hidden;text-overflow:ellipsis}
-@media (width < 1024px){
-  .kb-list{grid-template-columns:minmax(0,1fr)}
-}
-@media (width < 768px){
-  .kb-sub{font-size:16px !important;white-space:normal}
-  .kb-card{min-height:64px}
-  .kb-nm,.kb-mt{white-space:normal}
-  .kb-card{grid-template-columns:28px minmax(0,1fr) 44px}
-  .kb-card .dt-x{width:44px;height:44px}
-  .kb-lr{flex-wrap:wrap}
-  .kb-lr > .kb-ob{flex:1 1 100%;height:48px}
-  .kb-in{height:48px;font-size:16px}
-  .kb-btns > .kb-ob{flex:1 1 0%;height:48px}
-  .kb-hl,.kb-note,.kb-st{font-size:16px;line-height:24px}
-  .kb-drop{min-height:160px}
-  .kb-chip .kb-cc{display:none}
-  .kb-chip{justify-content:center;width:44px;height:44px;padding:0}
-}
+
+
 .pv-del:disabled{opacity:.4;cursor:default;transform:none;background:transparent}

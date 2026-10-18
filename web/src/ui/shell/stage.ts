@@ -1,42 +1,44 @@
-// Сцена компьютера в низком окне. Раскладка от 1280 px — холст v105 постоянной геометрии: шапка 64 + колода 812 +
-// поле 24 = 900 px по высоте. Окно ниже — вся страница уменьшается равномерно (transform: scale от левого верхнего
-// угла), как картинка: раскладка та же, пиксель в пиксель, только мельче, и видна целиком, без прокрутки. Ширина
-// сцены — ширина окна / масштаб, так что по ширине компьютер остаётся компьютером (колода до 1392, по центру).
-// Мельче `STAGE_MIN` текст уже не читается — окно ниже `TIER_XL_H` (tier.ts) получает стопку lg с прокруткой страницы.
+// Сцена — только компьютер (решение владельца 18.10: стопки и телефонной раскладки нет). Раскладка — холст v105
+// постоянной геометрии: шапка 64 + колода 812 + поле 24 = 900 px по высоте, колода не уже 1280 px. Окно ниже 900 или
+// уже 1280 — вся страница уменьшается равномерно (CSS `zoom`), как картинка: раскладка та же, только мельче, и видна
+// целиком, без прокрутки. Масштаб округляется вниз до шага 1/40 — при каждом размере окна один и тот же, без дробной
+// дрожи на ходу.
 //
-// Почему transform, а не zoom: zoom меняет раскладку по-разному в Chrome (стандартный, со 128) и Safari (старый
-// WebKit), и getBoundingClientRect под ним в них не совпадает; transform одинаков везде, попадания мыши и фокус он
-// пересчитывает сам, а раскладку не трогает — ResizeObserver, offset*, scroll* остаются в px раскладки. Отличается
-// только getBoundingClientRect (и прямоугольники Range): они в px окна — замеры, которые пишут px в стили или
-// прокрутку, переводят их обратно (`layoutRect`, `layoutWidth`).
+// Почему zoom, а не transform: transform: scale в Safari переводит уменьшенную страницу из документа в слой и обратно,
+// как только внутри начинается ход transform (наведение, смена слайда), — при дробном масштабе пиксели округляются
+// по-разному, и экран дрожит. zoom перекладывает страницу без слоя. Ширина страницы задаётся в px (а не в %): px zoom
+// умножает одинаково в Chrome (стандартный zoom) и Safari (WebKit). Замеры, которые пишут px в стили или прокрутку,
+// переводят getBoundingClientRect обратно в px раскладки (`layoutRect`): во сколько раз — замер самой страницы
+// (`stageOf`), так что верно в любом движке.
 import { useSyncExternalStore } from "react";
 
 /** Высота холста компьютера, px: шапка 64 + колода 812 (geometry.ts `DECK_H`) + поле страницы снизу 24. */
 export const STAGE_H = 900;
-/** Мельче сцена не становится (TIER_XL_H = STAGE_H × STAGE_MIN). */
-export const STAGE_MIN = 0.75;
+/** Ширина, уже которой колода не становится, px. */
+export const STAGE_W = 1280;
+/** Шаг масштаба: вниз до 1/40. */
+const STEP = 40;
+/** Мельче сцена не становится. */
+export const STAGE_MIN = 0.25;
 
-/** Масштаб сцены по высоте окна: окно не ниже холста — 1 (как на доске), ниже — во всю высоту окна, не мельче
- *  `STAGE_MIN`. Не компьютер (стопка, телефон) — 1: там страница прокручивается. Высота не известна — 1. */
-export function stageScale(height: number, desktop: boolean): number {
-  if (!desktop || !(height > 0) || height >= STAGE_H) return 1;
-  return Math.max(STAGE_MIN, height / STAGE_H);
+/** Масштаб сцены по окну: не ниже холста и не уже 1280 — 1 (как на доске); иначе — чтобы холст поместился и по высоте, и
+ *  по ширине, вниз до шага 1/40, не мельче `STAGE_MIN`. Размер не известен — 1. */
+export function stageScale(width: number, height: number): number {
+  const kh = height > 0 ? height / STAGE_H : 1;
+  const kw = width > 0 ? width / STAGE_W : 1;
+  const k = Math.min(1, kh, kw);
+  if (k >= 1) return 1;
+  return Math.max(STAGE_MIN, Math.floor(k * STEP + 1e-9) / STEP);
 }
 
-/** Страница в уменьшенной сцене — всегда свой слой (`translateZ(0)`): иначе Safari делает её слоем только на время
- *  наведения (у кнопки или миниатюры внутри начался ход transform — уменьшенный предок обязан стать слоем) и снова
- *  рисует её в документ по окончании; при дробном масштабе пиксели при этом округляются по-разному, и вся страница
- *  на миг сдвигается — слайд «подпрыгивает», правая колонка съезжает (замечание владельца 18.10, скрин 20). Слой
- *  растеризуется в своём масштабе (3D-перенос нулевой, will-change не замораживает растр). */
-/** Стили обёртки и страницы при масштабе `k`: обёртка — высотой с уменьшенную сцену (страница не прокручивается,
- *  лишнее — clip, без полосы и без прокрутки фокусом; высота — вниз до целого px, иначе дробная доля
- *  пикселя дала бы прокрутку на 1 px), страница — шире окна в 1/k раз и уменьшена от левого верхнего
- *  угла. k = 1 — ничего (раскладка как без сцены). */
-export function stageStyles(k: number): { fit?: Record<string, string | number>; root?: Record<string, string | number> } {
+/** Стили обёртки и страницы при масштабе `k` и ширине окна `width`: обёртка — высотой с уменьшенную сцену (страница
+ *  не прокручивается, лишнее — clip; высота — вниз до целого px), страница — `zoom: k`, шириной в px (окно / k) и
+ *  высотой с холст. k = 1 — ничего (раскладка как без сцены). */
+export function stageStyles(k: number, width: number): { fit?: Record<string, string | number>; root?: Record<string, string | number> } {
   if (!(k > 0) || k >= 1) return {};
   return {
     fit: { height: Math.floor(STAGE_H * k + 0.001), overflow: "clip", background: "#F3F4F1" },
-    root: { width: `${100 / k}%`, height: STAGE_H, minHeight: 0, transform: `scale(${k}) translateZ(0)`, transformOrigin: "0 0" },
+    root: { width: Math.floor((width > 0 ? width : STAGE_W) / k), height: STAGE_H, minHeight: 0, zoom: k },
   };
 }
 
@@ -45,22 +47,28 @@ const subscribe = (cb: () => void) => {
   window.addEventListener("resize", cb);
   return () => window.removeEventListener("resize", cb);
 };
-const height = () => (typeof window === "undefined" ? 0 : window.innerHeight);
+const size = () => (typeof window === "undefined" ? "0x0" : `${window.innerWidth}x${window.innerHeight}`);
 
-/** Высота окна (CSS px); обновляется синхронно с resize — новая сцена встаёт до того, как её замерят наблюдатели. */
-export function useWindowHeight(): number {
-  return useSyncExternalStore(subscribe, height, () => 0);
+/** Ширина и высота окна (CSS px); обновляются синхронно с resize — новая сцена встаёт до того, как её замерят
+ *  наблюдатели. */
+export function useWindowSize(): { width: number; height: number } {
+  const [w, h] = useSyncExternalStore(subscribe, size, () => "0x0").split("x").map(Number);
+  return { width: w, height: h };
 }
 
 /** Атрибут страницы с масштабом сцены: по нему замеры узнают, в каких px их прямоугольники. */
 export const STAGE_ATTR = "data-stage";
 
-/** Масштаб сцены, в которой стоит узел (вне сцены и без уменьшения — 1). */
+/** Во сколько раз прямоугольники getBoundingClientRect узла меньше px раскладки (вне сцены и без уменьшения — 1):
+ *  замер самой страницы сцены — её прямоугольник к её ширине раскладки (offsetWidth). Так верно и там, где движок
+ *  отдаёт прямоугольники уже в px раскладки (отношение — 1). */
 export function stageOf(node: Node | null | undefined): number {
   const el: Element | null | undefined = node && "closest" in node ? (node as Element) : node?.parentElement;
-  const v = el?.closest?.(`[${STAGE_ATTR}]`)?.getAttribute(STAGE_ATTR);
-  const k = v ? Number(v) : 1;
-  return k > 0 && k < 1 ? k : 1;
+  const root = el?.closest?.(`[${STAGE_ATTR}]`) as HTMLElement | null | undefined;
+  if (!root) return 1;
+  const w = root.offsetWidth;
+  const k = w > 0 ? root.getBoundingClientRect().width / w : Number(root.getAttribute(STAGE_ATTR));
+  return k > 0 && k < 0.999 ? k : 1;
 }
 
 export interface LayoutRect { left: number; top: number; right: number; bottom: number; width: number; height: number }

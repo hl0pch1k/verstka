@@ -75,7 +75,7 @@
 /* полный вид (разметка R-aside не меняется): сетка результата сужает правую колонку вместе с колодой, слайд опускается на 24 px
    и не выше свободного места (143 = листание 40 + отступ 16 + лента 87); уведомление и колонка гаснут, колонка едет со своей
    колонкой сетки и не сжимается. Раскрытое уведомление держит действия видимыми — прячем их вместе со слоем (Tab) */
-@media (width >= 1280px) and (height >= 675px){
+
   .hp-wrap .ra-note{transition:transform 160ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   .hp-nar .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear 240ms}
@@ -83,13 +83,15 @@
   .hp-nar .ra-two{grid-template-columns:minmax(0,1fr) 184px !important;column-gap:24px !important;transition-duration:520ms}
   .hp-wrap .ra-two > :first-child{height:100%;margin-top:0;container-type:size;transition:height 340ms var(--ease),margin-top 340ms var(--ease)}
   .hp-nar .ra-two > :first-child{height:calc(100% - 24px);margin-top:24px;transition-duration:520ms}
-  .hp-wrap .ra-two .ra-stage{max-width:min(720px, calc((100cqh - 143px) * var(--ra-ar, 1.7778)))}
+  /* сцена не выше свободного места: высота колонки известна (548 / 612, в узкой раскладке на 24 меньше) — числом, а не
+     100cqh: в Safari единицы контейнера в уменьшенной сцене (zoom, stage.ts) не делятся на масштаб, и сцена мельчала */
+  .hp-nar .ra-two .ra-stage{max-width:min(720px, calc(381px * var(--ra-ar, 1.7778)))}
   .hp-wrap .ra-two > aside{justify-self:start;width:424px;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .ra-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
   /* презентация без уведомления (`ra-top`, R-remarks): рабочая область стоит с самого верха (612), а не под рядом 48 + 16 —
      в узкой раскладке слайд опускается под шапку компактного вида целиком (64 + 24 = 88), панель замечаний встаёт под неё
      (64; по `data-fit` панели — в её подмене, пока содержимое невидимо): узкая раскладка та же, что с уведомлением */
-  .hp-wrap .ra-two.ra-top .ra-stage{max-width:min(832px, calc((100cqh - 143px) * var(--ra-ar, 1.7778)))}
+  .hp-nar .ra-two.ra-top .ra-stage{max-width:min(832px, calc(445px * var(--ra-ar, 1.7778)))}
   /* закрытие помощника на такой презентации: шапка «Слайд N из M» поднимается на 88 px только после того, как погасла
      шапка компактного вида над ней (160 мс), — она не проезжает по гаснущему названию; ход 340 мс, весь уход — 500.
      Открытие — без задержки (правило ниже) */
@@ -99,7 +101,7 @@
   /* уведомление появилось или ушло (смена раскладки, ResultPlate `geo`): рабочая область подменяется невидимой и встаёт на
      место без хода — шапка компактного вида не съезжает и слайд не едет, пока проявляется */
   .ra-work.fx-in > .ra-two > :first-child{transition:none}
-}
+
 
 /* ── Свои дополнения */
 /* «печатает…»: ответ ещё не пришёл — тихая строка в пузыре помощника, мерцает прозрачностью */
@@ -155,7 +157,7 @@ a.p2-rbl:hover{color:#0B1220}
 .hp-nar .hp-in.hp-snap{transition:none}
 .hp-pcol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:320px;min-width:0;min-height:0;overflow-y:auto;scrollbar-width:none}
 .hp-pcol::-webkit-scrollbar{display:none}
-@media (width >= 1280px) and (height >= 675px){
+
   .hp-nar .ra-two.hp-wide{grid-template-columns:minmax(0,1fr) 320px !important}
   .hp-nar .ra-two.fx-out{transition:opacity 120ms var(--ease),grid-template-columns 520ms var(--ease),column-gap 520ms var(--ease)}
   .hp-nar .ra-two.fx-in{transition:opacity 240ms var(--ease)}
@@ -167,16 +169,16 @@ a.p2-rbl:hover{color:#0B1220}
   .hp-wrap .ra-two > aside.rm-col{width:416px}
   .hp-wrap .ra-two > aside.rm-col[data-fit=narrow]{width:320px}
   .hp-nar .ra-two > aside.rm-col.rm-col-on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 360ms var(--ease) 120ms,visibility 0s}
-}
+
 /* правило V2 «колонка проявляется за 160 мс через 80 мс» — о возвращении полного вида при закрытии помощника; свои
    сменщики колонки при закрытом помощнике (панель замечаний, колонка «Изображение») ходят своими ходами (result.css) */
-@media (width >= 1280px) and (height >= 675px){
+
   .hp-closed .ra-two > aside.rm-col{transition:opacity 240ms var(--ease)}
   .hp-closed .ra-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
   .hp-closed .ra-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
   .hp-closed .ra-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
   .hp-closed .ra-two:has(.rm-col.rm-col-on) > .ra-main{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
-}
+
 /* помощник при 1280 и колонка 320 рядом (замечания, изображение) — рабочая область 376 px: подпись «Замечания» у
    переключателя уходит (остаётся для чтения с экрана — она его имя), номер слайда в шапке виден целиком. По раскладке
    (тесная колода, широкая колонка — compact.ts `headTight`), а не по живой ширине, и по `data-fit` обёртки шапки

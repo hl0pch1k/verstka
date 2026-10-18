@@ -3,6 +3,12 @@
  * логотип (p2-brand, p2-bars, p2-lbar*) и подсказка-печать (p2-taw, p2-tph; курсора у неё нет — замечание владельца 18.10). Перенесено дословно, классы не
  * переименованы. */
 body{margin:0}
+/* страница не прокручивается никогда: сцена всегда целиком в окне (stage.ts), а фокус или прокрутка в глубине не
+   сдвигают весь экран (замечание владельца 18.10, скрин 22) */
+html,body{overflow:hidden;overscroll-behavior:none}
+/* элементы стопки и телефона (кнопка меню разделов, затемнение под плитой, короткая строка «Нет связи») — их раскладок
+   больше нет (stage.ts): скрыты всегда */
+.p2-navbtn,.p2-dim,.of-short{display:none}
 a{color:#0A0F1F}a:hover{color:#1E40AF}
 .p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
@@ -207,58 +213,57 @@ body{background:#F3F4F1;color:#0B1220;font-family:'Manrope',system-ui,-apple-sys
 .df-mchk-on{opacity:1}
 @keyframes gh-spin{to{transform:rotate(360deg)}}
 .gh-spin{display:block;animation:gh-spin 1000ms linear infinite}
-/* уменьшенная сцена (stage.ts, окно ниже 900): наведение не двигает и не сдвигает элементы — только цвет, тень и
-   прозрачность. Подъём на 2 px при дробном масштабе — 1,69 px: Safari округляет его по-разному в каждом кадре, и
-   приподнятые карточки, кнопки и миниатюры дрожат (замечание владельца 18.10). Нажатие (scale .98) остаётся.
-   Уменьшается только компьютер — правил стопки и телефона здесь нет */
-.p2-root[data-stage] .an-tile:hover .an-eye,
-.p2-root[data-stage] .an-tile:hover .p2-card,
-.p2-root[data-stage] .bb-chip:hover,
-.p2-root[data-stage] .bf-obd:hover,
-.p2-root[data-stage] .da-sl:hover,
-.p2-root[data-stage] .df-coll:hover .df-cc,
-.p2-root[data-stage] .dpl-colbtn:hover .dpl-chev,
-.p2-root[data-stage] .dpt-back:hover .dpt-ret,
-.p2-root[data-stage] .dq-cb:hover,
-.p2-root[data-stage] .dt-x:hover,
-.p2-root[data-stage] .dtp-colbtn:hover .dtp-chev,
-.p2-root[data-stage] .dtp-sw:hover,
-.p2-root[data-stage] .dw-chk:hover,
-.p2-root[data-stage] .ga-tile:hover .ga-eye,
-.p2-root[data-stage] .ga-tile:hover .p2-card,
-.p2-root[data-stage] .gh-act:hover,
-.p2-root[data-stage] .gh-send:hover,
-.p2-root[data-stage] .hp-chkb:hover,
-.p2-root[data-stage] .kb-chip:hover,
-.p2-root[data-stage] .p2-brand:hover .p2-lbar2,
-.p2-root[data-stage] .p2-brand:hover .p2-lbar3,
-.p2-root[data-stage] .p2-card:hover,
-.p2-root[data-stage] .p2-card:hover .p2-lic-b,
-.p2-root[data-stage] .p2-card:hover .p2-lic-f,
-.p2-root[data-stage] .p2-cta:hover,
-.p2-root[data-stage] .p2-gb:hover,
-.p2-root[data-stage] .p2-lic-host:hover .p2-lic-f,
-.p2-root[data-stage] .p2-more-up:hover,
-.p2-root[data-stage] .p2-more:hover,
-.p2-root[data-stage] .p2-ob:hover,
-.p2-root[data-stage] .p2-pill:hover,
-.p2-root[data-stage] .p2-rb:hover,
-.p2-root[data-stage] .p2-rbl:hover,
-.p2-root[data-stage] .p2-th:hover,
-.p2-root[data-stage] .p2-vc:hover,
-.p2-root[data-stage] .pp-go:hover,
-.p2-root[data-stage] .ra-card:hover,
-.p2-root[data-stage] .ra-card:hover .ra-go,
-.p2-root[data-stage] .ra-note:not(.ra-note-on):has(.ra-ntg:hover),
-.p2-root[data-stage] .rd-btn:hover,
-.p2-root[data-stage] .rk-pin:hover,
-.p2-root[data-stage] .rk-row:hover,
-.p2-root[data-stage] .rp-card:hover,
-.p2-root[data-stage] .rp-card:hover .rp-go,
-.p2-root[data-stage] .tt-tile:hover .p2-card,
-.p2-root[data-stage] .tt-tile:hover .tt-eye,
-.p2-root[data-stage] .tx-take:hover{transform:none}
-.p2-root[data-stage] .ra-ntg:hover .ra-chev{transform:rotate(0deg)}
-.p2-root[data-stage] .ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(180deg)}
-.p2-root[data-stage] .ra-note-h .ra-ntg:hover .ra-chev{transform:rotate(90deg)}
-.p2-root[data-stage] .ra-note-h.ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(-90deg)}
+/* наведение нигде не двигает и не сдвигает элементы — только цвет, тень и прозрачность (решение владельца 18.10):
+   подъём на 2 px в уменьшенной сцене (stage.ts) — дробный, Safari округляет его по-разному в каждом кадре, и
+   карточки, кнопки и миниатюры дрожат. Нажатие (scale .98) остаётся */
+.p2-root .an-tile:hover .an-eye,
+.p2-root .an-tile:hover .p2-card,
+.p2-root .bb-chip:hover,
+.p2-root .bf-obd:hover,
+.p2-root .da-sl:hover,
+.p2-root .df-coll:hover .df-cc,
+.p2-root .dpl-colbtn:hover .dpl-chev,
+.p2-root .dpt-back:hover .dpt-ret,
+.p2-root .dq-cb:hover,
+.p2-root .dt-x:hover,
+.p2-root .dtp-colbtn:hover .dtp-chev,
+.p2-root .dtp-sw:hover,
+.p2-root .dw-chk:hover,
+.p2-root .ga-tile:hover .ga-eye,
+.p2-root .ga-tile:hover .p2-card,
+.p2-root .gh-act:hover,
+.p2-root .gh-send:hover,
+.p2-root .hp-chkb:hover,
+.p2-root .kb-chip:hover,
+.p2-root .p2-brand:hover .p2-lbar2,
+.p2-root .p2-brand:hover .p2-lbar3,
+.p2-root .p2-card:hover,
+.p2-root .p2-card:hover .p2-lic-b,
+.p2-root .p2-card:hover .p2-lic-f,
+.p2-root .p2-cta:hover,
+.p2-root .p2-gb:hover,
+.p2-root .p2-lic-host:hover .p2-lic-f,
+.p2-root .p2-more-up:hover,
+.p2-root .p2-more:hover,
+.p2-root .p2-ob:hover,
+.p2-root .p2-pill:hover,
+.p2-root .p2-rb:hover,
+.p2-root .p2-rbl:hover,
+.p2-root .p2-th:hover,
+.p2-root .p2-vc:hover,
+.p2-root .pp-go:hover,
+.p2-root .ra-card:hover,
+.p2-root .ra-card:hover .ra-go,
+.p2-root .ra-note:not(.ra-note-on):has(.ra-ntg:hover),
+.p2-root .rd-btn:hover,
+.p2-root .rk-pin:hover,
+.p2-root .rk-row:hover,
+.p2-root .rp-card:hover,
+.p2-root .rp-card:hover .rp-go,
+.p2-root .tt-tile:hover .p2-card,
+.p2-root .tt-tile:hover .tt-eye,
+.p2-root .tx-take:hover{transform:none}
+.p2-root .ra-ntg:hover .ra-chev{transform:rotate(0deg)}
+.p2-root .ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(180deg)}
+.p2-root .ra-note-h .ra-ntg:hover .ra-chev{transform:rotate(90deg)}
+.p2-root .ra-note-h.ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(-90deg)}

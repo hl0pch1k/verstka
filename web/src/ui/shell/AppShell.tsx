@@ -43,7 +43,7 @@ import { deckBrand, deckStrip, deckTemplate, docTitle, openDeck } from "../resul
 import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 import { StackDim } from "./StackDim";
-import { STAGE_ATTR, stageScale, stageStyles, useWindowHeight } from "./stage";
+import { STAGE_ATTR, stageScale, stageStyles, useWindowSize } from "./stage";
 import { helperBeside, useTier } from "./tier";
 
 const ROOT: CSSProperties = {
@@ -150,10 +150,11 @@ export function AppShell() {
   };
   const tier = useTier();
   const beside = helperBeside(tier);
-  // компьютер в окне ниже холста (900): сцена уменьшается целиком и видна вся, без прокрутки (ui/shell/stage.ts).
-  // Обёртка `p2-fit` есть всегда (без стилей, пока масштаб 1): смена масштаба не пересоздаёт страницу
-  const k = stageScale(useWindowHeight(), tier === "xl");
-  const st = stageStyles(k);
+  // окно ниже холста (900) или уже 1280: сцена уменьшается целиком (zoom) и видна вся, без прокрутки
+  // (ui/shell/stage.ts). Обёртка `p2-fit` есть всегда (без стилей, пока масштаб 1): смена масштаба не пересоздаёт страницу
+  const win = useWindowSize();
+  const k = stageScale(win.width, win.height);
+  const st = stageStyles(k, win.width);
   const layers = (
     <>
       {/* колода стопкой (окно уже 1280): затемнение под слоем или помощником, щелчок закрывает верхнюю плиту */}

@@ -1,43 +1,37 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { STAGE_H, STAGE_MIN, stageOf, stageScale, stageStyles, unscale } from "./stage";
-import { TIER_XL_H } from "./tier";
+import { STAGE_H, STAGE_MIN, STAGE_W, stageOf, stageScale, stageStyles, unscale } from "./stage";
 
-test("масштаб сцены: окно не ниже холста — 1 (пиксель в пиксель), ниже — во всю высоту окна", () => {
-  assert.equal(stageScale(900, true), 1);
-  assert.equal(stageScale(1080, true), 1);
-  assert.equal(stageScale(760, true), 760 / 900); // жалоба владельца: Safari 1330 × 760
-  assert.equal(stageScale(800, true), 800 / 900);
-  // уменьшенный холст ровно во всю высоту окна
-  for (const h of [675, 700, 760, 800, 899]) assert.ok(Math.abs(STAGE_H * stageScale(h, true) - h) < 1e-6, String(h));
-});
-
-test("масштаб не мельче STAGE_MIN; стопка и телефон не уменьшаются; высота не известна — 1", () => {
-  assert.equal(stageScale(TIER_XL_H, true), STAGE_MIN);
-  assert.equal(stageScale(400, true), STAGE_MIN);
-  assert.equal(stageScale(600, false), 1);
-  assert.equal(stageScale(390, false), 1);
-  assert.equal(stageScale(0, true), 1);
-  assert.equal(stageScale(Number.NaN, true), 1);
-});
-
-test("стили сцены: 1 — ничего; меньше — страница шире окна в 1/k раз, уменьшена от угла, обёртка — целых px без прокрутки", () => {
-  assert.deepEqual(stageStyles(1), {});
-  const k = 760 / 900;
-  const s = stageStyles(k);
-  assert.equal(s.fit?.height, 760);
-  assert.equal(s.fit?.overflow, "clip");
-  // всегда свой слой: наведение внутри не переводит страницу из документа в слой и обратно (Safari, скрин 20)
-  assert.equal(s.root?.transform, `scale(${k}) translateZ(0)`);
-  assert.equal(s.root?.transformOrigin, "0 0");
-  assert.equal(s.root?.height, STAGE_H);
-  assert.equal(parseFloat(String(s.root?.width)) * k, 100 + 0); // 100 % окна после уменьшения
-  // дробная доля пикселя не даёт прокрутки: обёртка не выше уменьшенной сцены
-  for (const h of [675, 701, 733, 759, 799, 811, 899]) {
-    const kk = stageScale(h, true);
-    const fit = Number(stageStyles(kk).fit?.height);
-    assert.ok(fit <= h && fit >= h - 1, `${h}: ${fit}`);
+test("масштаб сцены: окно не ниже холста и не уже 1280 — 1; иначе — помещается по высоте и по ширине, шаг 1/40", () => {
+  assert.equal(stageScale(1440, 900), 1);
+  assert.equal(stageScale(1920, 1080), 1);
+  assert.equal(stageScale(1330, 760), 0.825); // жалоба владельца: Safari 1330 × 760 (760/900 = 0.844 → 0.825)
+  assert.equal(stageScale(1440, 800), 0.875);
+  assert.equal(stageScale(1024, 900), 0.8); // уже 1280 — по ширине
+  assert.equal(stageScale(390, 844), 0.3); // телефон — тот же компьютер, уменьшенный
+  for (const [w, h] of [[1330, 760], [1100, 700], [1600, 640], [800, 1200]]) {
+    const k = stageScale(w, h);
+    assert.ok(STAGE_H * k <= h + 1e-6 && STAGE_W * k <= w + 1e-6, `${w}x${h}`);
+    assert.equal(Math.round(k * 40), k * 40); // шаг 1/40 — без дробной дрожи
   }
+});
+
+test("масштаб не мельче STAGE_MIN; размер не известен — 1", () => {
+  assert.equal(stageScale(100, 100), STAGE_MIN);
+  assert.equal(stageScale(0, 0), 1);
+  assert.equal(stageScale(Number.NaN, Number.NaN), 1);
+});
+
+test("стили сцены: 1 — ничего; меньше — zoom, ширина страницы в px (окно / k), обёртка — целых px без прокрутки", () => {
+  assert.deepEqual(stageStyles(1, 1440), {});
+  const k = stageScale(1330, 760);
+  const s = stageStyles(k, 1330);
+  assert.equal(s.root?.zoom, k);
+  assert.equal(s.root?.transform, undefined);
+  assert.equal(s.root?.height, STAGE_H);
+  assert.equal(s.root?.width, Math.floor(1330 / k));
+  assert.equal(s.fit?.overflow, "clip");
+  assert.ok(Number(s.fit?.height) <= 760);
 });
 
 test("замеры в px раскладки: прямоугольник окна делится на масштаб; вне сцены — 1", () => {
