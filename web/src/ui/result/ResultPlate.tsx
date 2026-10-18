@@ -400,7 +400,7 @@ function ResultBody({ g }: { g: Generation }) {
   // «Изображение» (PhoneResult); слои (текст, весь экран, «Подробнее») поднимаются поверх колоды
   if (phone) {
     const marks = pic.spots || rm.stage || rm.sketch
-      ? <>{pic.spots && <PictureSpots {...pic.spots} />}{rm.stage && <StageMarks {...rm.stage} />}{rm.sketch && <FixSketch {...rm.sketch} />}</>
+      ? <>{pic.spots && <PictureSpots {...pic.spots} />}{rm.stage && <StageMarks {...rm.stage} />}{rm.sketch && <FixSketch {...rm.sketch} src={src} />}</>
       : null;
     const extra = rm.panel ? <RemarksPanel {...rm.panel} helper={false} /> : pic.column?.shown ? <PictureCard {...pic.column.card} /> : null;
     return (
@@ -443,7 +443,7 @@ function ResultBody({ g }: { g: Generation }) {
             <Stage src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect}>
               {pic.spots && <PictureSpots {...pic.spots} />}
               {rm.stage && <StageMarks {...rm.stage} />}
-              {rm.sketch && <FixSketch {...rm.sketch} />}
+              {rm.sketch && <FixSketch {...rm.sketch} src={src} />}
             </Stage>
             <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={filmMarks} />
           </div>
