@@ -42,6 +42,108 @@ _FORMS: list[tuple[re.Pattern, str, Optional[str]]] = [
 ]
 
 
+_REDO_RE = re.compile(r"полност|целиком|с\s+нуля|заново|по-?друго|по-?новому|иначе|совсем\s+друг|не\s+нравится", re.I)
+_PICTURE_RE = re.compile(r"(?:\b(?:добав|встав|постав|нуж|сделай|дай|нарисуй)\w*\s+(?:\S+\s+){0,2}?|\bс\s+)(?:картинк|иллюстрац|изображени|рисун)", re.I)
+_SHORTER_RE = re.compile(r"короч|сократи|меньше\s+текст|покороче|лаконичн|сжат", re.I)
+# the forms a slide is turned into when it is to be made anew without a model (the first that keeps every line)
+_REDO_FORMS = ("timeline", "cards", "two_column", "bullets")
+
+
+# the label of a picture the person asked for («добавь картинку»): drawn from the slide's own description even without
+# the text model (an AUTO_LABEL place of the build waits for the model's English description)
+ASKED_PICTURE = "Иллюстрация к слайду"
+
+
+_NUMBERY_RE = re.compile(r"[^\s;,.]*\d[^\s;,.]*|\b(?:лет|год[а-я]*|век[а-я]*|назад|около|более|менее|млн|млрд|тыс\.?|до\s+н\.\s*э\.?|н\.\s*э\.?)\b", re.I)
+
+
+def picture_hint(new: OutlineSlide, old: OutlineSlide) -> str:
+    """What a picture the person asked for shows, from the slide itself: its heading and the descriptive part of its
+    points, every figure, date and unit taken out (an image model writes the figures it is given across the picture)."""
+    # (the heading alone: the points' names — «Массалия», «Ласко» — came back as lettering on stones)
+    parts = [new.headline or old.headline or ""]
+    out = []
+    for x in parts:
+        t = _NUMBERY_RE.sub(" ", x or "")
+        t = re.sub(r"\s*[—–-]\s*", " ", t)
+        t = re.sub(r"\s+", " ", t).strip(" ,.;:–—-")
+        if len(t) >= 6:
+            out.append(t)
+    return "; ".join(out)[:300]
+
+
+def redo_request(request: str) -> bool:
+    """«переделай слайд полностью», «сделай по-другому», «с нуля»: the slide anew — another form, another layout."""
+    return bool(_REDO_RE.search(request or ""))
+
+
+def picture_request(request: str) -> bool:
+    """«добавь картинку», «с иллюстрацией»: a generated picture on the slide (not a place for the person's photo)."""
+    return bool(_PICTURE_RE.search(request or ""))
+
+
+def shorter_request(request: str) -> bool:
+    return bool(_SHORTER_RE.search(request or ""))
+
+
+def other_form(outline: DeckOutline, s: OutlineSlide, avoid: Optional[str] = None) -> Optional[OutlineSlide]:
+    """The slide in another form made by the rules (not `avoid`, not its own), every line kept; None when none fits."""
+    avoid = avoid or s.kind.value
+    c = s.content
+    if c.bullets and not c.items and 2 <= len(c.bullets) <= 6:
+        # a list's lines become cards or steps: «1,7–1,8 млн лет назад — каменные орудия…» → title «1,7–1,8 млн лет назад»,
+        # text «каменные орудия…»; lines that open with a date or a figure are a timeline
+        from verstka.schemas.common import PatternKind
+        from verstka.schemas.outline import SlideItem
+
+        items = []
+        for b in c.bullets:
+            parts = re.split(r"\s[—–]\s|:\s", b, maxsplit=1)
+            head, tail = parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+            if not tail or len(head) > 60:
+                head, tail = b.strip(), ""
+            items.append(SlideItem(title=head, text=tail))
+        dated = sum(1 for b in c.bullets if re.match(r"\s*(?:\d|около\s+\d|в\s+\d|[IVXLC]+\s+век)", b, re.I)) >= max(2, len(c.bullets) - 1)
+        for kind in (("timeline", "cards") if dated else ("cards", "timeline")):
+            if kind == avoid:
+                continue
+            got = s.model_copy(update={"kind": PatternKind(kind), "content": c.model_copy(update={"bullets": [], "items": items}, deep=True)}, deep=True)
+            if not lost_lines(s, got):
+                return got
+    for kind in _REDO_FORMS:
+        if kind in (avoid, s.kind.value):
+            continue
+        try:
+            got = rules_form(outline, s, kind, None)
+        except Exception:  # noqa: BLE001 - the next form
+            got = None
+        if got is not None and got.kind.value != avoid and not lost_lines(s, got):
+            return got
+    return None
+
+
+def rules_shorter(s: OutlineSlide) -> OutlineSlide:
+    """«короче» without a model: each line of the slide down to its first sentence or clause (its figures kept — the
+    clause with a figure stays), the subtitle and paragraphs too."""
+    def cut(t: str) -> str:
+        t = (t or "").strip()
+        for sep in (". ", "; ", ": ", ", "):
+            head, _, tail = t.partition(sep)
+            if tail and len(head) >= 12 and not (any(ch.isdigit() for ch in tail) and not any(ch.isdigit() for ch in head)):
+                return head.rstrip(".;:,")
+        return t
+
+    out = s.model_copy(deep=True)
+    c = out.content
+    c.bullets = [cut(b) for b in c.bullets]
+    c.paragraphs = [cut(p) for p in c.paragraphs]
+    for it in c.items:
+        it.text = cut(it.text or "")
+    if out.subtitle:
+        out.subtitle = cut(out.subtitle)
+    return out
+
+
 def requested_form(request: str) -> Optional[tuple[str, Optional[str]]]:
     for rx, kind, chart_type in _FORMS:
         if rx.search(request):
@@ -76,6 +178,20 @@ def _inline(outline: DeckOutline, s: OutlineSlide) -> OutlineSlide:
     return s
 
 
+def _line_pairs(s: OutlineSlide) -> list[tuple[str, str]]:
+    """The slide's lines as (what, about it): cards and steps by their title and text, list lines split at their dash or
+    colon («1944 — высадка» → («1944», «высадка»))."""
+    c = s.content
+    if c.items:
+        return [((it.title or "").strip(), (it.text or "").strip()) for it in c.items if (it.title or it.text)]
+    out = []
+    for b in c.bullets:
+        parts = re.split(r"\s[—–]\s|:\s", b, maxsplit=1)
+        a, t = parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+        out.append((b.strip(), "") if len(a) > 60 else (a, t))
+    return out
+
+
 def rules_form(outline: DeckOutline, s: OutlineSlide, kind: str, chart_type: Optional[str]) -> Optional[OutlineSlide]:
     """The form a request names, made by the rules: the slide's lines stay under the new form (a chart shown as a table
     keeps the lines beside it); None when the content does not fit it."""
@@ -84,6 +200,39 @@ def rules_form(outline: DeckOutline, s: OutlineSlide, kind: str, chart_type: Opt
 
     s = _inline(outline, s)
     c = s.content
+    pairs = _line_pairs(s)
+    if kind == "table" and c.chart is None and c.table is None and len(pairs) >= 2:
+        # a list or cards as a table: what — about it (the lines split at their dash or colon), every word kept
+        from verstka.schemas.common import PatternKind
+        from verstka.schemas.outline import TableData
+
+        # two columns when every line splits into a short head and its text; else one column of whole lines (a line cut
+        # at a stray dash read «В конце апреля | начале мая…»)
+        two = all(b and len(a) <= 40 for a, b in pairs)
+        t = TableData(columns=["Пункт", "Подробнее"] if two else ["Что известно"], rows=[[a, b] for a, b in pairs] if two else [[f"{a} — {b}" if b else a] for a, b in pairs])
+        content = c.model_copy(update={"table": t, "bullets": [], "items": []}, deep=True)
+        return s.model_copy(update={"kind": PatternKind.table, "content": content}, deep=True)
+    if kind == "stat_row" and not c.numbers:
+        # «крупнее цифры»: each line's figure large with the rest of the line as its label (lines without one stay below)
+        from verstka.rendering.clone_check import _LEAD_FIG_RE
+        from verstka.schemas.common import PatternKind
+        from verstka.schemas.outline import NumberCallout
+
+        nums, rest = [], []
+        for a, b in pairs:
+            line = f"{a} — {b}" if b else a
+            m = _LEAD_FIG_RE.match(b or "") or _LEAD_FIG_RE.match(a)
+            if m and any(ch.isdigit() for ch in m.group(1)):
+                src = b if (b and _LEAD_FIG_RE.match(b)) else a
+                tail = src[m.end():].strip(" ,—–-:")
+                label = " — ".join(x for x in ((a if src is b else ""), tail) if x) or a
+                nums.append(NumberCallout(value=m.group(1).strip(), label=label[:120]))
+            else:
+                rest.append(line)
+        if len(nums) >= 2:
+            content = c.model_copy(update={"numbers": nums[:4], "items": [], "bullets": rest + [f"{n.value} — {n.label}" for n in nums[4:]]}, deep=True)
+            return s.model_copy(update={"kind": PatternKind.stat_row, "content": content}, deep=True)
+        return None
     if kind == "table" and c.chart is not None and c.table is None:
         t = A._table_from_chart(c.chart)
         if t is None:
@@ -336,7 +485,9 @@ def describe_change(old: OutlineSlide, new: OutlineSlide) -> str:
         a, b = getattr(old.content, key), getattr(new.content, key)
         if a is not None and b is not None and a.highlight_index != b.highlight_index and b.highlight_index is not None and 0 <= b.highlight_index < len(b.categories):
             changed.append(f"выделено «{b.categories[b.highlight_index]}» на диаграмме")
-    if new.content.photo_slot and not old.content.photo_slot:
+    if new.content.photo_slot and not old.content.photo_slot and not new.content.photo_own and new.content.photo_slot == ASKED_PICTURE:
+        changed.append("добавлена картинка — её рисует модель изображений по заголовку и пунктам слайда, без надписей")
+    elif new.content.photo_slot and not old.content.photo_slot:
         changed.append("оставлено свободное место под фото — вставьте его в рамку на слайде")
     elif old.content.photo_slot and not new.content.photo_slot:
         changed.append("место под фото убрано")
@@ -570,6 +721,10 @@ def redesign_slide(
 
     photo = photo_request(request) if request.strip() else None
     drop_photo = bool(request.strip()) and photo_dropped(request)
+    # (the request is the person's — in the chat, or their wishes under the remarks: one path for both)
+    redo = redo_request(request)
+    picture = not photo and not drop_photo and picture_request(request)
+    shorter = shorter_request(request)
     emphasis: Optional[tuple[str, int]] = None
     if not fixing and emphasis_request(request):
         # «выдели Казань цветом»: the chart's own highlight on that category — a safe edit the rules make, no model; a
@@ -615,6 +770,12 @@ def redesign_slide(
             )
             if photo:
                 note += f"\n- The slide keeps {A.photo_requirement(photo)}."
+        if redo:
+            note += (f"\n- Make this slide anew: another form of its content than now ({A.form_ru(old)}) — cards, a timeline, big "
+                     "figures, two columns or a table, whichever shows it best — a new headline that states the conclusion and new "
+                     "lines; keep every fact and figure of the slide.")
+        if picture:
+            note += "\n- The slide gets a picture beside its content: keep the text short enough for half of the slide."
         if old.data is not None:
             note += (
                 f"\n- This slide is made from the data file «{old.data.file}»: its chart, table and figures stay exactly as they are "
@@ -693,6 +854,20 @@ def redesign_slide(
             if not fixing or form is not None:
                 tracker.emit("designer", "Дизайнер: модель не ответила — пробую сделать по правилам.", slide=index)
             how = f"model failed: {str(e)[:120]}"
+    if redo and new is not None and form is None and new.kind == old.kind:
+        # the model kept the form: «полностью» is another form all the same (the rules make it from the model's lines)
+        alt = other_form(outline, new, old.kind.value)
+        if alt is not None:
+            new = alt
+    if new is None and form is None and (redo or picture or shorter):
+        # no model (or no usable answer): the rules make the slide anew — another form keeping every line, the lines cut to
+        # their first clause, a generated picture's place — never «не получилось»
+        cand = old.model_copy(deep=True)
+        if redo:
+            cand = other_form(outline, old) or cand
+        if shorter:
+            cand = rules_shorter(cand)
+        new, how = cand, "rules"
     if new is None and (photo or drop_photo) and form is None:
         new, how = old.model_copy(deep=True), "rules"  # the slide as it is, with its photo place made or taken back
     if new is None:
@@ -716,6 +891,8 @@ def redesign_slide(
                 if agent.models:
                     raise ValueError("модель не ответила, а без неё могу только сменить форму слайда («таблицей», «круговой диаграммой», «карточками») — попробуйте ещё раз через минуту")
                 raise ValueError("без модели могу только сменить форму слайда («таблицей», «круговой диаграммой», «карточками»), а модель сейчас недоступна")
+            if form[0] == "stat_row":
+                raise ValueError(f"на слайде {index} меньше двух чисел — крупно показать нечего; можно сделать карточками или списком")
             raise ValueError(f"содержимое слайда {index} не ложится в такую форму: для неё нет подходящих данных в тексте")
     new = keep_what_was_asked(old, new.model_copy(deep=True), request, outline)
     refused: list[str] = []
@@ -735,9 +912,14 @@ def redesign_slide(
                 raise ValueError(f"модель ответила, но правку не применил: {why}")
     new.id = old.id
     new.spec_ref = old.spec_ref
-    new.content.photo_slot = photo or (None if drop_photo else old.content.photo_slot)
+    new.content.photo_slot = photo or (ASKED_PICTURE if picture else (None if drop_photo else old.content.photo_slot))
     # «оставь место под фото» asks for the person's own photo; a kept place keeps what it was for
-    new.content.photo_own = bool(photo) or (False if drop_photo else old.content.photo_own)
+    new.content.photo_own = bool(photo) or (False if (drop_photo or picture) else old.content.photo_own)
+    if picture:
+        # «добавь картинку»: a picture the image model draws (a strip beside the content), described by the slide
+        # (described by the slide itself — its heading and its points — so the image model draws it without the text model;
+        # «Wordless picture» and the image check keep letters out)
+        new.content.photo_hint = picture_hint(new, old)
     if new.content.photo_slot is None:
         new.content.photo_hint = None if drop_photo else new.content.photo_hint
     why = (new.rationale or "").strip()
@@ -769,7 +951,7 @@ def redesign_slide(
             # the check of the figures cut a conclusion the redesign kept (the API's «цифры крупнее» on the summary: «…больше
             # 120 мин, 3 — больше 10 часов» lost its tail) — a wish about the look never costs a conclusion
             raise ValueError(f"после проверки цифр в новом варианте пропадал вывод слайда («{lost[0][:60]}»…) — слайд оставлен как был")
-    if _visible(result) == _visible(old) and not (photo or drop_photo):
+    if _visible(result) == _visible(old) and not (photo or drop_photo or picture):
         # never «переделан» for a slide that did not change (N-E4): the reply says what happened instead
         if answered:
             raise ValueError("модель ответила, но слайд после проверки не изменился — попробуйте сказать иначе, что поменять")
@@ -779,8 +961,13 @@ def redesign_slide(
     reply = f"Слайд {index} переделан: {what}."
     if emphasis is not None:
         reply = f"Слайд {index}: выделил «{getattr(result.content, emphasis[0]).categories[emphasis[1]]}» цветом на диаграмме."
+    elif how == "rules" and (redo or picture or shorter):
+        did = [x for x, on in (("другая форма и раскладка", redo and result.kind != old.kind), ("строки сокращены до главного", shorter),
+                               ("картинка по описанию из заголовка и пунктов слайда", picture)) if on]
+        reply += (" Модель текста не ответила — сделал по правилам, без неё: " if not answered else " Ответ модели не подошёл — сделал по правилам: ") + "; ".join(did or ["слайд собран заново"]) + "."
     elif how == "rules":
         reply += " Модель не ответила, форму сменил по правилам." if not answered else " Ответ модели не подошёл к слайду, форму сменил по правилам."
+
     if refused:
         reply += " Не взял из ответа модели: " + "; ".join(refused) + "."
     tracker.emit("designer", f"Дизайнер: слайд {index} — {after}.", slide=index)

@@ -869,20 +869,32 @@ def _frame_name(kind: str) -> tuple[str, str]:
     return "обложку", "Обложку агент собирает из названия и разделов текста — исправлено только оформление"
 
 
-def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int) -> Optional[list[dict]]:
+def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int, *, make: bool = False, manifest: Any = None, skills: Any = None,
+                        providers: Any = None) -> Optional[list[dict]]:
     """Slide `n` built again comes with its free picture place: the picture it had goes back in (refitted to the new
-    place, no model call). The variant's records with slide n's renewed, or None when nothing changed."""
+    place, no model call). With `make` (the person asked for a picture), a place without a picture gets one drawn by the
+    image model. The variant's records with slide n's renewed, or None when nothing changed."""
     try:
         from verstka.images.fill import apply_pictures, merged, plan_pictures, read_records
 
         old = read_records(vdir)
         mine = [r for r in old if r.get("slide") == n]
-        if not mine:
+        maker = None
+        osl = outline.slides[n - 1] if 1 <= n <= len(outline.slides) else None
+        if make and manifest is not None and osl is not None and osl.content.photo_slot and not osl.content.photo_own:
+            from verstka.pipeline.generate import _picture_maker
+
+            maker, _ = _picture_maker(True, None, manifest, vdir.parent / "images", time.time(), skills, providers, None, outline, {})
+        if not mine and maker is None:
             return None
-        pend = plan_pictures(deck, outline, None, enabled=False, reuse=mine, folder=vdir.parent / "images", slides={n})
+        pend = plan_pictures(deck, outline, maker, enabled=maker is not None, reuse=mine, folder=vdir.parent / "images", slides={n})
         if not pend:
             return None  # fixed in place: the picture never left
-        got = apply_pictures(deck, pend, wait_s=0)
+        try:
+            got = apply_pictures(deck, pend, wait_s=120.0 if maker is not None else 0)
+        finally:
+            if maker is not None:
+                maker.close()
         return merged(old, got.records, {n})
     except Exception:  # noqa: BLE001 - the slide keeps its free place rather than the fix being lost
         log.warning("slide fix: the slide's picture was not put back", exc_info=True)
@@ -1106,7 +1118,8 @@ def fix_slide(
         # (a remark the rules have no fix for — a figure hardly larger than its label — goes to the designer too: the
         # button never leaves the slide as it was while a remark is on it)
         need_designer = not frame and bool(wishes or any(i.check_id in RM.CONTENT_CHECKS or i.autofix is None or i.autofix.action == "none" for i in left))
-        if need_designer and use_models:
+        # (a wish without a model: the designer's rules make it — another form, a picture's place, shorter lines)
+        if need_designer and (use_models or wishes):
             voice.plain(f"Дизайнер переделывает слайд {n}", 0.1)
             left_ids = {id(i) for i in left}
             source = left if left else remarks
@@ -1177,6 +1190,8 @@ def fix_slide(
                         shutil.copy2(first_deck, work)
                 r, o, pl, rp = got
                 how, redesigned, rerendered = r.how, True, True
+                if r.how == "rules" and wishes:
+                    notes.append("Модель текста недоступна — слайд переделан по правилам, без неё")
                 what = describe_change(osl0, o.slides[n - 1])
                 outline, plan, rep = o, pl, rp
             elif reason == "model_unavailable":
@@ -1310,7 +1325,20 @@ def fix_slide(
             log.warning("outline markers left in the notes", exc_info=True)
         final_outline = _with_slide(outline0, outline, n)
         final_plan = _with_entry(plan0, plan.for_outline(oid), oid)
-        pic_records = _keep_slide_picture(vdir, final, final_outline, n)
+        asked_picture = bool(wishes) and bool(final_outline.slides[n - 1].content.photo_slot) and not osl0.content.photo_slot
+        if asked_picture:
+            voice.plain("Рисую картинку для слайда", 0.62)
+        pic_records = _keep_slide_picture(vdir, final, final_outline, n, make=asked_picture, manifest=manifest, skills=skills if use_models else None,
+                                          providers=providers if use_models else None)
+        if asked_picture:
+            mine = [r for r in (pic_records or []) if r.get("slide") == n]
+            got = next((r for r in mine if r.get("status") == "generated"), None)
+            if got is not None:
+                notes.append("Картинку нарисовала модель " + str(got.get("model") or "изображений").split("/")[-1]
+                             + ("" if got.get("text_checked") else " — надписи на ней не проверены: модель зрения недоступна"))
+            else:
+                why_pic = next((str(r.get("why")) for r in mine if r.get("why")), "модель изображений не ответила")
+                notes.append(f"Картинку нарисовать не получилось: {why_pic}")
         # the audit numbers its remarks through the deck: the ids of the remarks that stayed (on every slide) are carried
         # over, so the person's remark keeps its id through the fix and a fixed remark's id never comes back
         report = RM.carry_report_ids(report0, run_audit(final, manifest, final_outline, ws, **audit_kw))
