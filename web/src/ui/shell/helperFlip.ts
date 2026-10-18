@@ -1,94 +1,218 @@
-// Помощник на «Результате» — без хода раскладки по кадрам (замечание владельца 18.10: «супер плавно, как на холсте»).
-// Раскладка колоды и рабочей области меняется один раз — в том же кадре, что класс обёртки (`hp-flip`, shell.css и
-// helper.css: переходы сеток выключены); край колоды едет фоном и тенью плит (clip-path, shell.css), а всё, что
-// стоит в обеих раскладках, — transform'ом от прежнего места к новому (FLIP): прежнее место меряется возвратом класса
-// обёртки на тот же кадр, до первой отрисовки. Полный и компактный вид сменяются своей прозрачностью (helper.css).
-import { useLayoutEffect, useRef, type RefObject } from "react";
+// Помощник на «Результате» — ход без перекладки раскладки посреди движения и без двух видимых раскладок сразу
+// (замечание владельца 18.10, кадры настоящего Safari: колода обрезалась мгновенно, полный и компактный вид двоились).
+//
+// Открытие (520 мс, кривая холста):
+//   0 мс    раскладка остаётся широкой; полный вид (колонка справа, таблетка уведомления) гаснет за 160 мс;
+//           край колоды едет влево подрезкой плит (clip-path на местах плит, переход CSS), тень края — тень самой
+//           колоды (filter на `.p2-deck`, тот же слой); плита помощника выходит из-под колоды (shell.css, helper.css);
+//           слайд, лента и строка «Слайд N из M» едут transform'ом к своим местам в узкой раскладке (замерены один раз
+//           в момент нажатия);
+//   520 мс  узкая раскладка ставится разом — всё уже стоит на её местах; ходы снимаются; компактный вид проявляется.
+// Закрытие (340 мс):
+//   0 мс    компактный вид гаснет за 120 мс (раскладка ещё узкая);
+//   120 мс  широкая раскладка ставится разом, колода подрезана до узкой ширины, слайд и лента стоят на прежних местах
+//           (transform), — и край колоды едет вправо, накрывая плиту помощника (она непрозрачна, пока не накрыта),
+//           всё возвращается к своим местам, колонка полного вида открывается краем;
+//   460 мс  плита помощника убирается (уже под колодой).
+// Все ходы начинаются одной сменой стилей в одном кадре: переходы CSS на элементах (не псевдоэлементах).
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";
 import { layoutRect, type LayoutRect } from "./stage";
 
-/** Открытие — 520 мс, закрытие — 2/3 (340), как ход колоды на холсте. */
 export const FLIP_OPEN_MS = 520;
 export const FLIP_CLOSE_MS = 340;
+/** Сколько гаснет компактный вид перед закрытием. */
+export const CLOSE_FADE_MS = 120;
 const EASE = "cubic-bezier(0.2, 0, 0, 1)";
-/** Место помощника: плита 400 + зазор 16 — на столько слои плит продлены вправо в узкой раскладке (shell.css). */
-const HELPER_CUT = 416;
+/** Только для проверки кадров (Safari WebDriver): `window.__animSlow = 10` замедляет таймеры фаз вместе с ходами. */
+const slow = (ms: number) => ms * (typeof window !== "undefined" && Number((window as unknown as { __animSlow?: number }).__animSlow) > 0 ? Number((window as unknown as { __animSlow?: number }).__animSlow) : 1);
+/** Место помощника: плита 400 + зазор 16. */
+export const HELPER_CUT = 416;
 
-/** Что переезжает — то, что на холсте (V2, «Play: весь путь») едет вместе с сеткой колоды и результата: подпись и
- *  кнопки строки «Слайд N из M», таблетка уведомления, слайд (с масштабом), лента миниатюр, колонка полного вида,
- *  действия и узкая колонка компактного, тень края колоды. Видимое только в одной раскладке едет, пока гаснет или
- *  проявляется (как на холсте: перекрёстное затухание идёт поверх хода сетки). Ни один элемент не вложен в другой —
- *  сдвиги не складываются. */
-export interface FlipTarget { sel: string; scale?: boolean }
-export const FLIP_TARGETS: FlipTarget[] = [
+/** Что едет к своему месту в другой раскладке (ни один не вложен в другой). */
+export const FLIP_TARGETS: Array<{ sel: string; scale?: boolean }> = [
   { sel: ".ra-whx > div > p" },
   { sel: ".ra-whx .ra-whr" },
-  { sel: ".ra-whx .ra-note-h" },
   { sel: ".ra-stage", scale: true },
   { sel: ".p2-film" },
-  { sel: ".ra-two > aside" },
-  { sel: ".hp-acts" },
-  { sel: ".hp-ncol" },
-  { sel: ".hp-pcol" },
-  { sel: ".hp-shade" },
 ];
 
-/** transform, который ставит элемент из нового места `last` на прежнее `first` (сдвиг левого верхнего угла и, для
- *  слайда, масштаб по ширине); null — не сдвинулся (меньше 0,5 px и масштаб тот же). */
-export function flipFrom(first: LayoutRect, last: LayoutRect, scale: boolean | number = false): string | null {
-  const dx = first.left - last.left;
-  const dy = first.top - last.top;
-  const s = typeof scale === "number" ? scale : scale && last.width > 0 ? first.width / last.width : 1;
+/** transform из места `from` в место `to` (сдвиг левого верхнего угла и, для слайда, масштаб по ширине); null — на месте. */
+export function flipFrom(from: LayoutRect, to: LayoutRect, scale = false): string | null {
+  const dx = from.left - to.left;
+  const dy = from.top - to.top;
+  const s = scale && to.width > 0 ? from.width / to.width : 1;
   if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(s - 1) < 0.002) return null;
   const r = (v: number) => Math.round(v * 100) / 100;
   return s !== 1 ? `translate(${r(dx)}px, ${r(dy)}px) scale(${Math.round(s * 10000) / 10000})` : `translate(${r(dx)}px, ${r(dy)}px)`;
 }
 
-/** Идущие ходы: новый снимает прежний у того же элемента. */
-const running = new WeakMap<HTMLElement, Animation>();
-function track(el: HTMLElement, a: Animation) {
-  running.set(el, a);
-  a.onfinish = a.oncancel = () => {
-    if (running.get(el) === a) running.delete(el);
-  };
+/** Подрезка места плиты шириной `w` и высотой `h` справа на `cut` px: прямой край со скруглёнными на 40 px углами, как у
+ *  плиты; сверху и слева — запас под тени плит. Многоугольник в px, без calc(): вершины переходят одна в одну и в
+ *  Safari (calc() в многоугольнике он не интерполирует — край прыгал). */
+export function plateClip(cut: number, w: number, h: number): string {
+  const r = (v: number) => `${Math.round(v * 100) / 100}px`;
+  const R = w - cut;
+  const pts: string[] = ["-64px -64px", `${r(R - 40)} -64px`, `${r(R - 40)} 0px`];
+  const N = 6;
+  for (let i = 1; i < N; i++) {
+    const t = (i / N) * (Math.PI / 2);
+    pts.push(`${r(R - 40 + 40 * Math.sin(t))} ${r(40 - 40 * Math.cos(t))}`);
+  }
+  pts.push(`${r(R)} 40px`, `${r(R)} ${r(h - 40)}`);
+  for (let i = 1; i < N; i++) {
+    const t = (i / N) * (Math.PI / 2);
+    pts.push(`${r(R - 40 + 40 * Math.cos(t))} ${r(h - 40 + 40 * Math.sin(t))}`);
+  }
+  pts.push(`${r(R - 40)} ${r(h)}`, `-64px ${r(h)}`);
+  return `polygon(${pts.join(", ")})`;
 }
 
-/** Ход FLIP для обёртки `ref` при смене `open` (помощник открыт), только когда `active` (экран «Результат»). */
-export function useHelperFlip(ref: RefObject<HTMLElement>, open: boolean, active: boolean): void {
-  const was = useRef({ open, cls: "" });
+export type HelperPhase = "closed" | "opening" | "open" | "fading" | "closing";
+
+/** Классы обёртки колоды по фазе: `hp-open` — плита помощника видна, `hp-nar` — узкая раскладка, `hp-go` — открытие
+ *  (полный вид гаснет), `hp-out` — компактный вид гаснет. */
+export function phaseClasses(p: HelperPhase): string {
+  switch (p) {
+    case "closed": return "hp-closed";
+    case "opening": return "hp-open hp-go";
+    case "open": return "hp-open hp-nar";
+    case "fading": return "hp-open hp-nar hp-out";
+    case "closing": return "hp-open hp-back";
+  }
+}
+
+const slotsOf = (wrap: HTMLElement) => Array.from(wrap.querySelectorAll<HTMLElement>(".p2-deck > .p2-slot"));
+const deckOf = (wrap: HTMLElement) => wrap.querySelector<HTMLElement>(".p2-deck");
+
+function setClip(slots: HTMLElement[], cut: number, ms: number) {
+  for (const el of slots) {
+    el.style.transition = ms ? `clip-path ${ms}ms ${EASE}, -webkit-clip-path ${ms}ms ${EASE}` : "none";
+    const c = plateClip(cut, el.offsetWidth, el.offsetHeight);
+    el.style.clipPath = c;
+    el.style.setProperty("-webkit-clip-path", c);
+  }
+}
+function clearClip(slots: HTMLElement[]) {
+  for (const el of slots) {
+    el.style.transition = "none";
+    el.style.clipPath = "";
+    el.style.removeProperty("-webkit-clip-path");
+  }
+  requestAnimationFrame(() => requestAnimationFrame(() => slots.forEach((el) => { el.style.transition = ""; })));
+}
+type Moved = Array<{ el: HTMLElement; t: string }>;
+function place(moved: Moved, ms: number, to: "t" | "none") {
+  for (const { el, t } of moved) {
+    el.style.transformOrigin = "0 0";
+    el.style.transition = ms ? `transform ${ms}ms ${EASE}` : "none";
+    el.style.transform = to === "t" ? t : "";
+  }
+}
+function unplace(moved: Moved) {
+  // снятие хода — без перехода (иначе переход стилей элемента повёл бы его обратно), переход возвращается через кадр
+  for (const { el } of moved) {
+    el.style.transition = "none";
+    el.style.transform = "";
+    el.style.transformOrigin = "";
+  }
+  const els = moved.map(({ el }) => el);
+  requestAnimationFrame(() => requestAnimationFrame(() => els.forEach((el) => { el.style.transition = ""; })));
+}
+const visible = (wrap: HTMLElement) => FLIP_TARGETS.flatMap((t) =>
+  Array.from(wrap.querySelectorAll<HTMLElement>(t.sel)).filter((el) => el.getClientRects().length > 0).map((el) => ({ el, scale: !!t.scale })));
+
+/** Фаза помощника для обёртки `ref`: `want` — помощник открыт; `active` — экран «Результат» (иначе фаза следует
+ *  `want` сразу, как раньше). */
+export function useHelperMotion(ref: RefObject<HTMLElement>, want: boolean, active: boolean): HelperPhase {
+  const [phase, setPhase] = useState<HelperPhase>(want ? "open" : "closed");
+  const moved = useRef<Moved>([]);
+  const timer = useRef(0);
+
+  // смена желания: вне «Результата» или при «уменьшить движение» — сразу; иначе — первая фаза хода
   useLayoutEffect(() => {
+    const done = want ? "open" : "closed";
+    if (phase === done || (want && phase === "opening") || (!want && (phase === "fading" || phase === "closing"))) return;
     const wrap = ref.current;
-    const prev = was.current;
-    const cls = wrap?.className ?? "";
-    was.current = { open, cls };
-    if (!wrap || prev.open === open || !active || !prev.cls || prefersReducedMotion()) return;
-    const els = FLIP_TARGETS.flatMap((t) => Array.from(wrap.querySelectorAll<HTMLElement>(t.sel)).map((el) => ({ el, t })))
-      .filter(({ el }) => el.getClientRects().length > 0);
-    // фон и тень плит (их ::before / ::after) — край колоды: подрезка от прежней к новой
-    const plates = Array.from(wrap.querySelectorAll<HTMLElement>(".p2-pbg"));
-    // прерванный прежний ход снимается, иначе его transform попал бы в замер
-    for (const { el } of els) running.get(el)?.cancel();
-    for (const el of plates) running.get(el)?.cancel();
-    const last = els.map(({ el }) => layoutRect(el));
-    wrap.className = prev.cls; // прежняя раскладка на этот же кадр — только замер
-    const first = els.map(({ el }) => layoutRect(el));
-    wrap.className = cls;
-    const ms = open ? FLIP_OPEN_MS : FLIP_CLOSE_MS;
-    const opts = { duration: ms, easing: EASE };
-    // все ходы — Web Animations, созданные в одном кадре: у них одно время начала, край колоды (подрезка фона) и всё,
-    // что едет вместе с ним, идут кадр в кадр (в Safari переходы CSS и анимации JS начинались в разных кадрах)
-    els.forEach(({ el, t: target }, i) => {
-      const t = flipFrom(first[i], last[i], !!target.scale);
-      if (!t) return;
-      const a = el.animate([{ transform: t, transformOrigin: "0 0" }, { transform: "none", transformOrigin: "0 0" }], opts);
-      track(el, a);
-    });
-    const bg = (cut: number) => `inset(0px ${cut}px 0px 0px round 40px)`;
-    const sh = (cut: number) => `inset(-64px ${cut}px -64px -64px)`;
-    const [c0, c1] = open ? [0, HELPER_CUT] : [HELPER_CUT, 0];
-    for (const el of plates) {
-      track(el, el.animate({ clipPath: [bg(c0), bg(c1)] }, { ...opts, pseudoElement: "::before" }));
-      el.animate({ clipPath: [sh(c0), sh(c1)] }, { ...opts, pseudoElement: "::after" });
+    window.clearTimeout(timer.current);
+    if (!active || !wrap || prefersReducedMotion() || (phase !== "open" && phase !== "closed")) {
+      // прерванный ход: всё снимается, раскладка — целевая
+      const slots = wrap ? slotsOf(wrap) : [];
+      clearClip(slots);
+      unplace(moved.current);
+      moved.current = [];
+      if (wrap) deckOf(wrap)?.classList.remove("p2-dkm");
+      setPhase(done);
+      return;
     }
-  }, [ref, open, active]);
+    if (want) {
+      // открытие: замер узкой раскладки (класс на этот же кадр, до отрисовки), ход к ней в широкой
+      const els = visible(wrap);
+      const from = els.map(({ el }) => layoutRect(el));
+      wrap.classList.add("hp-nar");
+      const to = els.map(({ el }) => layoutRect(el));
+      wrap.classList.remove("hp-nar");
+      moved.current = els.flatMap(({ el, scale }, i) => {
+        const t = flipFrom(to[i], from[i], scale);
+        return t ? [{ el, t }] : [];
+      });
+      const slots = slotsOf(wrap);
+      setClip(slots, 0, 0);
+      place(moved.current, 0, "none");
+      void wrap.offsetWidth;
+      deckOf(wrap)?.classList.add("p2-dkm");
+      setClip(slots, HELPER_CUT, FLIP_OPEN_MS);
+      place(moved.current, FLIP_OPEN_MS, "t");
+      setPhase("opening");
+      timer.current = window.setTimeout(() => setPhase("open"), slow(FLIP_OPEN_MS));
+    } else {
+      setPhase("fading");
+      timer.current = window.setTimeout(() => setPhase("closing"), slow(CLOSE_FADE_MS));
+    }
+  });
+
+  // кадр смены раскладки: открытие доиграло — узкая раскладка стоит, ходы и подрезка снимаются (всё уже на местах);
+  // закрытие — широкая раскладка поставлена: подрезка до узкой и прежние места, затем ход к широкой
+  const was = useRef(phase);
+  useLayoutEffect(() => {
+    const prev = was.current;
+    was.current = phase;
+    const wrap = ref.current;
+    if (!wrap || prev === phase) return;
+    const slots = slotsOf(wrap);
+    if (prev === "opening" && phase === "open") {
+      clearClip(slots);
+      unplace(moved.current);
+      moved.current = [];
+      deckOf(wrap)?.classList.remove("p2-dkm");
+    }
+    if (prev === "fading" && phase === "closing") {
+      // прежние места (узкая раскладка) — возвратом класса на этот же кадр
+      const els = visible(wrap);
+      const now = els.map(({ el }) => layoutRect(el));
+      wrap.classList.add("hp-nar");
+      const before = els.map(({ el }) => layoutRect(el));
+      wrap.classList.remove("hp-nar");
+      moved.current = els.flatMap(({ el, scale }, i) => {
+        const t = flipFrom(before[i], now[i], scale);
+        return t ? [{ el, t }] : [];
+      });
+      setClip(slots, HELPER_CUT, 0);
+      place(moved.current, 0, "t");
+      void wrap.offsetWidth;
+      deckOf(wrap)?.classList.add("p2-dkm");
+      setClip(slots, 0, FLIP_CLOSE_MS);
+      place(moved.current, FLIP_CLOSE_MS, "none");
+      timer.current = window.setTimeout(() => setPhase("closed"), slow(FLIP_CLOSE_MS));
+    }
+    if (prev === "closing" && phase === "closed") {
+      clearClip(slots);
+      unplace(moved.current);
+      moved.current = [];
+      deckOf(wrap)?.classList.remove("p2-dkm");
+    }
+  }, [phase, ref]);
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return active ? phase : want ? "open" : "closed";
 }

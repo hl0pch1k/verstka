@@ -44,7 +44,7 @@ import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 import { StackDim } from "./StackDim";
 import { STAGE_ATTR, stageScale, stageStyles, useWindowSize } from "./stage";
-import { useHelperFlip } from "./helperFlip";
+import { phaseClasses, useHelperMotion } from "./helperFlip";
 import { helperBeside, useTier } from "./tier";
 
 const ROOT: CSSProperties = {
@@ -156,7 +156,7 @@ export function AppShell() {
   // «Результат» с помощником: раскладка меняется один раз, всё едет transform'ом (helperFlip.ts)
   const wrapRef = useRef<HTMLDivElement>(null);
   const flip = ui.screen === "result" && beside;
-  useHelperFlip(wrapRef, ui.helper && beside, flip);
+  const hpPhase = useHelperMotion(wrapRef, ui.helper && beside, flip);
   const win = useWindowSize();
   const k = stageScale(win.width, win.height);
   const st = stageStyles(k, win.width);
@@ -189,7 +189,7 @@ export function AppShell() {
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
         {/* колода и место помощника: закрыт — колонка 0; открыт — 400 px, зазор 16, колода сужается на всех экранах */}
-        <div ref={wrapRef} className={cls("hp-wrap", ui.helper ? (beside ? "hp-open hp-nar" : "hp-open hp-sheet") : "hp-closed", flip && "hp-flip")}>
+        <div ref={wrapRef} className={cls("hp-wrap", beside ? phaseClasses(hpPhase) : ui.helper ? "hp-open hp-sheet" : "hp-closed", flip && "hp-flip")}>
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
             h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} q3={<PhoneParams pp={params} />}
