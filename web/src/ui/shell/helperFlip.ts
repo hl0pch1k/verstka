@@ -11,33 +11,26 @@ import { layoutRect, type LayoutRect } from "./stage";
 export const FLIP_OPEN_MS = 520;
 export const FLIP_CLOSE_MS = 340;
 const EASE = "cubic-bezier(0.2, 0, 0, 1)";
+/** Место помощника: плита 400 + зазор 16 — на столько слои плит продлены вправо в узкой раскладке (shell.css). */
+const HELPER_CUT = 416;
 
-/** Что переезжает. Подпись и кнопки шапки «Слайд N из M», слайд (с масштабом), лента миниатюр — в обе стороны. Видимое только в одной раскладке едет, пока гаснет: открытие — колонки полного вида; закрытие — шапка и
- *  колонки компактного. Название презентации перекладывается из одного вида в другой: при открытии название компактного
- *  вида выходит из места большого (и его кегля), при закрытии — большое из места компактного (`from`, `font`). Ни один
- *  элемент не вложен в другой, что едет в ту же сторону, — сдвиги не складываются. */
-export interface FlipTarget {
-  sel: string; scale?: boolean;
-  /** Прежнее место — не своё, а этого элемента (название из большого в компактное). */
-  from?: string;
-  /** Ход не на своё новое место, а на новое место этого элемента (гаснущее название — к большому). */
-  to?: string;
-  /** Масштаб — отношение кеглей. */
-  font?: boolean;
-  when?: "open" | "close";
-}
+/** Что переезжает — то, что на холсте (V2, «Play: весь путь») едет вместе с сеткой колоды и результата: подпись и
+ *  кнопки строки «Слайд N из M», таблетка уведомления, слайд (с масштабом), лента миниатюр, колонка полного вида,
+ *  действия и узкая колонка компактного, тень края колоды. Видимое только в одной раскладке едет, пока гаснет или
+ *  проявляется (как на холсте: перекрёстное затухание идёт поверх хода сетки). Ни один элемент не вложен в другой —
+ *  сдвиги не складываются. */
+export interface FlipTarget { sel: string; scale?: boolean }
 export const FLIP_TARGETS: FlipTarget[] = [
   { sel: ".ra-whx > div > p" },
   { sel: ".ra-whx .ra-whr" },
+  { sel: ".ra-whx .ra-note-h" },
   { sel: ".ra-stage", scale: true },
   { sel: ".p2-film" },
-  { sel: ".ra-two > aside", when: "open" },
-  { sel: ".hp-top h1", from: ".ra-two > aside .ra-h1", font: true, when: "open" },
-  { sel: ".hp-top h1", to: ".ra-two > aside .ra-h1", font: true, when: "close" },
-  { sel: ".hp-top .gh-top > div:first-child > div", when: "close" },
-  { sel: ".hp-acts", when: "close" },
-  { sel: ".hp-ncol", when: "close" },
-  { sel: ".hp-pcol", when: "close" },
+  { sel: ".ra-two > aside" },
+  { sel: ".hp-acts" },
+  { sel: ".hp-ncol" },
+  { sel: ".hp-pcol" },
+  { sel: ".hp-shade" },
 ];
 
 /** transform, который ставит элемент из нового места `last` на прежнее `first` (сдвиг левого верхнего угла и, для
@@ -53,6 +46,12 @@ export function flipFrom(first: LayoutRect, last: LayoutRect, scale: boolean | n
 
 /** Идущие ходы: новый снимает прежний у того же элемента. */
 const running = new WeakMap<HTMLElement, Animation>();
+function track(el: HTMLElement, a: Animation) {
+  running.set(el, a);
+  a.onfinish = a.oncancel = () => {
+    if (running.get(el) === a) running.delete(el);
+  };
+}
 
 /** Ход FLIP для обёртки `ref` при смене `open` (помощник открыт), только когда `active` (экран «Результат»). */
 export function useHelperFlip(ref: RefObject<HTMLElement>, open: boolean, active: boolean): void {
@@ -63,33 +62,33 @@ export function useHelperFlip(ref: RefObject<HTMLElement>, open: boolean, active
     const cls = wrap?.className ?? "";
     was.current = { open, cls };
     if (!wrap || prev.open === open || !active || !prev.cls || prefersReducedMotion()) return;
-    const dir = open ? "open" : "close";
-    const one = (sel: string) => Array.from(wrap.querySelectorAll<HTMLElement>(sel)).find((el) => el.getClientRects().length > 0) ?? null;
-    const els = FLIP_TARGETS.filter((t) => !t.when || t.when === dir).flatMap((t) =>
-      Array.from(wrap.querySelectorAll<HTMLElement>(t.sel)).filter((el) => el.getClientRects().length > 0).map((el) => ({ el, t, src: t.from ? one(t.from) : el })))
-      .filter((x): x is { el: HTMLElement; t: FlipTarget; src: HTMLElement } => !!x.src);
+    const els = FLIP_TARGETS.flatMap((t) => Array.from(wrap.querySelectorAll<HTMLElement>(t.sel)).map((el) => ({ el, t })))
+      .filter(({ el }) => el.getClientRects().length > 0);
+    // фон и тень плит (их ::before / ::after) — край колоды: подрезка от прежней к новой
+    const plates = Array.from(wrap.querySelectorAll<HTMLElement>(".p2-pbg"));
     // прерванный прежний ход снимается, иначе его transform попал бы в замер
     for (const { el } of els) running.get(el)?.cancel();
+    for (const el of plates) running.get(el)?.cancel();
     const last = els.map(({ el }) => layoutRect(el));
-    const font = (el: HTMLElement) => parseFloat(getComputedStyle(el).fontSize) || 1;
-    const lastFont = els.map(({ el, t }) => (t.font ? font(el) : 1));
-    // для хода «к чужому месту» (`to`) нужен кегль элемента и в новой раскладке — он тот же
     wrap.className = prev.cls; // прежняя раскладка на этот же кадр — только замер
-    const first = els.map(({ src }) => layoutRect(src));
-    const firstFont = els.map(({ src, t }) => (t.font ? font(src) : 1));
+    const first = els.map(({ el }) => layoutRect(el));
     wrap.className = cls;
     const ms = open ? FLIP_OPEN_MS : FLIP_CLOSE_MS;
-    // ход — анимацией элемента (Web Animations), а не его переходами: прозрачность и прочие переходы CSS остаются свои
+    const opts = { duration: ms, easing: EASE };
+    // все ходы — Web Animations, созданные в одном кадре: у них одно время начала, край колоды (подрезка фона) и всё,
+    // что едет вместе с ним, идут кадр в кадр (в Safari переходы CSS и анимации JS начинались в разных кадрах)
     els.forEach(({ el, t: target }, i) => {
-      const toEl = target.to ? one(target.to) : null;
-      const t = flipFrom(first[i], last[i], target.font && !target.to ? firstFont[i] / lastFont[i] : !!target.scale) ?? "none";
-      const end = toEl ? flipFrom(layoutRect(toEl), last[i], font(toEl) / lastFont[i]) ?? "none" : "none";
-      if (t === "none" && end === "none") return;
-      const a = el.animate([{ transform: t, transformOrigin: "0 0" }, { transform: end, transformOrigin: "0 0" }], { duration: ms, easing: EASE });
-      running.set(el, a);
-      a.onfinish = a.oncancel = () => {
-        if (running.get(el) === a) running.delete(el);
-      };
+      const t = flipFrom(first[i], last[i], !!target.scale);
+      if (!t) return;
+      const a = el.animate([{ transform: t, transformOrigin: "0 0" }, { transform: "none", transformOrigin: "0 0" }], opts);
+      track(el, a);
     });
+    const bg = (cut: number) => `inset(0px ${cut}px 0px 0px round 40px)`;
+    const sh = (cut: number) => `inset(-64px ${cut}px -64px -64px)`;
+    const [c0, c1] = open ? [0, HELPER_CUT] : [HELPER_CUT, 0];
+    for (const el of plates) {
+      track(el, el.animate({ clipPath: [bg(c0), bg(c1)] }, { ...opts, pseudoElement: "::before" }));
+      el.animate({ clipPath: [sh(c0), sh(c1)] }, { ...opts, pseudoElement: "::after" });
+    }
   }, [ref, open, active]);
 }
