@@ -107,37 +107,20 @@ a.p2-ob:hover{color:#0B1220}
 .rm-fx{position:absolute;inset:0;z-index:2;pointer-events:none}
 .rm-dk{position:absolute;inset:0;background:#0B1220;opacity:0;transition:opacity 240ms var(--ease) 200ms}
 .rf-mini .rm-dk{opacity:1;transition-delay:0ms}
-.rf-sk{position:absolute;inset:0;width:100%;height:100%;opacity:0;transition:opacity 240ms var(--ease)}
-.rf-work{position:absolute;left:0;right:0;bottom:0;height:4px;background:#38BDF8;transform-origin:left center;opacity:0;transition:opacity 240ms var(--ease)}
-.rf-mini .rf-sk{opacity:1;transition-delay:160ms}
-.rf-mini .rf-work{opacity:1;animation:p2-work 1100ms var(--ease) infinite}
-.rf-draw{stroke-dasharray:100;stroke-dashoffset:0}
-.rf-mini .rf-draw{animation:rf-draw 1800ms var(--ease) infinite both}
-.rf-mini .rf-d2{animation-delay:120ms}.rf-mini .rf-d3{animation-delay:240ms}.rf-mini .rf-d4{animation-delay:360ms}
-@keyframes rf-draw{0%{stroke-dashoffset:100}55%,100%{stroke-dashoffset:0}}
-.rf-mini .rf-tint{animation:rf-tint 1800ms var(--ease) infinite both}
-@keyframes rf-tint{0%,20%{opacity:0}55%,100%{opacity:1}}
-/* R-fixing на самом превью (FixSketch, rf-live): части превью волной отходят от центра и подсвечиваются, по слайду
-   идёт сканирующая линия; готово (rf-post) — части гаснут над новым превью. Только transform и opacity */
-.rf-pcs{position:absolute;inset:0;overflow:hidden;border-radius:inherit}
-.rf-bd{position:absolute;inset:0;background:#F3F4F1;opacity:0;transition:opacity 360ms var(--ease)}
-.rf-live.rf-mini .rf-bd{opacity:1;transition-duration:0ms}
-.rf-pc{position:absolute;background-repeat:no-repeat;opacity:0;transition:opacity 240ms var(--ease)}
-.rf-pc::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 2px #38BDF8;border-radius:12px;opacity:0}
-.rf-live.rf-mini .rf-pc,.rf-live.rf-post .rf-pc{opacity:1;transition-duration:0ms}
-.rf-live.rf-mini .rf-pc{animation:rf-part 2400ms var(--ease) infinite both}
-.rf-live.rf-mini .rf-pc::after{animation:rf-glow 2400ms var(--ease) infinite both;animation-delay:inherit}
-@keyframes rf-part{0%,12%{transform:none;opacity:1}40%{transform:translate(var(--dx),var(--dy)) scale(.92);opacity:.62}68%,100%{transform:none;opacity:1}}
-@keyframes rf-glow{0%,16%{opacity:0}40%{opacity:1}68%,100%{opacity:0}}
-.rf-live.rf-post .rf-pc{opacity:0;transition:opacity 360ms var(--ease)}
-.rf-scan{position:absolute;left:0;right:0;top:0;height:100%;pointer-events:none;opacity:0;transition:opacity 240ms var(--ease)}
-.rf-scan::before{content:"";position:absolute;left:0;right:0;top:-24px;height:24px;background:linear-gradient(to bottom,rgba(56,189,248,0),rgba(56,189,248,.35));border-bottom:2px solid #38BDF8}
-.rf-live.rf-mini .rf-scan{opacity:1;animation:rf-scan 2400ms linear infinite}
-@keyframes rf-scan{from{transform:translateY(0)}to{transform:translateY(calc(100% + 24px))}}
-.rf-live .rf-work{height:6px}
-@media (prefers-reduced-motion: reduce){
-  .rf-live.rf-mini .rf-pc,.rf-live.rf-mini .rf-pc::after,.rf-live.rf-mini .rf-scan{animation:none !important}
-}
+/* эскиз — девять блоков (FixSketch, fixBlocks.ts): каждый — во весь эскиз, с началом в левом верхнем углу, место и
+   размер — transform (720 мс), гашение — opacity; подсвеченный блок — голубое свечение поверх (rf-gl). Плашки — заливкой,
+   а не контуром: контур сплющился бы масштабом. Свои слои (will-change) — в уменьшенной сцене Safari не пересобирает
+   слои на каждом шаге */
+.rf-bx{position:absolute;inset:0;opacity:0;transition:opacity 240ms var(--ease)}
+.rf-mini .rf-bx{opacity:1;transition-delay:160ms}
+.rf-bk{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:0 0;will-change:transform;transition:transform 720ms var(--ease),opacity 360ms var(--ease)}
+.rf-hd{background:rgba(255,255,255,.4)}
+.rf-ln{background:rgba(255,255,255,.24)}
+.rf-cd{background:rgba(255,255,255,.08)}
+.rf-ac{background:#38BDF8}
+.rf-gl{position:absolute;inset:0;background:#38BDF8;opacity:0;transition:opacity 360ms var(--ease)}
+.rf-lit > .rf-gl{opacity:.55}
+.rf-ac.rf-lit > .rf-gl{background:#FFFFFF;opacity:.4}
 .rf-err{background:#DC2626}
 .rf-warn{background:#B45309}
 .rf-note{background:#5A6272}

@@ -3,7 +3,7 @@
 // сравнения, текста с формулой, списка, шагов, картинки, карточек и финала — boards/V2.dc.html (`bdData().SK`,
 // доска B-sketch) дословно; формы, которых на доске нет (столбцы, полосы, круговая, таблица, числа, цитата, повестка,
 // раздел, код, текст), нарисованы теми же примитивами и слоями. Декоративный: подпись карточки говорит то же словами.
-// Тот же эскиз — сцена результата, пока агент исправляет слайд (R-fixing, `draw`).
+// Пока агент исправляет слайд, сцена результата показывает эскиз из блоков, которые перестраиваются (ui/result/fixBlocks).
 import type { CSSProperties } from "react";
 import type { SketchKind } from "../../lib/stage";
 
@@ -155,22 +155,18 @@ export function shapeOf(kind: SketchKind, formula: boolean): ShapeKey {
   }
 }
 
-/** Эскиз карточки; `style` — задержка появления (эскизы встают по 60 мс друг за другом, V2 `skDelay`). `draw` — эскиз
- *  исправляемого слайда (R-fixing, V2 `rm-fx`): тот же рисунок во всю сцену, линии перерисовываются по кругу, пока агент
- *  работает (`rf-draw`, по 120 мс слой за слоем: заголовок, акцент, контуры, строки), заливка проступает (`rf-tint`). */
-export function SlideSketch({ kind, formula, style, draw }: { kind: SketchKind; formula: boolean; style?: CSSProperties; draw?: boolean }) {
+/** Эскиз карточки; `style` — задержка появления (эскизы встают по 60 мс друг за другом, V2 `skDelay`). */
+export function SlideSketch({ kind, formula, style }: { kind: SketchKind; formula: boolean; style?: CSSProperties }) {
   const s = SK[shapeOf(kind, formula)];
-  const len = draw ? 100 : undefined;
-  const d = (c: string) => (draw ? c : undefined);
   return (
-    <svg className={draw ? "rf-sk" : "bk-sk p2-pop"} viewBox="0 0 160 90" preserveAspectRatio={draw ? "xMidYMid meet" : undefined} aria-hidden="true" style={style}>
-      <path className={d("rf-tint")} d={s.tint} fill="#38BDF8" fillOpacity=".24" />
-      <path className={d("rf-draw rf-d3")} pathLength={len} d={s.ln} fill="none" stroke="rgba(255,255,255,.4)" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-      <path className={d("rf-draw rf-d4")} pathLength={len} d={s.txt} fill="none" stroke="rgba(255,255,255,.24)" strokeWidth="3" strokeLinecap="round" />
-      <path className={d("rf-draw")} pathLength={len} d={s.head} fill="none" stroke="rgba(255,255,255,.4)" strokeWidth="5" strokeLinecap="round" />
-      <path className={d("rf-draw rf-d2")} pathLength={len} d={s.acc} fill="none" stroke="#38BDF8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path className={d("rf-draw rf-d2")} pathLength={len} d={s.bar} fill="none" stroke="#38BDF8" strokeWidth="5" strokeLinecap="round" />
-      <path className={d("rf-tint")} d={s.dot} fill="#38BDF8" />
+    <svg className="bk-sk p2-pop" viewBox="0 0 160 90" aria-hidden="true" style={style}>
+      <path d={s.tint} fill="#38BDF8" fillOpacity=".24" />
+      <path d={s.ln} fill="none" stroke="rgba(255,255,255,.4)" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={s.txt} fill="none" stroke="rgba(255,255,255,.24)" strokeWidth="3" strokeLinecap="round" />
+      <path d={s.head} fill="none" stroke="rgba(255,255,255,.4)" strokeWidth="5" strokeLinecap="round" />
+      <path d={s.acc} fill="none" stroke="#38BDF8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={s.bar} fill="none" stroke="#38BDF8" strokeWidth="5" strokeLinecap="round" />
+      <path d={s.dot} fill="#38BDF8" />
     </svg>
   );
 }

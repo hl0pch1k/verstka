@@ -1,15 +1,16 @@
-// «Агент исправляет слайд» на сцене (R-fixing, V2 `rm-fx`): по «Исправить слайд» сцена сжимается до scale(.5) за
-// 520 мс — миниатюра самого слайда; пока агент работает, превью «разбирается» на части (волна отхода и подсветки,
-// сканирующая линия, рабочая полоса); когда исправление готово и новое превью декодировано, части гаснут поверх нового
-// превью (кросс-фейд из старого), сцена разворачивается обратно (520 мс), и через 560 мс панель показывает
-// «Исправлено». Превью нет — тёмный эскиз формы слайда, как карточка раскадровки (ui/build/SlideSketch). Движение —
-// классы rf-mini / rf-post / rf-pc / rf-scan / rf-work (result.css), только transform и opacity.
-import { useEffect, useReducer, useState, type CSSProperties } from "react";
+// «Агент исправляет слайд» на сцене (R-fixing, V2 `rm-fx`, утверждено владельцем): по «Исправить слайд» сцена
+// сжимается до scale(.5) за 520 мс в двумерный эскиз — тёмная плитка со схемой формы слайда, как карточка раскадровки
+// сборки; пока агент работает, блоки схемы по шагам перестраиваются (fixBlocks.ts) — без полосы загрузки (замечание
+// владельца 18.10); когда исправление готово и новое превью декодировано, эскиз разворачивается обратно в слайд
+// (520 мс), и через 560 мс панель показывает «Исправлено». Движение — классы rf-mini / rm-dk / rf-bx / rf-bk
+// (result.css), только transform и opacity.
+import { useEffect, useReducer, useState } from "react";
 import { decodeImage } from "../../lib/motion";
 import type { SketchKind } from "../../lib/stage";
-import { SlideSketch } from "../build/SlideSketch";
+import { prefersReducedMotion } from "../../lib/motion";
 import { cls } from "../kit/cls";
 import { FX0, fixStageNext, fxPhase, holdLeft, type FxPhase } from "./fixStage";
+import { BLOCKS, blockRadius, blockTransform, layoutAt, litAt, startLayout, STEP_MS, type BlockId } from "./fixBlocks";
 
 export type { FxPhase } from "./fixStage";
 
@@ -66,51 +67,43 @@ export function useFixStage(seq: number | null, done: boolean, src: string | nul
   return phase;
 }
 
-/** Сетка «разборки» превью: 4 × 3 части. */
-const COLS = 4;
-const ROWS = 3;
-/** Куда часть отходит, пока агент работает (px сцены до её сжатия; сжатая — вдвое меньше): от центра наружу. */
-const drift = (c: number, r: number) => ({ dx: ((c + 0.5) / COLS - 0.5) * 28, dy: ((r + 0.5) / ROWS - 0.5) * 24 });
+/** Полоски (заголовок, строки, акцент) — с полукруглыми концами; плашки — со скруглением 5. */
+const BAR: Record<BlockId, boolean> = { head: true, l1: true, l2: true, l3: true, l4: true, c1: false, c2: false, c3: false, acc: false };
 
-/** Слой исправления поверх сцены. Есть превью слайда — анимация на нём самом: превью разбирается на части, они волной
- *  (по диагонали) отходят от центра, подсвечиваются и встают на место, по слайду проходит сканирующая линия; когда
- *  исправление готово, части гаснут, и под ними уже проявилось новое превью (Shots) — кросс-фейд из старого. Превью
- *  берётся то, что было при запуске (`src` на первом кадре): новое приходит под слой, а не в его части. Превью нет —
- *  прежний эскиз формы слайда (SlideSketch). Только transform и opacity; «уменьшить движение» — части стоят, линия
- *  не бежит (result.css). */
-export function FixSketch({ phase, kind, formula, src }: { phase: FxPhase; kind: SketchKind; formula: boolean; src?: string | null }) {
-  const [shot] = useState(src ?? null);
-  if (!shot) {
-    return (
-      <span className={cls("rm-fx", phase === "mini" && "rf-mini")} aria-hidden="true">
-        <span className="rm-dk" />
-        <SlideSketch kind={kind} formula={formula} draw />
-        <span className="rf-work" />
-      </span>
-    );
-  }
-  const parts = [];
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const { dx, dy } = drift(c, r);
-      parts.push(
-        <span key={`${r}-${c}`} className="rf-pc"
-          style={{
-            left: `${(c * 100) / COLS}%`, top: `${(r * 100) / ROWS}%`, width: `${100 / COLS}%`, height: `${100 / ROWS}%`,
-            backgroundImage: `url("${shot}")`, backgroundSize: `${COLS * 100}% ${ROWS * 100}%`,
-            backgroundPosition: `${(c * 100) / (COLS - 1)}% ${(r * 100) / (ROWS - 1)}%`,
-            "--dx": `${dx.toFixed(1)}px`, "--dy": `${dy.toFixed(1)}px`, animationDelay: `${(c + r) * 110}ms`,
-          } as CSSProperties} />,
-      );
-    }
-  }
+/** Цвет блока: заголовок, строки, плашки, акцент (result.css). */
+const TONE: Record<BlockId, string> = { head: "rf-hd", l1: "rf-ln", l2: "rf-ln", l3: "rf-ln", l4: "rf-ln", c1: "rf-cd", c2: "rf-cd", c3: "rf-cd", acc: "rf-ac" };
+
+/** Шаг перестройки эскиза: идёт, пока сцена сжата (`on`); «уменьшить движение» — стоит первая раскладка. */
+function useSketchStep(on: boolean): number {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    if (!on || prefersReducedMotion()) return;
+    const t = window.setInterval(() => setStep((s) => s + 1), STEP_MS);
+    return () => window.clearInterval(t);
+  }, [on]);
+  return step;
+}
+
+/** Слой эскиза поверх сцены: тёмная подложка закрывает превью, поверх — эскиз формы слайда из девяти блоков, которые по
+ *  шагам работы агента перестраиваются (fixBlocks.ts): плашки отходят на новые места и меняют форму, строки
+ *  переукладываются, один блок на шаге подсвечивается. Раскладки идут последовательностью (с формы самого слайда), не
+ *  по одному кругу. Только transform и opacity. */
+export function FixSketch({ phase, kind }: { phase: FxPhase; kind: SketchKind; formula?: boolean }) {
+  const start = startLayout(kind);
+  const step = useSketchStep(phase === "mini");
+  const l = layoutAt(start, step);
+  const lit = phase === "mini" && step > 0 ? litAt(start, step) : null;
   return (
-    <span className={cls("rm-fx rf-live", phase === "mini" && "rf-mini", phase === "post" && "rf-post")} aria-hidden="true">
-      {/* подложка под частями: в щелях между отошедшими частями — ровный фон, а не то же превью вторым слоем */}
-      <span className="rf-bd" />
-      <span className="rf-pcs">{parts}</span>
-      <span className="rf-scan" />
-      <span className="rf-work" />
+    <span className={cls("rm-fx", phase === "mini" && "rf-mini")} aria-hidden="true">
+      <span className="rm-dk" />
+      <span className="rf-bx">
+        {BLOCKS.map((id) => (
+          <span key={id} className={cls("rf-bk", TONE[id], lit === id && "rf-lit")}
+            style={{ transform: blockTransform(l[id]), opacity: l[id].o, borderRadius: blockRadius(l[id], BAR[id]) }}>
+            <span className="rf-gl" style={{ borderRadius: "inherit" }} />
+          </span>
+        ))}
+      </span>
     </span>
   );
 }
