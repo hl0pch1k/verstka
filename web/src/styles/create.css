@@ -196,19 +196,19 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-swn > .cp-nm{flex:none;white-space:nowrap}
 .pp-swh{display:block;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ── Колода, суженная помощником, — тем же ходом, что «Результат» (V2 версии 100, блок «Колода, суженная помощником, на
-   «Создать», «Сборке» и под «Подробнее»…»; правила V2 дословно, кроме отмеченного «сайт:»). Содержимое плит идёт за
-   шириной колоды каждый кадр (как сетка «Результата»): всё, что в узкой раскладке меняется, выражено тем, что
-   интерполируется на той же кривой (var(--ease)) и за то же время — открытие 520 мс, закрытие 340:
-     · дорожки сеток с тем же числом дорожек (лишняя сжимается до нуля), отступы, ширина подписи, которая уходит;
-     · transform: названия шагов 32 → 24 px (scale .75 от левого края; место в ряду держит невидимая мерка, её кегль
-       идёт той же кривой);
-     · прозрачность на месте — только у того, что есть в одной раскладке (hp-wo — только в широкой, hp-no — только в
-       узкой), по таймингу полного и компактного вида «Результата»: открытие — широкое гаснет 240 мс с 0, узкое
-       проявляется 240 мс с 120; закрытие — узкое гаснет 160 мс, широкое проявляется 160 мс через 80.
-   Ничего, что есть в обеих раскладках, не гаснет и не перескакивает между рядами; многострочный текст не переносится
-   заново посреди хода (стопки hp-tx ниже). Что зависит от ширины окна (дорожки короткого ряда, тесная раскладка при
-   1280, на сколько у́же клетки стопок, короткие подписи) — ui/create/morph.ts: обе раскладки сразу, переменными CSS. */
+/* ── Колода, суженная помощником (V2 версии 100, блок «Колода, суженная помощником…»), — по-новому, только transform и
+   opacity (ui/shell/helperMotion.ts, helper.css). Узкая раскладка (`hp-nar`: дорожки сеток, ширины, кегли) встаёт разом —
+   в конце открытия и в начале закрытия, без переходов. На глазах идёт только видимое и по классу `hp-v` (помощник открыт
+   для глаза — с кадра нажатия), по таймингу полного и компактного вида «Результата»:
+     · названия шагов 32 → 24 px — scale .75 от левого края (520 / 340 мс); место в ряду держит невидимая мерка, её кегль
+       меняется со сменой раскладки;
+     · то, что есть только в одной раскладке (hp-wo — только в широкой, hp-no — только в узкой), гаснет и проявляется на
+       месте: открытие — широкое гаснет 240 мс с 0, узкое проявляется 240 мс с 120; закрытие — узкое гаснет 160 мс,
+       широкое проявляется 160 мс через 80;
+     · то, что есть в обеих раскладках и стоит в них по-разному, едет к месту другой раскладки transform'ом (`data-hpm`,
+       helperMotion), коробки, которые у́же, — «растяжкой» (`data-hpk`: левый край, середина scaleX, правый край едет).
+   Что зависит от ширины окна (дорожки короткого ряда, тесная раскладка при 1280, на сколько у́же клетки стопок, короткие
+   подписи) — ui/create/morph.ts: обе раскладки сразу, переменными CSS. */
 .p2-fxbox{position:absolute;left:0;top:0;right:0;bottom:0;box-sizing:border-box;padding:40px 48px}
 .p2-hx{position:relative;display:flex;align-items:center;gap:24px;flex:1 1 0%;min-width:0;height:64px}
 .p2-ttl-box{position:relative;display:block;height:40px}
@@ -216,42 +216,38 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .p2-ttl-v{position:absolute;left:0;top:0;transform-origin:left center}
 .p2-root .hp-sw{display:grid}
 .p2-root .hp-sw > *{grid-area:1 / 1}
-/* сайт: стопки в потоке флекса — во всю свою клетку и при ≤ 900 px (там узкой копии нет, поле — одно) */
+/* сайт: стопки в потоке флекса — во всю свою клетку */
 .hp-txf{flex:1 1 0%;min-width:0}
 
-  .p2-ttl-sz{transition:font-size 340ms var(--ease)}
-  .p2-ttl-v{transition:transform 340ms var(--ease)}
-  .hp-nar .p2-ttl-sz{font-size:24px;transition-duration:520ms}
-  .hp-nar .p2-ttl-v{transform:scale(.75);transition-duration:520ms}
-  .hp-wo{transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-no{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
-  .hp-nar .hp-no{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  .p2-ttl-v{transition:transform calc(340ms * var(--hp-k, 1)) var(--ease)}
+  .hp-nar .p2-ttl-sz{font-size:24px}
+  .hp-v .p2-ttl-v{transform:scale(.75);transition-duration:calc(520ms * var(--hp-k, 1))}
+  .hp-wo{transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
+  .hp-v .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+  .hp-no{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
+  .hp-v2 .hp-no{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(120ms * var(--hp-k, 1)),visibility 0s linear 0s}
   /* обложка, вернувшаяся в ряд ленты при открытом помощнике (выбрали другую — hp-wo снялся): проявляется как hp-no —
-     240 мс с 120, а не вспыхивает; пока hp-wo есть, ход гашения остаётся его (240 мс с 0) */
-  .hp-nar .tp-cell > .tt-tile:not(.hp-wo){transition:opacity 240ms var(--ease) 120ms}
+     240 мс с 120, а не вспыхивает */
+  .hp-v2 .tp-cell > .tt-tile:not(.hp-wo){transition:opacity 240ms var(--ease) 120ms}
 
-  /* 01 · лента — ряды по четыре дорожки; межколонник — поле справа у каждой плитки (дорожка с нулём сжимается вместе с
-     ним), лишнее поле последней колонки уходит за край отрицательным отступом. Разбор: вторая дорожка сжимается до нуля.
-     сайт: ход сетки — вместе с проявлением и уходом тела шага (p2-on / p2-off), а не вместо него */
+  /* 01 · лента — ряды по четыре дорожки; межколонник — поле справа у каждой плитки (дорожка с нулём уходит вместе с
+     ним), лишнее поле последней колонки уходит за край отрицательным отступом. Разбор: вторая дорожка — ноль */
   #p2-b1{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) !important;column-gap:0 !important;margin-right:-16px !important}
-  #p2-b1.p2-on{transition:grid-template-columns 340ms var(--ease),opacity 360ms var(--ease) 120ms}
-  #p2-b1.p2-off{transition:grid-template-columns 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-nar #p2-b1.p2-on{transition:grid-template-columns 520ms var(--ease),opacity 360ms var(--ease) 120ms}
-  .hp-nar #p2-b1.p2-off{transition:grid-template-columns 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  #p2-b1.p2-on{transition:opacity 360ms var(--ease) 120ms}
+  #p2-b1.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
   #p2-b1 > *{margin-right:16px}
-  #p2-b1 > .tp-row{grid-column:1 / -1;margin-right:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);transition:grid-template-columns 340ms var(--ease)}
-  .hp-nar #p2-b1 > .tp-row{grid-template-columns:var(--tn);transition-duration:520ms}
+  #p2-b1 > .tp-row{grid-column:1 / -1;margin-right:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}
+  .hp-nar #p2-b1 > .tp-row{grid-template-columns:var(--tn)}
   .tp-row > .tp-cell{min-width:0;margin-right:16px}
   .tp-cut{min-width:0;overflow:clip;overflow-clip-margin:8px}
-  :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{transition:object-position 340ms var(--ease)}
-  .hp-nar :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{object-position:0 50%;transition-duration:520ms}
+  .hp-nar :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{object-position:0 50%}
   .tt-note .hp-sw{display:grid}
 
-  /* 02 · «.txt или .md» сжимается и гаснет; «Это готовый текст…» — в ряду шапки, сжимается слева и меняет формулировку на
-     месте; свёрнутый шаг — у правого края ряда; подсказка под полем меняет формулировку на месте */
-  .tx-fmtw{display:block;max-width:120px;overflow:hidden;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .tx-fmtw{max-width:0;margin-left:-12px;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* 02 · «.txt или .md» гаснет; «Это готовый текст…» — в ряду шапки, меняет формулировку на месте; свёрнутый шаг — у
+     правого края ряда; подсказка под полем меняет формулировку на месте */
+  .tx-fmtw{display:block;max-width:120px;overflow:hidden;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
+  .hp-nar .tx-fmtw{max-width:0;margin-left:-12px}
+  .hp-v .tx-fmtw{opacity:0;visibility:hidden;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
   .p2-hx .tx-top{position:static;flex:0 1 auto;justify-content:flex-end;overflow:hidden}
   .tx-tops{min-width:0;justify-items:end}
   .tx-tops > span{display:flex;align-items:center;gap:8px;white-space:nowrap}
@@ -259,140 +255,110 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .p2-hx .tx-closed{position:absolute;right:0;top:0;height:64px;max-width:100%}
   .tx-hsw{min-width:0}
   .tx-hsw > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tx-fixw{display:block;max-width:400px;overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .tx-fixw{max-width:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  /* «Улучшить готовую»: заметка в узкой колоде выше — её коробка растёт той же кривой, поле уходит под неё ниже и вниз
-     растёт меньше (собственный translate: ход «Улучшить готовую» — свой transform, 520 мс).
-     сайт: высоты заметки в обеих раскладках — замер её двух копий (TextBody: --tx-nhw / --tx-nhn, при 1440 — 72 и 112,
-     как в V2), сдвиг и рост поля — от них (textRules `improveShift`: --tx-dsh, --tx-dgr, --tx-grn) */
+  .tx-fixw{display:block;max-width:400px;overflow:hidden}
+  .hp-nar .tx-fixw{max-width:0}
+  /* «Улучшить готовую»: заметка в узкой колоде выше, поле уходит под неё ниже (высоты — замер двух копий её текста:
+     --tx-nhw / --tx-nhn; сдвиг и рост поля — textRules `improveShift`) */
   .tx-note{height:var(--tx-nhw,auto)}
   .hp-nar .tx-note{height:var(--tx-nhn,auto)}
-  .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms,height 340ms var(--ease)}
-  .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms,height 340ms var(--ease)}
-  .hp-nar .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms,height 520ms var(--ease)}
-  .hp-nar .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms,height 520ms var(--ease)}
-  .tx-fw{transition:transform 520ms var(--ease),translate 340ms var(--ease)}
-  .hp-nar .tx-fw{transition:transform 520ms var(--ease),translate 520ms var(--ease)}
+  .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms}
+  .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .tx-fw{transition:transform 520ms var(--ease)}
   .hp-nar .tx-fw-imp{translate:0 var(--tx-dsh,40px)}
-  .tx-ring::before,.tx-ring>.p2-wrap{transition:transform 520ms var(--ease),translate 340ms var(--ease)}
-  .hp-nar .tx-ring::before,.hp-nar .tx-ring>.p2-wrap{transition:transform 520ms var(--ease),translate 520ms var(--ease)}
+  .tx-ring::before,.tx-ring>.p2-wrap{transition:transform 520ms var(--ease)}
   .hp-nar .tx-fw-imp .tx-ring::before,.hp-nar .tx-fw-imp .tx-ring>.p2-wrap{translate:0 var(--tx-dgr,-16px)}
-  .tx-fw-imp .tx-ring::after{transition:opacity 240ms var(--ease),bottom 340ms var(--ease)}
-  .hp-nar .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-grn,0px) * -1);transition:opacity 240ms var(--ease),bottom 520ms var(--ease)}
+  .tx-fw-imp .tx-ring::after{transition:opacity 240ms var(--ease)}
+  .hp-nar .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-grn,0px) * -1)}
 
-  /* 03 · сводка уступает место «Создать презентацию» (сжимается слева и гаснет); короткий ряд — те же дорожки: степпер
-     216 → 200, переключатели 264 → 0 (гаснут на месте), лишний межколонник уходит за край; у вариантов описание
-     и галочка справа гаснут, галочка проявляется на месте описания. «Все параметры»: миниатюры вариантов сжимаются и
-     гаснут; коробки переключателей растут той же кривой под текст.
-     сайт: межколонники сводки уходят вместе с ней (в тесной колоде «Создать» встаёт к названию шага); дорожки короткого
-     ряда — переменными (morph.ts `paramsRow`: при 1280 переключателей в ряду нет, а в узкой ряд тесный — ниже),
-     межколонник — поле справа у клетки, как у ленты; ход сетки — вместе с проявлением и уходом тела шага */
-  .p2-hx .pp-sum{display:flex;justify-content:flex-end;flex:0 1 auto;min-width:0;overflow:hidden;transition:margin 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .p2-hx .pp-sum{margin:0 -24px;transition:margin 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .pp-ctat{max-width:160px;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
-  .hp-nar .pp-ctag{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  /* 03 · сводка уступает место «Создать презентацию» (гаснет, hp-wo); короткий ряд — те же дорожки: степпер 216 → 200,
+     переключатели 264 → 0 (гаснут на месте), лишний межколонник уходит за край; у вариантов описание и галочка справа
+     гаснут, галочка проявляется на месте описания. Дорожки короткого ряда — переменными (morph.ts `paramsRow`) */
+  .p2-hx .pp-sum{display:flex;justify-content:flex-end;flex:0 1 auto;min-width:0;overflow:hidden}
+  .hp-nar .p2-hx .pp-sum{margin:0 -24px}
+  .pp-ctat{max-width:160px;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1))}
+  .hp-nar .pp-ctag{max-width:0}
+  .hp-v .pp-ctag{opacity:0;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease)}
   #p2-b3{grid-template-columns:var(--pp-tw) !important;column-gap:0 !important;margin-right:-16px !important}
-  #p2-b3.p2-on{transition:grid-template-columns 340ms var(--ease),opacity 360ms var(--ease) 120ms}
-  #p2-b3.p2-off{transition:grid-template-columns 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  #p2-b3.p2-on{transition:opacity 360ms var(--ease) 120ms}
+  #p2-b3.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
   .hp-nar #p2-b3{grid-template-columns:var(--pp-tn) !important}
-  .hp-nar #p2-b3.p2-on{transition:grid-template-columns 520ms var(--ease),opacity 360ms var(--ease) 120ms}
-  .hp-nar #p2-b3.p2-off{transition:grid-template-columns 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   #p2-b3 > *{min-width:0;margin-right:16px}
-  /* сайт: тесный ряд (окно около 1280, узкая колода, `pp-tgt`; степпер остаётся на плите — решение владельца). Всё одним
-     ходом, той же кривой и за то же время, что колода: дорожки (степпер 216 → 144, карточки сужаются), межколонник
-     16 → 12, у степпера поля 16 → 4, кнопки 40 → 32 (scale), число — scale .875, «задано в тексте» меняет формулировку на
-     месте («в тексте»); у карточек поля по бокам 16 → 8, название — scale .875 (его место — одной ширины в обеих
-     раскладках: многоточие не меняется), галочка внизу — на поле 8. Ничего не разворачивается и не обгоняет край колоды */
-  #p2-b3.pp-tgt.p2-on{transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease),opacity 360ms var(--ease) 120ms}
-  #p2-b3.pp-tgt.p2-off{transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* сайт: тесный ряд (окно около 1280, узкая колода, `pp-tgt`; степпер остаётся на плите — решение владельца):
+     межколонник 16 → 12, у степпера поля 16 → 4, кнопки 40 → 32 (scale), число — scale .875; у карточек поля по бокам
+     16 → 8, название — scale .875, галочка внизу — на поле 8 */
   .hp-nar #p2-b3.pp-tgt{margin-right:-12px !important}
-  .hp-nar #p2-b3.pp-tgt.p2-on{transition:grid-template-columns 520ms var(--ease),margin-right 520ms var(--ease),opacity 360ms var(--ease) 120ms}
-  .hp-nar #p2-b3.pp-tgt.p2-off{transition:grid-template-columns 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  #p2-b3.pp-tgt > *{transition:margin-right 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt > *{margin-right:12px;transition-duration:520ms}
-  #p2-b3.pp-tgt .pp-stc > .p2-box{transition:opacity 360ms var(--ease),transform 360ms var(--ease),padding 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt .pp-stc > .p2-box{padding:0 4px !important;transition:opacity 360ms var(--ease),transform 360ms var(--ease),padding 520ms var(--ease)}
-  #p2-b3.pp-tgt .pp-stc .p2-rb{transition:transform 160ms var(--ease),opacity 160ms var(--ease),scale 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt .pp-stc .p2-rb{scale:.8;transition:transform 160ms var(--ease),opacity 160ms var(--ease),scale 520ms var(--ease)}
-  #p2-b3.pp-tgt .pp-stn{transition:scale 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt .pp-stn{scale:.875;transition-duration:520ms}
-  .pp-stl{justify-items:center;max-width:100px;overflow:clip;transition:max-width 340ms var(--ease)}
-  .hp-nar .pp-stl{max-width:54px;transition-duration:520ms}
-  #p2-b3.pp-tgt .pp-vc{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt .pp-vc{padding:16px 8px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
-  #p2-b3.pp-tgt .pp-vtt{flex:none;max-width:var(--pp-tm);transform-origin:0 50%;transition:scale 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt .pp-vtt{scale:.875;transition-duration:520ms}
-  #p2-b3.pp-tgt .pp-vb2{transition:opacity 160ms var(--ease),visibility 0s linear 160ms,translate 340ms var(--ease)}
-  .hp-nar #p2-b3.pp-tgt .pp-vb2{translate:-8px 0;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s,translate 520ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt > *{margin-right:12px}
+  #p2-b3.pp-tgt .pp-stc > .p2-box{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-stc > .p2-box{padding:0 4px !important}
+  #p2-b3.pp-tgt .pp-stc .p2-rb{transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-stc .p2-rb{scale:.8}
+  .hp-nar #p2-b3.pp-tgt .pp-stn{scale:.875}
+  .pp-stl{justify-items:center;max-width:100px;overflow:clip}
+  .hp-nar .pp-stl{max-width:54px}
+  #p2-b3.pp-tgt .pp-vc{transition:transform 160ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-vc{padding:16px 8px}
+  #p2-b3.pp-tgt .pp-vtt{flex:none;max-width:var(--pp-tm);transform-origin:0 50%}
+  .hp-nar #p2-b3.pp-tgt .pp-vtt{scale:.875}
+  .hp-nar #p2-b3.pp-tgt .pp-vb2{translate:-8px 0}
   .pp-swc{min-width:0;overflow:clip}
-  /* подписи переключателей и описания вариантов не переносятся заново, пока гаснут: подпись — в одну строку и уходит под край
-     (переключатель остаётся у правого края); строка описания держит ширину покоя (вариант у́же в узкой на --pp-vd — та же
-     кривая --hpp), лишнее обрезается краем описания */
+  /* подписи переключателей и описания вариантов не переносятся заново, пока гаснут: подпись — в одну строку; строка
+     описания держит ширину широкой раскладки (вариант у́же в узкой на --pp-vd), лишнее обрезается краем описания */
   .pp-swc [id^="p2-sw"]{min-width:0;white-space:nowrap;overflow:clip;overflow-clip-margin:4px}
   #p2-b3 .pp-vd{display:block;min-width:0;overflow:clip;overflow-clip-margin:8px}
-  #p2-b3 .pp-vdi{display:block;--hpp:0;width:calc(100% + var(--pp-vd,40px) * var(--hpp));transition:--hpp 340ms var(--ease)}
-  .hp-nar #p2-b3 .pp-vdi{--hpp:1;transition-duration:520ms}
+  #p2-b3 .pp-vdi{display:block;--hpp:0;width:calc(100% + var(--pp-vd,40px) * var(--hpp))}
+  .hp-nar #p2-b3 .pp-vdi{--hpp:1}
   #p2-b3 .p2-vc{position:relative}
-  .pp-vb1{overflow:hidden;transition:width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .pp-vb1{width:0;margin-left:-8px;transition:width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .pp-vb1{overflow:hidden}
+  .hp-nar .pp-vb1{width:0;margin-left:-8px}
   .pp-vb2{position:absolute;left:16px;bottom:16px}
-  .pp-th{overflow:hidden;transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .pp-th{width:0 !important;margin-right:-16px;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .pp-th{overflow:hidden}
+  .hp-nar .pp-th{width:0 !important;margin-right:-16px}
   /* сайт: высоты коробок переключателей в обеих раскладках — замер их копий (ParamsAll: --pp-swhw / --pp-swh) */
-  #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swhw,auto);transition:height 340ms var(--ease)}
-  .hp-nar #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swh,164px) !important;transition-duration:520ms}
-  /* сайт: тесная раскладка «Все параметры» (окно около 1280, morph.ts `moreGrid`): степпер слайдов в первом ряду — по
-     содержимому, поля плотнее; переключатели — строками в обеих раскладках (ниже): строка сужается вместе с колодой,
-     подсказка в строке сжимается и гаснет на месте */
+  #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swhw,auto)}
+  .hp-nar #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swh,164px) !important}
+  /* сайт: тесная раскладка «Все параметры» (окно около 1280, morph.ts `moreGrid`) */
   .pp-r1{display:grid;gap:16px}
-  .pp-tight .pp-r1{grid-template-columns:var(--pp-r1w) !important;transition:grid-template-columns 340ms var(--ease)}
-  .hp-nar .pp-tight .pp-r1{grid-template-columns:var(--pp-r1n) !important;transition-duration:520ms}
-  .pp-tight .pp-r1 .cp-fbox{transition:padding 340ms var(--ease)}
-  .pp-tight .pp-r1 .cp-chev{transition:right 340ms var(--ease)}
-  .pp-tight .pp-r1 .pp-sl{transition:gap 340ms var(--ease)}
-  .hp-nar .pp-tight .pp-r1 .cp-fbox{padding:0 16px;transition-duration:520ms}
+  .pp-tight .pp-r1{grid-template-columns:var(--pp-r1w) !important}
+  .hp-nar .pp-tight .pp-r1{grid-template-columns:var(--pp-r1n) !important}
+  .hp-nar .pp-tight .pp-r1 .cp-fbox{padding:0 16px}
   .hp-nar .pp-tight .pp-r1 .cp-fbox.pp-slb{padding:0 12px}
-  .hp-nar .pp-tight .pp-r1 .cp-chev{right:16px;transition-duration:520ms}
-  .hp-nar .pp-tight .pp-r1 .pp-sl{gap:8px !important;transition-duration:520ms}
-  .pp-tight .cp-vc{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
-  .hp-nar .pp-tight .cp-vc{padding:16px 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
-  /* сайт: то, что гаснет на месте вместе со своей обёрткой (hp-wo — только в широкой, hp-no — только в узкой), и с
-     собственным проявлением p2-on (оно ставит visibility:visible) не остаётся видимым для чтения с экрана */
+  .hp-nar .pp-tight .pp-r1 .cp-chev{right:16px}
+  .hp-nar .pp-tight .pp-r1 .pp-sl{gap:8px !important}
+  .pp-tight .cp-vc{transition:transform 160ms var(--ease)}
+  .hp-nar .pp-tight .cp-vc{padding:16px 12px}
+  /* сайт: то, что гаснет на месте вместе со своей обёрткой (hp-wo / hp-no), и с собственным проявлением p2-on (оно
+     ставит visibility:visible) не остаётся видимым для чтения с экрана */
   :is(.hp-wo,.hp-no) .p2-on{visibility:inherit}
+  /* скрытое (шаг или слой не на экране, p2-off) меняет вид без перехода: ход помощника не заводит анимаций на том, чего
+     не видно (в Safari каждая — свой слой в первом кадре хода) */
+  .p2-off :is(.hp-wo,.hp-no,.hp-txw,.hp-txn,.tt-tile,.p2-ttl-v){transition:none !important}
 
-/* Многострочный текст не переносится заново посреди хода (как на «Результате»: его текстовые блоки не меняют ширину —
-   колонка и компактный вид подменяются на месте). Блок, ширина которого в узкой раскладке другая, — «стопка» (hp-tx):
-   в одной клетке широкая копия (hp-txw, сам блок) и узкая (hp-txn, клон, свёрстанный на узкую ширину). Ширина каждой
-   копии на всём ходу постоянна: клетка сужается вместе с колодой по той же кривой, а --hpp (0 → 1, тот же ход, что сетка
-   hp-wrap) прибавляет к ней ровно то, на что она уже сузилась (--hpd — на сколько клетка у́же в узкой раскладке):
-   широкая копия = клетка + --hpd·p (в начале — вся клетка), узкая = клетка − --hpd·(1 − p) (в конце — вся клетка).
-   Подмена: открытие — широкая гаснет 160 мс с 0, узкая проявляется 240 мс с 120 (половинки почти не двоятся);
-   закрытие — узкая гаснет 160 мс, широкая проявляется 160 мс через 80. Высоту меняет только копия, которая выше в своей
-   раскладке (узкая; у шире узкой — hp-txr, широкая): auto ↔ 0 той же кривой (520 / 340 мс), вторая всё время во весь
-   рост. Клетка = большей из двух, поэтому её высота идёт монотонно; уходящая копия не обрезается. Растущая копия обрезана
-   по своей высоте точно (clip-path, по вертикали 2 px вместо поля 8 px) — её следующая строка не заходит на то, что ниже
-   клетки. Текст внутри не переносится ни в одном кадре. Неактивная копия — aria-hidden (и без фокуса). */
-/* --hpp не наследуется и идёт на самих копиях: ход наследуемого свойства на hp-wrap пересчитывал бы стиль всей колоды
-   каждый кадр; переходы стартуют тем же переключением класса — кадр в кадр с сеткой hp-wrap */
+/* Многострочный текст не переносится заново посреди хода: блок, ширина которого в узкой раскладке другая, — «стопка»
+   (hp-tx): в одной клетке широкая копия (hp-txw, сам блок) и узкая (hp-txn, клон, свёрстанный на узкую ширину), каждая
+   своей постоянной ширины в обеих раскладках (--hpd — на сколько клетка у́же в узкой; --hpp — 0 в широкой, 1 в узкой).
+   Подмена — прозрачностью по `hp-v`: открытие — широкая гаснет 160 мс, узкая проявляется 240 мс с 120; закрытие — узкая
+   гаснет 160 мс, широкая проявляется 160 мс через 80. Высоту держит копия своей раскладки. Неактивная копия —
+   aria-hidden (и без фокуса). */
 @property --hpp{syntax:'<number>';inherits:false;initial-value:0}
-/* ширина мягкого края растущей копии (ниже) — тоже не наследуется: иначе каждый кадр пересчитывался бы стиль всего её текста */
-@property --hpf{syntax:'<length>';inherits:false;initial-value:0px}
 
-  .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
+  .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px}
   .hp-tx.hp-txf{flex:1 1 0%}
   span.hp-tx{display:grid}
   .hp-tx > .hp-txw,.hp-tx > .hp-txn{grid-area:1 / 1;min-width:0;overflow:clip;overflow-clip-margin:8px;box-sizing:border-box}
-  .hp-tx > .hp-txw{--hpp:0;width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:--hpp 340ms var(--ease),height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .hp-tx > .hp-txw{--hpp:1;opacity:0;visibility:hidden;pointer-events:none;transition:--hpp 520ms var(--ease),height 520ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
-  .hp-tx > .hp-txn{--hpp:0;width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;overflow:visible;clip-path:inset(-2px -8px);opacity:0;visibility:hidden;pointer-events:none;transition:--hpp 340ms var(--ease),height 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
-  /* нижний край растущей (сжимающейся) копии посреди хода — мягкий: последние 16 px гаснут (маска только пока идёт ход,
-     в покое её нет; ширина края → 0 к обоим концам хода, без щелчка) — строки проявляются, а не режутся */
-  .hp-tx > .hp-txn{--hpf:calc(16px * min(1, 4 * var(--hpp), 4 - 4 * var(--hpp)));mask-image:if(style(--hpp: 0): none; style(--hpp: 1): none; else: linear-gradient(#000 calc(100% - var(--hpf)), transparent))}
+  .hp-tx > .hp-txw{--hpp:0;width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
+  .hp-nar .hp-tx > .hp-txw{--hpp:1}
+  .hp-v .hp-tx > .hp-txw{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
+  .hp-tx > .hp-txn{--hpp:0;width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;overflow:visible;clip-path:inset(-2px -8px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
   /* узкая копия шире и ниже (подсказка варианта в «Все параметры» при 1440: миниатюра уходит) — роли наоборот */
-  .hp-tx.hp-txr > .hp-txn{height:auto;overflow:clip;clip-path:none;mask-image:none}
-  .hp-tx.hp-txr > .hp-txw{overflow:visible;clip-path:inset(-2px -8px);--hpf:calc(16px * min(1, 4 * var(--hpp), 4 - 4 * var(--hpp)));mask-image:if(style(--hpp: 0): none; style(--hpp: 1): none; else: linear-gradient(#000 calc(100% - var(--hpf)), transparent))}
+  .hp-tx.hp-txr > .hp-txn{height:auto;overflow:clip;clip-path:none}
+  .hp-tx.hp-txr > .hp-txw{overflow:visible;clip-path:inset(-2px -8px)}
   .hp-nar .hp-tx.hp-txr > .hp-txw{height:0}
-  .hp-nar .hp-tx > .hp-txn{--hpp:1;height:auto;opacity:1;visibility:inherit;pointer-events:auto;transition:--hpp 520ms var(--ease),height 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  .hp-nar .hp-tx > .hp-txn{--hpp:1;height:auto}
+  /* во время хода в широкой раскладке узкая копия стоит поверх клетки (её строк может быть больше — лишнее обрезает
+     клетка), так она видна, пока проявляется; раскладка клетки при этом не меняется */
+  .hp-run:not(.hp-nar) .hp-tx:not(.hp-txa){position:relative}
+  .hp-run:not(.hp-nar) .hp-tx:not(.hp-txa):not(.hp-txr) > .hp-txn{position:absolute;left:0;top:0;height:auto;clip-path:none}
+  .hp-v2 .hp-tx > .hp-txn{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(120ms * var(--hp-k, 1)),visibility 0s linear 0s}
   /* поле «О чём презентация»: обе копии во всю высоту поля, меняется только прозрачность (сайт: мягкий край прокрутки
      p2-fade — у обеих копий) */
   .hp-tx.hp-txa{align-items:stretch;flex:1 1 0%;min-height:0;overflow:clip}
@@ -405,6 +371,14 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   [data-tx="c-swt"]{--hpd:138.667px}
   [data-tx="c-ta"]{--hpd:416px}
   [data-tx="c-vhint"]{--hpd:-33.333px}
+
+/* «Сменить» во время хода помощника едет быстрее названия шаблона (край ряда — на 416, название — на сколько у́же ряд):
+   за его правым краем — подложка цвета плиты (тени без размытия, сдвинутые вправо), хвост длинного названия не выглядывает
+   из-за скруглённого края */
+.hp-run .bb-chg{box-shadow:inset 0 0 0 1px rgba(11,18,32,.14),32px 0 0 0 #FFFFFF,64px 0 0 0 #FFFFFF}
+
+/* подсказка-печать над полем — уже узкой в кадре нажатия: в ходе она не переносится заново (поле — стопка копий) */
+.hp-v:not(.hp-nar) .p2-tph{right:416px}
 
 /* ═══ Данные и брендбук (модуль ds) — вторая ступень: файлы с данными и брендбук на шагах 01 и 02. Дословно из
    boards/V2.dc.html версии 105 (<helmet><style>, блок «Данные и брендбук»); «сайт:» — сверх доски. Без файлов и
@@ -419,7 +393,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 /* открыт помощник (узкая колода): «Брендбук» — круглая кнопка с книжкой, подпись — в подсказке (title); иначе он
    налезал на обложку шаблона (замечание владельца 18.10, скрин 30) */
 .hp-nar .bb-btn{width:40px;height:40px;padding:0;justify-content:center;gap:0;border-radius:999px;background:#F3F4F1}
-.hp-nar .bb-btn > span{display:none}
+.hp-nar .bb-btn > span.hp-wo{display:none}
+.bb-bi{display:flex;flex:none}
+/* круг под книжкой проявляется вместе с открытием помощника (как hp-no) — с ним круглая кнопка встаёт без вспышки фона */
+.bb-btn{position:relative;isolation:isolate}
+.bb-btn::before{content:"";position:absolute;left:0;top:0;z-index:-1;width:40px;height:40px;border-radius:999px;background:#F3F4F1;opacity:0;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease)}
+.hp-v2 .bb-btn::before{opacity:1;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(120ms * var(--hp-k, 1))}
 .tx-menu.bb-menu{left:auto;right:0;transform-origin:top right}
 .tx-mdiv{display:block;height:1px;margin:4px 12px;background:rgba(11,18,32,.08)}
 .bb-busy{display:inline-flex;align-items:center;gap:8px;height:40px;font-size:14px;font-weight:600;line-height:20px;color:#2563EB;white-space:nowrap}

@@ -35,11 +35,11 @@ export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksO
       {note}
       {/* только «Слайд N из M», целиком: название слайда видно на самом слайде, а в строке оно всегда обрезалось
           (замечание владельца 18.10) */}
-      <p title={title ? `${where} · ${title}` : where}
+      <p data-hpm="" title={title ? `${where} · ${title}` : where}
         style={{ flex: note ? 1 : "none", margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
         {where}
       </p>
-      <div className="ra-whr" style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
+      <div className="ra-whr" data-hpm="" style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
         {sw.shown && (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span id="ra-swl" className="ra-swl" style={{ fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#0B1220" }}>Замечания</span>

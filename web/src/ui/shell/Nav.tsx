@@ -9,6 +9,7 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { usePop } from "../kit/usePop";
 import { usePhone } from "./tier";
+import { prepareHelper, releaseHelper, toggleHelper, useHelperWant } from "./helperMotion";
 
 export function Nav() {
   const { ui, dispatch } = useApp();
@@ -19,6 +20,8 @@ export function Nav() {
   const pop = usePop<HTMLButtonElement, HTMLElement>(phone);
   const open = pop.open;
   const pick = pop.pick;
+  // «Помощник»: таблетка и раскрытие — по ходу (helperMotion), в кадре нажатия; наведение готовит ход заранее
+  const helper = useHelperWant();
   return (
     <>
       <button ref={pop.btn} type="button" id="p2-navbtn" className="p2-navbtn" aria-expanded={open} aria-controls="p2-navmenu"
@@ -31,9 +34,10 @@ export function Nav() {
           onClick={() => pick(() => dispatch({ type: "sect", sect: hist ? null : "hist" }))}>{phone && <Icon name="history" size={20} />}Мои презентации</button>
         <button type="button" className={cls("p2-nav", tpls && "p2-nav-on")} aria-expanded={tpls} aria-controls="p2-lay-t"
           onClick={() => pick(() => dispatch({ type: "sect", sect: tpls ? null : "tpls" }))}>{phone && <Icon name="layout" size={20} />}Шаблоны</button>
-        <button type="button" id="hp-nav" className={cls("p2-nav", ui.helper && "p2-nav-on")} aria-expanded={ui.helper} aria-controls="hp-help"
-          title={ui.helper ? "Закрыть помощника" : "Открыть помощника"}
-          onClick={() => pick(() => dispatch({ type: "set", patch: { helper: !ui.helper } }))}>{phone && <Icon name="chat" size={20} />}Помощник</button>
+        <button type="button" id="hp-nav" className={cls("p2-nav", helper && "p2-nav-on")} aria-expanded={helper} aria-controls="hp-help"
+          title={helper ? "Закрыть помощника" : "Открыть помощника"}
+          onPointerEnter={prepareHelper} onPointerLeave={releaseHelper} onFocus={prepareHelper} onBlur={releaseHelper}
+          onClick={() => pick(toggleHelper)}>{phone && <Icon name="chat" size={20} />}Помощник</button>
       </nav>
     </>
   );

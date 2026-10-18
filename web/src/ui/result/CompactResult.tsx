@@ -12,7 +12,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { Arc } from "../kit/Arc";
 import { useSwap } from "../kit/useSwap";
 import type { SheetTab } from "../deck/geometry";
-import { useDeckWidth } from "../deck/useDeckFit";
+import { useDeckWrap } from "../deck/useDeckFit";
+import { HELPER_COL } from "../deck/layout";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
@@ -208,8 +209,10 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
    *  колонке полного вида (смена вида). null — изображение не выбрано. */
   card: { shown: boolean; node: ReactNode } | null;
 }) {
-  // «Скачать PowerPoint» → «PowerPoint», когда рядом со значками названию мало места (по целевой ширине колоды)
-  const short = ctaShort(useDeckWidth(), (note ? 1 : 0) + 4);
+  // «Скачать PowerPoint» → «PowerPoint», когда рядом со значками названию мало места: компактный вид виден только в
+  // узкой колоде — по её ширине (обёртка − место помощника), а не по состоянию помощника (подпись не меняется на глазах)
+  const wrap = useDeckWrap();
+  const short = ctaShort(wrap > 0 ? wrap - HELPER_COL : 0, (note ? 1 : 0) + 4);
   const tf = useTitleFit(d.title);
   return (
     <div className={cls("hp-in", snap.wide && "hp-wide", snap.now && "hp-snap")}>

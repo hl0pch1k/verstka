@@ -258,7 +258,7 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
           ) : t && (
             <HeadSlot key="tpl" fade={fade}>
               {/* рядом с брендбуком в узкой колоде обложка шаблона сжимается и гаснет на месте (V2 `bb-tpl-n`) */}
-              <div className={cls("bb-tpl", bbHas && "bb-tpl-n")} style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+              <div className={cls("bb-tpl", bbHas && "bb-tpl-n")} data-hpm="" style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
                 <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
                 <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplLabel(t)}</span>
@@ -267,7 +267,7 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
               </div>
             </HeadSlot>
           )}
-          <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "tpl" })} style={{ flex: "none", height: 40 }}>
+          <button type="button" className="p2-ob bb-chg" data-hpm="" onClick={() => dispatch({ type: "open", step: "tpl" })} style={{ flex: "none", height: 40 }}>
             {t ? "Сменить" : "Выбрать шаблон"}
           </button>
         </div>

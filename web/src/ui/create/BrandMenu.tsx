@@ -146,11 +146,12 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
   return (
     <div ref={box} className="bb-fg">
       {!busy && !has && (
-        <button ref={btn} type="button" className="p2-gb bb-btn" onClick={toggle} aria-haspopup="menu" aria-expanded={menu} aria-controls="bb-menu"
+        <button ref={btn} type="button" className="p2-gb bb-btn" data-hpm="" onClick={toggle} aria-haspopup="menu" aria-expanded={menu} aria-controls="bb-menu"
           aria-disabled={off ? true : undefined} title={off ?? "Брендбук или дизайн-система: PDF, токены, папка, Figma"}
           style={off ? { opacity: 0.32, cursor: "default" } : undefined}>
-          <DsIcon name="book" size={18} />
-          <span>Брендбук</span>
+          {/* открыт помощник — кнопка круглая (create.css `.hp-nar .bb-btn`): подпись гаснет, книжка встаёт в середину круга */}
+          <span className="bb-bi" data-hpm=""><DsIcon name="book" size={18} /></span>
+          <span className="hp-wo">Брендбук</span>
         </button>
       )}
       {busy && (

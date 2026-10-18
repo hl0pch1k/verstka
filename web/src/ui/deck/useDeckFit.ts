@@ -1,8 +1,8 @@
-// Ширина колоды для её содержимого. Всё, что перестраивается вместе с колодой каждый кадр («Создать», «Сборка», слои,
-// лист «Подробнее»: ui/create/morph.ts, ui/build/columns.ts, ui/details/sheetMorph.ts), берёт отсюда только ширину
-// обёртки (`useDeckWrap`) — по ней считаются обе раскладки сразу. Раскладку по целевой ширине (fit.ts `deckLayout`:
-// открытие — узкая с первого кадра; закрытие — узкая держится, пока сетка обёртки не доехала, `transitionend` на
-// grid-template-columns, запасной таймер — ход 340 мс + 40) читает только «Результат» (`useDeckFit`, `useDeckWidth`).
+// Ширина колоды для её содержимого. «Создать», «Сборка», слои и лист «Подробнее» (ui/create/morph.ts,
+// ui/build/columns.ts, ui/details/sheetMorph.ts) берут отсюда только ширину обёртки (`useDeckWrap`) — по ней считаются
+// обе раскладки сразу. Раскладку по целевой ширине (fit.ts `deckLayout`: открытие — узкая с первого кадра; закрытие —
+// узкая держится до конца хода, запасной таймер — ход 340 мс + 40) читает только «Результат» (`useDeckFit`,
+// `useDeckWidth`); состояние помощника в React догоняет ход в его конце (ui/shell/helperMotion.ts).
 // Содержимое колоды встаёт сразу в настоящей ширине обёртки (`useWrapWidth`, Deck.tsx): при загрузке ничего не едет.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";

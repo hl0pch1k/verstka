@@ -13,7 +13,9 @@ import { pushShot, shotDone, shotReady, type Shot } from "./stageLayers";
 export function Stage({ src, alt, aspect, children }: { src: string | null; alt: string; aspect: number; children?: ReactNode }) {
   const ar = aspect > 0 ? aspect : 16 / 9;
   return (
-    <div className="p2-in" style={{ display: "flex", justifyContent: "center", marginTop: 16, animationDelay: "240ms" }}>
+    // обёртка сцены — её ход к месту другой раскладки, когда открывается помощник (сдвиг и масштаб, `data-hps`,
+    // ui/shell/helperMotion.ts): у самой сцены свой transform — сворачивание в эскиз при исправлении слайда
+    <div className="p2-in" data-hps="" style={{ display: "flex", justifyContent: "center", marginTop: 16, animationDelay: "240ms" }}>
       {/* выше 16:9 (например, 4:3) — уже: высота сцены та же, что у 16:9 шириной 720; помощник сужает колоду — сцена не
           выше свободного места (helper.css: `--ra-ar` — пропорции шаблона) */}
       <div className="ra-stage" style={{ aspectRatio: String(ar), "--ra-ar": ar.toFixed(4) } as CSSProperties}>

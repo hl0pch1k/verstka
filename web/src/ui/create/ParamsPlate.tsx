@@ -245,7 +245,7 @@ export function ParamsHead({ pp }: { pp: ParamsPlate }) {
     <>
       <span style={{ flex: 1, minWidth: 0 }} />
       <span className="p2-hide-s pp-sum hp-wo"><span className="pp-sumt" title={pp.summary}>{pp.summary}</span></span>
-      <button type="button" className="p2-cta pp-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={pp.line !== null ? "pp-err" : undefined}
+      <button type="button" className="p2-cta pp-cta" data-hpm="" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={pp.line !== null ? "pp-err" : undefined}
         aria-label="Создать презентацию">
         <span>Создать<span className={cls("pp-ctat", short && "pp-ctag")}> презентацию</span></span>
         <Icon name="arrow-right" size={20} />
@@ -281,10 +281,10 @@ function ShortSlides({ pp, tight }: { pp: ParamsPlate; tight: boolean }) {
   if (!changed && s.locked !== first) setChanged(true);
   const enter = changed ? "p2-in" : undefined;
   return (
-    <div className="p2-box p2-stag" title={s.locked ? SLIDES_LOCKED : undefined}
+    <div className="p2-box p2-stag" data-hpk="" title={s.locked ? SLIDES_LOCKED : undefined}
       style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 88, padding: "0 16px", transitionDelay: "0ms" }}>
       <button type="button" className="p2-rb" onClick={() => pp.step(-1)} disabled={!s.dec} aria-label="Меньше слайдов"><Icon name="minus" size={18} /></button>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 0 }}>
+      <div data-hpm="" style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 0 }}>
         <span className="pp-stn" aria-live="polite" style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#FFFFFF" }}>{s.count}</span>
         {s.locked
           ? <span key="locked" className={cls(enter, tight && "hp-sw pp-stl")} style={{ fontSize: 12, fontWeight: 600, lineHeight: "20px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>
@@ -292,7 +292,7 @@ function ShortSlides({ pp, tight }: { pp: ParamsPlate; tight: boolean }) {
             </span>
           : <span key="word" className={enter} style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{slideWord(s.count)}</span>}
       </div>
-      <button type="button" className="p2-rb" onClick={() => pp.step(1)} disabled={!s.inc} aria-label="Больше слайдов"><Icon name="plus" size={18} /></button>
+      <button type="button" className="p2-rb" data-hpm="" onClick={() => pp.step(1)} disabled={!s.inc} aria-label="Больше слайдов"><Icon name="plus" size={18} /></button>
     </div>
   );
 }
@@ -321,7 +321,7 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
         {pp.cards.map((v, i) => (
           <div key={v.name}>
             <div className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
-              <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
+              <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} data-hpk="" onClick={() => pp.toggle(v.name)} title={v.full}>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%" }}>
                   <span className="pp-vt pp-vtt" style={{ fontSize: 16, fontWeight: 700, lineHeight: "24px", color: "#FFFFFF" }}>{v.title}</span>
                   <span className="p2-vbox hp-wo pp-vb1" aria-hidden="true"><Icon name="check" size={12} /></span>

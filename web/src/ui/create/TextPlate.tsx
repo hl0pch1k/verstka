@@ -416,7 +416,7 @@ export function TextHead({ tp }: { tp: TextPlate }) {
             <Icon name="attach" size={20} />
           </button>
         ) : (
-          <button ref={tp.btnRef} type="button" className="p2-ob" onClick={() => tp.setMenu(!tp.menu)} title="Текст или данные из файла"
+          <button ref={tp.btnRef} type="button" className="p2-ob" data-hpm="" onClick={() => tp.setMenu(!tp.menu)} title="Текст или данные из файла"
             aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu" style={{ height: 40 }}>
             <Icon name="attach" size={18} />
             <span>Из файла</span>
@@ -713,7 +713,9 @@ export function TextBody({ tp }: { tp: TextPlate }) {
       <div className="tx-b2" style={noteVars}>
         <ImproveNote on={impOn} onHeights={setNoteH} />
         <div className={cls("tx-fw dt-g", impOn && "tx-fw-imp", motion.grid)} style={{ "--dtn": `${panel.narrow}px` } as CSSProperties}>
-          <div className={cls("p2-field p2-stag tx-ring", issue && "ce-bad")}
+          {/* поле у́же в узкой раскладке: открывая помощника, оно сужается «растяжкой» (`data-hpk`, ui/shell/helperMotion.ts);
+              правый край — над текстом, за ним — шторка цвета плиты (cover): текст не выходит за видимый край поля */}
+          <div className={cls("p2-field p2-stag tx-ring", issue && "ce-bad")} data-hpk="cover"
             style={{ display: "flex", flexDirection: "column", height: 244, padding: 24, borderRadius: 24, background: "#FFFFFF" }}>
             <label htmlFor={narrow ? "ct-tan" : "ct-taw"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
               <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>О чём презентация</span>
@@ -768,7 +770,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                   строки ошибки не прыгает (длинная — многоточием, целиком — в подсказке). Счётчик без aria-live: он не
                   перебивает чтение с экрана на каждом знаке */}
               <span className={cls("tx-sw tx-swr", show(issue?.kind !== "file"))}>
-                <span className={show(!issue)} style={{ ...NOTE_LINE, fontWeight: 600 }}>{charsLabel(brief.length)}</span>
+                <span className={show(!issue)} data-hpm="" style={{ ...NOTE_LINE, fontWeight: 600 }}>{charsLabel(brief.length)}</span>
                 {/* помощник сужает колоду — подсказка сжимается и гаснет: строке ошибки — вся ширина */}
                 <span className="hp-wo tx-fixw"><span className={show(!!issue)} style={{ ...NOTE_LINE, fontWeight: 500 }}>{FIX}</span></span>
               </span>

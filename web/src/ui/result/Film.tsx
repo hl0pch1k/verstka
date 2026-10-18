@@ -40,7 +40,8 @@ export function Film({ film, variant, n, headline, onPick, marks }: {
   }, [film, n, count]);
 
   return (
-    <div ref={film} className="p2-film p2-in" style={{ position: "relative", margin: "8px -4px 0", animationDelay: "280ms" }}>
+    // помощник: лента едет к месту другой раскладки, её правый край — за «ластиком» (`data-hpm`, `data-hpe`, helperMotion)
+    <div ref={film} className="p2-film p2-in" data-hpm="" data-hpe="" style={{ position: "relative", margin: "8px -4px 0", animationDelay: "280ms" }}>
       {variant.slides.map((_, i) => {
         const h = headline(i + 1);
         const spin = marks?.spin === i + 1;

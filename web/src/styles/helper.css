@@ -1,51 +1,85 @@
-/* Помощник (ui/helper) и компактный «Результат» (ui/result/CompactResult). Блок «Помощник (модуль helper, как
- * G-helper-open и G-helper)» — дословно из boards/V2.dc.html (<helmet><style>): плита hp-help, каскад hp-st, лента и
- * поле gh-, компактный слой hp-in (hp-top, hp-ncol, hp-xf) и правила полного вида при сужении. Сетка колоды и ячейка
- * помощника (hp-wrap, hp-hcell) — в shell.css. Колода сужается на всех экранах; плита помощника выходит из-под неё
- * (reveal, V2 версии 100) с тенью края колоды (hp-shade). Режим push доски (hp-push, свойство hpEnter) не перенесён —
- * владелец оставил reveal. «Создать» перестраивается вместе с колодой каждый кадр (create.css, V2 версии 100: дорожки,
- * transform, прозрачность на месте, стопки текста), названия шагов сжимаются transform'ом; «Сборка» — так же (build.css,
- * V2 версии 100: дорожки сетки, фаза — transform, стопки строк агента); слои и лист «Подробнее» — тоже (details.css,
- * layers.css, kit/Tx). «Результат» — как в V2: компактный вид сменяет полный перекрёстным затуханием, его шапка и
- * панель замечаний — своими обёртками по раскладке на цель хода (ui/deck/fit.ts; правила — по их `data-fit`).
- *   Открытие:  0 мс    колода сужается: колонка 0 → 400 px, зазор 0 → 16 — 520 мс (исключение: анимируется сетка)
- *              0 мс    сетка результата перестраивается вместе с колодой: колонка 416 → 184, зазор 48 → 24, слайд
- *                      опускается на 24 px (строка шапки 48 → 64, отступ 16 → 24) — 520 мс
- *              0 мс    полный вид «Результата» (уведомление и колонка) гаснет — 240 мс
- *              0 мс    «Помощник» в шапке — белая таблетка (p2-nav-on) — 240 мс
- *              0 мс    плита помощника — под колодой, на своём месте: край колоды, уходя влево, открывает её (как плита
- *                      из-под плиты, «Слои»); сама плита сдвигается translateX(32px) → 0 той же кривой и за то же время
- *                      (520 мс), прозрачность 0 → 1 за 240 мс — только чтобы полоса за краем окна (сдвиг 32 px) не
- *                      вспыхнула в первом кадре. Ни в одном кадре плита не ложится поверх колоды: колода выше по слою
- *                      (hp-hcell z-index −1)
+/* Помощник (ui/helper) и компактный «Результат» (ui/result/CompactResult). Ход открытия и закрытия — заново по холсту
+ * V2 («Создать (Play: весь путь)», блок «Помощник (модуль helper, как G-helper-open и G-helper)»), только transform и
+ * opacity (ui/shell/helperMotion.ts): колода во время хода широкая, её край — рельс справа (`hp-rail`): полоса края
+ * (`hp-band`, копии плит), занавес цвета страницы (`hp-cur`) с плитой помощника (встречный ход `hp-ctr` — плита стоит на
+ * месте) и тень края на плите (`hp-shd`). Раскладка колоды (`hp-nar`) меняется один раз: в конце открытия и в начале
+ * закрытия, разом (переходы, которые она запустила бы, снимаются). Классы обёртки: `hp-v` — помощник открыт для глаза (с кадра
+ * нажатия; то, что проявляется с задержкой, — `hp-v2`, кадром позже: первый кадр хода легче), `hp-nar` —
+ * узкая раскладка, `hp-run` — идёт ход, `hp-prep` — ход готовится (наведение). Длительности × `--hp-k` (только проверка).
+ *   Открытие (как холст):
+ *              0 мс    край колоды уходит влево на 416 px — 520 мс; плита помощника под ним доезжает последние 32 px той же
+ *                      кривой (520 мс) и проявляется за 240 мс; тень края на плите — 240 мс, уходит за 160 мс с 340
+ *              0 мс    полный вид «Результата» (таблетка уведомления, колонка) гаснет — 240 мс; слайд, лента и строка «Слайд
+ *                      N из M» едут к местам узкой раскладки (520 мс); названия шагов «Создать» мельчают (scale .75, 520 мс)
  *              120 мс  компактный вид (шапка с действиями и узкая колонка) проявляется — 240 мс
  *              160 мс… шапка помощника, сообщения, подсказки, поле ввода — каскад 40 мс (12 px, 360 мс)
- *   Закрытие (2/3 входа): сетки 340 мс; колода наезжает на плиту и закрывает её (плита — вправо на 32 px той же кривой,
- *              вместе с содержимым: первые 100 мс непрозрачна, затем гаснет за 240 мс — к концу хода, когда колода её
- *              уже накрыла, так что полоса за краем окна не остаётся видна). Компактный вид
- *              гаснет за 160 мс, полный проявляется за 160 мс через 80 мс; содержимое помощника сбрасывается невидимо,
- *              когда плита уже закрыта (340 мс). */
-/* reveal: плита стоит у правого края, под колодой, и доезжает последние 32 px на кривой колоды */
-.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:transform 340ms var(--ease),opacity 240ms var(--ease) 100ms,visibility 0s linear 340ms}
-.hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:transform 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 0s}
-/* тень колоды на плиту помощника. Пока плита под колодой, правый край колоды отбрасывает на неё ту же мягкую тень,
-   что плиты в стопке друг на друга (0 −24 48 −24), повёрнутую вправо: 24 0 48 −24, rgba(11,18,32,.28). Тень даёт фигура
-   правого края колоды (углы 40 px, как у плит) — полоса постоянного размера 184 × 812 в первой дорожке сетки hp-wrap: правым
-   краем за краем колоды на 72 px, по высоте обрезана по колоде; слой — над ячейкой помощника, под колодой (z −1, позже ячейки).
-   Её размер не меняется — каждый кадр она только сдвигается вместе с краем, а видимость — одни переходы opacity:
-   видно = прозрачность полосы × прозрачность её ::before (в покое, открыт и закрыт, произведение 0):
-     открытие — полоса 0 → 1 за 240 мс (как сама плита), ::before 1 → 0 за 160 мс с 340 мс (край колоды доходит до места,
-                открывается зазор 16 px — тень уходит вместе с его раскрытием);
-     закрытие — ::before 0 → 1 за 160 мс с 0 (колода наезжает на плиту), полоса 1 → 0 за 240 мс с 100 мс (как сама плита).
-   Элемент — последний ребёнок hp-wrap (ui/shell/AppShell). */
-.hp-wrap{position:relative}
-.hp-shade{position:absolute;grid-column:1 / 2;grid-row:1 / 2;top:0;right:-72px;width:184px;height:812px;overflow:hidden;z-index:-1;pointer-events:none;opacity:0;transition:opacity 240ms var(--ease) 100ms}
-.hp-open .hp-shade{opacity:1;transition:opacity 240ms var(--ease)}
-.hp-shade::before{content:"";position:absolute;top:0;bottom:0;left:0;right:72px;border-radius:0 40px 40px 0;box-shadow:24px 0 48px -24px rgba(11,18,32,.28);transition:opacity 160ms var(--ease)}
-.hp-open .hp-shade::before{opacity:0;transition:opacity 160ms var(--ease) 340ms}
-/* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
-.hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
-.hp-open .hp-st{opacity:1;transform:translateY(0);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+ *   Закрытие (2/3 входа): край колоды едет вправо 340 мс и накрывает плиту (она уходит вправо на 32 px той же кривой,
+ *              первые 100 мс непрозрачна, затем гаснет за 240 мс); компактный вид гаснет за 160 мс, полный проявляется за
+ *              160 мс через 80 мс; содержимое помощника сбрасывается невидимо через 340 мс. */
+.hp-wrap{position:relative;height:812px;isolation:isolate;--hp-o:calc(520ms * var(--hp-k, 1));--hp-c:calc(340ms * var(--hp-k, 1))}
+/* Колода не меняет ширину никогда: её места плит — свои слои, и смена их размера в Safari перерисовывала бы все плиты
+   целиком (кадр 30–60 мс). Узкая раскладка — содержимое плит у́же на 416 (поле справа 48 + 416); правую часть колоды
+   закрывает рельс, правые углы и концы теней плит у края — его полоса края (живые копии мест плит) */
+.hp-nar .p2-deck > .p2-slot > :is(.p2-plate,.dd-sheet){padding-right:464px !important}
+.hp-nar .p2-deck :is(.p2-fxbox){padding-right:464px !important}
+.hp-nar .p2-deck :is(.p2-strip,.rt-strip,.dd-back,.ci-strip,.dpt-strip,.tx-top,.pp-err,#p2-b3m,.dd-pw.p2-on,.dd-load,.dd-pw.p2-in){right:464px !important}
+/* рельс: закрыт — за правым краем обёртки и скрыт; открыт — у края узкой колоды, над ней */
+.hp-rail{position:absolute;top:0;left:100%;z-index:1;width:416px;height:812px;transform:translateX(0);visibility:hidden}
+.hp-v > .hp-rail{transform:translateX(-416px);visibility:visible}
+.hp-run > .hp-rail{visibility:visible}
+.hp-run.hp-v > .hp-rail{transition:transform var(--hp-o) var(--ease)}
+.hp-run:not(.hp-v) > .hp-rail{transition:transform var(--hp-c) var(--ease)}
+/* занавес: цвет страницы, от полосы края (−48) до правого края; закрывает колоду правее её края, плиту помощника — левее */
+.hp-cur{position:absolute;top:0;bottom:0;left:-48px;right:0;overflow:hidden;background:#F3F4F1}
+/* встречный ход: занавес — влево, его содержимое — вправо на столько же; плита помощника стоит на своём месте */
+.hp-ctr{position:absolute;top:0;left:48px;width:416px;height:812px;transform:translateX(-416px)}
+.hp-v .hp-ctr{transform:translateX(0)}
+.hp-run.hp-v .hp-ctr{transition:transform var(--hp-o) var(--ease)}
+.hp-run:not(.hp-v) .hp-ctr{transition:transform var(--hp-c) var(--ease)}
+.hp-hcell{position:absolute;top:0;left:16px;width:400px;height:812px}
+/* плита помощника: доезжает последние 32 px на кривой края колоды; закрытая — непрозрачна, пока колода её накрывает */
+.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:transform var(--hp-c) var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(100ms * var(--hp-k, 1)),visibility 0s linear var(--hp-c)}
+.hp-v .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:transform var(--hp-o) var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear 0s}
+/* полоса края колоды: правые 48 px живых копий мест плит и слоёв (фоны, тени, углы — без содержимого; копии едут вместе
+   с плитами), скругление колоды */
+.hp-band{position:absolute;top:0;left:-48px;width:48px;height:812px;overflow:hidden;border-radius:0 40px 40px 0;pointer-events:none}
+.hp-bandin{position:absolute;top:0;right:0;height:812px}
+/* тень копии плиты: коробка продлена за край колоды на 80 px (тень у левой границы полосы — та же, что у широкой плиты под
+   ней), к краю колоды тень гаснет маской (как у угла плиты); копия плиты — без тени, только фон и углы */
+.hp-bsh{position:absolute;left:0;right:0;top:-64px;bottom:0;pointer-events:none;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent calc(100% - 4px));mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent calc(100% - 4px))}
+.hp-bsh > i{position:absolute;left:0;right:-80px;top:64px;bottom:0;border-radius:40px}
+/* тень края колоды на плиту помощника (холст: 24 0 48 −24, rgba(11,18,32,.28)): полоса постоянного размера едет с краем;
+   видно = прозрачность полосы × прозрачность фигуры края — открытие: 0 → 1 за 240 мс, фигура 1 → 0 за 160 мс с 340;
+   закрытие: фигура 0 → 1 за 160 мс, полоса 1 → 0 за 240 мс с 100 */
+.hp-shd{position:absolute;top:0;left:-112px;width:184px;height:812px;overflow:hidden;pointer-events:none;opacity:0;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(100ms * var(--hp-k, 1))}
+.hp-v .hp-shd{opacity:1;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease)}
+.hp-shd > i{position:absolute;top:0;bottom:0;left:0;right:72px;border-radius:0 40px 40px 0;box-shadow:24px 0 48px -24px rgba(11,18,32,.28);transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease)}
+.hp-v .hp-shd > i{opacity:0;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(340ms * var(--hp-k, 1))}
+/* слои хода готовятся до нажатия (наведение на «Помощник» или ✕) и держатся, пока идёт ход: рельс виден уже до хода —
+   закрытым он стоит у правого края колоды, и его полоса края в точности повторяет край колоды, а плита помощника и её
+   содержимое — прозрачны; так в кадре нажатия ничего не рисуется заново, слои только начинают ход */
+.hp-rail{pointer-events:none}
+.hp-v > .hp-rail{pointer-events:auto}
+.hp-prep > .hp-rail{visibility:visible}
+.hp-prep > .hp-rail,.hp-run > .hp-rail,.hp-prep .hp-ctr,.hp-run .hp-ctr{will-change:transform}
+.hp-prep .hp-help,.hp-run .hp-help{visibility:visible;will-change:transform,opacity}
+.hp-prep .hp-st,.hp-run .hp-st{will-change:transform,opacity}
+.hp-prep .hp-shd,.hp-run .hp-shd,.hp-prep .hp-shd > i,.hp-run .hp-shd > i{will-change:opacity}
+.hp-prep [data-hpm],.hp-prep [data-hps]{will-change:transform}
+.hp-prep .hp-xf,.hp-run .hp-xf{visibility:visible;will-change:opacity}
+.hp-prep .ra-two > aside,.hp-run .ra-two > aside{will-change:opacity}
+/* то, что гаснет и проявляется на виду (и названия шагов), — своими слоями заранее; скрытое (p2-off) — нет */
+.hp-prep :is(.hp-wo,.hp-no,.hp-txw,.hp-txn,.p2-ttl-v,.ra-note,.tx-fmtw,.pp-ctag):not(.p2-off *){will-change:opacity,transform}
+/* «растяжка» коробки (helperMotion `stretch`): на время хода её фон и обводка — три куска под её содержимым */
+.hp-k{background:transparent !important;box-shadow:none !important;isolation:isolate}
+.hp-k::before,.hp-k::after{visibility:hidden}
+.hp-kp{position:absolute;top:0;bottom:0;z-index:-1;display:block;box-sizing:border-box;pointer-events:none;will-change:transform}
+/* ластик ленты миниатюр (helperMotion `eraserOf`): цвет плиты, едет с правым краем ленты; колонка полного вида — над ним */
+.hp-erase{position:absolute;z-index:0;display:block;pointer-events:none;will-change:transform}
+.hp-run .ra-two > aside{position:relative;z-index:1}
+/* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — `--d` */
+.hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear var(--hp-c),transform 0s linear var(--hp-c)}
+.hp-v2 .hp-st{opacity:1;transform:translateY(0);transition:opacity calc(360ms * var(--hp-k, 1)) var(--ease) calc(var(--d, 0ms) * var(--hp-k, 1)),transform calc(360ms * var(--hp-k, 1)) var(--ease) calc(var(--d, 0ms) * var(--hp-k, 1))}
 /* из G-helper: лента, поле ввода, крестик */
 .gh-x{background:#FFFFFF}
 .gh-item{max-width:304px}
@@ -65,70 +99,37 @@
 .gh-send:hover{transform:translateY(-2px)}
 .gh-send:active{transform:scale(.98)}
 .gh-send:disabled{opacity:.32;cursor:default;transform:none}
-/* компактный вид «Результата» — слой поверх плиты с сеткой gho-in: строка шапки 48 → 64, зазор 16 → 24, колонка 416 → 184, зазор 48 → 24 */
-.hp-in{position:absolute;left:48px;right:48px;top:40px;z-index:2;display:grid;grid-template-columns:minmax(0,1fr) 416px;grid-template-rows:48px minmax(0,1fr);row-gap:16px;column-gap:48px;height:612px;pointer-events:none;transition:grid-template-columns 340ms var(--ease),grid-template-rows 340ms var(--ease),row-gap 340ms var(--ease),column-gap 340ms var(--ease)}
-.hp-nar .hp-in{grid-template-columns:minmax(0,1fr) 184px;grid-template-rows:64px minmax(0,1fr);row-gap:24px;column-gap:24px;transition-duration:520ms}
+/* компактный вид «Результата» — слой поверх плиты, всегда в раскладке узкой колоды (у́же плиты на 416 справа), так что в
+   ходе он только гаснет и проявляется: строка шапки 64, зазор 24, колонка 184, зазор 24 */
+.hp-in{position:absolute;left:48px;right:464px;top:40px;z-index:2;display:grid;grid-template-columns:minmax(0,1fr) 184px;grid-template-rows:64px minmax(0,1fr);row-gap:24px;column-gap:24px;height:612px;pointer-events:none}
 .hp-top{grid-column:1 / -1;grid-row:1;align-self:start;min-width:0}
 .hp-ncol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:184px;min-width:0}
-.hp-xf{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
-.hp-nar .hp-xf{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
-/* полный вид (разметка R-aside не меняется): сетка результата сужает правую колонку вместе с колодой, слайд опускается на 24 px
-   и не выше свободного места (143 = листание 40 + отступ 16 + лента 87); уведомление и колонка гаснут, колонка едет со своей
-   колонкой сетки и не сжимается. Раскрытое уведомление держит действия видимыми — прячем их вместе со слоем (Tab) */
-
-  .hp-wrap .ra-note{transition:transform 160ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-nar .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear 240ms}
-  .hp-wrap .ra-two{transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
-  .hp-nar .ra-two{grid-template-columns:minmax(0,1fr) 184px !important;column-gap:24px !important;transition-duration:520ms}
-  .hp-wrap .ra-two > :first-child{height:100%;margin-top:0;container-type:size;transition:height 340ms var(--ease),margin-top 340ms var(--ease)}
-  .hp-nar .ra-two > :first-child{height:calc(100% - 24px);margin-top:24px;transition-duration:520ms}
-  /* сцена не выше свободного места: высота колонки известна (548 / 612, в узкой раскладке на 24 меньше) — числом, а не
-     100cqh: в Safari единицы контейнера в уменьшенной сцене (zoom, stage.ts) не делятся на масштаб, и сцена мельчала */
-  .hp-nar .ra-two .ra-stage{max-width:min(720px, calc(381px * var(--ra-ar, 1.7778)))}
-  .hp-wrap .ra-two .ra-stage{transition:max-width 340ms var(--ease),transform 520ms var(--ease)}
-  .hp-nar .ra-two .ra-stage{transition:max-width 520ms var(--ease),transform 520ms var(--ease)}
-  .hp-wrap .ra-two > aside{justify-self:start;width:424px;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .ra-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
-  /* презентация без уведомления (`ra-top`, R-remarks): рабочая область стоит с самого верха (612), а не под рядом 48 + 16 —
-     в узкой раскладке слайд опускается под шапку компактного вида целиком (64 + 24 = 88), панель замечаний встаёт под неё
-     (64; по `data-fit` панели — в её подмене, пока содержимое невидимо): узкая раскладка та же, что с уведомлением */
-  .hp-nar .ra-two.ra-top .ra-stage{max-width:min(832px, calc(445px * var(--ra-ar, 1.7778)))}
-  /* закрытие помощника на такой презентации: шапка «Слайд N из M» поднимается на 88 px только после того, как погасла
-     шапка компактного вида над ней (160 мс), — она не проезжает по гаснущему названию; ход 340 мс, весь уход — 500.
-     Открытие — без задержки (правило ниже) */
-  .hp-wrap .ra-two.ra-top > :first-child{transition-delay:160ms}
-  .hp-nar .ra-two.ra-top > :first-child{height:calc(100% - 88px);margin-top:88px;transition-delay:0ms}
-  .hp-wrap .ra-two.ra-top > aside.rm-col[data-fit=narrow]{margin-top:64px;height:548px}
-  /* уведомление появилось или ушло (смена раскладки, ResultPlate `geo`): рабочая область подменяется невидимой и встаёт на
-     место без хода — шапка компактного вида не съезжает и слайд не едет, пока проявляется */
-  .ra-work.fx-in > .ra-two > :first-child{transition:none}
-
-
-/* «Результат» с помощником (hp-flip, ui/shell/helperFlip.ts): раскладка меняется разом — в конце открытия и в начале
-   закрытия; переходы сеток выключены, ход делают transform и подрезка мест плит. Одновременно видна только одна
-   раскладка: открытие — полный вид гаснет (160 мс), компактный проявляется, когда узкая раскладка встала (240 мс);
-   закрытие — компактный гаснет (120 мс), затем полный открывается краем колоды */
-.hp-flip.hp-wrap,.hp-flip .hp-in,.hp-flip .ra-two,.hp-flip .ra-two > :first-child{transition:none !important}
-.hp-flip.hp-go .ra-two > aside,.hp-flip.hp-go .ra-note-h{opacity:0;pointer-events:none;transition:opacity 160ms var(--ease) !important}
-.hp-flip.hp-nar .hp-xf{transition:opacity 240ms var(--ease),visibility 0s linear 0s}
-/* открытие: компактный вид стоит сразу в узкой раскладке своего слоя и начинает проявляться, когда полный уже погас и
-   слайд со строкой «Слайд N из M» почти доехали (280 мс) — без паузы с пустой карточкой и без наложения */
-.hp-flip.hp-go .hp-in{right:464px;grid-template-columns:minmax(0,1fr) 184px;grid-template-rows:64px minmax(0,1fr);row-gap:24px;column-gap:24px}
-.hp-flip.hp-go .hp-xf{opacity:1;visibility:visible;pointer-events:none;transition:opacity 240ms var(--ease) 280ms,visibility 0s linear 280ms}
-.hp-flip.hp-go .hp-xf.hp-xf-off{opacity:0;visibility:hidden}
-.hp-flip.hp-go .hp-in.hp-wide{grid-template-columns:minmax(0,1fr) 320px}
-.hp-flip.hp-out .hp-xf{opacity:0;transition:opacity 120ms var(--ease),visibility 0s linear 120ms}
-.hp-flip.hp-back .ra-two > aside{opacity:1;visibility:visible;transition:none}
-.hp-flip.hp-back .ra-note-h{animation:hp-pill-in 340ms var(--ease) both}
-@keyframes hp-pill-in{0%,55%{opacity:0}100%{opacity:1}}
-/* плита помощника выходит из-под колоды и при закрытии уходит под неё непрозрачной; тень края — тень самой колоды */
-.hp-flip .hp-shade{display:none}
-.hp-flip.hp-go .hp-help{transition:transform 520ms var(--ease),opacity 0s,visibility 0s}
-.hp-flip.hp-back .hp-help{opacity:1;visibility:visible;transform:none;transition:none}
-/* закрытие: плита помощника — под колодой (её ячейка возвращается на нижний слой сразу), колода наезжает на неё */
-.hp-flip.hp-back .hp-hcell,.hp-flip.hp-out .hp-hcell{z-index:-1;transition:none}
-.hp-flip .p2-deck.p2-dkm{filter:drop-shadow(16px 0 24px rgba(11,18,32,.16))}
+.hp-xf{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
+.hp-v2 .hp-xf{opacity:1;visibility:visible;pointer-events:auto;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(120ms * var(--hp-k, 1)),visibility 0s linear 0s}
+/* полный вид (разметка R-aside не меняется): таблетка уведомления и колонка гаснут на месте (открытие 240 мс) и
+   проявляются (закрытие 160 мс через 80); слайд, лента и строка «Слайд N из M» едут transform'ом (helperMotion).
+   Раскрытое уведомление держит действия видимыми — прячем их вместе со слоем (Tab) */
+/* таблетка уведомления стоит в строке «Слайд N из M» (замечание владельца 18.10), и строка едет на её место — таблетка
+   гаснет быстрее строки (100 мс) и проявляется, когда строка уже ушла с её места (160 мс через 180) */
+.hp-wrap .ra-note{transition:transform 160ms var(--ease),opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
+.hp-wrap.hp-v .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+.hp-wrap .ra-note-h{transition:transform 160ms var(--ease),opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(180ms * var(--hp-k, 1)),visibility 0s linear 0s}
+.hp-wrap.hp-v .ra-note-h{transition:transform 160ms var(--ease),opacity calc(100ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(100ms * var(--hp-k, 1))}
+.hp-wrap.hp-v .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear calc(240ms * var(--hp-k, 1))}
+.hp-wrap .ra-two > aside{justify-self:start;width:424px;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
+.hp-wrap.hp-v .ra-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+/* узкая раскладка рабочей области: колонка 184, зазор 24, слайд ниже на 24 px и не выше свободного места */
+.hp-nar .ra-two{grid-template-columns:minmax(0,1fr) 184px !important;column-gap:24px !important}
+.hp-wrap .ra-two > :first-child{height:100%;margin-top:0}
+.hp-nar .ra-two > :first-child{height:calc(100% - 24px);margin-top:24px}
+/* сцена не выше свободного места: высота колонки известна (548 / 612, в узкой раскладке на 24 меньше) — числом, а не
+   100cqh: в Safari единицы контейнера в уменьшенной сцене (zoom, stage.ts) не делятся на масштаб, и сцена мельчала */
+.hp-nar .ra-two .ra-stage{max-width:min(720px, calc(381px * var(--ra-ar, 1.7778)))}
+/* презентация без уведомления (`ra-top`, R-remarks): рабочая область стоит с самого верха (612), а не под рядом 48 + 16 —
+   в узкой раскладке слайд опускается под шапку компактного вида целиком (64 + 24 = 88), панель замечаний встаёт под неё */
+.hp-nar .ra-two.ra-top .ra-stage{max-width:min(832px, calc(445px * var(--ra-ar, 1.7778)))}
+.hp-nar .ra-two.ra-top > :first-child{height:calc(100% - 88px);margin-top:88px}
+.hp-wrap .ra-two.ra-top > aside.rm-col[data-fit=narrow]{margin-top:64px;height:548px}
 /* таблетка уведомления в узкой раскладке не держит места в строке «Слайд N из M» */
 .hp-nar .ra-note-h{position:absolute;left:0;top:0}
 
@@ -177,7 +178,7 @@ a.p2-rbl:hover{color:#0B1220}
 .hp-act{flex:none;font-size:14px;line-height:20px;white-space:nowrap}
 /* слой компактного вида, который сейчас не на месте (колонка занята замечаниями или изображением): гаснет за 120 мс —
    к подмене сетки его уже не видно */
-.hp-nar .hp-xf.hp-xf-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 120ms var(--ease),visibility 0s linear 120ms}
+.hp-v2 .hp-xf.hp-xf-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 120ms var(--ease),visibility 0s linear 120ms}
 /* Режим «Замечания» и изображение на слайде при открытом помощнике: колонка компактного вида шире — 320 px (184 мало
    для рядов замечаний и карточки «Изображение»). Панель замечаний встаёт в колонку полного вида (она шире на 320 и не
    гаснет), карточка «Изображение» — в колонку компактного, вместо итогов. Смена 184 ↔ 320 — не ход ширины, а
@@ -187,8 +188,7 @@ a.p2-rbl:hover{color:#0B1220}
    выбранном изображении), панель замечаний меняет ширину колонки 416 ↔ 320 тем же перекрёстным затуханием своего
    содержимого (RemarksPanel, `data-fit` панели), а карточка «Изображение» остаётся в колонке полного вида, пока та не
    погасла (ResultPlate, `fullCard`). */
-.hp-nar .hp-in.hp-wide{grid-template-columns:minmax(0,1fr) 320px}
-.hp-nar .hp-in.hp-snap{transition:none}
+.hp-in.hp-wide{grid-template-columns:minmax(0,1fr) 320px}
 .hp-pcol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:320px;min-width:0;min-height:0;overflow-y:auto;scrollbar-width:none}
 .hp-pcol::-webkit-scrollbar{display:none}
 
@@ -207,11 +207,11 @@ a.p2-rbl:hover{color:#0B1220}
 /* правило V2 «колонка проявляется за 160 мс через 80 мс» — о возвращении полного вида при закрытии помощника; свои
    сменщики колонки при закрытом помощнике (панель замечаний, колонка «Изображение») ходят своими ходами (result.css) */
 
-  .hp-closed .ra-two > aside.rm-col{transition:opacity 240ms var(--ease)}
-  .hp-closed .ra-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
-  .hp-closed .ra-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-closed .ra-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
-  .hp-closed .ra-two:has(.rm-col.rm-col-on) > .ra-main{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-wrap:not(.hp-v) .ra-two > aside.rm-col{transition:opacity 240ms var(--ease)}
+  .hp-wrap:not(.hp-v) .ra-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+  .hp-wrap:not(.hp-v) .ra-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-wrap:not(.hp-v) .ra-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+  .hp-wrap:not(.hp-v) .ra-two:has(.rm-col.rm-col-on) > .ra-main{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
 
 /* помощник при 1280 и колонка 320 рядом (замечания, изображение) — рабочая область 376 px: подпись «Замечания» у
    переключателя уходит (остаётся для чтения с экрана — она его имя), номер слайда в шапке виден целиком. По раскладке

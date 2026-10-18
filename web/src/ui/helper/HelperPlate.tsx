@@ -1,11 +1,11 @@
-// Плита «Помощник» (boards/G-helper, G-helper-open; V2 модуль `hp`): ячейка второй колонки обёртки колоды (0 → 400 px),
-// плита 400 px #E9F1FF прижата к правому краю и выходит из-под колоды: край колоды, уходя влево, открывает её, сама
-// она доезжает последние 32 px той же кривой (520 мс); закрытую колода накрывает (340 мс), плита уходит вправо — первые
-// 100 мс непрозрачной, затем гаснет за 240 мс, пока колода её накрывает (helper.css `.hp-help`, reveal). Шапка «Помощник»
+// Плита «Помощник» (boards/G-helper, G-helper-open; V2 модуль `hp`): плита 400 px #E9F1FF справа от колоды. Ход
+// открытия и закрытия — ui/shell/helperMotion.ts и helper.css: плита стоит на своём месте в занавесе рельса, край колоды,
+// уходя влево, открывает её; сама она доезжает последние 32 px той же кривой (520 мс) и проявляется за 240 мс; закрытую
+// колода накрывает (340 мс), плита уходит вправо — первые 100 мс непрозрачной, затем гаснет за 240 мс. Шапка «Помощник»
 // и ✕, лента с мягким краем (сообщения, полосы задач, «печатает…»), подсказки и поле до восьми строк со скрепкой и
-// отправкой. Содержимое входит каскадом по 40 мс (шапка 160, сообщения 200…400, подсказки 440, поле 480) — переходом,
-// поэтому каскад повторяется при каждом открытии: закрытая плита сбрасывает его невидимо, когда колода её уже закрыла
-// (340 мс). Новое сообщение в открытой ленте всплывает само (p2-in).
+// отправкой. Содержимое входит каскадом по 40 мс (шапка 160, сообщения 200…400, подсказки 440, поле 480) — переходом
+// по классу `hp-v` обёртки (задержки — `--d`), поэтому каскад повторяется при каждом открытии: закрытая плита сбрасывает
+// его невидимо, когда колода её уже закрыла (340 мс). Новое сообщение в открытой ленте всплывает само (p2-in).
 // Плита смонтирована всегда (закрытая — скрыта): недописанное сообщение и задачи из чата живут, пока она закрыта.
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent } from "react";
 import { humanError } from "../../lib/errors";
@@ -22,6 +22,7 @@ import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNo
 import { useHelperChat } from "./useHelperChat";
 import { layerOpen } from "../shell/sheets";
 import { usePhone } from "../shell/tier";
+import { prepareHelper, releaseHelper, setHelper } from "../shell/helperMotion";
 
 const LINE = 24;
 const PAD = 16;
@@ -30,8 +31,9 @@ const MAX_ROWS = 8;
 /** Счётчик знаков — только у длинного текста. */
 const COUNT_FROM = 1000;
 
-/** Каскад открытия (G-helper-open): закрытие — без каскада, сброс через 340 мс, когда колода уже закрыла плиту. */
-const dl = (open: boolean, ms: number) => `${open ? ms : 340}ms`;
+/** Задержка в каскаде открытия (G-helper-open; helper.css `.hp-v .hp-st`); закрытие — без каскада, сброс через 340 мс,
+ *  когда колода уже закрыла плиту (helper.css `.hp-st`). */
+const dl = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 
 /** Пузырь ответа: абзацы и список (`gh-ul`), русская вёрстка без висячих предлогов. */
 function BotText({ text }: { text: string }) {
@@ -154,24 +156,16 @@ export function HelperPlate() {
     if (!el) return;
     const opening = open && !wasOpen.current;
     wasOpen.current = open;
-    if (!open) return;
+    // закрытая плита держит ленту у конца: открытие ничего не прокручивает на глазах
+    if (!open) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
     el.scrollTo({ top: el.scrollHeight, behavior: opening ? "auto" : smoothScroll() });
   }, [tail, open]);
 
-  // открытие: курсор — в поле (плита уже едет); закрытие: фокус из плиты — на пункт шапки
-  useEffect(() => {
-    if (open) {
-      const raf = window.requestAnimationFrame(() => area.current?.focus({ preventScroll: true }));
-      return () => window.cancelAnimationFrame(raf);
-    }
-    if (plate.current?.contains(document.activeElement)) {
-      const nav = document.getElementById("hp-nav");
-      const to = nav && nav.getClientRects().length && getComputedStyle(nav).visibility !== "hidden" ? nav : document.getElementById("p2-navbtn");
-      to?.focus({ preventScroll: true });
-    }
-  }, [open]);
-
-  const close = () => dispatch({ type: "set", patch: { helper: false } });
+  // курсор в поле при открытии и фокус на пункт шапки при закрытии ставит ход (helperMotion)
+  const close = () => setHelper(false);
   // Esc вне полей и слоёв (фокус на странице) тоже закрывает помощника — если поверх колоды ничего не открыто
   const layered = layerOpen(ui);
   useEffect(() => {
@@ -179,7 +173,7 @@ export function HelperPlate() {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (document.activeElement && document.activeElement !== document.body) return;
-      dispatch({ type: "set", patch: { helper: false } });
+      setHelper(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -233,7 +227,7 @@ export function HelperPlate() {
 
   const n = items.length + 1;
   const sendOff = !text.trim() || chat.pending || healthError;
-  const st = (ms: number): CSSProperties => ({ transitionDelay: dl(open, ms) });
+  const st = (ms: number): CSSProperties => dl(ms);
 
   return (
     <div className="hp-hcell">
@@ -247,7 +241,8 @@ export function HelperPlate() {
         {/* шапка: заголовок и крестик на одной оси (центр строки 48) */}
         <div className="hp-st" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 48, flex: "none", ...st(160) }}>
           <h2 id="hp-title" style={{ minWidth: 0, margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 20, lineHeight: "28px", letterSpacing: "-0.02em", color: "#0B1220" }}>Помощник</h2>
-          <button type="button" className="p2-rbl gh-x" onClick={close} aria-label="Закрыть помощника" title="Закрыть (Esc)">
+          <button type="button" className="p2-rbl gh-x" onClick={close} aria-label="Закрыть помощника" title="Закрыть (Esc)"
+            onPointerEnter={prepareHelper} onPointerLeave={releaseHelper} onFocus={prepareHelper} onBlur={releaseHelper}>
             <Icon name="x" size={18} />
           </button>
         </div>
@@ -256,14 +251,14 @@ export function HelperPlate() {
         <div ref={feed} role="log" className="p2-fade" aria-label="Переписка с помощником"
           style={{ flex: 1, minHeight: 0, overflowY: "auto", margin: "16px -4px 0", padding: "4px 4px 24px", scrollbarWidth: "none" }}>
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 12, minHeight: "100%" }}>
-            <div key={intro} className={cls("gh-item gh-l hp-st", open && intro !== introAtOpen.current && "p2-in")} style={st(feedDelay(0, n, open))}>
+            <div key={intro} className={cls("gh-item gh-l hp-st", open && intro !== introAtOpen.current && "p2-in")} style={st(feedDelay(0, n, true))}>
               <BotText text={intro} />
             </div>
             {items.map((it, i) => {
               const { id, ts } = it.kind === "msg" ? it.msg : it.kind === "job" ? it.job : it.note;
               const user = it.kind === "msg" && it.msg.role === "user";
               return (
-                <div key={id} className={cls("gh-item hp-st", user ? "gh-r" : "gh-l", fresh(ts) && "p2-in")} style={st(feedDelay(i + 1, n, open))}>
+                <div key={id} className={cls("gh-item hp-st", user ? "gh-r" : "gh-l", fresh(ts) && "p2-in")} style={st(feedDelay(i + 1, n, true))}>
                   {it.kind === "job" ? <JobCard job={it.job} />
                     : it.kind === "note" ? <NoteLine note={it.note} latest={it.note.id === latestRefreshNote(chat.notes, it.note.refresh)} />
                     : user ? <div className="gh-user">{it.msg.text}</div> : <BotText text={it.msg.text} />}

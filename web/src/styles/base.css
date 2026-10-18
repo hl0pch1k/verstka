@@ -213,6 +213,8 @@ body{background:#F3F4F1;color:#0B1220;font-family:'Manrope',system-ui,-apple-sys
 .df-mchk-on{opacity:1}
 @keyframes gh-spin{to{transform:rotate(360deg)}}
 .gh-spin{display:block;animation:gh-spin 1000ms linear infinite}
+/* скрытая дуга (её строка не на экране, p2-off) не крутится: бесконечная анимация невидимого слоя — лишняя работа кадра */
+.p2-off .gh-spin{animation-play-state:paused}
 /* наведение нигде не двигает и не сдвигает элементы — только цвет, тень и прозрачность (решение владельца 18.10):
    подъём на 2 px в уменьшенной сцене (stage.ts) — дробный, Safari округляет его по-разному в каждом кадре, и
    карточки, кнопки и миниатюры дрожат. Нажатие (scale .98) остаётся */

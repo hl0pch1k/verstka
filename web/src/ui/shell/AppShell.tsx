@@ -1,11 +1,9 @@
-// Оболочка «Слоёв»: страница (#F3F4F1, поля 24, ширина до 1392), шапка и колода в обёртке `hp-wrap` — сетке из двух
-// колонок, где вторая (место помощника) 0 → 400 px. Разметка — boards/V2.dc.html, `.p2-root`. Задачи областей
-// подключают сюда содержимое плит и слоёв через слоты `Deck`. Помощник открыт — колода сужается на любом экране
-// (`hp-open hp-nar`: сетка 520 мс, плита выходит из-под колоды, край колоды бросает на неё тень `hp-shade`, пока она
-// под колодой). «Создать» и «Сборка» перестраиваются вместе с ней каждый кадр (ui/create/morph.ts, ui/build/columns.ts,
-// create.css, build.css), слои и лист «Подробнее» — тоже (details.css, layers.css, kit/Tx); плиты и названия шагов не
-// гаснут.
-import { useContext, useEffect, useMemo, useRef, type CSSProperties } from "react";
+// Оболочка «Слоёв»: страница (#F3F4F1, поля 24, ширина до 1392), шапка и колода в обёртке `hp-wrap`. Задачи областей
+// подключают сюда содержимое плит и слоёв через слоты `Deck`. Помощник открыт — колода у́же на 416 px (плита 400 и зазор
+// 16) на любом экране; ход открытия и закрытия — ui/shell/helperMotion.ts: колода во время хода широкая, её край —
+// «рельс» справа (полоса края с копиями плит, занавес цвета страницы с плитой помощника, тень края), он едет
+// transform'ом; раскладка меняется один раз — в конце открытия и в начале закрытия.
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { Generation, GenerationMeta, TemplateListItem, Variant } from "../../types";
@@ -24,7 +22,6 @@ import { Deck } from "../deck/Deck";
 // не успеть к движению или не загрузиться вовсе); библиотеки — отдельным куском (vite.config `manualChunks`)
 import { DetailsSheet } from "../details/DetailsSheet";
 import { HelperPlate } from "../helper/HelperPlate";
-import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import type { StripData } from "../deck/Strip";
 import { HistoryLayer } from "../layers/HistoryLayer";
@@ -44,8 +41,7 @@ import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 import { StackDim } from "./StackDim";
 import { STAGE_ATTR, stageScale, stageStyles, useWindowSize } from "./stage";
-import { phaseClasses, useHelperMotion } from "./helperFlip";
-import { helperBeside, useTier } from "./tier";
+import { attachHelper, syncHelper } from "./helperMotion";
 
 const ROOT: CSSProperties = {
   width: "100%", minHeight: 900, boxSizing: "border-box", padding: "0 24px 24px", background: "#F3F4F1", color: "#0B1220",
@@ -149,14 +145,22 @@ export function AppShell() {
     dispatch({ type: "open", step: "tpl" });
     upload.pick();
   };
-  const tier = useTier();
-  const beside = helperBeside(tier);
+  // помощник: ход — в helperMotion (классы обёртки и страницы, transform'ы), состояние React догоняет его в конце хода
+  const rootRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const bandRef = useRef<HTMLDivElement>(null);
+  const helperNow = useRef(ui.helper);
+  helperNow.current = ui.helper;
+  useLayoutEffect(() => {
+    const root = rootRef.current, wrap = wrapRef.current, band = bandRef.current;
+    if (!root || !wrap || !band) return;
+    return attachHelper({ root, wrap, band }, helperNow.current, (open) => {
+      if (helperNow.current !== open) dispatch({ type: "set", patch: { helper: open } });
+    });
+  }, [dispatch]);
+  useEffect(() => syncHelper(ui.helper), [ui.helper]);
   // окно ниже холста (900) или уже 1280: сцена уменьшается целиком (zoom) и видна вся, без прокрутки
   // (ui/shell/stage.ts). Обёртка `p2-fit` есть всегда (без стилей, пока масштаб 1): смена масштаба не пересоздаёт страницу
-  // «Результат» с помощником: раскладка меняется один раз, всё едет transform'ом (helperFlip.ts)
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const flip = ui.screen === "result" && beside;
-  const hpPhase = useHelperMotion(wrapRef, ui.helper && beside, flip);
   const win = useWindowSize();
   const k = stageScale(win.width, win.height);
   const st = stageStyles(k, win.width);
@@ -185,18 +189,26 @@ export function AppShell() {
   );
   return (
     <div className="p2-fit" style={st.fit}>
-    <div className="p2-root" style={st.root ? { ...ROOT, ...st.root } : ROOT} {...(k < 1 && { [STAGE_ATTR]: String(k) })}>
+    <div ref={rootRef} className="p2-root" style={st.root ? { ...ROOT, ...st.root } : ROOT} {...(k < 1 && { [STAGE_ATTR]: String(k) })}>
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
-        {/* колода и место помощника: закрыт — колонка 0; открыт — 400 px, зазор 16, колода сужается на всех экранах */}
-        <div ref={wrapRef} className={cls("hp-wrap", beside ? phaseClasses(hpPhase) : ui.helper ? "hp-open hp-sheet" : "hp-closed", flip && "hp-flip")}>
+        {/* колода и рельс помощника справа от неё (helper.css): полоса края колоды (копии плит — на время хода), занавес
+            цвета страницы с плитой помощника (встречный ход — плита стоит на месте, пока край колоды её открывает) и тень
+            края на плите. Классы обёртки ставит helperMotion — у React они не меняются */}
+        <div ref={wrapRef} className="hp-wrap">
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
             h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} q3={<PhoneParams pp={params} />}
             b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />
-          <HelperPlate />
-          {/* тень правого края колоды на плиту помощника — видна, только пока плита под колодой (helper.css `.hp-shade`) */}
-          <div className="hp-shade" aria-hidden="true" />
+          <div className="hp-rail">
+            <div className="hp-cur">
+              <div className="hp-ctr">
+                <HelperPlate />
+              </div>
+            </div>
+            <div className="hp-shd" aria-hidden="true"><i /></div>
+            <div className="hp-band" aria-hidden="true"><div ref={bandRef} className="hp-bandin" /></div>
+          </div>
         </div>
       </div>
     </div>
