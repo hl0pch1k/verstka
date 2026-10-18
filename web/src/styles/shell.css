@@ -25,3 +25,22 @@
 .p2-root:has(.hp-wrap){overflow-x:clip}
 /* логотип крупнее (владелец, 15.10): «Verstka» 25 px, полоски 5 px — всё в пропорции, вместе с наведением и анимацией «Нет связи» */
 .p2-brand{zoom:1.25}
+
+/* фон и тень плиты колоды — слоями под содержимым (Plate.tsx `p2-pbg`): тень — ::after, фон — ::before. В покое — как
+   были фон и тень самой плиты */
+.p2-pbg{isolation:isolate}
+.p2-pbg::before,.p2-pbg::after{content:"";position:absolute;top:0;bottom:0;left:0;right:0;border-radius:inherit;pointer-events:none}
+.p2-pbg::before{z-index:-1;background:var(--pbg);clip-path:inset(0 0 0 0 round 40px)}
+.p2-pbg::after{z-index:-2;box-shadow:var(--psh);clip-path:inset(-64px 0 -64px -64px)}
+/* «Результат» с помощником (hp-flip, AppShell; ход — ui/shell/helperFlip.ts): раскладка колоды меняется один раз, в
+   первом кадре, — без хода сетки по кадрам. Край колоды едет только фоном и тенью плит: в узкой раскладке их слои
+   продлены вправо на место помощника (400 + зазор 16) и подрезаны clip-path; открытие — подрезка 0 → 416 (520 мс),
+   закрытие — 416 → 0 (340 мс). Содержимое переезжает transform'ом (FLIP), полный и компактный вид сменяются прозрачностью */
+.hp-flip.hp-wrap{transition:none}
+/* колода обрезает плиты по высоте (overflow: clip, Deck.tsx), а продлённый вправо фон плит должен быть виден за её краем */
+.hp-flip .p2-deck{overflow-x:visible !important;overflow-y:clip !important}
+/* тень края колоды на плиту помощника отдельной полосой отставала от края в Safari — здесь край колоды — сам фон плит */
+.hp-flip .hp-shade{display:none}
+.hp-flip.hp-nar .p2-pbg::before{right:-416px;clip-path:inset(0 416px 0 0 round 40px);transition:clip-path 520ms var(--ease)}
+.hp-flip.hp-nar .p2-pbg::after{right:-416px;clip-path:inset(-64px 416px -64px -64px);transition:clip-path 520ms var(--ease)}
+.hp-flip:not(.hp-nar) .p2-pbg::before,.hp-flip:not(.hp-nar) .p2-pbg::after{transition:clip-path 340ms var(--ease)}

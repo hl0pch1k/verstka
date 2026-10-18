@@ -105,6 +105,22 @@
   .ra-work.fx-in > .ra-two > :first-child{transition:none}
 
 
+/* «Результат» с помощником без хода раскладки (hp-flip, ui/shell/helperFlip.ts): сетки компактного и полного вида, высота
+   и отступ колонки слайда, предел ширины слайда меняются в первом кадре — переезд делает transform; остаются ходы
+   прозрачности (полный вид гаснет, компактный проявляется) */
+.hp-flip .hp-in,.hp-flip .ra-two,.hp-flip .ra-two > :first-child{transition:none !important}
+.hp-flip .ra-two .ra-stage{transition:transform 520ms var(--ease)}
+/* таблетка уведомления в шапке «Слайд N из M» при открытом помощнике гаснет и не держит места — подпись встаёт слева,
+   как на холсте */
+.hp-nar .ra-note-h{position:absolute;left:0;top:0}
+.hp-flip.hp-nar .ra-note.ra-note-h{transition:none}
+/* открытие: название компактного вида выходит из большого и садится на место — кнопки шапки проявляются, когда оно
+   уже почти встало (иначе увеличенное название ложится на них) */
+@keyframes hp-acts-in{0%,50%{opacity:0}100%{opacity:1}}
+.hp-flip.hp-nar .hp-acts{animation:hp-acts-in 520ms var(--ease) both}
+/* закрытие: кнопки шапки гаснут сразу — название уходит к большому над ними */
+.hp-flip:not(.hp-nar) .hp-acts{opacity:0}
+
 /* ── Свои дополнения */
 /* «печатает…»: ответ ещё не пришёл — тихая строка в пузыре помощника, мерцает прозрачностью */
 @keyframes hp-typing{from{opacity:1}to{opacity:.48}}
@@ -127,15 +143,11 @@ a.p2-rbl:hover{color:#0B1220}
    действиями — те же, что у раскрытой таблетки полного вида; значок — первый в ряду, меню раскрывается от него вправо
    (влево ему мало места при 1280) */
 .hp-nb{color:#2563EB}
-/* значки шапки компактного вида: при наведении — пилюля «значок + подпись», разворачивается вправо поверх соседей
-   (clip-path 240 мс и прозрачность), раскладка не меняется */
+/* значки шапки компактного вида: подпись при наведении — под кнопкой, в пустом зазоре 24 px между шапкой (64) и рабочей
+   областью: не перекрывает ни соседей, ни название и никого не сдвигает; проявляется прозрачностью и подъёмом на 4 px */
 .hp-ib{position:relative;overflow:visible}
-.hp-ibp{position:absolute;left:0;top:0;z-index:3;display:flex;align-items:center;gap:8px;height:40px;padding:0 16px 0 11px;border-radius:999px;background:#E9F1FF;color:#0B1220;font-size:14px;font-weight:700;line-height:20px;white-space:nowrap;pointer-events:none;opacity:0;clip-path:inset(0 calc(100% - 40px) 0 0 round 20px);transition:clip-path 200ms var(--ease),opacity 120ms var(--ease) 80ms}
-.hp-ibp svg{flex:none}
-.hp-nb .hp-ibp{color:#2563EB}
-.hp-nb .hp-ibp > span{color:#0B1220}
-.hp-ib:hover .hp-ibp,.hp-ib:focus-visible .hp-ibp{opacity:1;clip-path:inset(0 0 0 0 round 20px);transition:clip-path 240ms var(--ease),opacity 80ms var(--ease)}
-.hp-ib:hover{z-index:4}
+.hp-ibt{position:absolute;left:50%;top:calc(100% + 14px);z-index:3;height:20px;padding:0 8px;border-radius:999px;background:#0B1220;color:#FFFFFF;font-size:12px;font-weight:700;line-height:20px;white-space:nowrap;pointer-events:none;opacity:0;transform:translate(-50%, -4px);transition:opacity 120ms var(--ease),transform 160ms var(--ease)}
+.hp-ib:hover .hp-ibt,.hp-ib:focus-visible .hp-ibt{opacity:1;transform:translate(-50%, 0);transition:opacity 160ms var(--ease) 120ms,transform 240ms var(--ease) 120ms}
 .hp-np{left:0;right:auto;width:320px;display:flex;flex-direction:column;gap:2px;outline:none;transform-origin:top left}
 .hp-npt{margin:0;padding:8px 12px 0;font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
 .hp-npb{margin:0 0 6px;padding:2px 12px 0;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}

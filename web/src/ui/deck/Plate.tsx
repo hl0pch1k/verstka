@@ -20,13 +20,17 @@ export function Plate({ z, y, height = DECK_H, vis, slotClass, className, label,
   style?: CSSProperties;
   children?: ReactNode;
 }) {
+  const { background, boxShadow, ...rest } = style ?? {};
   // место — всегда свой слой (translateZ(0)): иначе Safari делает его слоем только на время наведения на кнопку или
   // миниатюру внутри и по окончании снова рисует в документ — в уменьшенной сцене (stage.ts) пиксели округляются
   // по-разному, и вся плита на миг сдвигается (замечание владельца 18.10, скрин 20)
   return (
     <div className={cls("p2-slot", slotClass)}
       style={{ position: "absolute", left: 0, right: 0, top: 0, height, zIndex: z, transform: `translateY(${y}px) translateZ(0)`, ...(vis !== undefined && { "--vis": `${vis}px` }) } as CSSProperties}>
-      <section className={cls("p2-plate", className)} aria-label={label} style={{ position: "relative", height: "100%", padding: "40px 48px", borderRadius: 40, ...style }}>
+      {/* фон плиты — слой под содержимым (`p2-pbg`, shell.css): при открытии помощника на «Результате» край колоды
+          едет им одним (clip-path), а раскладка меняется один раз (helperFlip.ts) */}
+      <section className={cls("p2-plate p2-pbg", className)} aria-label={label}
+        style={{ position: "relative", height: "100%", padding: "40px 48px", borderRadius: 40, ...rest, "--pbg": background, "--psh": boxShadow ?? "none" } as CSSProperties}>
         {children}
       </section>
     </div>

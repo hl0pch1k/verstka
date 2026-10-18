@@ -5,7 +5,7 @@
 // под колодой). «Создать» и «Сборка» перестраиваются вместе с ней каждый кадр (ui/create/morph.ts, ui/build/columns.ts,
 // create.css, build.css), слои и лист «Подробнее» — тоже (details.css, layers.css, kit/Tx); плиты и названия шагов не
 // гаснут.
-import { useContext, useEffect, useMemo, type CSSProperties } from "react";
+import { useContext, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { Generation, GenerationMeta, TemplateListItem, Variant } from "../../types";
@@ -44,6 +44,7 @@ import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 import { StackDim } from "./StackDim";
 import { STAGE_ATTR, stageScale, stageStyles, useWindowSize } from "./stage";
+import { useHelperFlip } from "./helperFlip";
 import { helperBeside, useTier } from "./tier";
 
 const ROOT: CSSProperties = {
@@ -152,6 +153,10 @@ export function AppShell() {
   const beside = helperBeside(tier);
   // окно ниже холста (900) или уже 1280: сцена уменьшается целиком (zoom) и видна вся, без прокрутки
   // (ui/shell/stage.ts). Обёртка `p2-fit` есть всегда (без стилей, пока масштаб 1): смена масштаба не пересоздаёт страницу
+  // «Результат» с помощником: раскладка меняется один раз, всё едет transform'ом (helperFlip.ts)
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const flip = ui.screen === "result" && beside;
+  useHelperFlip(wrapRef, ui.helper && beside, flip);
   const win = useWindowSize();
   const k = stageScale(win.width, win.height);
   const st = stageStyles(k, win.width);
@@ -184,7 +189,7 @@ export function AppShell() {
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
         {/* колода и место помощника: закрыт — колонка 0; открыт — 400 px, зазор 16, колода сужается на всех экранах */}
-        <div className={cls("hp-wrap", ui.helper ? (beside ? "hp-open hp-nar" : "hp-open hp-sheet") : "hp-closed")}>
+        <div ref={wrapRef} className={cls("hp-wrap", ui.helper ? (beside ? "hp-open hp-nar" : "hp-open hp-sheet") : "hp-closed", flip && "hp-flip")}>
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
             h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} q3={<PhoneParams pp={params} />}

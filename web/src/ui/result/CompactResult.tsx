@@ -1,21 +1,21 @@
 // Компактный вид «Результата» (boards/G-helper, G-helper-open; V2 `hp-in`): слой над плитой с той же сеткой, что у
 // полного вида, — когда помощник сужает колоду, его шапка встаёт в строку уведомления (48 → 64): название, строка
-// «шаблон · слайды · когда», действия-иконки («Скачать PDF», «Изменить текст», «Показать текст», «Подробнее», «Новая
-// презентация») и «Скачать PowerPoint»; а в узкой колонке 184 px — варианты столбиком, оценка и итоги проверки (пункты о
+// «шаблон · слайды · когда», действия-иконки («Скачать PDF», «Изменить текст», «Показать текст», «Новая презентация» —
+// как на холсте; «Подробнее» открывают пункты итогов в узкой колонке) и «Скачать PowerPoint»; а в узкой колонке 184 px — варианты столбиком, оценка и итоги проверки (пункты о
 // качестве открывают «Подробнее» на «Качестве»). Уведомления полного вида здесь нет: если оно есть, его действия — за
 // значком «i» в начале ряда (меню как df-menu). Слайд, листание и лента миниатюр — общие с полным видом, их сетка
 // перестраивается вместе с колодой (helper.css). Полный вид гаснет за 240 мс, компактный проявляется за 240 мс через
 // 120 мс; закрытие — наоборот, быстрее. В режиме «Замечания» и с выбранным изображением колонка шире (320 px): панель
 // замечаний стоит в ней, а карточка «Изображение» — здесь, вместо итогов; смена 184 ↔ 320 — перекрёстным затуханием
 // (`snap`: сетка подменяется без хода, пока слайд и колонка не видны).
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Arc } from "../kit/Arc";
 import { useSwap } from "../kit/useSwap";
 import type { SheetTab } from "../deck/geometry";
 import { useDeckWidth } from "../deck/useDeckFit";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
-import { Icon, type IconName } from "../kit/Icon";
+import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { ctaShort, type CheckItem } from "./compact";
 import type { NoteActions } from "./NotePill";
@@ -76,7 +76,7 @@ function NoteMenu({ note, actions, live }: { note: NoteView; actions: NoteAction
       <button ref={btn} type="button" className="p2-rbl hp-nb hp-ib" onClick={() => setOpen(!open)} aria-haspopup="dialog" aria-expanded={open}
         aria-controls={open ? "hp-np" : undefined} aria-label={note.label}>
         <Icon name="info" size={18} />
-        {!open && <Pill icon="info" text={note.title} />}
+        {!open && <Tip text={note.title} />}
       </button>
       {open && (
         <>
@@ -116,15 +116,46 @@ function NoteMenu({ note, actions, live }: { note: NoteView; actions: NoteAction
   );
 }
 
-/** Подпись значка: при наведении круглая кнопка разворачивается вправо в пилюлю «значок + подпись» поверх соседей
- *  (clip-path и прозрачность, без сдвига раскладки) — понятно, что это за кнопка (замечание владельца 18.10, скрин 33). */
-function Pill({ icon, text }: { icon: IconName; text: string }) {
-  return (
-    <span className="hp-ibp" aria-hidden="true">
-      <Icon name={icon} size={18} />
-      <span>{text}</span>
-    </span>
-  );
+/** Подпись значка: при наведении проявляется под кнопкой, в пустом зазоре между шапкой компактного вида и
+ *  рабочей областью (только прозрачность и transform) — ничего не перекрывает и никого не сдвигает (замечание
+ *  владельца 18.10). */
+function Tip({ text }: { text: string }) {
+  return <span className="hp-ibt" aria-hidden="true">{text}</span>;
+}
+
+/** Кегль названия компактного вида: 32 px, как на холсте; не помещается в строку — 28, 24; и тогда нет — две строки
+ *  по 22 px (строка «шаблон · слайды · когда» уступает им место). Многоточия нет (замечание владельца 18.10). */
+const TITLE_SIZES = [32, 28, 24];
+function useTitleFit(title: string) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const [fit, setFit] = useState<{ size: number; two: boolean }>({ size: 32, two: false });
+  useLayoutEffect(() => {
+    const h = ref.current;
+    const box = h?.parentElement;
+    if (!h || !box) return;
+    const measure = () => {
+      if (!box.clientWidth) return;
+      const was = { fs: h.style.fontSize, lh: h.style.lineHeight, ws: h.style.whiteSpace };
+      h.style.whiteSpace = "nowrap";
+      let next = { size: 22, two: true };
+      for (const size of TITLE_SIZES) {
+        h.style.fontSize = `${size}px`;
+        if (h.scrollWidth <= box.clientWidth + 0.5) {
+          next = { size, two: false };
+          break;
+        }
+      }
+      h.style.fontSize = was.fs;
+      h.style.lineHeight = was.lh;
+      h.style.whiteSpace = was.ws;
+      setFit((f) => (f.size === next.size && f.two === next.two ? f : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [title]);
+  return { ref, ...fit };
 }
 
 /** Строка под названием: строка ряда результата с её действием или «шаблон · слайды · когда»; смена — перекрёстным
@@ -178,33 +209,34 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
   card: { shown: boolean; node: ReactNode } | null;
 }) {
   // «Скачать PowerPoint» → «PowerPoint», когда рядом со значками названию мало места (по целевой ширине колоды)
-  const short = ctaShort(useDeckWidth(), (note ? 1 : 0) + 5);
+  const short = ctaShort(useDeckWidth(), (note ? 1 : 0) + 4);
+  const tf = useTitleFit(d.title);
   return (
     <div className={cls("hp-in", snap.wide && "hp-wide", snap.now && "hp-snap")}>
       <div className="hp-top hp-xf">
         <div className="gh-top p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64, animationDelay: "160ms" }}>
-          <div style={{ minWidth: 0 }}>
-            <h1 title={d.title} style={{ margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 24, lineHeight: "32px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</h1>
-            <HeadLine d={d} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1 ref={tf.ref} title={d.title} style={{
+              margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: tf.size, lineHeight: tf.two ? "26px" : `${tf.size + 8}px`, letterSpacing: "-0.03em", color: "#0B1220",
+              whiteSpace: tf.two ? "normal" : "nowrap", overflowWrap: "anywhere",
+              ...(tf.two && { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }),
+            }}>{d.title}</h1>
+            {!tf.two && <HeadLine d={d} />}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+          <div className="hp-acts" style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
             {note && <NoteMenu note={note} actions={noteActions} live={live} />}
             {d.pdf ? (
-              <a className="p2-rbl hp-ib" href={d.pdf} download={`${d.fileBase}.pdf`} aria-label="Скачать PDF"><Icon name="file" size={18} /><Pill icon="file" text="Скачать PDF" /></a>
+              <a className="p2-rbl hp-ib" href={d.pdf} download={`${d.fileBase}.pdf`} aria-label="Скачать PDF"><Icon name="file" size={18} /><Tip text="Скачать PDF" /></a>
             ) : (
               <button type="button" className="p2-rbl" disabled aria-label="Скачать PDF" title="PDF для этой презентации нет"><Icon name="file" size={18} /></button>
             )}
-            <button type="button" className="p2-rbl hp-ib" onClick={onEditText} aria-label="Изменить текст"><Icon name="pen" size={18} /><Pill icon="pen" text="Изменить текст" /></button>
+            <button type="button" className="p2-rbl hp-ib" onClick={onEditText} aria-label="Изменить текст"><Icon name="pen" size={18} /><Tip text="Изменить текст" /></button>
             <button type="button" className={cls("p2-rbl hp-ib", !d.hasText && "rt-nb-off")} onClick={onShowText} aria-haspopup="dialog" aria-label="Показать текст"
               aria-disabled={d.hasText ? undefined : true} title={d.hasText ? undefined : "Для этой презентации текст недоступен"}>
               <Icon name="list" size={18} />
-              {d.hasText && <Pill icon="list" text="Показать текст" />}
+              {d.hasText && <Tip text="Показать текст" />}
             </button>
-            <button type="button" className="p2-rbl hp-ib" onClick={() => onDetails("quality")} aria-haspopup="dialog" aria-label="Подробнее: качество, почему так, агент, план, шаблон, файлы">
-              <Icon name="chart" size={18} />
-              <Pill icon="chart" text="Подробнее" />
-            </button>
-            <button type="button" className="p2-rbl hp-ib" onClick={onNew} aria-label="Новая презентация"><Icon name="plus" size={18} /><Pill icon="plus" text="Новая презентация" /></button>
+            <button type="button" className="p2-rbl hp-ib" onClick={onNew} aria-label="Новая презентация"><Icon name="plus" size={18} /><Tip text="Новая презентация" /></button>
             {d.pptx && (
               <a className="p2-cta p2-cta-flat" href={d.pptx} download={`${d.fileBase}.pptx`} aria-label="Скачать PowerPoint" title={d.pptxTitle} style={{ marginLeft: 8 }}>
                 <Icon name="download" size={20} />
