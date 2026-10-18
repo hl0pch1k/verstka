@@ -33,11 +33,11 @@ export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksO
   return (
     <div className="p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 40, animationDelay: "200ms" }}>
       {note}
-      {/* в тесной колоде (помощник при 1280) заголовок слайда сжимается многоточием — целиком он в подсказке */}
+      {/* только «Слайд N из M», целиком: название слайда видно на самом слайде, а в строке оно всегда обрезалось
+          (замечание владельца 18.10) */}
       <p title={title ? `${where} · ${title}` : where}
-        style={{ flex: note ? 1 : undefined, minWidth: 0, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {where}{" "}
-        {title && <span style={{ fontWeight: 500, color: "#5A6272" }}>· {title}</span>}
+        style={{ flex: note ? 1 : "none", margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
+        {where}
       </p>
       <div className="ra-whr" style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
         {sw.shown && (

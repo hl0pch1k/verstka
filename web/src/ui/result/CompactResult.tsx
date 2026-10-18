@@ -15,7 +15,7 @@ import type { SheetTab } from "../deck/geometry";
 import { useDeckWidth } from "../deck/useDeckFit";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
-import { Icon } from "../kit/Icon";
+import { Icon, type IconName } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { ctaShort, type CheckItem } from "./compact";
 import type { NoteActions } from "./NotePill";
@@ -73,9 +73,10 @@ function NoteMenu({ note, actions, live }: { note: NoteView; actions: NoteAction
   const busy = !!actions.rebuildBusy;
   return (
     <div style={{ position: "relative", flex: "none" }}>
-      <button ref={btn} type="button" className="p2-rbl hp-nb" onClick={() => setOpen(!open)} aria-haspopup="dialog" aria-expanded={open}
-        aria-controls={open ? "hp-np" : undefined} aria-label={note.label} title={note.title}>
+      <button ref={btn} type="button" className="p2-rbl hp-nb hp-ib" onClick={() => setOpen(!open)} aria-haspopup="dialog" aria-expanded={open}
+        aria-controls={open ? "hp-np" : undefined} aria-label={note.label}>
         <Icon name="info" size={18} />
+        {!open && <Pill icon="info" text={note.title} />}
       </button>
       {open && (
         <>
@@ -112,6 +113,17 @@ function NoteMenu({ note, actions, live }: { note: NoteView; actions: NoteAction
         </>
       )}
     </div>
+  );
+}
+
+/** Подпись значка: при наведении круглая кнопка разворачивается вправо в пилюлю «значок + подпись» поверх соседей
+ *  (clip-path и прозрачность, без сдвига раскладки) — понятно, что это за кнопка (замечание владельца 18.10, скрин 33). */
+function Pill({ icon, text }: { icon: IconName; text: string }) {
+  return (
+    <span className="hp-ibp" aria-hidden="true">
+      <Icon name={icon} size={18} />
+      <span>{text}</span>
+    </span>
   );
 }
 
@@ -172,26 +184,27 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
       <div className="hp-top hp-xf">
         <div className="gh-top p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64, animationDelay: "160ms" }}>
           <div style={{ minWidth: 0 }}>
-            <h1 title={d.title} style={{ margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</h1>
+            <h1 title={d.title} style={{ margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 24, lineHeight: "32px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</h1>
             <HeadLine d={d} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
             {note && <NoteMenu note={note} actions={noteActions} live={live} />}
             {d.pdf ? (
-              <a className="p2-rbl" href={d.pdf} download={`${d.fileBase}.pdf`} aria-label="Скачать PDF" title="Скачать PDF"><Icon name="file" size={18} /></a>
+              <a className="p2-rbl hp-ib" href={d.pdf} download={`${d.fileBase}.pdf`} aria-label="Скачать PDF"><Icon name="file" size={18} /><Pill icon="file" text="Скачать PDF" /></a>
             ) : (
               <button type="button" className="p2-rbl" disabled aria-label="Скачать PDF" title="PDF для этой презентации нет"><Icon name="file" size={18} /></button>
             )}
-            <button type="button" className="p2-rbl" onClick={onEditText} aria-label="Изменить текст" title="Изменить текст или шаблон"><Icon name="pen" size={18} /></button>
-            <button type="button" className={cls("p2-rbl", !d.hasText && "rt-nb-off")} onClick={onShowText} aria-haspopup="dialog" aria-label="Показать текст"
-              aria-disabled={d.hasText ? undefined : true} title={d.hasText ? "Показать текст презентации" : "Для этой презентации текст недоступен"}>
+            <button type="button" className="p2-rbl hp-ib" onClick={onEditText} aria-label="Изменить текст"><Icon name="pen" size={18} /><Pill icon="pen" text="Изменить текст" /></button>
+            <button type="button" className={cls("p2-rbl hp-ib", !d.hasText && "rt-nb-off")} onClick={onShowText} aria-haspopup="dialog" aria-label="Показать текст"
+              aria-disabled={d.hasText ? undefined : true} title={d.hasText ? undefined : "Для этой презентации текст недоступен"}>
               <Icon name="list" size={18} />
+              {d.hasText && <Pill icon="list" text="Показать текст" />}
             </button>
-            <button type="button" className="p2-rbl" onClick={() => onDetails("quality")} aria-haspopup="dialog" aria-label="Подробнее"
-              title="Подробнее: качество, почему так, агент, план, шаблон, файлы">
+            <button type="button" className="p2-rbl hp-ib" onClick={() => onDetails("quality")} aria-haspopup="dialog" aria-label="Подробнее: качество, почему так, агент, план, шаблон, файлы">
               <Icon name="chart" size={18} />
+              <Pill icon="chart" text="Подробнее" />
             </button>
-            <button type="button" className="p2-rbl" onClick={onNew} aria-label="Новая презентация" title="Новая презентация"><Icon name="plus" size={18} /></button>
+            <button type="button" className="p2-rbl hp-ib" onClick={onNew} aria-label="Новая презентация"><Icon name="plus" size={18} /><Pill icon="plus" text="Новая презентация" /></button>
             {d.pptx && (
               <a className="p2-cta p2-cta-flat" href={d.pptx} download={`${d.fileBase}.pptx`} aria-label="Скачать PowerPoint" title={d.pptxTitle} style={{ marginLeft: 8 }}>
                 <Icon name="download" size={20} />

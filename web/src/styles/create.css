@@ -416,6 +416,10 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
    над плитками ленты, которые проявляются в то же время */
 .p2-hx>.p2-in:has(>.bb-fg){position:relative;z-index:4}
 .bb-btn{flex:none}
+/* открыт помощник (узкая колода): «Брендбук» — круглая кнопка с книжкой, подпись — в подсказке (title); иначе он
+   налезал на обложку шаблона (замечание владельца 18.10, скрин 30) */
+.hp-nar .bb-btn{width:40px;height:40px;padding:0;justify-content:center;gap:0;border-radius:999px;background:#F3F4F1}
+.hp-nar .bb-btn > span{display:none}
 .tx-menu.bb-menu{left:auto;right:0;transform-origin:top right}
 .tx-mdiv{display:block;height:1px;margin:4px 12px;background:rgba(11,18,32,.08)}
 .bb-busy{display:inline-flex;align-items:center;gap:8px;height:40px;font-size:14px;font-weight:600;line-height:20px;color:#2563EB;white-space:nowrap}

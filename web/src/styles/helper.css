@@ -86,6 +86,8 @@
   /* сцена не выше свободного места: высота колонки известна (548 / 612, в узкой раскладке на 24 меньше) — числом, а не
      100cqh: в Safari единицы контейнера в уменьшенной сцене (zoom, stage.ts) не делятся на масштаб, и сцена мельчала */
   .hp-nar .ra-two .ra-stage{max-width:min(720px, calc(381px * var(--ra-ar, 1.7778)))}
+  .hp-wrap .ra-two .ra-stage{transition:max-width 340ms var(--ease),transform 520ms var(--ease)}
+  .hp-nar .ra-two .ra-stage{transition:max-width 520ms var(--ease),transform 520ms var(--ease)}
   .hp-wrap .ra-two > aside{justify-self:start;width:424px;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .ra-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
   /* презентация без уведомления (`ra-top`, R-remarks): рабочая область стоит с самого верха (612), а не под рядом 48 + 16 —
@@ -125,6 +127,15 @@ a.p2-rbl:hover{color:#0B1220}
    действиями — те же, что у раскрытой таблетки полного вида; значок — первый в ряду, меню раскрывается от него вправо
    (влево ему мало места при 1280) */
 .hp-nb{color:#2563EB}
+/* значки шапки компактного вида: при наведении — пилюля «значок + подпись», разворачивается вправо поверх соседей
+   (clip-path 240 мс и прозрачность), раскладка не меняется */
+.hp-ib{position:relative;overflow:visible}
+.hp-ibp{position:absolute;left:0;top:0;z-index:3;display:flex;align-items:center;gap:8px;height:40px;padding:0 16px 0 11px;border-radius:999px;background:#E9F1FF;color:#0B1220;font-size:14px;font-weight:700;line-height:20px;white-space:nowrap;pointer-events:none;opacity:0;clip-path:inset(0 calc(100% - 40px) 0 0 round 20px);transition:clip-path 200ms var(--ease),opacity 120ms var(--ease) 80ms}
+.hp-ibp svg{flex:none}
+.hp-nb .hp-ibp{color:#2563EB}
+.hp-nb .hp-ibp > span{color:#0B1220}
+.hp-ib:hover .hp-ibp,.hp-ib:focus-visible .hp-ibp{opacity:1;clip-path:inset(0 0 0 0 round 20px);transition:clip-path 240ms var(--ease),opacity 80ms var(--ease)}
+.hp-ib:hover{z-index:4}
 .hp-np{left:0;right:auto;width:320px;display:flex;flex-direction:column;gap:2px;outline:none;transform-origin:top left}
 .hp-npt{margin:0;padding:8px 12px 0;font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
 .hp-npb{margin:0 0 6px;padding:2px 12px 0;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
