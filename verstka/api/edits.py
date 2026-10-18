@@ -93,7 +93,10 @@ def looks_like_edit(message: str) -> bool:
     from verstka.planning.brief_structure import is_photo_instruction, photo_dropped
 
     # «на слайде 6 оставь место под фото», «убери место под фото»: the free place for the person's own photo
-    return bool(EDIT_RX.search(text) or _UNDO_RX.search(text) or is_photo_instruction(text) or photo_dropped(text))
+    from verstka.planning.slide_edit import picture_request
+
+    # «создай изображение на этом слайде»: a picture the image model draws on the slide
+    return bool(EDIT_RX.search(text) or _UNDO_RX.search(text) or is_photo_instruction(text) or photo_dropped(text) or picture_request(text))
 
 
 def parse_edit(message: str, on_screen: Optional[int], total: int) -> Optional[EditRequest]:

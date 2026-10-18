@@ -336,10 +336,28 @@ def _rerender_pinned(vdir: Path, strategy: str, outline: DeckOutline, template_s
             log.warning("outline markers left in the notes", exc_info=True)
         # a picture the edited slide had goes back into its place (no model call)
         pic_records = None
+        misses: dict[int, str] = {}  # slide → why its asked picture could not be drawn (the reply says so)
+        made_by: dict[int, str] = {}  # slide → the image model that drew its asked picture
         for k in changed:
-            got = _keep_slide_picture(vdir, final, o, k)
+            # a new place on an edited slide («создай изображение на слайде 5»): the picture is drawn now (Z-Image), not left
+            # as a grey stand-in; one that could not be drawn takes its place away and the slide is laid out again
+            from verstka.planning.slide_edit import ASKED_PICTURE
+
+            new_place = o.slides[k - 1].content.photo_slot == ASKED_PICTURE and not o.slides[k - 1].content.photo_own and not _has_drawn(vdir, k)
+            got = _keep_slide_picture(vdir, final, o, k, make=new_place, manifest=manifest)
             if got is not None:
                 pic_records = got
+            if new_place:
+                ok, why_pic = picture_in_place(got, o, k)
+                if not ok:
+                    # the person asked for it: the place stays (they may try again), the reply says why it is empty
+                    log.warning("edit: slide %d — no picture: %s", k, why_pic)
+                    misses[k] = why_pic
+                else:
+                    from verstka.images.prompt import DECORATIVE_SUBJECT
+
+                    rec = next((r for r in (got or []) if r.get("slide") == k and r.get("status") == "generated"), {})
+                    made_by[k] = str(rec.get("model") or "") + (" (декоративная: без модели текста; по теме — попросите ещё раз, когда модель ответит)" if DECORATIVE_SUBJECT in str(rec.get("prompt") or "") else "")
         report = carry_report_ids(report0, run_audit(final, manifest, o, ws, use_vlm=False, use_llm=False, render=False, strategy=strategy, brief_text=brief_text))
         report.issues.extend(i.model_copy(deep=True) for i in report0.issues if i.kind == "model" and i.slide not in changed)
         report.applied_fixes = list(report0.applied_fixes) + [{"action": "edit", "slides": changed}] + records
@@ -405,6 +423,8 @@ def _rerender_pinned(vdir: Path, strategy: str, outline: DeckOutline, template_s
         v.planner = (rm or {}).get("planner") or {}
         v.other_slides = other  # type: ignore[attr-defined]  (the slides besides the edited ones that changed: none expected)
         v.changed_slides = changed  # type: ignore[attr-defined]
+        v.picture_misses = misses  # type: ignore[attr-defined]  (asked pictures that could not be drawn: the slide has none)
+        v.picture_made = made_by  # type: ignore[attr-defined]
         if other:
             log.warning("pinned re-render: slides %s changed besides the edited %s", other, changed)
         return v
@@ -901,6 +921,48 @@ def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int, *,
         return None
 
 
+def _has_drawn(vdir: Path, n: int) -> bool:
+    """Slide n of the variant already shows a drawn picture (its place is not a grey stand-in)."""
+    try:
+        from verstka.images.fill import read_records
+
+        return any(r.get("slide") == n and r.get("status") == "generated" for r in read_records(vdir))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def picture_in_place(records: Optional[list[dict]], outline: DeckOutline, n: int) -> tuple[bool, Optional[str]]:
+    """(whether slide n's picture place holds a drawn picture — or needs none: the person's own photo, no place —, the
+    reason when it does not)."""
+    osl = outline.slides[n - 1] if 1 <= n <= len(outline.slides) else None
+    if osl is None or not osl.content.photo_slot or osl.content.photo_own:
+        return True, None
+    mine = [r for r in (records or []) if r.get("slide") == n]
+    if any(r.get("status") == "generated" for r in mine):
+        return True, None
+    return False, picture_why(mine)
+
+
+def picture_why(records: list[dict]) -> str:
+    """Why a slide's asked picture is not there, in the person's words: the record's reason, its error, else the image
+    model's silence."""
+    for r in records:
+        why = str(r.get("why") or "").strip()
+        if why:
+            return why
+    for r in records:
+        err = str(r.get("error") or "").lower()
+        if err:
+            if "key" in err or "ключ" in err or "401" in err or "403" in err:
+                return "нет ключа к модели изображений"
+            if "timeout" in err or "time" in err or "таймаут" in err:
+                return "модель изображений не успела за отведённое время"
+            if "text" in err or "надпис" in err:
+                return "все варианты картинки отбракованы: на них были надписи"
+            return f"модель изображений ответила ошибкой ({err[:80]})"
+    return "модель изображений не ответила"
+
+
 _WORD_RE = re.compile(r"[\w\d][\w\d\-]{2,}", re.U)
 
 
@@ -1325,20 +1387,31 @@ def fix_slide(
             log.warning("outline markers left in the notes", exc_info=True)
         final_outline = _with_slide(outline0, outline, n)
         final_plan = _with_entry(plan0, plan.for_outline(oid), oid)
-        asked_picture = bool(wishes) and bool(final_outline.slides[n - 1].content.photo_slot) and not osl0.content.photo_slot
+        from verstka.planning.slide_edit import ASKED_PICTURE
+
+        asked_picture = bool(wishes) and final_outline.slides[n - 1].content.photo_slot == ASKED_PICTURE and not final_outline.slides[n - 1].content.photo_own and not _has_drawn(vdir, n)
         if asked_picture:
             voice.plain("Рисую картинку для слайда", 0.62)
         pic_records = _keep_slide_picture(vdir, final, final_outline, n, make=asked_picture, manifest=manifest, skills=skills if use_models else None,
                                           providers=providers if use_models else None)
         if asked_picture:
+            from verstka.planning.slide_edit import PICTURE_SAID
+
             mine = [r for r in (pic_records or []) if r.get("slide") == n]
             got = next((r for r in mine if r.get("status") == "generated"), None)
             if got is not None:
+                what = what.replace(PICTURE_SAID, "добавлена картинка")
+                from verstka.images.prompt import DECORATIVE_SUBJECT
+
+                deco = DECORATIVE_SUBJECT in str(got.get("prompt") or "")
                 notes.append("Картинку нарисовала модель " + str(got.get("model") or "изображений").split("/")[-1]
-                             + ("" if got.get("text_checked") else " — надписи на ней не проверены: модель зрения недоступна"))
+                             + (" — декоративную: без модели текста описание слайда по-английски не составить, а русские слова модель изображений пишет на картинке; по теме слайда нарисую, когда модель текста ответит — попросите ещё раз" if deco else "")
+                             + ("" if got.get("text_checked") or deco else " — надписи на ней не проверены: модель зрения недоступна"))
             else:
-                why_pic = next((str(r.get("why")) for r in mine if r.get("why")), "модель изображений не ответила")
-                notes.append(f"Картинку нарисовать не получилось: {why_pic}")
+                # the person asked for it: the place stays on the slide (they may try again), the reply says why it is empty
+                why_pic = picture_why(mine)
+                what = what.replace(PICTURE_SAID, "место под картинку")
+                notes.append(f"Картинку нарисовать не получилось: {why_pic} — место под неё оставлено, попробуйте ещё раз")
         # the audit numbers its remarks through the deck: the ids of the remarks that stayed (on every slide) are carried
         # over, so the person's remark keeps its id through the fix and a fixed remark's id never comes back
         report = RM.carry_report_ids(report0, run_audit(final, manifest, final_outline, ws, **audit_kw))

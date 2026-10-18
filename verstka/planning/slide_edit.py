@@ -43,7 +43,7 @@ _FORMS: list[tuple[re.Pattern, str, Optional[str]]] = [
 
 
 _REDO_RE = re.compile(r"полност|целиком|с\s+нуля|заново|по-?друго|по-?новому|иначе|совсем\s+друг|не\s+нравится", re.I)
-_PICTURE_RE = re.compile(r"(?:\b(?:добав|встав|постав|нуж|сделай|дай|нарисуй)\w*\s+(?:\S+\s+){0,2}?|\bс\s+)(?:картинк|иллюстрац|изображени|рисун)", re.I)
+_PICTURE_RE = re.compile(r"(?:\b(?:добав|встав|постав|нуж|сделай|дай|нарисуй|созда|сгенерир|генерир|сгенери|подбер|помест)\w*\s+(?:\S+\s+){0,2}?|\bс\s+)(?:картинк|иллюстрац|изображени|рисун)", re.I)
 _SHORTER_RE = re.compile(r"короч|сократи|меньше\s+текст|покороче|лаконичн|сжат", re.I)
 # the forms a slide is turned into when it is to be made anew without a model (the first that keeps every line)
 _REDO_FORMS = ("timeline", "cards", "two_column", "bullets")
@@ -52,6 +52,8 @@ _REDO_FORMS = ("timeline", "cards", "two_column", "bullets")
 # the label of a picture the person asked for («добавь картинку»): drawn from the slide's own description even without
 # the text model (an AUTO_LABEL place of the build waits for the model's English description)
 ASKED_PICTURE = "Иллюстрация к слайду"
+# what the edit says of an asked picture before it is drawn (the caller says then whether it really is on the slide)
+PICTURE_SAID = "добавлена картинка — её рисует модель изображений по заголовку слайда, без надписей"
 
 
 _NUMBERY_RE = re.compile(r"[^\s;,.]*\d[^\s;,.]*|\b(?:лет|год[а-я]*|век[а-я]*|назад|около|более|менее|млн|млрд|тыс\.?|до\s+н\.\s*э\.?|н\.\s*э\.?)\b", re.I)
@@ -67,6 +69,11 @@ def picture_hint(new: OutlineSlide, old: OutlineSlide) -> str:
         t = _NUMBERY_RE.sub(" ", x or "")
         t = re.sub(r"\s*[—–-]\s*", " ", t)
         t = re.sub(r"\s+", " ", t).strip(" ,.;:–—-")
+        # prepositions left without their figures («правили с по») go too
+        prev = None
+        while prev != t:
+            prev = t
+            t = re.sub(r"(?:^|\s)(?:с|со|по|в|во|до|от|на|к|из|за|и)(?=\s+(?:с|со|по|в|во|до|от|на|к|из|за|и)(?:\s|$)|\s*$)", "", t, flags=re.I).strip(" ,.;:–—-")
         if len(t) >= 6:
             out.append(t)
     return "; ".join(out)[:300]
@@ -486,7 +493,7 @@ def describe_change(old: OutlineSlide, new: OutlineSlide) -> str:
         if a is not None and b is not None and a.highlight_index != b.highlight_index and b.highlight_index is not None and 0 <= b.highlight_index < len(b.categories):
             changed.append(f"выделено «{b.categories[b.highlight_index]}» на диаграмме")
     if new.content.photo_slot and not old.content.photo_slot and not new.content.photo_own and new.content.photo_slot == ASKED_PICTURE:
-        changed.append("добавлена картинка — её рисует модель изображений по заголовку и пунктам слайда, без надписей")
+        changed.append(PICTURE_SAID)
     elif new.content.photo_slot and not old.content.photo_slot:
         changed.append("оставлено свободное место под фото — вставьте его в рамку на слайде")
     elif old.content.photo_slot and not new.content.photo_slot:
@@ -963,7 +970,7 @@ def redesign_slide(
         reply = f"Слайд {index}: выделил «{getattr(result.content, emphasis[0]).categories[emphasis[1]]}» цветом на диаграмме."
     elif how == "rules" and (redo or picture or shorter):
         did = [x for x, on in (("другая форма и раскладка", redo and result.kind != old.kind), ("строки сокращены до главного", shorter),
-                               ("картинка по описанию из заголовка и пунктов слайда", picture)) if on]
+                               ("место под картинку", picture)) if on]
         reply += (" Модель текста не ответила — сделал по правилам, без неё: " if not answered else " Ответ модели не подошёл — сделал по правилам: ") + "; ".join(did or ["слайд собран заново"]) + "."
     elif how == "rules":
         reply += " Модель не ответила, форму сменил по правилам." if not answered else " Ответ модели не подошёл к слайду, форму сменил по правилам."

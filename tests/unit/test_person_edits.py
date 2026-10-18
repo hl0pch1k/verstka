@@ -76,3 +76,34 @@ def test_redo_with_a_picture_without_a_model_changes_the_slide():
     assert r.how == "rules" and new.kind.value != "bullets"
     assert new.content.photo_slot == SE.ASKED_PICTURE and not new.content.photo_own and new.content.photo_hint
     assert "по правилам" in r.reply and "картинка" in r.what
+
+
+def test_a_picture_asked_in_the_chat_is_an_edit():
+    from verstka.api.edits import looks_like_edit
+
+    for msg in ("создай изображение на этом слайде", "создай изображение на слайде 5", "сгенерируй картинку", "нарисуй иллюстрацию на слайде 2"):
+        assert SE.picture_request(msg) and looks_like_edit(msg), msg
+    assert not SE.picture_request("убери место под фото")
+
+
+def test_without_english_the_asked_picture_is_decorative_and_wordless():
+    from verstka.images.prompt import DECORATIVE_SUBJECT, ImageAsk, build_prompt
+
+    p, _ = build_prompt(ImageAsk(hint="Блицкриг и расширение фронта", headline="Блицкриг", deck="Война", label=SE.ASKED_PICTURE), None)
+    assert DECORATIVE_SUBJECT in p and "Блицкриг" not in p and "wordless" in p.lower()
+    p2, _ = build_prompt(ImageAsk(hint="Блицкриг", headline="Блицкриг", deck="Война", label=SE.ASKED_PICTURE, subject_en="Tanks crossing a field"), None)
+    assert "Tanks crossing a field" in p2 and DECORATIVE_SUBJECT not in p2
+
+
+def test_an_asked_picture_that_failed_keeps_its_place_and_says_why():
+    from verstka.api.app import _picture_reply
+    from verstka.pipeline.revise import picture_in_place, picture_why
+
+    o = _outline()
+    o.slides[2].content.photo_slot = SE.ASKED_PICTURE
+    ok, why = picture_in_place([{"slide": 3, "status": "free", "error": "Polza: 401 invalid key"}], o, 3)
+    assert not ok and why == "нет ключа к модели изображений"
+    assert picture_why([{"slide": 3, "error": "timeout after 90 s"}]) == "модель изображений не успела за отведённое время"
+    assert picture_in_place([{"slide": 3, "status": "generated"}], o, 3) == (True, None)
+    reply = _picture_reply(f"Слайд 3 переделан: {SE.PICTURE_SAID}.", {3: why}, {})
+    assert "нет ключа к модели изображений" in reply and "Место под неё оставил" in reply and "ещё раз" in reply and SE.PICTURE_SAID not in reply

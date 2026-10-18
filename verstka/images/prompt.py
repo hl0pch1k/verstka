@@ -113,6 +113,10 @@ def _clean(text: str, limit: int = 300) -> str:
     return t[:limit].rstrip(" .,;:")
 
 
+# the subject of a picture the person asked for when there is no text model to describe the slide in English
+DECORATIVE_SUBJECT = "Abstract decorative composition of soft overlapping geometric shapes, gentle light and depth"
+
+
 def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = None, strict: int = 0) -> tuple[str, str]:
     """(the prompt, the style). Deterministic: the same ask and palette give the same prompt. `strict` — the attempt
     after a picture came out with writing on it (images/text_check.py): 1 — the wordless lead and the strict rules,
@@ -121,6 +125,13 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     pcfg = cfg.get("prompt") or {}
     style = style_of(" ".join([ask.hint or "", ask.label or "", ask.wish or ""]), cfg, ask.template_style)
     scfg = pcfg.get("strict") or {}
+    lead_only = False
+    if not ask.subject_en and (ask.label or "") == "Иллюстрация к слайду":
+        # a picture the person asked for, described by the slide's heading with no text model to turn it into a scene:
+        # the image model writes such words across it («Капетинги» on a gradient) — the wordless lead from the first
+        # attempt, the scene as an illustration of the subject (the strict rules made it a bare screen mock-up)
+        # (slide_edit.ASKED_PICTURE)
+        lead_only = True
     if strict >= 2:
         style = "illustration"
     subject = _clean(ask.subject_en or ask.what)
@@ -140,6 +151,12 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     if strict >= 1:
         template = str(scfg.get("lead", "Wordless picture.")) + " " + template
         rules = str(scfg.get("rules", rules))
+    elif lead_only:
+        # no English for the slide's words: the image model writes Russian subjects across the picture («Блицкриг и
+        # расширение фронта» in large letters, live 18.10) — a decorative picture in the template's palette instead
+        template = str(scfg.get("lead", "Wordless picture.")) + " " + template
+        subject = DECORATIVE_SUBJECT
+        style_line = str((pcfg.get("styles") or {}).get("illustration", style_line))
 
     def compose(subj: str, ctx: str) -> str:
         text = template.format(subject=subj, context=ctx, style=style_line, colors=colors or "neutral", rules=rules, frame=frame_line)

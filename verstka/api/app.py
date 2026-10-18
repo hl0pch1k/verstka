@@ -2764,6 +2764,7 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
             version = R.snapshot(vdir)
             v = R.rerender_variant(vdir, strategy, new, store.workspace(meta["template_id"]).source, store.root, brief=brief, exports=list(meta.get("exports") or []), pictures=meta.get("pictures"))
             audit, n_slides = v.audit, len(v.outline.slides)
+            reply = _picture_reply(reply, getattr(v, "picture_misses", None) or {}, getattr(v, "picture_made", None) or {})
         after = audit.summary.score if audit else None
         R.log_edit(vdir, {"version": version, "undo_of": undone, "request": body.message, "kind": req.kind, "slides": req.slides, "reply": reply, "score_before": before, "score_after": after})
         if audit is not None:
@@ -3109,6 +3110,33 @@ _PICTURE_REMOVE_RX = re.compile(r"\b(?:убери|удали)(?:те)?\b", re.I)
 _SLIDE_NO_RX = re.compile(r"(?:(?:на|со?|для)\s+)?слайд\w*\s*№?\s*(\d{1,2})", re.I)
 
 
+def _picture_reply(reply: str, misses: dict, made: dict) -> str:
+    """The edit's reply told what really happened to an asked picture: drawn (by which model), or why its place is empty
+    (the place stays: the person may ask again)."""
+    from verstka.planning.slide_edit import PICTURE_SAID
+
+    for n, why in misses.items():
+        reply = reply.replace(PICTURE_SAID, "место под картинку") + f" Картинку на слайд {n} нарисовать не получилось: {why}. Место под неё оставил — попросите ещё раз: «создай изображение на слайде {n}»."
+    for n, model in made.items():
+        reply = reply.replace(PICTURE_SAID, "добавлена картинка") + f" Картинку для слайда {n} нарисовала модель {(model or 'изображений').split('/')[-1]}."
+    return reply
+
+
+def _slide_has_picture(gid: str, strategy: Optional[str], n: Optional[int]) -> bool:
+    """Whether slide `n` of the variant has a picture or a place for one (its picture is changed in place); a slide
+    without one gets a picture by an edit of the slide («создай изображение на слайде 5»: a place, then the picture)."""
+    if not n:
+        return True  # (the picture route asks which slide)
+    try:
+        from verstka.images.fill import read_records
+
+        meta = store.read_generation_meta(gid) or {}
+        strategy = strategy or next(iter(meta.get("strategies") or []), None)
+        return bool(strategy) and any(r.get("slide") == n and r.get("status") != "removed" for r in read_records(_variant_dir(gid, strategy)))
+    except Exception:  # noqa: BLE001 - the picture route answers for itself
+        return True
+
+
 def _picture_ask(message: str) -> tuple[Optional[int], Optional[str], str]:
     """(the slide named, the wish — what the new picture should show —, the action) of a picture request in the chat."""
     m = _SLIDE_NO_RX.search(message)
@@ -3227,7 +3255,7 @@ def chat(req: ChatRequest) -> dict:
     gen_id = session.get("generation_id")
     reply: str
     actions: list[dict] = []
-    if gen_id and _PICTURE_RX.search(req.message) and not _looks_like_brief(req.message):
+    if gen_id and _PICTURE_RX.search(req.message) and not _looks_like_brief(req.message) and _slide_has_picture(gen_id, req.strategy or session.get("strategy"), _picture_ask(req.message)[0] or req.slide):
         intent = "picture"
     elif gen_id and _is_edit(req.message, intent):
         intent = "edit"

@@ -175,9 +175,10 @@ def test_the_helper_chat_changes_a_picture_on_request(built):
     job = _wait(c, r["actions"][0]["job_id"])
     assert job["status"] == "done" and job["result"]["changed"] and job["result"]["slide"] == n, job
     assert "вид сверху" in mock.calls[-1]["prompt"]
-    # a slide without a picture or a place: the chat says so instead of starting a job
+    # a slide without a picture or a place: an edit of the slide gives it one (owner 18.10: «создай изображение на слайде
+    # 5» was answered with the helper's hint), not «на слайде нет изображения»
     r = c.post("/api/chat", json={"session_id": "pic", "message": "нарисуй другое изображение на слайде 1", "generation_id": gid, "strategy": "structured"}).json()
-    assert not r["actions"] and "нет изображения" in r["reply"]
+    assert r["intent"] == "edit" and r["actions"] and r["actions"][0]["slide"] == 1, r
 
 
 @pytest.mark.parametrize(
