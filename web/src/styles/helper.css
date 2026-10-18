@@ -112,6 +112,12 @@
 .hp-flip.hp-wrap,.hp-flip .hp-in,.hp-flip .ra-two,.hp-flip .ra-two > :first-child{transition:none !important}
 .hp-flip.hp-go .ra-two > aside,.hp-flip.hp-go .ra-note-h{opacity:0;pointer-events:none;transition:opacity 160ms var(--ease) !important}
 .hp-flip.hp-nar .hp-xf{transition:opacity 240ms var(--ease),visibility 0s linear 0s}
+/* открытие: компактный вид стоит сразу в узкой раскладке своего слоя и начинает проявляться, когда полный уже погас и
+   слайд со строкой «Слайд N из M» почти доехали (280 мс) — без паузы с пустой карточкой и без наложения */
+.hp-flip.hp-go .hp-in{right:464px;grid-template-columns:minmax(0,1fr) 184px;grid-template-rows:64px minmax(0,1fr);row-gap:24px;column-gap:24px}
+.hp-flip.hp-go .hp-xf{opacity:1;visibility:visible;pointer-events:none;transition:opacity 240ms var(--ease) 280ms,visibility 0s linear 280ms}
+.hp-flip.hp-go .hp-xf.hp-xf-off{opacity:0;visibility:hidden}
+.hp-flip.hp-go .hp-in.hp-wide{grid-template-columns:minmax(0,1fr) 320px}
 .hp-flip.hp-out .hp-xf{opacity:0;transition:opacity 120ms var(--ease),visibility 0s linear 120ms}
 .hp-flip.hp-back .ra-two > aside{opacity:1;visibility:visible;transition:none}
 .hp-flip.hp-back .ra-note-h{animation:hp-pill-in 340ms var(--ease) both}
@@ -123,7 +129,6 @@
 /* закрытие: плита помощника — под колодой (её ячейка возвращается на нижний слой сразу), колода наезжает на неё */
 .hp-flip.hp-back .hp-hcell,.hp-flip.hp-out .hp-hcell{z-index:-1;transition:none}
 .hp-flip .p2-deck.p2-dkm{filter:drop-shadow(16px 0 24px rgba(11,18,32,.16))}
-.hp-flip .p2-deck > .p2-slot{will-change:transform}
 /* таблетка уведомления в узкой раскладке не держит места в строке «Слайд N из M» */
 .hp-nar .ra-note-h{position:absolute;left:0;top:0}
 

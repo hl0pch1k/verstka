@@ -85,21 +85,47 @@ export function phaseClasses(p: HelperPhase): string {
 const slotsOf = (wrap: HTMLElement) => Array.from(wrap.querySelectorAll<HTMLElement>(".p2-deck > .p2-slot"));
 const deckOf = (wrap: HTMLElement) => wrap.querySelector<HTMLElement>(".p2-deck");
 
+/** Плита с тяжёлым содержимым («Результат»: слайд, лента — свои слои): подрезка clip-path в Safari не обновляется
+ *  на её слоях посреди хода (край стоял на месте, кадры настоящего Safari). Её край — встречный сдвиг: место плиты
+ *  с обрезкой по своему краю (overflow, скругление 40) едет влево на `cut`, а сама плита — на столько же вправо;
+ *  обрезку по краю Safari ведёт на слоях верно. Тень этой плиты падает на тёмную плиту 03 — её на время хода не видно. */
+const heavy = (el: HTMLElement) => !!el.querySelector(".ra-two");
 function setClip(slots: HTMLElement[], cut: number, ms: number) {
+  const tr = ms ? `${ms}ms ${EASE}` : "";
   for (const el of slots) {
-    el.style.transition = ms ? `clip-path ${ms}ms ${EASE}, -webkit-clip-path ${ms}ms ${EASE}` : "none";
+    if (heavy(el)) {
+      const inner = el.firstElementChild as HTMLElement | null;
+      el.style.overflow = "hidden";
+      el.style.borderRadius = "40px";
+      el.style.transition = ms ? `translate ${tr}` : "none";
+      el.style.translate = `${-cut}px 0px`;
+      if (inner) {
+        inner.style.transition = ms ? `translate ${tr}` : "none";
+        inner.style.translate = `${cut}px 0px`;
+      }
+      continue;
+    }
+    el.style.transition = ms ? `clip-path ${tr}, -webkit-clip-path ${tr}` : "none";
     const c = plateClip(cut, el.offsetWidth, el.offsetHeight);
     el.style.clipPath = c;
     el.style.setProperty("-webkit-clip-path", c);
   }
 }
 function clearClip(slots: HTMLElement[]) {
+  const all: HTMLElement[] = [];
   for (const el of slots) {
-    el.style.transition = "none";
+    const inner = el.firstElementChild as HTMLElement | null;
+    for (const x of inner ? [el, inner] : [el]) {
+      x.style.transition = "none";
+      x.style.translate = "";
+      all.push(x);
+    }
+    el.style.overflow = "";
+    el.style.borderRadius = "";
     el.style.clipPath = "";
     el.style.removeProperty("-webkit-clip-path");
   }
-  requestAnimationFrame(() => requestAnimationFrame(() => slots.forEach((el) => { el.style.transition = ""; })));
+  requestAnimationFrame(() => requestAnimationFrame(() => all.forEach((el) => { el.style.transition = ""; })));
 }
 type Moved = Array<{ el: HTMLElement; t: string }>;
 function place(moved: Moved, ms: number, to: "t" | "none") {
