@@ -3,8 +3,9 @@
  * opacity (ui/shell/helperMotion.ts): колода во время хода широкая, её край — рельс справа (`hp-rail`): полоса края
  * (`hp-band`, копии плит), занавес цвета страницы (`hp-cur`) с плитой помощника (встречный ход `hp-ctr` — плита стоит на
  * месте) и тень края на плите (`hp-shd`). Раскладка колоды (`hp-nar`) меняется один раз: в конце открытия и в начале
- * закрытия, разом (переходы, которые она запустила бы, снимаются). Классы обёртки: `hp-v` — помощник открыт для глаза (с кадра
- * нажатия; то, что проявляется с задержкой, — `hp-v2`, кадром позже: первый кадр хода легче), `hp-nar` —
+ * закрытия, разом (переходы, которые она запустила бы, снимаются). Классы обёртки: `hp-v` — помощник открыт для глаза (кадр
+ * нажатия: рельс, плита помощника, ход помеченного), `hp-vd` — гаснущее и названия шагов (кадром позже), `hp-v2` —
+ * проявляющееся (ещё кадром позже): работа первого кадра хода разнесена на три, `hp-nar` —
  * узкая раскладка, `hp-run` — идёт ход, `hp-prep` — ход готовится (наведение). Длительности × `--hp-k` (только проверка).
  *   Открытие (как холст):
  *              0 мс    край колоды уходит влево на 416 px — 520 мс; плита помощника под ним доезжает последние 32 px той же
@@ -63,20 +64,26 @@
 .hp-prep > .hp-rail{visibility:visible}
 .hp-prep > .hp-rail,.hp-run > .hp-rail,.hp-prep .hp-ctr,.hp-run .hp-ctr{will-change:transform}
 .hp-prep .hp-help,.hp-run .hp-help{visibility:visible;will-change:transform,opacity}
+/* закрытая и готовящаяся — видима сразу (прозрачна): иначе её видимость ждала бы задержки закрытия (340 мс) */
+.hp-prep:not(.hp-v) .hp-help{transition:transform var(--hp-c) var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(100ms * var(--hp-k, 1)),visibility 0s}
 .hp-prep .hp-st,.hp-run .hp-st{will-change:transform,opacity}
 .hp-prep .hp-shd,.hp-run .hp-shd,.hp-prep .hp-shd > i,.hp-run .hp-shd > i{will-change:opacity}
 .hp-prep [data-hpm],.hp-prep [data-hps]{will-change:transform}
 .hp-prep .hp-xf,.hp-run .hp-xf{visibility:visible;will-change:opacity}
+.hp-prep:not(.hp-v2) .hp-xf{transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s}
 .hp-prep .ra-two > aside,.hp-run .ra-two > aside{will-change:opacity}
 /* то, что гаснет и проявляется на виду (и названия шагов), — своими слоями заранее; скрытое (p2-off) — нет */
 .hp-prep :is(.hp-wo,.hp-no,.hp-txw,.hp-txn,.p2-ttl-v,.ra-note,.tx-fmtw,.pp-ctag):not(.p2-off *){will-change:opacity,transform}
+/* закрытие готово (наведение, раскладка уже широкая): погашенное открытием — видимо, но прозрачно, его слои нарисованы
+   заранее; иначе кадр после нажатия рисовал бы их заново (WebKit: 22–28 мс → 16–18) */
+.hp-wrap.hp-prep.hp-run.hp-vd:not(.hp-nar) :is(.hp-wo,.tx-fmtw,.hp-tx > .hp-txw,.ra-note,.ra-two > aside):not(.p2-off *){visibility:visible}
 /* «растяжка» коробки (helperMotion `stretch`): на время хода её фон и обводка — три куска под её содержимым */
 .hp-k{background:transparent !important;box-shadow:none !important;isolation:isolate}
 .hp-k::before,.hp-k::after{visibility:hidden}
 .hp-kp{position:absolute;top:0;bottom:0;z-index:-1;display:block;box-sizing:border-box;pointer-events:none;will-change:transform}
 /* ластик ленты миниатюр (helperMotion `eraserOf`): цвет плиты, едет с правым краем ленты; колонка полного вида — над ним */
 .hp-erase{position:absolute;z-index:0;display:block;pointer-events:none;will-change:transform}
-.hp-run .ra-two > aside{position:relative;z-index:1}
+.hp-prep .ra-two > aside,.hp-run .ra-two > aside{position:relative;z-index:1}
 /* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — `--d` */
 .hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear var(--hp-c),transform 0s linear var(--hp-c)}
 .hp-v2 .hp-st{opacity:1;transform:translateY(0);transition:opacity calc(360ms * var(--hp-k, 1)) var(--ease) calc(var(--d, 0ms) * var(--hp-k, 1)),transform calc(360ms * var(--hp-k, 1)) var(--ease) calc(var(--d, 0ms) * var(--hp-k, 1))}
@@ -112,12 +119,12 @@
 /* таблетка уведомления стоит в строке «Слайд N из M» (замечание владельца 18.10), и строка едет на её место — таблетка
    гаснет быстрее строки (100 мс) и проявляется, когда строка уже ушла с её места (160 мс через 180) */
 .hp-wrap .ra-note{transition:transform 160ms var(--ease),opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
-.hp-wrap.hp-v .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+.hp-wrap.hp-vd .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
 .hp-wrap .ra-note-h{transition:transform 160ms var(--ease),opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(180ms * var(--hp-k, 1)),visibility 0s linear 0s}
-.hp-wrap.hp-v .ra-note-h{transition:transform 160ms var(--ease),opacity calc(100ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(100ms * var(--hp-k, 1))}
-.hp-wrap.hp-v .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear calc(240ms * var(--hp-k, 1))}
+.hp-wrap.hp-vd .ra-note-h{transition:transform 160ms var(--ease),opacity calc(100ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(100ms * var(--hp-k, 1))}
+.hp-wrap.hp-vd .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear calc(240ms * var(--hp-k, 1))}
 .hp-wrap .ra-two > aside{justify-self:start;width:424px;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
-.hp-wrap.hp-v .ra-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+.hp-wrap.hp-vd .ra-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
 /* узкая раскладка рабочей области: колонка 184, зазор 24, слайд ниже на 24 px и не выше свободного места */
 .hp-nar .ra-two{grid-template-columns:minmax(0,1fr) 184px !important;column-gap:24px !important}
 .hp-wrap .ra-two > :first-child{height:100%;margin-top:0}
@@ -207,11 +214,11 @@ a.p2-rbl:hover{color:#0B1220}
 /* правило V2 «колонка проявляется за 160 мс через 80 мс» — о возвращении полного вида при закрытии помощника; свои
    сменщики колонки при закрытом помощнике (панель замечаний, колонка «Изображение») ходят своими ходами (result.css) */
 
-  .hp-wrap:not(.hp-v) .ra-two > aside.rm-col{transition:opacity 240ms var(--ease)}
-  .hp-wrap:not(.hp-v) .ra-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
-  .hp-wrap:not(.hp-v) .ra-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-wrap:not(.hp-v) .ra-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
-  .hp-wrap:not(.hp-v) .ra-two:has(.rm-col.rm-col-on) > .ra-main{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-wrap:not(.hp-vd) .ra-two > aside.rm-col{transition:opacity 240ms var(--ease)}
+  .hp-wrap:not(.hp-vd) .ra-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+  .hp-wrap:not(.hp-vd) .ra-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-wrap:not(.hp-vd) .ra-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+  .hp-wrap:not(.hp-vd) .ra-two:has(.rm-col.rm-col-on) > .ra-main{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
 
 /* помощник при 1280 и колонка 320 рядом (замечания, изображение) — рабочая область 376 px: подпись «Замечания» у
    переключателя уходит (остаётся для чтения с экрана — она его имя), номер слайда в шапке виден целиком. По раскладке

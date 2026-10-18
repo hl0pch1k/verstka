@@ -128,6 +128,7 @@ let ownSwitch = 0;
 let geoObs: ResizeObserver | null = null;
 const sizes = new Map<Element, string>();
 let prepared = 0;
+let commitTimer = 0;
 let moves: Animation[] = [];
 let erasers: HTMLElement[] = [];
 let stretched: Array<{ el: HTMLElement; pos: string }> = [];
@@ -165,15 +166,20 @@ function read(wrap: HTMLElement, its: Item[]): { at: Box[]; wrapAt: Box[]; plate
   };
 }
 
+/** Анимации, что идут до смены раскладки (смена экрана — плиты едут, вход содержимого): `settle` их не трогает. */
+const goingNow = (): Set<Animation> => new Set(document.getAnimations());
+
 /** Переходы, которые запустила смена раскладки (ширины, дорожки сеток, кегли прежнего «перестроения каждый кадр» на
  *  экранах, где оно ещё осталось), снимаются: раскладка встаёт разом. getAnimations сам пересчитывает стили — переходы
- *  уже заведены; снятый переход оставляет конечное значение. Только внутри колоды. Ответ — сколько снято. */
-function settle(): number {
+ *  уже заведены; снятый переход оставляет конечное значение. Только внутри колоды и только новые: шедшие до смены
+ *  (`keep`, например плиты, едущие при смене экрана) идут дальше — иначе плита прыгнула бы к концу своего хода, а замер
+ *  (до и после) разошёлся бы на остаток этого хода. Ответ — сколько снято. */
+function settle(keep: Set<Animation>): number {
   const deck = dom?.wrap.querySelector(".p2-deck");
   if (!deck) return 0;
   let n = 0;
   for (const a of document.getAnimations()) {
-    if (!("transitionProperty" in a)) continue;
+    if (!("transitionProperty" in a) || keep.has(a)) continue;
     const t = (a.effect as KeyframeEffect | null)?.target;
     if (t && deck.contains(t)) {
       a.cancel();
@@ -197,19 +203,20 @@ function lookOf(it: Item): Look {
  *  прежнего «перестроения» (`legacy`: тогда их снимать и в ходе). */
 function measure(): Geo | null {
   if (!dom) return null;
-  // заготовленные «растяжки» прятали фон коробок — замер стиля без них
-  unprep();
+  // заготовка хода (куски «растяжек» прятали фон коробок) — снимается: замер стиля и мест без неё
+  unpreOpen();
   const { wrap } = dom;
   const its = items(wrap);
   const nar = wrap.classList.contains("hp-nar");
   const films = Array.from(wrap.querySelectorAll<HTMLElement>(".p2-film")).map((el) => [el, el.scrollLeft] as const);
   const look = its.map(lookOf);
+  const keep = goingNow();
   const a = read(wrap, its);
   wrap.classList.toggle("hp-nar");
-  let legacy = settle() > 0;
+  let legacy = settle(keep) > 0;
   const b = read(wrap, its);
   wrap.classList.toggle("hp-nar");
-  legacy = settle() > 0 || legacy;
+  legacy = settle(keep) > 0 || legacy;
   films.forEach(([el, s]) => {
     if (el.scrollLeft !== s) el.scrollLeft = s;
   });
@@ -345,7 +352,7 @@ function place(g: Geo, ms: number, toNarrow: boolean, paused: boolean) {
   const d = its.map((_, i) => shiftOf(g.wide[i], g.narrow[i]));
   const kf = (t: string) => (toNarrow ? [{ transform: "none" }, { transform: t }] : [{ transform: t }, { transform: "none" }]);
   const timing: KeyframeAnimationOptions = { duration: ms, easing: EASE, fill: "forwards" };
-  if (prep && (prep.geo !== g || prep.toNarrow !== toNarrow || prep.ms !== ms)) unprep();
+  flushRest();
   moves = [];
   erasers = [];
   // анимации заводятся сразу; на паузе (закрытие) — стоят в начале до следующего кадра
@@ -375,12 +382,7 @@ function place(g: Geo, ms: number, toNarrow: boolean, paused: boolean) {
       el.style.transformOrigin = origin;
       moves.push(el.animate(kf(transform), timing));
     }
-    if (it.stretch) {
-      const ready = prep && prep.geo === g && prep.toNarrow === toNarrow && prep.ms === ms ? prep.map.get(el) : undefined;
-      const anims = ready ?? stretch(el, g.wide[i], g.narrow[i], g.look[i], kf, timing);
-      if (ready && !paused) for (const a of ready) a.play();
-      moves.push(...anims);
-    }
+    if (it.stretch) moves.push(...stretch(el, g.wide[i], g.narrow[i], g.look[i], kf, timing));
     if (it.erase) {
       const plateEl = el.closest<HTMLElement>(".p2-plate");
       const e = eraserOf(g.wide[i], g.narrow[i], g.plate[i]);
@@ -395,8 +397,14 @@ function place(g: Geo, ms: number, toNarrow: boolean, paused: boolean) {
       }
     }
   });
+  // то, что всегда стоит в узкой раскладке и едет с краем колоды (компактный вид «Результата»: узкая колонка и действия
+  // шапки, `data-hpr`): из-за края на своё место — на 416 той же кривой, как на холсте (колонка сетки едет с колодой)
+  for (const el of Array.from(dom!.wrap.querySelectorAll<HTMLElement>("[data-hpr]"))) {
+    if (el.closest(".p2-off")) continue;
+    const off = `translateX(${CUT}px)`;
+    moves.push(el.animate(toNarrow ? [{ transform: off }, { transform: "none" }] : [{ transform: "none" }, { transform: off }], timing));
+  }
   done0();
-  prep = null;
 }
 
 /** Коробка, которая в узкой раскладке у́же (поле текста, карточки вариантов, степпер): её фон и обводка на время хода —
@@ -436,83 +444,87 @@ function stretch(el: HTMLElement, a: Box, b: Box, look: Look, kf: (t: string) =>
   return out;
 }
 
-/** «Растяжки», заведённые заранее (наведение на «Помощник»): куски стоят в начале своего хода на паузе — коробка выглядит
- *  как была, а в кадре нажатия им остаётся только поехать (вставка кусков и перерисовка коробок — до нажатия). */
-let prep: { geo: Geo; toNarrow: boolean; ms: number; map: Map<HTMLElement, Animation[]> } | null = null;
-
-function kfOf(toNarrow: boolean) {
-  return (t: string): Keyframe[] => (toNarrow ? [{ transform: "none" }, { transform: t }] : [{ transform: t }, { transform: "none" }]);
-}
-
-function prepStretch(g: Geo) {
-  if (!dom) return;
-  const toNarrow = !dom.wrap.classList.contains("hp-v");
-  const ms = Math.round((toNarrow ? OPEN_MS : CLOSE_MS) * speed());
-  if (prep && prep.geo === g && prep.toNarrow === toNarrow && prep.ms === ms) return;
-  unprep();
-  const timing: KeyframeAnimationOptions = { duration: ms, easing: EASE, fill: "forwards" };
-  const map = new Map<HTMLElement, Animation[]>();
-  g.items.forEach((it, i) => {
-    if (!it.stretch) return;
-    const anims = stretch(it.el, g.wide[i], g.narrow[i], g.look[i], kfOf(toNarrow), timing);
-    for (const a of anims) a.pause();
-    map.set(it.el, anims);
+/** Ход кончился: ход помеченного снимается (раскладка уже та же, что его конечные места); куски «растяжек» и ластики
+ *  стоят на тех же конечных местах — их можно снять и кадром позже (`later`: кадр смены раскладки легче). */
+function clearPlaced(later = false) {
+  const els = Array.from(dom?.wrap.querySelectorAll<HTMLElement>("[data-hpm],[data-hps],[data-hpk]") ?? []);
+  const kept = moves.filter((a) => {
+    const t = (a.effect as KeyframeEffect | null)?.target as HTMLElement | null;
+    const piece = !!t && (t.classList.contains("hp-kp") || t.classList.contains("hp-erase"));
+    if (!piece || !later) a.cancel();
+    return piece && later;
   });
-  prep = { geo: g, toNarrow, ms, map };
-}
-
-/** Заготовка не пригодилась (наведение ушло, замер устарел): куски снимаются, коробки — со своим фоном. */
-function unprep() {
-  if (!prep) return;
-  for (const anims of prep.map.values()) for (const a of anims) a.cancel();
-  const els = new Set(prep.map.keys());
-  stretched = stretched.filter(({ el, pos }) => {
-    if (!els.has(el)) return true;
-    el.classList.remove("hp-k");
-    el.style.position = pos;
-    el.querySelectorAll(":scope > .hp-kp").forEach((x) => x.remove());
-    return false;
-  });
-  prep = null;
-}
-
-/** Ход кончился: анимации, ластики и подсказки слоёв снимаются (раскладка уже та же, что их конечные места). */
-function clearPlaced() {
-  for (const a of moves) a.cancel();
-  for (const x of erasers) x.remove();
-  for (const { el, pos } of stretched) {
-    el.classList.remove("hp-k");
-    el.style.position = pos;
-    el.querySelectorAll(":scope > .hp-kp").forEach((x) => x.remove());
-  }
-  stretched = [];
-  for (const el of Array.from(dom?.wrap.querySelectorAll<HTMLElement>("[data-hpm],[data-hps]") ?? [])) {
-    el.style.transformOrigin = "";
-    el.style.willChange = "";
-  }
+  const ers = erasers;
+  const sts = stretched;
   moves = [];
   erasers = [];
+  stretched = [];
+  const rest = () => {
+    for (const a of kept) a.cancel();
+    for (const x of ers) x.remove();
+    for (const { el, pos } of sts) {
+      el.classList.remove("hp-k");
+      el.style.position = pos;
+      el.querySelectorAll(":scope > .hp-kp").forEach((x) => x.remove());
+    }
+    for (const el of els) {
+      el.style.transformOrigin = "";
+      el.style.willChange = "";
+    }
+  };
+  if (later) {
+    flushRest();
+    const id = window.setTimeout(() => flushRest(), 120);
+    pendingRest = { id, run: rest };
+  } else rest();
 }
 
-function done(open: boolean) {
+/** Отложенная уборка кусков после смены раскладки — сейчас (перед новым ходом или заготовкой). */
+let pendingRest: { id: number; run: () => void } | null = null;
+function flushRest() {
+  const p = pendingRest;
+  if (!p) return;
+  pendingRest = null;
+  window.clearTimeout(p.id);
+  p.run();
+}
+
+/** React узнаёт о помощнике, когда на экране всё стоит: его перерисовка — не в кадрах хода. */
+function commitLater(open: boolean, ms: number) {
+  window.clearTimeout(commitTimer);
+  commitTimer = window.setTimeout(() => {
+    const c = commit;
+    if (c && open === want) startTransition(() => c(open));
+  }, ms);
+}
+
+function done(open: boolean, commitMs: number | null = 120) {
   running = null;
-  // указатель всё ещё на «Помощнике» или ✕ — следующий ход готовится заранее (позже, не в кадре смены раскладки)
+  // указатель всё ещё на «Помощнике» или ✕ — следующий ход готовится заранее: когда доиграл и каскад помощника, а не
+  // в кадрах хода (подготовка закрытия — смена раскладки, кадр потяжелее, на неподвижном экране его не видно)
   if (dom?.wrap.classList.contains("hp-prep")) {
     const at = prepared;
     window.setTimeout(() => {
       if (dom && !running && prepared === at && dom.wrap.classList.contains("hp-prep")) prepareHelper();
-    }, 200);
+    }, lazy ? 300 : 900);
   }
   if (open !== state) {
     state = open;
-    const c = commit;
-    if (c) startTransition(() => c(open));
+    if (commitMs !== null) commitLater(open, commitMs);
   }
   if (pending !== null && pending !== open) {
     const next = pending;
     pending = null;
     go(next);
   } else pending = null;
+}
+
+/** Следующий кадр после нынешнего: нажатие приходит и между кадрами, и из rAF — два rAF дают «не этот кадр». */
+function nextFrame(fn: () => void): number {
+  let id = requestAnimationFrame(() => {
+    id = requestAnimationFrame(fn);
+  });
+  return id;
 }
 
 /** Открытие. Кадр нажатия: край колоды, плита помощника, тень края, ход помеченного, гашение полного вида и названия
@@ -522,57 +534,187 @@ function open() {
   if (!dom) return;
   const { wrap } = dom;
   const ms = Math.round(OPEN_MS * speed());
-  const g = fresh() ?? measure();
+  const pre = preopened;
+  preopened = null;
+  let g = fresh();
+  if (pre && g && pre.geo === g && pre.ms === ms) for (const m of moves) m.play();
+  else {
+    // заготовки нет или она устарела: снять её, замерить (без неё) и завести ход сейчас
+    clearPlaced();
+    g = g ?? measure();
+    if (g) place(g, ms, true, false);
+  }
   geo = g;
-  if (g) place(g, ms, true, false);
   wrap.classList.add("hp-run", "hp-v");
-  // следующий кадр после кадра нажатия (нажатие приходит и между кадрами, и из rAF — два rAF надёжно дают «следующий»)
+  // кадром позже — гаснущее и названия шагов (hp-vd), ещё кадром позже — проявляющееся (hp-v2)
   const run = { dir: "open" as const, step2: 0, timer: 0 };
-  run.step2 = requestAnimationFrame(() => {
-    run.step2 = requestAnimationFrame(() => wrap.classList.add("hp-v2"));
+  run.step2 = nextFrame(() => {
+    if (running !== run) return;
+    wrap.classList.add("hp-vd");
+    run.step2 = requestAnimationFrame(() => {
+      if (running === run) wrap.classList.add("hp-v2");
+    });
   });
   running = run;
   run.timer = window.setTimeout(() => {
     if (!dom) return;
     const w = dom.wrap;
-    // раскладка — узкая, разом: на экране всё уже на её местах
-    ownSwitch = performance.now() + 250;
-    w.classList.add("hp-nar", "hp-v2");
-    w.classList.remove("hp-run");
-    clearPlaced();
-    if (!geo || geo.legacy) settle();
-    // курсор — в поле помощника (следующим кадром: кадр смены раскладки — только она)
-    requestAnimationFrame(() => w.querySelector<HTMLTextAreaElement>("#hp-help .gh-ta")?.focus({ preventScroll: true }));
-    done(true);
+    w.classList.add("hp-vd", "hp-v2");
+    // ход доиграл: на экране всё на местах узкой раскладки (помеченное держат анимации), сама раскладка встанет, когда
+    // экран неподвижен (`narrowNow`)
+    lazy = { timer: window.setTimeout(settleLazy, SETTLE_MS) };
+    // курсор — в поле помощника, когда доиграл и каскад его содержимого (не в кадрах хода)
+    window.setTimeout(() => {
+      if (dom && !running && want) w.querySelector<HTMLTextAreaElement>("#hp-help .gh-ta")?.focus({ preventScroll: true });
+    }, 320);
+    done(true, null);
   }, ms + TAIL_MS);
 }
 
-/** Закрытие. Кадр нажатия: раскладка — широкая, разом (переходы, которые она запустила бы, снимаются), помеченное
- *  стоит на узких местах (анимации на паузе в начале), на экране ничего не меняется; следующим кадром — ход: помеченное
- *  едет к своим местам, край колоды накрывает плиту помощника, компактный вид гаснет, полный проявляется. Смена
- *  раскладки и начало хода — в разных кадрах. */
+/** Открытие доиграло, а раскладка ещё широкая: помеченное держит узкие места анимациями, «растяжки» — свои куски. Узкой
+ *  раскладка становится, когда экран неподвижен (через SETTLE_MS после хода), при касании колоды, клавише, прокрутке или
+ *  изменении окна — не в кадрах хода. Закрытие из этого состояния обходится без смены раскладки вовсе. */
+const SETTLE_MS = 600;
+let lazy: { timer: number } | null = null;
+
+/** Экран неподвижен — раскладка встаёт; но пока указатель на «Помощнике» или ✕ (вероятно закрытие), она ждёт: закрытие
+ *  из широкой раскладки — без смены раскладки. */
+function settleLazy() {
+  if (!lazy) return;
+  if (document.querySelector("#hp-nav:hover, #hp-help .gh-x:hover")) {
+    lazy.timer = window.setTimeout(settleLazy, SETTLE_MS);
+    return;
+  }
+  narrowNow();
+}
+
+function narrowNow() {
+  if (!dom || !lazy) return;
+  window.clearTimeout(lazy.timer);
+  lazy = null;
+  const w = dom.wrap;
+  const keep = !geo || geo.legacy ? goingNow() : null;
+  ownSwitch = performance.now() + 250;
+  w.classList.add("hp-nar");
+  w.classList.remove("hp-run");
+  clearPlaced(true);
+  lazyBack = 0;
+  if (keep) settle(keep);
+  commitLater(true, 120);
+}
+
+/** Обратный ход из «ленивого» состояния: те же элементы и куски — новые анимации от нынешних (узких) мест к исходным,
+ *  кривая и время закрытия (обратное проигрывание открытия дало бы не ту кривую). Заводятся на паузе в начале — на
+ *  экране ничего не меняется; при наведении — заранее, иначе — в кадре нажатия. `lazyBack` — их время, 0 — не заведены. */
+let lazyBack = 0;
+
+function reverseLazy(ms: number) {
+  if (lazyBack) {
+    if (lazyBack !== ms) for (const m of moves) m.effect?.updateTiming({ duration: ms });
+    lazyBack = ms;
+    return;
+  }
+  moves = moves.map((a) => {
+    const eff = a.effect as KeyframeEffect;
+    const kfs = eff.getKeyframes();
+    const from = kfs[kfs.length - 1]?.transform as string | undefined;
+    const to = kfs[0]?.transform as string | undefined;
+    const t = eff.target as HTMLElement;
+    a.cancel();
+    const b = t.animate([{ transform: from ?? "none" }, { transform: to ?? "none" }], { duration: ms, easing: EASE, fill: "forwards" });
+    b.pause();
+    return b;
+  });
+  lazyBack = ms;
+}
+
+/** Наведение у закрытого помощника: ход открытия заводится заранее и стоит на паузе в начале (помеченное — на своих
+ *  местах, куски «растяжек» повторяют коробки, ластик — за краем ленты): в кадре нажатия ему остаётся только поехать. */
+let preopened: { geo: Geo; ms: number } | null = null;
+
+function preOpen() {
+  if (!dom || running || preopened || !geo || dom.wrap.classList.contains("hp-v")) return;
+  const ms = Math.round(OPEN_MS * speed());
+  clearPlaced();
+  place(geo, ms, true, true);
+  preopened = { geo, ms };
+}
+
+/** Заготовка открытия не пригодилась (наведение ушло, замер устарел): всё снимается. */
+function unpreOpen() {
+  if (!preopened || running) return;
+  preopened = null;
+  clearPlaced();
+}
+
+/** Закрытие, шаг 0: раскладка — широкая, разом (переходы, которые она запустила бы, снимаются), помеченное стоит на
+ *  узких местах (анимации на паузе в начале) — на экране ничего не меняется. Делается заранее, при наведении на
+ *  «Помощник» или ✕ у открытого помощника (`preClose`), иначе — в кадре нажатия. */
+let preclosed: { geo: Geo | null; ms: number } | null = null;
+
+function closeStep0(ms: number): Geo | null {
+  if (!dom) return null;
+  const { wrap } = dom;
+  const g = fresh() ?? measure();
+  geo = g;
+  const keep = !g || g.legacy ? goingNow() : null;
+  ownSwitch = performance.now() + 250;
+  wrap.classList.add("hp-run");
+  wrap.classList.remove("hp-nar");
+  if (keep) settle(keep);
+  if (g) place(g, ms, false, true);
+  return g;
+}
+
+/** Наведение у открытого помощника: шаг 0 закрытия — заранее (он невидим), в кадре нажатия остаётся только ход. */
+function preClose() {
+  if (!dom || running || preclosed || !dom.wrap.classList.contains("hp-nar")) return;
+  const ms = Math.round(CLOSE_MS * speed());
+  preclosed = { geo: closeStep0(ms), ms };
+}
+
+/** Наведение ушло без нажатия: шаг 0 закрытия — обратно (раскладка снова узкая, помеченное — без анимаций). */
+function unpreClose() {
+  if (!dom || !preclosed || running) return;
+  preclosed = null;
+  const keep = !geo || geo.legacy ? goingNow() : null;
+  clearPlaced();
+  ownSwitch = performance.now() + 250;
+  dom.wrap.classList.add("hp-nar");
+  dom.wrap.classList.remove("hp-run");
+  if (keep) settle(keep);
+}
+
+/** Закрытие: шаг 0 (если не сделан заранее), затем ход — помеченное едет к своим местам, край колоды накрывает плиту
+ *  помощника, компактный вид гаснет; кадром позже — проявление полного вида и названия шагов (hp-vd). Шаг 0, сделанный
+ *  в кадре нажатия, отделён от хода кадром: смена раскладки и начало хода — в разных кадрах. */
 function close() {
   if (!dom) return;
   const { wrap } = dom;
   const ms = Math.round(CLOSE_MS * speed());
-  const g = fresh() ?? measure();
-  geo = g;
-  ownSwitch = performance.now() + 250;
-  wrap.classList.add("hp-run");
-  wrap.classList.remove("hp-nar");
-  if (!g || g.legacy) settle();
-  if (g) place(g, ms, false, true);
+  let ready: unknown = preclosed && preclosed.ms === ms && (!preclosed.geo || preclosed.geo === geo) ? preclosed : null;
+  preclosed = null;
+  if (lazy) {
+    // раскладка ещё широкая, помеченное — на узких местах: ход назад прямо от них, без смены раскладки
+    window.clearTimeout(lazy.timer);
+    lazy = null;
+    reverseLazy(ms);
+    lazyBack = 0;
+    ready = true;
+  } else if (!ready) closeStep0(ms);
   const run = { dir: "close" as const, step2: 0, timer: 0 };
-  const go2 = () => {
+  const go = () => {
     if (!dom || running !== run) return;
     for (const m of moves) m.play();
     dom.wrap.classList.remove("hp-v", "hp-v2");
     run.timer = window.setTimeout(endClose, ms + TAIL_MS);
+    run.step2 = requestAnimationFrame(() => {
+      if (dom && running === run) dom.wrap.classList.remove("hp-vd");
+    });
   };
-  run.step2 = requestAnimationFrame(() => {
-    run.step2 = requestAnimationFrame(go2);
-  });
   running = run;
+  if (ready) go();
+  else run.step2 = nextFrame(go);
   // фокус из плиты помощника — на пункт шапки (следующим кадром: кадр нажатия — только ход)
   const help = wrap.querySelector("#hp-help");
   if (help?.contains(document.activeElement)) requestAnimationFrame(() => document.getElementById("hp-nav")?.focus({ preventScroll: true }));
@@ -580,7 +722,7 @@ function close() {
 
 function endClose() {
   if (!dom) return;
-  dom.wrap.classList.remove("hp-run");
+  dom.wrap.classList.remove("hp-run", "hp-vd");
   clearPlaced();
   done(false);
 }
@@ -588,11 +730,14 @@ function endClose() {
 /** Без хода (уменьшить движение): раскладка и вид — сразу. */
 function jump(to: boolean) {
   if (!dom) return;
+  narrowNow();
   const { wrap } = dom;
+  const keep = goingNow();
   wrap.classList.toggle("hp-v", to);
+  wrap.classList.toggle("hp-vd", to);
   wrap.classList.toggle("hp-v2", to);
   wrap.classList.toggle("hp-nar", to);
-  settle();
+  settle(keep);
   done(to);
 }
 
@@ -644,10 +789,13 @@ export function syncHelper(open: boolean) {
 /** Подготовка хода (наведение, фокус на «Помощник» или ✕): замер обеих раскладок и слои хода — до нажатия. */
 export function prepareHelper() {
   if (!dom || running || prefersReducedMotion()) return;
-  if (!fresh()) geo = measure();
   prepared = performance.now();
   dom.wrap.classList.add("hp-prep");
-  if (geo) prepStretch(geo);
+  if (lazy) return reverseLazy(Math.round(CLOSE_MS * speed()));
+  if (preclosed || preopened) return;
+  if (!fresh()) geo = measure();
+  if (want) preClose();
+  else preOpen();
 }
 
 /** Наведение ушло без нажатия: слои хода больше не держатся. */
@@ -656,8 +804,11 @@ export function releaseHelper() {
   const at = prepared;
   window.setTimeout(() => {
     if (!dom || running || prepared !== at) return;
+    // фокус ушёл (в поле помощника), а указатель всё ещё на кнопке — подготовка остаётся
+    if (document.querySelector("#hp-nav:hover, #hp-help .gh-x:hover")) return;
     dom.wrap.classList.remove("hp-prep");
-    unprep();
+    unpreClose();
+    unpreOpen();
   }, 600);
 }
 
@@ -668,16 +819,34 @@ export function attachHelper(d: Dom, open: boolean, onCommit: (open: boolean) =>
   state = open;
   want = open;
   d.wrap.classList.toggle("hp-v", open);
+  d.wrap.classList.toggle("hp-vd", open);
   d.wrap.classList.toggle("hp-v2", open);
   d.wrap.classList.toggle("hp-nar", open);
   syncBand();
   emit();
   const onResize = () => {
     stale = true;
+    narrowNow();
+  };
+  // касание колоды (не помощника и не его кнопки) — раскладка встаёт сразу
+  const onPoke = (e: Event) => {
+    if (!lazy) return;
+    const t = e.target instanceof Element ? e.target : null;
+    if (t?.closest("#hp-help, #hp-nav")) return;
+    narrowNow();
   };
   window.addEventListener("resize", onResize);
+  window.addEventListener("pointerdown", onPoke, true);
+  window.addEventListener("keydown", onPoke, true);
+  window.addEventListener("wheel", onPoke, { capture: true, passive: true });
   return () => {
     window.removeEventListener("resize", onResize);
+    window.removeEventListener("pointerdown", onPoke, true);
+    window.removeEventListener("keydown", onPoke, true);
+    window.removeEventListener("wheel", onPoke, true);
+    if (lazy) window.clearTimeout(lazy.timer);
+    lazy = null;
+    lazyBack = 0;
     geoObs?.disconnect();
     geoObs = null;
     bandObs?.disconnect();
@@ -686,6 +855,7 @@ export function attachHelper(d: Dom, open: boolean, onCommit: (open: boolean) =>
     bandSize = null;
     copies.clear();
     d.band.replaceChildren();
+    window.clearTimeout(commitTimer);
     if (running) {
       window.clearTimeout(running.timer);
       cancelAnimationFrame(running.step2);

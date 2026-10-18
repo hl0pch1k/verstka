@@ -226,7 +226,7 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
             }}>{d.title}</h1>
             {!tf.two && <HeadLine d={d} />}
           </div>
-          <div className="hp-acts" style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+          <div className="hp-acts" data-hpr="" style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
             {note && <NoteMenu note={note} actions={noteActions} live={live} />}
             {d.pdf ? (
               <a className="p2-rbl hp-ib" href={d.pdf} download={`${d.fileBase}.pdf`} aria-label="Скачать PDF"><Icon name="file" size={18} /><Tip text="Скачать PDF" /></a>
@@ -250,7 +250,8 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
         </div>
       </div>
 
-      <div className={cls("hp-ncol hp-xf", wide && "hp-xf-off")} aria-hidden={wide || undefined}>
+      {/* узкая колонка едет с краем колоды, пока проявляется (ui/shell/helperMotion.ts, `data-hpr`) */}
+      <div className={cls("hp-ncol hp-xf", wide && "hp-xf-off")} data-hpr="" aria-hidden={wide || undefined}>
         <div className="p2-in" style={{ display: "flex", flexDirection: "column", minHeight: 0, animationDelay: "200ms" }}>
           <div role="group" aria-label="Вариант оформления" style={{ display: "flex", flexDirection: "column", gap: 4, padding: 4, borderRadius: 24, background: "#F3F4F1" }}>
             {d.variants.map((v) => {

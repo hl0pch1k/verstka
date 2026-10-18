@@ -198,8 +198,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 /* ── Колода, суженная помощником (V2 версии 100, блок «Колода, суженная помощником…»), — по-новому, только transform и
    opacity (ui/shell/helperMotion.ts, helper.css). Узкая раскладка (`hp-nar`: дорожки сеток, ширины, кегли) встаёт разом —
-   в конце открытия и в начале закрытия, без переходов. На глазах идёт только видимое и по классу `hp-v` (помощник открыт
-   для глаза — с кадра нажатия), по таймингу полного и компактного вида «Результата»:
+   в конце открытия и в начале закрытия, без переходов. На глазах идёт только видимое — по классам `hp-vd` (гаснет и
+   мельчает, кадром после нажатия) и `hp-v2` (проявляется, ещё кадром позже), по таймингу полного и компактного вида
+   «Результата»:
      · названия шагов 32 → 24 px — scale .75 от левого края (520 / 340 мс); место в ряду держит невидимая мерка, её кегль
        меняется со сменой раскладки;
      · то, что есть только в одной раскладке (hp-wo — только в широкой, hp-no — только в узкой), гаснет и проявляется на
@@ -221,9 +222,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
   .p2-ttl-v{transition:transform calc(340ms * var(--hp-k, 1)) var(--ease)}
   .hp-nar .p2-ttl-sz{font-size:24px}
-  .hp-v .p2-ttl-v{transform:scale(.75);transition-duration:calc(520ms * var(--hp-k, 1))}
+  .hp-vd .p2-ttl-v{transform:scale(.75);transition-duration:calc(520ms * var(--hp-k, 1))}
   .hp-wo{transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
-  .hp-v .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+  .hp-vd .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
   .hp-no{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
   .hp-v2 .hp-no{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(120ms * var(--hp-k, 1)),visibility 0s linear 0s}
   /* обложка, вернувшаяся в ряд ленты при открытом помощнике (выбрали другую — hp-wo снялся): проявляется как hp-no —
@@ -247,7 +248,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
      правого края ряда; подсказка под полем меняет формулировку на месте */
   .tx-fmtw{display:block;max-width:120px;overflow:hidden;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
   .hp-nar .tx-fmtw{max-width:0;margin-left:-12px}
-  .hp-v .tx-fmtw{opacity:0;visibility:hidden;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
+  .hp-vd .tx-fmtw{opacity:0;visibility:hidden;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(240ms * var(--hp-k, 1))}
   .p2-hx .tx-top{position:static;flex:0 1 auto;justify-content:flex-end;overflow:hidden}
   .tx-tops{min-width:0;justify-items:end}
   .tx-tops > span{display:flex;align-items:center;gap:8px;white-space:nowrap}
@@ -277,7 +278,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar .p2-hx .pp-sum{margin:0 -24px}
   .pp-ctat{max-width:160px;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1))}
   .hp-nar .pp-ctag{max-width:0}
-  .hp-v .pp-ctag{opacity:0;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease)}
+  .hp-vd .pp-ctag{opacity:0;transition:opacity calc(240ms * var(--hp-k, 1)) var(--ease)}
   #p2-b3{grid-template-columns:var(--pp-tw) !important;column-gap:0 !important;margin-right:-16px !important}
   #p2-b3.p2-on{transition:opacity 360ms var(--ease) 120ms}
   #p2-b3.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
@@ -336,7 +337,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 /* Многострочный текст не переносится заново посреди хода: блок, ширина которого в узкой раскладке другая, — «стопка»
    (hp-tx): в одной клетке широкая копия (hp-txw, сам блок) и узкая (hp-txn, клон, свёрстанный на узкую ширину), каждая
    своей постоянной ширины в обеих раскладках (--hpd — на сколько клетка у́же в узкой; --hpp — 0 в широкой, 1 в узкой).
-   Подмена — прозрачностью по `hp-v`: открытие — широкая гаснет 160 мс, узкая проявляется 240 мс с 120; закрытие — узкая
+   Подмена — прозрачностью по `hp-vd` / `hp-v2`: открытие — широкая гаснет 160 мс, узкая проявляется 240 мс с 120; закрытие — узкая
    гаснет 160 мс, широкая проявляется 160 мс через 80. Высоту держит копия своей раскладки. Неактивная копия —
    aria-hidden (и без фокуса). */
 @property --hpp{syntax:'<number>';inherits:false;initial-value:0}
@@ -347,7 +348,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-tx > .hp-txw,.hp-tx > .hp-txn{grid-area:1 / 1;min-width:0;overflow:clip;overflow-clip-margin:8px;box-sizing:border-box}
   .hp-tx > .hp-txw{--hpp:0;width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease) calc(80ms * var(--hp-k, 1)),visibility 0s linear 0s}
   .hp-nar .hp-tx > .hp-txw{--hpp:1}
-  .hp-v .hp-tx > .hp-txw{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
+  .hp-vd .hp-tx > .hp-txw{opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
   .hp-tx > .hp-txn{--hpp:0;width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;overflow:visible;clip-path:inset(-2px -8px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity calc(160ms * var(--hp-k, 1)) var(--ease),visibility 0s linear calc(160ms * var(--hp-k, 1))}
   /* узкая копия шире и ниже (подсказка варианта в «Все параметры» при 1440: миниатюра уходит) — роли наоборот */
   .hp-tx.hp-txr > .hp-txn{height:auto;overflow:clip;clip-path:none}
@@ -378,7 +379,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .hp-run .bb-chg{box-shadow:inset 0 0 0 1px rgba(11,18,32,.14),32px 0 0 0 #FFFFFF,64px 0 0 0 #FFFFFF}
 
 /* подсказка-печать над полем — уже узкой в кадре нажатия: в ходе она не переносится заново (поле — стопка копий) */
-.hp-v:not(.hp-nar) .p2-tph{right:416px}
+.hp-vd:not(.hp-nar) .p2-tph{right:416px}
 
 /* ═══ Данные и брендбук (модуль ds) — вторая ступень: файлы с данными и брендбук на шагах 01 и 02. Дословно из
    boards/V2.dc.html версии 105 (<helmet><style>, блок «Данные и брендбук»); «сайт:» — сверх доски. Без файлов и
