@@ -109,6 +109,14 @@ class ImageMaker:
         if self.deadline is not None and self.deadline - time.monotonic() < 5:
             raise ImageError("no time left in the generation for a picture")
         subject = self._subject(ask)
+        from verstka.planning.pictures import AUTO_LABEL
+
+        if subject is None and ask.label == AUTO_LABEL and not ask.wish:
+            # a place Verstka chose: its «description» is the slide's heading — the image model writes it across the
+            # picture; without the text model's description the place stays free and says why
+            err = ImageError("the text model gave no description of the picture")
+            err.why = "описание картинки не составлено (модель текста не ответила) — место оставлено свободным"
+            raise err
         # one deck title for every variant's picture (the key leaves it out: the variants share the picture)
         ask2 = ImageAsk(**{**asdict(ask), "subject_en": subject, "deck": self.deck_title or ask.deck, "template_style": ask.template_style or self.template_style})
         seed = seed if seed is not None else seed_of(ask.key(), aspect)

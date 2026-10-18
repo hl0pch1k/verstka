@@ -959,6 +959,11 @@ def score_pattern(
     # the template's art (renders, illustrations, plates) stays with new content: only a picture that is not art is
     # stale when nothing replaces it
     stale_images = [s for s in pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.12 and s.shape_id not in art_ids]
+    if stale_images and not has_visual and not bookend and not content.photo_slot:
+        # the sample's photo goes and what it carried stays empty (the owner's template, 18.10: a blue circle drawn over
+        # the sample's photo stood alone in the middle of the slide, the conclusion ran over the panel's edge) — the
+        # composer lays such a slide out instead
+        return ScoreResult(0.0, reasons + ["крупная картинка образца уйдёт — останется пустое место"], fit)
     if stale_images and not has_visual:
         kind *= 0.6
         reasons.append("крупная картинка-образец останется без замены")

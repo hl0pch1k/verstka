@@ -518,6 +518,21 @@ def generate_variants(
     if src_pictures:
         picture_reuse = {name: [*(picture_reuse or {}).get(name, []), *src_pictures] for name in strategies}
     maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, providers if models_on else None, brief, outline, planned)
+    if pictures and maker is None:
+        # the person asked for pictures and none can be made: said plainly, not left to guess
+        _event_sink(progress)({"type": "agent", "step": "compile", "message": "Изображения: модель изображений недоступна (нет ключа или она выключена) — слайды собраны без картинок.", "share": 0.3})
+    if maker is not None:
+        # pictures on: every variant has its pictures, the text's places or short slides Verstka picks (planning/pictures.py)
+        from verstka.planning.pictures import ensure_pictures
+
+        try:
+            added = ensure_pictures([planned[nm][0] for nm in strategies if nm in planned] or ([outline] if outline is not None else []), brief.text if brief is not None else "")
+        except Exception:  # noqa: BLE001 - the deck keeps the places its text gave it
+            log.warning("pictures: the places were not added", exc_info=True)
+            added = []
+        for nm in strategies:
+            if nm in planned and added:
+                planned[nm][1].extend(added)
     pending: list[dict] = []
     said_pictures: set = set()  # the timeline tells each place once, not once per variant
     from verstka.audit.eyes import load_config as eyes_config, look as look_at_slides

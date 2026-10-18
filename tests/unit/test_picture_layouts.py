@@ -268,3 +268,45 @@ def test_a_content_slides_picture_is_a_full_height_strip_away_from_the_layouts_l
     assert x == Inches(0.5) and x + w <= W - sw - int(0.03 * W)
     x, w = PL.beside_strip((0, 0, sw, H), Inches(0.5), W - Inches(1), W)
     assert x >= sw + int(0.03 * W) and x + w == W - Inches(0.5)
+
+
+def test_pictures_on_means_pictures_in_the_deck():
+    """The owner (18.10): «если включено „Генерировать изображения“, картинки обязаны быть». A deck whose text placed
+    none gets them on short content slides spread over it — the same slides in every variant, described by the text's
+    own slide headings so the variants share them; tables, charts, covers never."""
+    from verstka.planning.pictures import AUTO_LABEL, ensure_pictures
+    from verstka.schemas.common import PatternKind as K
+
+    def deck():
+        sl = [OutlineSlide(id="t", kind=K.title, headline="Франция")]
+        for k in range(2, 11):
+            c = SlideContent(bullets=["Короткий пункт.", "Ещё пункт."]) if k != 6 else SlideContent(table={"columns": ["a", "b"], "rows": [["1", "2"]]})
+            sl.append(OutlineSlide(id=f"s{k}", kind=K.bullets if k != 6 else K.table, headline=f"Заголовок {k}", content=c, spec_ref=k))
+        return DeckOutline(title="Франция", slides=sl)
+
+    a, b = deck(), deck()
+    text = "\n".join(f"Слайд {k}. Тема слайда {k}" for k in range(1, 11))
+    said = ensure_pictures([a, b], text)
+    got = [(i, s.content.photo_hint) for i, s in enumerate(a.slides) if s.content.photo_slot]
+    assert len(got) >= 2 and len(said) == len(got)
+    assert all(a.slides[i].kind.value not in ("title", "table") and h.startswith("Тема слайда") for i, h in got)
+    assert [(i, s.content.photo_hint) for i, s in enumerate(b.slides) if s.content.photo_slot] == got
+    assert all(a.slides[i].content.photo_slot == AUTO_LABEL and not a.slides[i].content.photo_own for i, _ in got)
+    assert ensure_pictures([a], text) == []  # enough already
+
+
+def test_a_place_verstka_chose_is_never_drawn_from_its_heading_alone(tmp_path):
+    from verstka.images import providers as IP
+    from verstka.images.prompt import ImageAsk as Ask
+    from verstka.images.service import ImageMaker
+    from verstka.planning.pictures import AUTO_LABEL
+
+    mock = IP.MockImages()
+    maker = ImageMaker(IP.ImageChain([mock]), None, tmp_path, deck_title="Франция")
+    try:
+        maker.make(Ask(hint="Капетинги и формирование королевства", label=AUTO_LABEL), "3:4")
+        raised = None
+    except Exception as e:  # noqa: BLE001
+        raised = e
+    maker.close()
+    assert raised is not None and "описание" in getattr(raised, "why", "") and not mock.calls

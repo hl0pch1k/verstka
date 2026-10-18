@@ -163,3 +163,69 @@ def strip_picture_notes(outline: Any, warnings: list[str]) -> None:
         if is_picture_note(s.subtitle or ""):
             s.subtitle = None
         warnings.append(f"slide {s.id}: the picture's note left the slide's text")
+
+
+# the owner (18.10): «если включено „Генерировать изображения“, картинки обязаны быть в презентации» — a deck whose
+# text placed fewer pictures gets them on its short content slides (each a full-height strip at the slide's edge)
+MIN_PICTURES = 2
+# the label of a place Verstka chose itself (its description is the slide's heading, not the author's words about a
+# picture): drawn only from the text model's English description (images/service.py) — the heading itself given to
+# the image model came back written across the picture (live run of 18.10, the text model down)
+AUTO_LABEL = "Иллюстрация"
+PICTURE_SHARE = 4  # one picture per this many slides (2 on 8–11 slides, 3 on 12+), at least MIN_PICTURES
+_SLIDE_HEAD_RE = re.compile(r"^\s*Слайд\s+(\d+)\s*[.:)]\s*(.+?)\s*$", re.M)
+
+
+def _fits_picture(s: Any) -> bool:
+    c = s.content
+    if s.kind.value in _FRAMES or getattr(s, "continues", None) or c.photo_slot:
+        return False
+    if c.table is not None or c.chart is not None or c.chart2 is not None or c.code is not None or c.formula or c.quote or c.image_hint:
+        return False
+    if len(c.items) > 4 or len(c.columns) > 0 or len(c.numbers) > 4:
+        return False
+    words = " ".join([*c.bullets, *c.paragraphs, *(f"{it.title} {it.text}" for it in c.items)])
+    return len(c.bullets) <= 5 and len(words) <= 480
+
+
+def _spread(cands: list[int], k: int) -> list[int]:
+    """k of the candidate positions spread over the deck (never two neighbours when it can be helped)."""
+    if len(cands) <= k:
+        return cands
+    return sorted({cands[int((j + 0.5) * len(cands) / k)] for j in range(k)})
+
+
+def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
+    """At least MIN_PICTURES pictures in every variant (a share of its slides): short content slides without a picture
+    get a place, described by the slide's heading in the text («Слайд 5. Капетинги и формирование королевства») so the
+    variants share one picture per place. Returns what was done, for the warnings."""
+    outlines = [o for o in outlines if o is not None and getattr(o, "slides", None)]
+    if not outlines:
+        return []
+    heads = {int(m.group(1)): H.strip_end(m.group(2)) for m in _SLIDE_HEAD_RE.finditer(brief_text or "")}
+    first = outlines[0]
+    n = len(first.slides)
+    want = max(MIN_PICTURES, round(n / PICTURE_SHARE)) if n >= 5 else 1
+    have = sum(1 for s in first.slides if s.content.photo_slot and not s.content.photo_own)
+    if have >= want:
+        return []
+    cands = [i for i, s in enumerate(first.slides) if _fits_picture(s)]
+    picked = _spread(cands, want - have)
+    out: list[str] = []
+    for i in picked:
+        s0 = first.slides[i]
+        ref = s0.spec_ref
+        hint = heads.get(ref) if ref is not None else None
+        hint = hint or H.strip_end(s0.headline or "")
+        for o in outlines:
+            # the same slide of every variant: by the text's slide number, else by position
+            host = next((s for s in o.slides if ref is not None and s.spec_ref == ref and _fits_picture(s)), None)
+            if host is None and ref is None and i < len(o.slides) and _fits_picture(o.slides[i]):
+                host = o.slides[i]
+            if host is None:
+                continue
+            host.content.photo_slot = AUTO_LABEL
+            host.content.photo_hint = hint
+            host.content.photo_own = False
+        out.append(f"picture added on slide {i + 1} ({hint[:60]}): pictures are on and the text placed fewer than {want}")
+    return out
