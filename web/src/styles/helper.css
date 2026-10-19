@@ -30,12 +30,12 @@
 .hp-run > .hp-rail{visibility:visible}
 .hp-run.hp-v > .hp-rail{transition:transform var(--hp-o) var(--ease)}
 .hp-run:not(.hp-v) > .hp-rail{transition:transform var(--hp-c) var(--ease)}
-/* занавес: цвет страницы, от полосы края (−48) до правого края; закрывает колоду правее её края, плиту помощника — левее.
-   Начинается на 2 px правее полосы края: его сглаженный левый край лежит под полосой (иначе два края в одном дробном
-   пикселе давали в Safari светлую линию через все плиты) */
-.hp-cur{position:absolute;top:0;bottom:0;left:-46px;right:0;overflow:hidden;background:#F3F4F1}
+/* занавес: цвет страницы, от начала скругления углов полосы края (−40) до правого края; закрывает колоду правее её
+   края, плиту помощника — левее; над и под скруглёнными углами копий виден он, а не прямой угол широкой колоды. Его левый
+   край лежит под непрозрачной частью полосы (два края в одном дробном пикселе давали в Safari светлую линию) */
+.hp-cur{position:absolute;top:0;bottom:0;left:-40px;right:0;overflow:hidden;background:#F3F4F1}
 /* встречный ход: занавес — влево, его содержимое — вправо на столько же; плита помощника стоит на своём месте */
-.hp-ctr{position:absolute;top:0;left:46px;width:416px;height:812px;transform:translateX(-416px)}
+.hp-ctr{position:absolute;top:0;left:40px;width:416px;height:812px;transform:translateX(-416px)}
 .hp-v .hp-ctr{transform:translateX(0)}
 .hp-run.hp-v .hp-ctr{transition:transform var(--hp-o) var(--ease)}
 .hp-run:not(.hp-v) .hp-ctr{transition:transform var(--hp-c) var(--ease)}
@@ -43,14 +43,11 @@
 /* плита помощника: доезжает последние 32 px на кривой края колоды; закрытая — непрозрачна, пока колода её накрывает */
 .hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:transform var(--hp-c) var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease) calc(100ms * var(--hp-k, 1)),visibility 0s linear var(--hp-c)}
 .hp-v .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:transform var(--hp-o) var(--ease),opacity calc(240ms * var(--hp-k, 1)) var(--ease),visibility 0s linear 0s}
-/* полоса края колоды: правые 48 px живых копий мест плит и слоёв (фоны, тени, углы — без содержимого; копии едут вместе
-   с плитами), скругление колоды */
-.hp-band{position:absolute;top:0;left:-48px;width:48px;height:812px;overflow:hidden;border-radius:0 40px 40px 0;pointer-events:none}
+/* полоса края колоды: правые 48 px живых копий мест плит и слоёв (фоны, свои тени, углы — без содержимого; копии едут
+   вместе с плитами), скругление колоды. Левые 8 px (до скругления углов) проявляются маской: копия у левой границы
+   полосы переходит в плиту под ней плавно (тень у конца плиты гаснет шире полосы), без ступеньки и без шва */
+.hp-band{position:absolute;top:0;left:-48px;width:48px;height:812px;overflow:hidden;border-radius:0 40px 40px 0;pointer-events:none;-webkit-mask-image:linear-gradient(to right,transparent,#000 8px);mask-image:linear-gradient(to right,transparent,#000 8px)}
 .hp-bandin{position:absolute;top:0;right:0;height:812px}
-/* тень копии плиты: коробка продлена за край колоды на 80 px (тень у левой границы полосы — та же, что у широкой плиты под
-   ней), к краю колоды тень гаснет маской (как у угла плиты); копия плиты — без тени, только фон и углы */
-.hp-bsh{position:absolute;left:0;right:0;top:-64px;bottom:0;pointer-events:none;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent calc(100% - 4px));mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent calc(100% - 4px))}
-.hp-bsh > i{position:absolute;left:0;right:-80px;top:64px;bottom:0;border-radius:40px}
 /* тень края колоды на плиту помощника (холст: 24 0 48 −24, rgba(11,18,32,.28)): полоса постоянного размера едет с краем;
    видно = прозрачность полосы × прозрачность фигуры края — открытие: 0 → 1 за 240 мс, фигура 1 → 0 за 160 мс с 340;
    закрытие: фигура 0 → 1 за 160 мс, полоса 1 → 0 за 240 мс с 100 */
