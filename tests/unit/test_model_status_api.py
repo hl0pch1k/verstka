@@ -502,7 +502,7 @@ def test_status_of_the_shipped_polza_chain(api, monkeypatch):
 
 def test_status_shows_the_vk_profile_chosen_by_the_vk_keys(api, monkeypatch):
     """Both VK variables in the environment switch the server to configs/models.vk.yaml by themselves; the status names
-    that config and its one model, never a key or the project id."""
+    that config and its chain (VK first, Polza as the fallback), never a key or the project id."""
     c, mod = api
     monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-test-key-status-000001")
     monkeypatch.setenv("VK_PROJECT_ID", "PRJ-test-status-000001")
@@ -510,7 +510,12 @@ def test_status_shows_the_vk_profile_chosen_by_the_vk_keys(api, monkeypatch):
     r = c.get("/api/models/status")
     st = r.json()
     assert st["configured"] is True and st["config"] == "configs/models.vk.yaml" and st["source"] == "status"
-    assert [(link["model"], link["label"], link["host"], link["roles"]) for link in st["links"]] == [("qwen38-27b-fp8", "Qwen3.8-27B (VK)", "ai-demo.platformpreview.ru", ["llm"])]
+    # VK inference first, the same open models on Polza when VK cannot answer
+    assert [(link["model"], link["label"], link["host"], link["roles"]) for link in st["links"]] == [
+        ("qwen38-27b-fp8", "Qwen3.8-27B (VK)", "ai-demo.platformpreview.ru", ["llm"]),
+        ("qwen/qwen3.8-27b", "Qwen3.8-27B (Polza)", "polza.ai", ["llm"]),
+        ("qwen/qwen3.6-27b", "Qwen3.6-27B (Polza)", "polza.ai", ["llm"]),
+    ]
     assert st["active_model"] == "qwen38-27b-fp8" and st["host"] == "ai-demo.platformpreview.ru" and st["active_model_label"].startswith("Qwen3.8-27B")
     assert "test-key-status" not in r.text and "PRJ-test-status" not in r.text
     # the same server forced back to Polza by VERSTKA_MODELS

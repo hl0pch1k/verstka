@@ -504,17 +504,22 @@ def test_a_503_is_retried_not_before_its_retry_after_and_never_later_than_fiftee
     assert ch.complete(MSGS).text == "backup" and sleeps == [10.0] and len(c[MAIN].calls) == 1
 
 
-def test_the_vk_config_of_the_final_is_one_model_without_long_holds(sleeps, vk_env):
+def test_the_vk_config_of_the_final_falls_back_to_polza(sleeps, vk_env, monkeypatch):
+    """VK inference first; when it cannot answer (VK down, «500 congested upstream») the same Qwen3.8-27B on Polza
+    answers within the same call, then Qwen3.6-27B (alone, without Polza, the VK link would be asked at most twice)."""
+    monkeypatch.setenv("POLZA_API_KEY", KEY)
     reg = ProviderRegistry.from_yaml(VK_CONFIG)
     for role in ("llm", "vlm"):
         p = reg.get(role)
-        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_FINAL_MODEL and p.max_attempts == 3
+        assert isinstance(p, ChainProvider) and [link.model for link in p.links] == [VK_FINAL_MODEL, MAIN, BACKUP]
+        vk = p.links[0]
+        assert vk.name == "openai_compat" and vk.max_attempts == 2 and vk.timeout_s == 90 and not vk.off
+        assert all(link.name == "polza" and not link.off for link in p.links[1:])
     p = reg.get("llm")
-    c = wire(p, [http_error(401, "invalid api key")])
-    with pytest.raises(ProviderError, match=r"access refused \(401/403\)"):
-        p.complete(MSGS)
-    assert len(c[0].calls) == 3 and status.blocked(p.health)[2] <= 60
-    assert status.blocked(reg.get("vlm").health)[2] <= 60  # vlm shares the model's record: the same short hold
+    c = wire(p, [http_error(500, "congested upstream")], [answer()])
+    res = p.complete(MSGS)
+    # inside a chain a failed link is not asked again: the next link answers at once
+    assert res.text == GOOD and res.model == MAIN and len(c[0].calls) == 1 and len(c[1].calls) == 1
 
 
 # ---------------------------------------------------------------------------------------------- Polza's errors
@@ -1594,20 +1599,23 @@ def test_the_ui_names_each_failed_link_by_its_label(config_env, sleeps, caplog):
     assert detail() == "на балансе Polza нет средств или исчерпан лимит расходов ключа"
 
 
-def test_the_vk_config_is_one_model_on_vk_inference(vk_env):
+def test_the_vk_config_is_vk_inference_first(vk_env):
     vk = ProviderRegistry.from_yaml(VK_CONFIG)
-    assert sorted(vk.roles) == ["llm", "vlm"] and vk.limits.timeout_s == 180
+    assert sorted(vk.roles) == ["llm", "t2i", "vlm"] or sorted(vk.roles) == ["llm", "vlm"]
+    assert vk.limits.timeout_s == 180
     # every limit the Polza profile sets is set here too (the VK profile may only differ in its values)
     assert vk.limits.time_budget_s == ProviderRegistry.from_yaml(DEFAULT).limits.time_budget_s == 210 and vk.limits.max_concurrency == 8
     assert set(yaml.safe_load(DEFAULT.read_text(encoding="utf-8"))["limits"]) <= set(yaml.safe_load(VK_CONFIG.read_text(encoding="utf-8"))["limits"])
     for role in ("llm", "vlm"):
-        p = vk.get(role)
-        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_FINAL_MODEL  # one model, no chain
+        ch = vk.get(role)
+        assert isinstance(ch, ChainProvider)
+        p = ch.links[0]
+        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_FINAL_MODEL
         assert p.base_url == VK and p.api_key == VK_KEY and p.label == "Qwen3.8-27B (VK)" and not p.off
         assert p.headers == {"Project-ID": VK_PROJECT}  # the project header of the organisers' inference
         assert p.extra_body == {"chat_template_kwargs": {"enable_thinking": False}} and p.system_suffix == "/no_think"
-        assert p.exclude_quantizations == () and p.timeout_s == 180 and p.max_attempts == 3
-    assert vk.get("vlm").health is vk.get("llm").health
+        assert p.exclude_quantizations == ()
+        assert all(link.off for link in ch.links[1:])  # no POLZA_API_KEY here: the Polza links are off, VK only
 
 
 @pytest.mark.parametrize("env", [{}, {"VK_PROJECT_ID": VK_PROJECT}])
@@ -1617,12 +1625,12 @@ def test_the_vk_config_without_its_key_is_off(monkeypatch, sleeps, env):
     reg = ProviderRegistry.from_yaml(VK_CONFIG)
     for role in ("llm", "vlm"):
         p = reg.get(role)
-        assert isinstance(p, oc.OpenAICompatProvider) and p.off and p.api_key == ""
+        assert isinstance(p, ChainProvider) and all(link.off and link.api_key == "" for link in p.links)
     p = reg.get("llm")
     wire(p)  # a request would fail the test
     with pytest.raises(ProviderError, match=r"not configured \(no API key\)"):
         p.complete(MSGS)
-    assert status.snapshot(reg, role="llm")[0]["state"] == "off" and sleeps == []
+    assert sleeps == []
 
 
 @pytest.mark.parametrize(

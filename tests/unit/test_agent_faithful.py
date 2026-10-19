@@ -382,9 +382,10 @@ def test_critic_and_revision_failures_keep_the_plan():
 def test_the_vk_config_switches_thinking_off():
     cfg = yaml.safe_load((ROOT / "configs" / "models.vk.yaml").read_text(encoding="utf-8"))
     for role in ("llm", "vlm"):
-        spec = cfg["roles"][role]
-        assert spec["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
-        assert spec["system_suffix"] == "/no_think"
+        vk, *polza = cfg["roles"][role]["chain"]  # VK inference first, the same open models on Polza when VK cannot answer
+        assert vk["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+        assert vk["system_suffix"] == "/no_think"
+        assert polza and all(link["extra_body"]["reasoning"]["effort"] == "none" for link in polza)
     assert cfg["limits"]["max_concurrency"] == 8
     assert cfg["limits"]["time_budget_s"] == 210  # the Polza profile's model time per generation
 

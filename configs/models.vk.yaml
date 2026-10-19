@@ -1,6 +1,7 @@
 # Final stage (top-10): the main model, Qwen3.8-27B (fp8, id qwen38-27b-fp8), served by VK inference (organisers'
 # quickstart 16.10: OpenAI-compatible, key in VK_INFERENCE_API_KEY, header «Project-ID» from VK_PROJECT_ID) — the ТЗ makes VK inference mandatory for
-# text and image reading in the top-10 (the organisers: for every model component). One model, no fallback chain.
+# text and image reading in the top-10 (the organisers: for every model component). When VK inference is down the
+# same open model on Polza answers (see roles.llm).
 # A single model: up to 3 attempts with backoff; a 429 of the hosts gets a short pause and one more try (two in a row:
 # the model is skipped for 2 minutes); per-minute caps are waited out; a 402 / 401 / 403 / 404 is reported after the
 # attempts and the model is skipped for at most 1 minute.
@@ -8,33 +9,49 @@
 # This is the DEFAULT profile whenever VK_INFERENCE_API_KEY and VK_PROJECT_ID are both set (.env or the environment):
 # verstka.providers.registry.resolve_models_profile(). $VERSTKA_MODELS=<path> overrides the choice either way.
 roles:
-  llm:
-    backend: openai_compat
-    model: qwen38-27b-fp8
-    label: Qwen3.8-27B (VK)
-    base_url: https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1
-    api_key: ${VK_INFERENCE_API_KEY}
-    headers: { Project-ID: "${VK_PROJECT_ID}" }
-    # Thinking OFF. Qwen3.8-27B thinks before answering by default; left on, the reasoning is billed as output and
-    # uses up the small answers' limits (designer 1800, critic 900 tokens): every answer comes back cut off and the
-    # deck is built by the rules after minutes of calls. Two switches, both harmless where unsupported:
-    # - vLLM / SGLang (the usual host of an open model): the chat template's own flag;
-    # - Qwen3's documented soft switch "/no_think" at the end of the system message (a host without the flag).
-    # A host that rejects the unknown field (a plain 400) is asked once more without it, and the provider logs a
-    # warning when completion tokens far exceed the answer (thinking still on). Check with scripts/vk_smoke.py first.
-    extra_body:
-      chat_template_kwargs: { enable_thinking: false }
-    system_suffix: "/no_think"
-  vlm:
-    backend: openai_compat
-    model: qwen38-27b-fp8
-    label: Qwen3.8-27B (VK)
-    base_url: https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1
-    api_key: ${VK_INFERENCE_API_KEY}
-    headers: { Project-ID: "${VK_PROJECT_ID}" }
-    extra_body:
-      chat_template_kwargs: { enable_thinking: false }
-    system_suffix: "/no_think"
+  # Text and image reading: VK inference first (mandatory in the final), the same Qwen3.8-27B on Polza when VK cannot
+  # answer (VK down, 5xx «congested upstream», timeouts), then Qwen3.6-27B on Polza. The VK link is asked at most twice
+  # with a short timeout, so a dead VK costs seconds, not minutes; after two failures in a row the chain holds it for a
+  # minute and the next requests go straight to Polza. Without POLZA_API_KEY the Polza links are off (VK only).
+  llm: &llm
+    chain:
+      - backend: openai_compat
+        model: qwen38-27b-fp8
+        label: Qwen3.8-27B (VK)
+        base_url: https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1
+        api_key: ${VK_INFERENCE_API_KEY}
+        headers: { Project-ID: "${VK_PROJECT_ID}" }
+        timeout_s: 90
+        max_attempts: 2
+        # Thinking OFF. Qwen3.8-27B thinks before answering by default; left on, the reasoning is billed as output and
+        # uses up the small answers' limits (designer 1800, critic 900 tokens): every answer comes back cut off and the
+        # deck is built by the rules after minutes of calls. Two switches, both harmless where unsupported:
+        # - vLLM / SGLang (the usual host of an open model): the chat template's own flag;
+        # - Qwen3's documented soft switch "/no_think" at the end of the system message (a host without the flag).
+        # A host that rejects the unknown field (a plain 400) is asked once more without it, and the provider logs a
+        # warning when completion tokens far exceed the answer (thinking still on). Check with scripts/vk_smoke.py first.
+        extra_body:
+          chat_template_kwargs: { enable_thinking: false }
+        system_suffix: "/no_think"
+      - backend: polza
+        base_url: https://polza.ai/api/v1
+        api_key: ${POLZA_API_KEY}
+        model: qwen/qwen3.8-27b
+        label: Qwen3.8-27B (Polza)
+        json_mode: false
+        exclude_quantizations: [fp4]
+        extra_body:
+          reasoning: { effort: none }
+      - backend: polza
+        base_url: https://polza.ai/api/v1
+        api_key: ${POLZA_API_KEY}
+        model: qwen/qwen3.6-27b
+        label: Qwen3.6-27B (Polza)
+        json_mode: false
+        exclude_quantizations: [fp4]
+        extra_body:
+          reasoning: { effort: none }
+  vlm: *llm  # the same chain: all three read images
   # Pictures (star task). VK inference serves no text-to-image model (as of 16.10), so the pictures are drawn by the same
   # Z-Image on Polza as in configs/models.yaml (Apache 2.0, ≈ 10B; POLZA_API_KEY; without it the role is off and the
   # slides keep their free places). When VK does provide an open text-to-image model, name it in VK_T2I_MODEL: the
