@@ -30,10 +30,12 @@
 .hp-run > .hp-rail{visibility:visible}
 .hp-run.hp-v > .hp-rail{transition:transform var(--hp-o) var(--ease)}
 .hp-run:not(.hp-v) > .hp-rail{transition:transform var(--hp-c) var(--ease)}
-/* занавес: цвет страницы, от полосы края (−48) до правого края; закрывает колоду правее её края, плиту помощника — левее */
-.hp-cur{position:absolute;top:0;bottom:0;left:-48px;right:0;overflow:hidden;background:#F3F4F1}
+/* занавес: цвет страницы, от полосы края (−48) до правого края; закрывает колоду правее её края, плиту помощника — левее.
+   Начинается на 2 px правее полосы края: его сглаженный левый край лежит под полосой (иначе два края в одном дробном
+   пикселе давали в Safari светлую линию через все плиты) */
+.hp-cur{position:absolute;top:0;bottom:0;left:-46px;right:0;overflow:hidden;background:#F3F4F1}
 /* встречный ход: занавес — влево, его содержимое — вправо на столько же; плита помощника стоит на своём месте */
-.hp-ctr{position:absolute;top:0;left:48px;width:416px;height:812px;transform:translateX(-416px)}
+.hp-ctr{position:absolute;top:0;left:46px;width:416px;height:812px;transform:translateX(-416px)}
 .hp-v .hp-ctr{transform:translateX(0)}
 .hp-run.hp-v .hp-ctr{transition:transform var(--hp-o) var(--ease)}
 .hp-run:not(.hp-v) .hp-ctr{transition:transform var(--hp-c) var(--ease)}
