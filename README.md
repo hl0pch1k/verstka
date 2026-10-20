@@ -20,7 +20,7 @@
 |---|---|
 | 01 · [Интерфейс](#interface) | экраны сервиса и [Помощник](#helper) — правки презентации словами |
 | 02 · [Примеры презентаций](#examples) | готовые колоды — PDF и PPTX |
-| 03 · [Видео](#video) | скринкаст второй ступени — он же в форме сдачи |
+| 03 · [Видео и презентация](#video) | скринкаст второй ступени и [презентация решения](#presentation) — PDF и PPTX |
 | 04 · [Что умеет](#features) | данные, брендбук, база знаний, любой вход, картинки |
 | 05 · [Как это работает](#how) | восемь шагов от файлов до PPTX |
 | 06 · [Качество](#quality) | проверки, время сборки, тесты |
@@ -200,7 +200,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-03-video-dark.svg">
-  <img src="docs/readme/svg/section-03-video-light.svg" width="100%" alt="03 · Видео">
+  <img src="docs/readme/svg/section-03-video-light.svg" width="100%" alt="03 · Видео и презентация">
 </picture>
 
 <p align="center">
@@ -210,6 +210,16 @@
 
 - **Актуальная версия** — скринкаст второй ступени, это текущее решение: шаблон VK Tech с брендбуком, данными и базой знаний, «Почему так», правки Помощником, сторонний шаблон. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4) · [что в видео по минутам](docs/video/README.md#вторая-ступень)
 - Архив — видео первой ступени (29.09): прошлая версия сервиса и прежний интерфейс. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4) · [по минутам](docs/video/README.md#первая-ступень)
+
+<br>
+
+<a id="presentation"></a>
+
+<p align="center">
+  <a href="docs/presentation/verstka-pitch-stage2.pdf"><img src="docs/readme/showcase/pitch.webp" width="100%" alt="Презентация решения, 19 слайдов: титул команды «Рекрут 2», проблема — слайд должен объяснять данные, как Verstka собирает презентацию за 8 шагов, одни данные — один и тот же график на любом шаблоне"></a>
+</p>
+
+**Презентация решения** — 19 слайдов на шаблоне ЛЦТ: команда, проблема, как работает Verstka, данные и графики, брендбук, правки, качество, планы. [PDF](docs/presentation/verstka-pitch-stage2.pdf) · [PPTX](docs/presentation/verstka-pitch-stage2.pptx)
 
 <br>
 

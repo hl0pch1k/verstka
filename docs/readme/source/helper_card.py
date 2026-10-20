@@ -217,7 +217,7 @@ def phones(out, caption, items):
     save(img, out)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and sys.argv[1] != "pitch":
     mode, out = sys.argv[1], sys.argv[2]
     if mode == "phones":
         rest = sys.argv[4:]
@@ -230,3 +230,29 @@ if __name__ == "__main__":
     else:
         title, rest = sys.argv[3], sys.argv[4:]
         chat(out, title, list(zip(rest[::2], rest[1::2])))
+
+
+def pitch(out, pdf, title, items):
+    """The solution pitch: a title pill and a 2 × 2 grid of slides with one-line captions (helper_card.py pitch …)."""
+    head, gap, lab = 120, 48, 56
+    sw = (CW - 2 * PAD - gap) // 2
+    sh_ = round(sw * 9 / 16)
+    rows = (len(items) + 1) // 2
+    H = 20 + head + rows * (sh_ + lab) + (rows - 1) * 24 + PAD - 16
+    img, d = canvas(H)
+    mid = (20 + head / 2 + 6) * S
+    pill(d, PAD * S, mid, title, 22, INK + (255,), (255, 255, 255, 255), padx=26, h=52)
+    logo_bars(d, mid)
+    for i, (page, cap_) in enumerate(items):
+        r, c = divmod(i, 2)
+        X = (PAD + c * (sw + gap)) * S
+        Y = (20 + head + r * (sh_ + lab + 24)) * S
+        shot(img, pdf_page(pdf, page, sw * S), X, Y, sw * S, sh_ * S)
+        pill(d, 0, Y + (sh_ + lab / 2 + 4) * S, cap_, 18, (255, 255, 255, 255), INK + (255,), padx=18, h=36,
+             center_x=X + sw * S / 2)
+    save(img, out)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "pitch":
+    _, _, _out, _pdf, _title, *_rest = sys.argv
+    pitch(_out, _pdf, _title, [(int(_rest[i]), _rest[i + 1]) for i in range(0, len(_rest), 2)])
