@@ -207,7 +207,8 @@ export function buildRequest(i: RequestInput): GenerateRequest {
     slides: dictated !== null && !dictatedByHeadings(i.brief) ? null : count,
     strategies: chosenStrategies(listOf(i.strategies), p.strategies),
     use_models: p.useModels && i.modelOn,
-    audit_models: false,
+    // проверка содержания моделью — с моделью по умолчанию (сервер укладывается: +19–35 с)
+    audit_models: p.useModels && i.modelOn,
     eyes: (eyesOn(p, i.modelOn) || !!src) && i.modelOn,
     pictures: i.images.configured ? picturesOn(p, i.images) : null,
     pick_fonts: p.fonts,

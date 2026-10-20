@@ -85,10 +85,10 @@ test("сводка: шаблон · слайды · варианты", () => {
   assert.equal(summaryLine(null, 1, 1), "1 слайд · 1 вариант");
 });
 
-test("запрос: поля сборки; взгляд дизайнера с моделью включён, проверки моделью — как в 3.0, выключены", () => {
+test("запрос: поля сборки; взгляд дизайнера и проверка содержания моделью — с моделью включены", () => {
   assert.deepEqual(req(), {
     template_id: "t1", brief: "История VK", audience: null, purpose: "product", slides: 12,
-    strategies: ["structured", "visual", "compact"], use_models: true, audit_models: false, eyes: true, pictures: true,
+    strategies: ["structured", "visual", "compact"], use_models: true, audit_models: true, eyes: true, pictures: true,
     autofix: true, exports: ["pdf", "html"], improved_from: undefined, pick_fonts: true,
   });
 });
@@ -100,10 +100,12 @@ test("запрос: аудитория, свой тип презентации, 
   assert.equal(r.slides, 8);
   assert.equal(req({ params: P({ purpose: OWN, ownPurpose: "  " }) }).purpose, null);
 });
-test("запрос: «Модель проверяет слайды по картинке» — только взгляд дизайнера (`eyes`), не `audit_models`", () => {
+test("запрос: «Модель проверяет слайды по картинке» — только взгляд дизайнера (`eyes`); `audit_models` — по «Модель пишет тексты»", () => {
   // человек выключил — выключен; включил при выключенной «Модель пишет тексты» — включён
-  assert.deepEqual([req({ params: P({ eyes: false }) }).eyes, req({ params: P({ eyes: false }) }).audit_models], [false, false]);
-  assert.deepEqual([req({ params: P({ eyes: true, useModels: false }) }).eyes, req({ params: P({ eyes: true }) }).audit_models], [true, false]);
+  assert.deepEqual([req({ params: P({ eyes: false }) }).eyes, req({ params: P({ eyes: false }) }).audit_models], [false, true]);
+  assert.deepEqual([req({ params: P({ eyes: true, useModels: false }) }).eyes, req({ params: P({ eyes: true }) }).audit_models], [true, true]);
+  // модель не пишет тексты — содержание моделью не проверяется
+  assert.equal(req({ params: P({ useModels: false }) }).audit_models, false);
   // не трогал — как модель: модель не пишет тексты — и не смотрит
   assert.equal(req({ params: P({ useModels: false }) }).eyes, false);
 });
@@ -137,7 +139,8 @@ test("запрос: «Улучшить готовую» — исходная п�
   const r = req({ improve: src });
   assert.deepEqual(r.improved_from, { name: "Итоги.pptx", slides: 14, template_id: "src", audit: { score: 62, errors: 3, warnings: 5 } });
   assert.equal(r.eyes, true);
-  assert.equal(r.audit_models, false);
+  // проверка содержания моделью — как везде: с моделью включена
+  assert.equal(r.audit_models, true);
   // переключатель выключен — в «Улучшить готовую» модель всё равно смотрит
   assert.equal(req({ improve: src, params: P({ eyes: false, useModels: false }) }).eyes, true);
   assert.equal(req({ improve: src, modelOn: false }).eyes, false);

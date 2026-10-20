@@ -67,7 +67,7 @@ export function requestOf(g: GenerationMeta): GenerateRequest {
     // брендбук: колода свёрстана на брендированной копии, а собирать ещё раз — с исходного шаблона и тем же брендбуком
     template_id: g.base_template_id || g.template_id, brief: g.brief ?? "", audience: g.audience ?? null, purpose: g.purpose ?? null, slides: g.slides ?? null,
     language: g.language, extra_instructions: g.extra_instructions ?? null, strategies: g.strategies,
-    use_models: g.use_models ?? true, audit_models: !!g.audit_models, autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
+    use_models: g.use_models ?? true, audit_models: g.audit_models ?? (g.use_models ?? true), autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
     pictures: g.pictures ?? null, eyes: g.eyes ?? null, improved_from: g.improved_from ?? null,
     // вторая ступень: «Собрать ещё раз» — с теми же данными и брендбуком (generation.json)
     ...(g.dataset_ids?.length ? { dataset_ids: g.dataset_ids } : {}),

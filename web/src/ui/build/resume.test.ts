@@ -46,7 +46,8 @@ test("запрос сборки по мете: те же входы, недос�
   const bare = requestOf({ id: "g2", template_id: "t2", strategies: ["structured"], brief: null });
   assert.equal(bare.brief, "");
   assert.equal(bare.use_models, true);
-  assert.equal(bare.audit_models, false);
+  // проверка содержания моделью — как модель (по умолчанию включена)
+  assert.equal(bare.audit_models, true);
   assert.equal(bare.autofix, true);
   assert.deepEqual(bare.exports, ["pdf", "html"]);
   assert.equal(bare.slides, null);
