@@ -741,6 +741,44 @@ def single_figure(text: str) -> Optional[tuple[str, str]]:
     return value, rest[:1].upper() + rest[1:]
 
 
+_LEAD_FIG_RE = re.compile(r"^((?:\d{1,3}(?:[\u00a0\u202f ]\d{3})+|\d+)(?:[.,]\d+)?(?:\s?(?:%|₽|×))?(?:\s?(?:млн|млрд|тыс\.?)(?:\s?(?:₽|руб\.?|рублей))?)?)\s+(\S.+)$")
+
+
+def leading_figure(text: str) -> Optional[tuple[str, str]]:
+    """(figure, the rest) of a short thesis that opens with its figure («48 200 заказов, на 12% больше, чем в августе»,
+    «0,8% заказов, цель — не больше 0,5%»): the figure is the slide's message — set large, the rest under it as its
+    label (a single line at 14 pt on an empty page read as a lost line — unseen templates, 20.10). None otherwise."""
+    t = " ".join((text or "").split()).rstrip(".")
+    if not t or len(t) > 160:
+        return None
+    m = _LEAD_FIG_RE.match(t)
+    if m is None:
+        return None
+    value, rest = m.group(1).strip(), m.group(2).strip(" ,.:;—–")
+    if re.fullmatch(r"(?:19|20|21)\d{2}", value):
+        return None  # a year, not a figure
+    if len(rest.split()) < 2 or re.match(r"^(?:год|года|году|г\.)\b", rest):
+        return None  # (a year opens the sentence: «2026 году…» is no figure)
+    return value, rest
+
+
+_PULL_FIG_RE = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?\s?%)")
+
+
+def pull_figure(text: str) -> Optional[str]:
+    """The percentage a short thesis turns on, pulled out over the whole sentence («Главная проблема — ночная смена: на
+    неё приходится 61% ошибок при 35% объёма» → «61%»): set large over the sentence kept whole, it is the slide's
+    message at a glance (a 14 pt line on an empty page read as lost — unseen templates, 20.10). The first percentage of
+    a sentence of 40–200 characters with at most three figures; None otherwise."""
+    t = " ".join((text or "").split())
+    if not 40 <= len(t) <= 200:
+        return None
+    found = _PULL_FIG_RE.findall(t)
+    if not found or len(re.findall(r"\d+(?:[.,]\d+)?", t)) > 3:
+        return None
+    return found[0].replace(" ", "")
+
+
 _ORDINAL_RE = re.compile(r"(?<![\w])\d+\s?-\s?(?:й|я|е|го|му|м|х|ый|ой|ий|ая|ое|ые)(?![а-яё])", re.I)
 _MONEY_WORD_RE = re.compile(r"(\d)\s?(?:рубл(?:ей|я|ь)|руб\.?)(?![а-яё])", re.I)
 _PLAIN_FIG_RE = re.compile(r"(?<![\w.,:])\d{1,3}(?: \d{3})+(?:[.,]\d+)?(?![\w:])|(?<![\w.,:])\d+(?:[.,]\d+)?(?![\w:%])")
@@ -1719,7 +1757,7 @@ class Composer:
                 # «Экономия — 18 млн ₽ в год на одну площадку»: one figure carries the message — it is set as one
                 value, label = hero
                 self.big_number(area, NumberCallout(value=value, label=label), extra=[], others=[])
-            else:
+            elif not self._figure_led(area, text):
                 self.statement(area, text)
         else:
             items = self._items()
@@ -2525,6 +2563,32 @@ class Composer:
         self._split_units = self._force_rows = False
         self._kpis_once(area, numbers, extra)
         short = self._figures_short(n0)
+        if short is None and extra:
+            # the figures came out small because the lines under them took the room (Forestbird «Услуги и цены»: three
+            # prices at a caption's size over three lines): the lines in two columns a size smaller, the figures larger —
+            # kept when the figures grow and still lead their labels
+            fig0 = self._figure_drawn(n0)
+            hero = 1.5 * (self.kit.head_size or self.kit.h2)
+            if fig0 and fig0 < hero:
+                first = list(self.cv.tree)[n0:]
+                keep = first, list(self.warnings), [el for el in self.cv.added if any(el is d for d in first)]
+                self._undo(n0)
+                del self.warnings[w0:]
+                self._extra_small = True
+                try:
+                    self._kpis_once(area, numbers, extra)
+                finally:
+                    self._extra_small = False
+                fig1 = self._figure_drawn(n0)
+                if not (fig1 and fig1 > fig0 + 1.0 and self._figures_short(n0) is None and not self._overflows(n0, area)):
+                    self._undo(n0)
+                    for el in keep[0]:
+                        self.cv.tree.append(el)
+                    self.cv.added.extend(keep[2])
+                    self.warnings[:] = keep[1]
+                else:
+                    self.warnings.append("the lines under the figures in two columns, smaller: the figures larger")
+            return
         if short is None:
             return
         k = self.kit
@@ -2597,6 +2661,18 @@ class Composer:
         del self.warnings[w0:]
         return False
 
+    def _figure_drawn(self, n0: int) -> float:
+        """The largest figure size drawn after the first `n0` elements (0 when none)."""
+        best = 0.0
+        for el in list(self.cv.tree)[n0:]:
+            nv = el.find(".//" + q("p:cNvPr"))
+            if nv is None or not (nv.get("name") or "").startswith("Figure"):
+                continue
+            for r in el.iter(q("a:rPr")):
+                if (r.get("sz") or "").isdigit():
+                    best = max(best, int(r.get("sz")) / 100)
+        return best
+
     def _figures_short(self, n0: int) -> Optional[float]:
         """The least ratio of a figure's size to its label's among the figures drawn after the first `n0` elements, when
         one is under 1.6 (None: every figure leads its label)."""
@@ -2626,9 +2702,10 @@ class Composer:
         if extra:
             # the running text goes under the tiles as a short note — in two columns when there are more than three
             # lines (a list of measures under two figures), so the figures keep their size
-            ecols = 2 if len(extra) > 3 else 1
+            small_note = bool(getattr(self, "_extra_small", False))
+            ecols = 2 if len(extra) > 3 or (small_note and len(extra) >= 2) else 1
             per = math.ceil(len(extra) / ecols)
-            denser_ = getattr(self, "_dense", False) or getattr(self, "_rehousing", False)
+            denser_ = getattr(self, "_dense", False) or getattr(self, "_rehousing", False) or small_note
             ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * (1.0 if denser_ else 0.8))
             groups = [extra[i * per:(i + 1) * per] for i in range(ecols)]
             esize = k.body
@@ -2983,7 +3060,8 @@ class Composer:
         has_side = bool(extra or others)
         left_w = int(area.w * (0.46 if has_side else 0.9))
         fs = k.display
-        for s in k.figure_sizes(k.figure_cap(1, False, self.strategy), k.display):
+        hero_cap = getattr(self, "_hero_cap", None)
+        for s in k.figure_sizes(min(k.figure_cap(1, False, self.strategy), hero_cap) if hero_cap else k.figure_cap(1, False, self.strategy), k.display):
             fs = s
             if self.figure_para(num.value, s, colors.figure, colors.muted)[1] <= _pt(left_w) * 0.88:
                 break
@@ -2991,7 +3069,14 @@ class Composer:
         fig = self.figure_para(num.value, fs, colors.figure, colors.muted)[0]
         lsb, tg = self._figure_optics(fig, fig_h)
         # (beside other figures the hero's label is a label as theirs: every figure of the slide leads every label)
-        label = [self.P(distinct_label(num.value, num.label, self.o.headline), k.body if others else k.lead, colors.text)]
+        lab_size = k.body if others else k.lead
+        if not others:
+            # a lone figure's words read under it from the back of the room: from 3 % of the slide height, never closer
+            # than 1.6× to the figure (Inspiration: «заказов, на 12% больше…» at 10 pt under a 72 pt figure, 20.10)
+            up = [x for x in sorted(k.sizes) if 0.03 * k.hpt - 0.05 <= x <= fs / FIG_RATIO + 0.05]
+            if up and up[0] > lab_size:
+                lab_size = up[0]
+        label = [self.P(distinct_label(num.value, num.label, self.o.headline), lab_size, colors.text)]
         lab_h = self.h(label, int(left_w * 0.92))
         left_h = fig_h - tg + int(k.vgap * 0.4) + lab_h
         right_paras: list[Para] = []
@@ -3129,10 +3214,30 @@ class Composer:
         hero = single_figure(text)
         if hero is not None:
             self.big_number(area, NumberCallout(value=hero[0], label=hero[1]), extra=[], others=[])
+        elif self._figure_led(area, text):
+            pass
         elif len(text) <= 260:
             self.statement(area, text)
         else:
             self.paragraphs(area, [text])
+
+    def _figure_led(self, area: Bbox, text: str) -> bool:
+        """A thesis that turns on a figure set in the «main figure» form: the figure large — up to 14 % of the slide
+        height, a figure, not a poster —, the words under it. A thesis opening with its figure keeps the rest as the
+        label («48 200» over «заказов, на 12% больше, чем в августе»); one with a percentage inside keeps the whole
+        sentence under the figure pulled out of it. False — no figure to lead with, nothing drawn."""
+        lead = leading_figure(text)
+        if lead is None:
+            pulled = pull_figure(text)
+            lead = (pulled, text.strip()) if pulled else None
+        if lead is None:
+            return False
+        self._hero_cap = 0.14 * self.kit.hpt
+        try:
+            self.big_number(area, NumberCallout(value=lead[0], label=lead[1]), extra=[], others=[])
+        finally:
+            self._hero_cap = None
+        return True
 
     def paragraphs(self, area: Bbox, texts: list[str]) -> None:
         k = self.kit
@@ -3239,6 +3344,13 @@ class Composer:
             # one headline per slide: the statement is larger than running text and a step below the heading — a
             # callout set above the heading turns the hierarchy upside down
             top = min(top, self._under_heading())
+        if len(text) <= 260:
+            # one or two sentences are the slide's message: large for the room — from 4.5 % of the slide height
+            # (Pencil, Lights, Inspiration: 16–18 pt over an empty page under a small heading in its band, 20.10)
+            want = 0.045 * k.hpt
+            up = [x for x in sorted(k.sizes) if want - 0.05 <= x <= 0.06 * k.hpt + 0.05]
+            if up and up[0] > top + 0.05:
+                top = up[0]
         size = top
         for s in k.steps_down(top, k.body):
             size = s

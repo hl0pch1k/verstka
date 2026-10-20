@@ -1787,10 +1787,36 @@ def _photo_strip(slide: Slide, box: tuple[int, int, int, int], kit, pal: "_Palet
             el.addnext(other)
 
 
+_ASK_RE = re.compile(r"^(?:предлага|предложени|прошу|просим|прош)", re.I)
+_DECIDE_RE = re.compile(r"^(?:утверд|выдел|одобр|соглас)", re.I)
+
+
+def heading_for_dup(oslide: OutlineSlide) -> Optional[str]:
+    """A short heading for a slide whose long heading only repeats the start of its one sentence («Предлагаю перевести
+    ночную смену на сканеры…» over «Предлагаю перевести ночную смену на сканеры с проверкой и добавить…»): the heading
+    shrank to 9 pt in the template's band and said the text twice (Inspiration, 20.10). «Предложение» for an ask,
+    «Решение» for a decision asked, «Главное» otherwise; None when the heading says something of its own."""
+    c = oslide.content
+    texts = [t for t in list(c.bullets) + list(c.paragraphs) if t and t.strip()]
+    head = (oslide.headline or "").strip()
+    if len(texts) != 1 or len(head) < 40 or c.items or c.numbers or c.table is not None or c.chart is not None:
+        return None
+    norm = lambda t: re.findall(r"[а-яёa-z0-9]+", t.lower().replace("ё", "е"))  # noqa: E731
+    hw, tw = norm(head), norm(texts[0])
+    if len(hw) < 5 or tw[: len(hw)] != hw:
+        return None
+    first = texts[0].strip()
+    return "Предложение" if _ASK_RE.match(first) else ("Решение" if _DECIDE_RE.match(first) else "Главное")
+
+
 def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     from verstka.rendering.compose import Composer, Kit
 
     warnings: list[str] = []
+    short = heading_for_dup(oslide)
+    if short is not None:
+        warnings.append(f"heading «{oslide.headline[:40]}…» repeated its text: «{short}» over the full sentence")
+        oslide.headline = short
     ds = deck_style(builder, manifest, outline)
     family = ds.family
     if comp == "image_text" and not (oslide.content.image_hint and pick_asset(manifest, ws, oslide.content.image_hint, require_match=True)):

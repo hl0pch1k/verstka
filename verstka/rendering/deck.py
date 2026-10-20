@@ -120,9 +120,23 @@ class DeckBuilder:
         ids = [int(el.get("id")) for el in slide._element.iter() if etree.QName(el).localname == "cNvPr" and (el.get("id") or "").isdigit()]
         return (max(ids) + 1) if ids else 2
 
+    def refresh_slide_numbers(self) -> None:
+        """The cached text of every slide-number field set to the slide's place in the deck: a clone keeps its sample's
+        «2», and a viewer that shows the cached text instead of the field (a preview, a converter) printed «2» on the
+        seventh slide — beside the real number, «2 2» (Pencil, 20.10)."""
+        fld, t = q("a:fld"), q("a:t")
+        for i, slide in enumerate(self.prs.slides, 1):
+            for f in slide._element.iter(fld):
+                if (f.get("type") or "").lower() != "slidenum":
+                    continue
+                el = f.find(t)
+                if el is not None and (el.text or "").strip().isdigit():
+                    el.text = str(i)
+
     def save(self, path: Path | str) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.refresh_slide_numbers()
         self.prs.save(str(path))
         return path
 

@@ -5928,18 +5928,34 @@ def _cover_into_free_room(ctx: _SlideCtx, t_el: etree._Element, t_box0: tuple, c
     of an empty slide (the pictures' agent's QA, 20.10). Returns the heading's new box, None — the sample's own place."""
     W, H = ctx.W, ctx.H
     x, y, w, h = t_box0
-    if w >= int(0.55 * W) or not text:
+    if not text:
+        return None
+    rooms = [b for b in cleared if b.y >= y + h // 2 and b.w >= int(0.6 * W) and b.h >= int(0.3 * H) and b.x <= x + w // 2 <= b.x2]
+    # a slide-heading band at the top of a «title and content» sample over its empty body (LibreOffice Inspiration: the
+    # deck's title in a green strip, a white page under it) is no cover: the title goes into the page, large
+    band = y + h <= int(0.25 * H) and h <= int(0.18 * H) and any(b.h >= int(0.4 * H) for b in rooms)
+    if w >= int(0.55 * W) and not band:
         return None
     size0 = title.style.size_pt or (int(_eff_rpr(ctx, t_el, "sz") or 0) / 100) or ctx.typo.size_for("display", 40.0)
     family = title.style.font_family or ctx.typo.primary_family
     bold = (_eff_rpr(ctx, t_el, "b") or "0") in ("1", "true") or bool(title.style.bold)
     need = text_width_pt(text, family, size0, bold) * EMU_PER_PT
-    if need <= 2 * 0.9 * w:
+    if need <= 2 * 0.9 * w and not band:
         return None  # two lines at the sample's size: the heading keeps its band
-    rooms = [b for b in cleared if b.y >= y + h // 2 and b.w >= int(0.6 * W) and b.h >= int(0.3 * H) and b.x <= x + w // 2 <= b.x2]
     if not rooms:
         return None
     room = max(rooms, key=lambda b: b.area)
+    if band:
+        # the strip the heading stood on (a plain filled shape under its centre) leaves with it: an empty strip at the
+        # top of the cover reads as a heading lost
+        tree = t_el.getparent()
+        cx, cy = x + w // 2, y + h // 2
+        for other in list(tree) if tree is not None else []:
+            if other is t_el or etree.QName(other).localname != "sp" or shape_text(other).strip() or not _has_fill(other):
+                continue
+            ob = element_bbox(other)
+            if ob and ob[0] <= cx <= ob[0] + ob[2] and ob[1] <= cy <= ob[1] + ob[3] and ob[2] * ob[3] < 0.3 * W * H:
+                remove_element(other)
     # the optical middle: the block centred a tenth above the room's centre
     hh = int(room.h * 0.8)
     new = (room.x, room.y, room.w, hh)
@@ -5990,12 +6006,17 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     if frame_el is not None:
         kicker_text, footer_text = None, None
     dot_rows = _pagination(ctx, oslide)
+    moved = None
     if kind == PatternKind.title:
         moved = _cover_into_free_room(ctx, t_el, t_box0, cleared, bind_short_words(head), title)
         if moved is not None:
             t_box0 = moved
     tb = Bbox(x=t_box0[0], y=t_box0[1], w=t_box0[2], h=t_box0[3])
     size0 = title.style.size_pt or (int(_eff_rpr(ctx, t_el, "sz") or 0) / 100) or typo.size_for("display", 40.0)
+    if moved is not None:
+        # the title moved off a slide-heading band into the page is set as a cover's: large (from 9 % of the slide
+        # height), not at the band's heading size
+        size0 = max(size0, 0.09 * H / EMU_PER_PT)
     family = title.style.font_family or typo.primary_family
     bold = (_eff_rpr(ctx, t_el, "b") or "0") in ("1", "true") or bool(title.style.bold)
     if kind != PatternKind.title and st.cover_bold is not None:

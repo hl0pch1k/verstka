@@ -374,3 +374,54 @@ def test_a_step_beside_its_year_keeps_the_names_capital(env):
     assert c._steps_beside(Bbox(x=int(0.06 * W), y=int(0.22 * H), w=int(0.88 * W), h=int(0.62 * H)), items, lines)
     text = " ".join("".join(t.text or "" for t in el.iter(q("a:t"))) for el in c.cv.tree)
     assert "Лейбниц" in text and "лейбниц" not in text
+
+
+def test_a_thesis_led_by_its_figure_sets_the_figure_large():
+    """«48 200 заказов, на 12% больше…» — the figure is the message (unseen templates, round 3, 20.10): figure and the
+    rest; a percentage inside a thesis is pulled out over the sentence kept whole; a year is no figure."""
+    from verstka.rendering.compose import leading_figure, pull_figure
+
+    assert leading_figure("48 200 заказов, на 12% больше, чем в августе.") == ("48 200", "заказов, на 12% больше, чем в августе")
+    assert leading_figure("0,8% заказов, цель — не больше 0,5%.") == ("0,8%", "заказов, цель — не больше 0,5%")
+    assert leading_figure("2026 году студия откроется") is None
+    assert leading_figure("Склад работает без выходных") is None
+    assert pull_figure("Главная проблема — ночная смена: на неё приходится 61% ошибок при 35% объёма.") == "61%"
+    assert pull_figure("Ночная смена — главная проблема склада") is None
+    assert pull_figure("61% ошибок") is None  # too short: the sentence is the label already
+
+
+def test_a_figure_led_thesis_is_drawn_as_a_main_figure_not_a_line(env):
+    for text in ("48 200 заказов, на 12% больше, чем в августе.", "Главная проблема — ночная смена: на неё приходится 61% ошибок при 35% объёма."):
+        o = OutlineSlide(id="f", kind=PatternKind.bullets, headline="Сколько отгрузили", content=SlideContent(bullets=[text]))
+        c, W, H = _composer(env, o)
+        n0 = len(c.cv.tree)
+        c.compose("bullets", Bbox(x=int(0.06 * W), y=int(0.2 * H), w=int(0.88 * W), h=int(0.68 * H)))
+        names = _names(c, n0)
+        assert any(n.startswith("Figure") for n in names) and not any(n.startswith("Statement") for n in names), names
+        fig = c._figure_drawn(n0)
+        assert 0.07 * c.kit.hpt <= fig <= 0.14 * c.kit.hpt + 0.05, fig  # a figure, not a poster
+
+
+def test_a_heading_repeating_its_one_sentence_is_shortened():
+    from verstka.rendering.synth import heading_for_dup
+
+    text = "Предлагаю перевести ночную смену на сканеры с проверкой и добавить 6 кладовщиков, это 2,9 млн рублей в год."
+    o = OutlineSlide(id="p", kind=PatternKind.bullets, headline="Предлагаю перевести ночную смену на сканеры с проверкой", content=SlideContent(paragraphs=[text]))
+    assert heading_for_dup(o) == "Предложение"
+    o2 = OutlineSlide(id="q", kind=PatternKind.bullets, headline="Ночная смена даёт больше всего ошибок", content=SlideContent(paragraphs=[text]))
+    assert heading_for_dup(o2) is None
+
+
+def test_a_slide_numbers_cached_text_follows_the_slide(simple_deck, tmp_path):
+    """A clone keeps its sample's cached «2»: a viewer printing the cached text showed «2» on every slide (Pencil)."""
+    from verstka.rendering.deck import DeckBuilder
+
+    b = DeckBuilder(simple_deck)
+    for i, slide in enumerate(b.prs.slides):
+        tb = slide.shapes.add_textbox(0, 0, 100000, 100000)
+        p = tb.text_frame.paragraphs[0]._p
+        fld = etree.SubElement(p, q("a:fld"), id="{3E2605F8-4BE9-4940-8082-945090CF79D2}", type="slidenum")
+        etree.SubElement(fld, q("a:t")).text = "2"
+    out = b.save(tmp_path / "d.pptx")
+    nums = [[t.text for t in s._element.iter(q("a:t")) if t.getparent().get("type") == "slidenum"] for s in Presentation(str(out)).slides]
+    assert nums == [[str(i)] for i in range(1, len(nums) + 1)]

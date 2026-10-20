@@ -133,11 +133,17 @@ def _present(wanted: str, have: str) -> bool:
     if tail and _norm_text(head)[:CONTENT_KEY_CHARS] in have and _norm_text(tail)[:CONTENT_KEY_CHARS] in have:
         return True  # a cover heading of two phrases set as a title and its subtitle
 
-    got = kpi_callout(wanted)
-    if got is None:
-        return False
-    value, label = got
-    return _norm_text(label)[:CONTENT_KEY_CHARS] in have and _norm_text(value) in have
+    from verstka.rendering.compose import leading_figure
+
+    for got in (kpi_callout(wanted), leading_figure(wanted)):
+        # (a thesis that opens with its figure set as the figure large and the rest under it: «48 200» over «заказов,
+        # на 12% больше, чем в августе» — compose.leading_figure)
+        if got is None:
+            continue
+        value, label = got
+        if _norm_text(label)[:CONTENT_KEY_CHARS] in have and _norm_text(value) in have:
+            return True
+    return False
 
 
 def slide_text_norm(s: IRSlide) -> str:
