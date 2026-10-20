@@ -784,8 +784,16 @@ def kpi_callout(text: str) -> Optional[tuple[str, str]]:
         return None
     # a hedge before the figure stays with it, as a sign: «составит около 1 237 388 ₽» → «≈ 1 237 388 ₽»
     hedge = {"около": "≈", "примерно": "≈", "приблизительно": "≈", "порядка": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
-    if words and words[-1].lower() in hedge and not value.startswith(("≈", ">", "<")):
-        value = f"{hedge[words[-1].lower()]} {value}"
+    if words and words[-1].lower() in hedge and not value.startswith(("≈", ">", "<", "≤", "≥")):
+        if len(words) >= 2 and words[-2].lower() == "не":
+            # «не больше 0,5%» — «≤ 0,5%», и «не» уходит вместе со знаком (жюри 20.10: «> 0,5%» под «Цель — не»)
+            neg = _NEG_HEDGE_SIGN.get(words[-1].lower())
+            if neg is None:
+                return None
+            value = f"{neg} {value}"
+            words.pop()
+        else:
+            value = f"{hedge[words[-1].lower()]} {value}"
         words.pop()
     while words and words[-1].lower().strip(":") in _LABEL_TAIL_PREP:
         words.pop()  # «рост на 34%» → «рост»: the preposition (and a dash before the figure) leaves with its figure
@@ -796,6 +804,9 @@ def kpi_callout(text: str) -> Optional[tuple[str, str]]:
     if not re.search(r"[A-Za-zА-Яа-яЁё]{3,}", label):
         return None
     return value, label[:1].upper() + label[1:]
+
+
+_NEG_HEDGE_SIGN = {"более": "≤", "свыше": "≤", "больше": "≤", "менее": "≥", "меньше": "≥"}
 
 
 _FIG_UNIT_RE = re.compile(r"^([+\-−–~≈×]?\s?\d[\d\s\u00a0]*(?:[.,]\d+)?\s?%?)\s*([A-Za-zА-Яа-яЁё₽$€].{0,12})$")
@@ -6354,8 +6365,10 @@ _MONEY_UNIT_RE = re.compile(r"\s*(?:рубл(?:ь|я|ей)|руб\.?)$", re.I)
 
 _TAIL_LINK_RE = re.compile(r"(?:\s+(?:до|на|в|с|—|–|-|:|→|->)|\s+(?:составит|составляет|составят|составляют|равна|равен|равно|—\s*это))+\s*$", re.I)
 # a hedge right before a figure: it stays with the figure, as a sign («около 74%» → «≈ 74%»)
-_HEDGE_TAIL_RE = re.compile(r"\s+(около|примерно|приблизительно|порядка|почти|более|свыше|больше|менее|меньше)\s*$", re.I)
-_HEDGE_SIGN = {"около": "≈", "примерно": "≈", "приблизительно": "≈", "порядка": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
+_HEDGE_TAIL_RE = re.compile(r"\s+((?:не\s+)?(?:около|примерно|приблизительно|порядка|почти|более|свыше|больше|менее|меньше))\s*$", re.I)
+_HEDGE_SIGN = {"около": "≈", "примерно": "≈", "приблизительно": "≈", "порядка": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<",
+               # «не больше 0,5%» — ≤, а не «>» (жюри 20.10, ЛЦТ «склад»: «> 0,5%» под подписью «Цель — не»)
+               "не более": "≤", "не свыше": "≤", "не больше": "≤", "не менее": "≥", "не меньше": "≥"}
 
 
 def _sole_end_figure(text: str, fig: Optional[str]) -> bool:
@@ -6470,7 +6483,7 @@ def _aside_figure(text: str, headline: Optional[str] = None) -> Optional[str]:
     at = text.find(pick)
     hm = _HEDGE_TAIL_RE.search(" " + text[:at]) if at > 0 else None
     if hm is not None:
-        sign = _HEDGE_SIGN.get(hm.group(1).lower(), "") + "\u00a0"
+        sign = _HEDGE_SIGN.get(" ".join(hm.group(1).lower().split()), "") + "\u00a0"
     return sign + typeset(_MONEY_UNIT_RE.sub(" ₽", pick).strip())
 
 

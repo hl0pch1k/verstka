@@ -424,7 +424,8 @@ def _counted(value: str, label: str, brief_text: str) -> Optional[str]:
 
 
 _VALUE_PREP_RE = re.compile(r"^(?:до|на|с|со|в|к)\s+(?=[+\-−]?\d)", re.I)
-_VALUE_HEDGE = {"около": "≈", "примерно": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
+_VALUE_HEDGE = {"около": "≈", "примерно": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<",
+                "не более": "≤", "не свыше": "≤", "не больше": "≤", "не менее": "≥", "не меньше": "≥"}  # «не больше 0,5%» — ≤
 _YEAR_VALUE_RE = re.compile(r"^(?:19|20)\d{2}(?:\s*(?:г\.?|год\w*))?$", re.I)
 
 
@@ -438,9 +439,9 @@ def tidy_values(o: DeckOutline) -> list[str]:
         for n in c.numbers:
             v = " ".join((n.value or "").split())
             nv = _VALUE_PREP_RE.sub("", v)
-            m = re.match(r"^(около|примерно|почти|более|свыше|больше|менее|меньше)\s+(?=[+\-−]?\d)", nv, re.I)
-            if m:
-                nv = f"{_VALUE_HEDGE[m.group(1).lower()]} {nv[m.end():]}"
+            m = re.match(r"^((?:не\s+)?(?:около|примерно|почти|более|свыше|больше|менее|меньше))\s+(?=[+\-−]?\d)", nv, re.I)
+            if m and " ".join(m.group(1).lower().split()) in _VALUE_HEDGE:
+                nv = f"{_VALUE_HEDGE[' '.join(m.group(1).lower().split())]} {nv[m.end():]}"
             if nv != v:
                 said.append(f"slide {s.id}: the figure «{v}» → «{nv}»")
                 n.value = nv
