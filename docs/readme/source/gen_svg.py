@@ -273,30 +273,23 @@ def pipeline(c, dark):
 
 # ---------------------------------------------------------------- video cards
 def video_card(c, dark, first):
+    """A video card: both stages are published recordings — the same dark card, number, title, length, date and link."""
     Wd, H = 580, 300
-    b = []
-    if first:
-        b.append(f'<rect width="{Wd}" height="{H}" rx="28" fill="#0B1220"/>')
-        if dark:
-            b.append(f'<rect x=".5" y=".5" width="{Wd - 1}" height="{H - 1}" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".1"/>')
-        b.append(T("01", "U", 120, 30, 140, "#FFFFFF", opacity=.08, track=-0.04))
-        b.append(f'<circle cx="490" cy="84" r="44" fill="url(#cta)"/>')
-        b.append('<path d="M478 64 L510 84 L478 104 Z" fill="#FFFFFF"/>')
-        b.append(T("Первая ступень", "U", 32, 36, 196, "#FFFFFF", track=-0.03))
-        b.append(T("8 мин 54 с · один дубль без монтажа", "M", 19, 36, 232, "#FFFFFF", opacity=.72))
-        b.append(T("29.09 · смотреть в браузере →", "M", 19, 36, 262, "#38BDF8"))
-        return svg(Wd, H, "Видео первой ступени", "Запись живого сервиса, 8 минут 54 секунды, один дубль без монтажа, 29 сентября.", "".join(b))
-    bg = c["p2"]
-    b.append(f'<rect width="{Wd}" height="{H}" rx="28" fill="{bg}"/>')
-    b.append(f'<rect x="1.5" y="1.5" width="{Wd - 3}" height="{H - 3}" rx="26.5" fill="none" stroke="{c["blue"]}" stroke-width="2" stroke-dasharray="10 9" stroke-opacity=".7"/>')
-    b.append(T("02", "U", 120, 30, 140, c["ink"], opacity=.08, track=-0.04))
-    b.append(f'<circle cx="490" cy="84" r="44" fill="none" stroke="{c["blue"]}" stroke-width="3" stroke-dasharray="6 7"/>')
-    b.append(f'<path d="M478 64 L510 84 L478 104 Z" fill="{c["blue"]}" fill-opacity=".8"/>')
-    b.append(T("Вторая ступень", "U", 32, 36, 196, c["ink"], track=-0.03))
-    b.append(T("скринкаст до 10 минут · интерфейс «Слои»", "M", 19, 36, 232, c["muted"]))
-    b.append(T("прикладывается в форме сдачи", "M", 19, 36, 262, c["blue"]))
-    return svg(Wd, H, "Скринкаст второй ступени", "Скринкаст второй ступени, до десяти минут, прикладывается в форме сдачи.", "".join(b))
-
+    n, title, meta, link, desc = (
+        ("01", "Первая ступень", "8 мин 54 с · один дубль без монтажа", "29.09 · смотреть в браузере →",
+         "Запись живого сервиса, 8 минут 54 секунды, один дубль без монтажа, 29 сентября.") if first else
+        ("02", "Вторая ступень", "9 мин 44 с · без ускорений · «Слои»", "20.10 · смотреть в браузере →",
+         "Скринкаст второй ступени, 9 минут 44 секунды, без ускорений, интерфейс «Слои», 20 октября."))
+    b = [f'<rect width="{Wd}" height="{H}" rx="28" fill="#0B1220"/>']
+    if dark:
+        b.append(f'<rect x=".5" y=".5" width="{Wd - 1}" height="{H - 1}" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".1"/>')
+    b.append(T(n, "U", 120, 30, 140, "#FFFFFF", opacity=.08, track=-0.04))
+    b.append(f'<circle cx="490" cy="84" r="44" fill="url(#cta)"/>')
+    b.append('<path d="M478 64 L510 84 L478 104 Z" fill="#FFFFFF"/>')
+    b.append(T(title, "U", 32, 36, 196, "#FFFFFF", track=-0.03))
+    b.append(T(meta, "M", 19, 36, 232, "#FFFFFF", opacity=.72))
+    b.append(T(link, "M", 19, 36, 262, "#38BDF8"))
+    return svg(Wd, H, "Видео " + ("первой" if first else "второй") + " ступени", desc, "".join(b))
 
 
 # ---------------------------------------------------------------- features board

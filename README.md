@@ -205,11 +205,11 @@
 
 <p align="center">
   <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage1-dark.svg"><img src="docs/readme/svg/video-stage1-light.svg" width="49%" alt="Видео первой ступени: 8 минут 54 секунды, один дубль без монтажа, 29.09 — смотреть в браузере"></picture></a>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage2-dark.svg"><img src="docs/readme/svg/video-stage2-light.svg" width="49%" alt="Скринкаст второй ступени: до 10 минут, интерфейс «Слои», прикладывается в форме сдачи"></picture>
+  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage2-dark.svg"><img src="docs/readme/svg/video-stage2-light.svg" width="49%" alt="Скринкаст второй ступени: 9 минут 44 секунды, без ускорений, интерфейс «Слои», 20.10 — смотреть в браузере"></picture></a>
 </p>
 
 - Первая ступень — запись живого сервиса одним дублем. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4) · [что в видео по минутам](docs/video/README.md)
-- Вторая ступень — скринкаст до 10 минут, ссылка появится здесь.
+- Вторая ступень — скринкаст 9:44 без ускорений: шаблон VK Tech с брендбуком, данными и базой знаний, «Почему так», правки Помощником, сторонний шаблон. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4) · [что в видео по минутам](docs/video/README.md#вторая-ступень)
 
 <br>
 
