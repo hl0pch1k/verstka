@@ -1070,11 +1070,24 @@ def stems_match(subject: Sequence[str], text: str) -> bool:
     return any(same_stem(s, w) for s in subject for w in words)
 
 
+_TECH_STEM = re.compile(r"^(?=[^\s]*[_\d])[A-Za-z0-9_.\-]+$")
+
+
+def technical_name(file: Optional[str]) -> bool:
+    """Имя файла — служебное, не название: латиница с подчёркиванием или цифрами без пробелов («d06_multisheet.xlsx»,
+    «export_2025.csv», «data1.json»). Такое имя не идёт в название колоды, тему и подписи карточек."""
+    s = re.sub(r"\.[A-Za-z0-9]+$", "", (file or "").strip())
+    return bool(s) and bool(_TECH_STEM.match(s))
+
+
 def file_title(file: Optional[str], sheet: Optional[str] = None) -> str:
-    """Название датасета по файлу: «Выручка по месяцам.csv» → «Выручка по месяцам» (лист XLSX — через «·»)."""
+    """Название датасета по файлу: «Выручка по месяцам.csv» → «Выручка по месяцам» (лист XLSX — через «·»); у служебного
+    имени файла («d06_multisheet.xlsx») с листом — только лист («Выручка»)."""
     s = re.sub(r"\.[A-Za-z0-9]+$", "", file or "").strip()
     # номер файла в начале («01 Заказы…», «3_Продажи», «12a Выручка») — не часть названия; год («2025 Выручка») — часть
     s = re.sub(r"^(?:\d{1,3}[a-zа-я]?)[\s._\-–)]+(?=[A-ZА-ЯЁ])", "", s).strip() or s
+    if sheet and technical_name(file):
+        s = ""
     if sheet:
         s = f"{s} · {sheet}" if s else sheet
     return upper_first(s) if s else "Данные"

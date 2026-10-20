@@ -22,6 +22,7 @@ import io
 import logging
 import math
 import re
+import unicodedata
 import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
@@ -312,11 +313,14 @@ def read_markdown(name: str, text: str, kind: str = "md") -> DocumentText:
             doc.blocks.append(Block("item", m.group(4).strip(), level=depth, ordered=bool(m.group(3))))
             i += 1
             continue
+        if para and kind == "txt" and _own_line(para[-1], s):
+            flush()  # a plan of short lines («Слайд 1: …», «Слайд 2: …»): each line is its own paragraph
         para.append(s)
         i += 1
     flush()
     # a plain text's first line, short and without an end stop, is its title («Команда и найм»)
-    if kind == "txt" and doc.blocks and doc.blocks[0].kind == "para" and not any(b.kind == "heading" for b in doc.blocks):
+    if kind == "txt" and doc.blocks and doc.blocks[0].kind == "para" and not any(b.kind == "heading" for b in doc.blocks) \
+            and not _SLIDE_LINE.match(text.strip()):
         first_line = text.strip().split("\n", 1)[0].strip()
         if first_line and len(first_line) <= 90 and not first_line.endswith((".", ",", ";", ":")):
             rest = doc.blocks[0].text[len(first_line):].strip()
@@ -324,6 +328,20 @@ def read_markdown(name: str, text: str, kind: str = "md") -> DocumentText:
     first = next((b for b in doc.blocks if b.kind == "heading"), None)
     doc.title = first.text if first else Path(name).stem
     return doc
+
+
+_SLIDE_LINE = re.compile(r"(?i)^(?:слайд|slide|экран|кадр)\s*№?\s*\d+\b")
+
+
+def _own_line(prev: str, line: str) -> bool:
+    """A line of a plain text that starts a new paragraph rather than continuing the previous one: a «Слайд N» line, or a
+    short line starting with a capital or a figure after a short line that ends without a comma or hyphen (a list of
+    points written line by line) — not a hard-wrapped sentence («…переход\nна облако»)."""
+    if _SLIDE_LINE.match(line):
+        return True
+    if len(prev) > 100 or len(line) > 160:
+        return False
+    return bool(re.match(r"^[A-ZА-ЯЁ0-9«\"]", line)) and not prev.rstrip().endswith((",", "-", "‐", "—", "–", "(", "и", "или"))
 
 
 def _caption_from(blocks: list[Block]) -> Optional[str]:
@@ -1016,6 +1034,39 @@ _WIKI_MARK_RE = re.compile(r"\[(?:\d{1,3}|[a-zа-я]|источник не ук�
 _BACKMATTER_RE = re.compile(r"^(?:примечани|литератур|ссылки|см\.?\s*также|источники|библиограф|комментари|notes|references|see also|external links|further reading)", re.I)
 
 
+_TEX_WORDS = {
+    "cdot": "·", "times": "×", "to": "→", "rightarrow": "→", "infty": "∞", "approx": "≈", "neq": "≠", "ne": "≠", "leq": "≤",
+    "le": "≤", "geq": "≥", "ge": "≥", "pm": "±", "Delta": "Δ", "delta": "δ", "alpha": "α", "beta": "β", "gamma": "γ",
+    "varepsilon": "ε", "epsilon": "ε", "lambda": "λ", "mu": "μ", "pi": "π", "sigma": "σ", "varphi": "φ", "phi": "φ",
+    "omega": "ω", "theta": "θ", "partial": "∂", "int": "∫", "sum": "Σ", "lim": "lim", "sin": "sin", "cos": "cos",
+    "tg": "tg", "tan": "tan", "ln": "ln", "log": "log", "exp": "exp", "prime": "′", "ldots": "…", "dots": "…",
+    "cdots": "…", "quad": " ", "qquad": " ", "in": "∈", "mathrm": "", "operatorname": "", "left": "", "right": "",
+    "displaystyle": "", "textstyle": "", "mathbb": "", "mathbf": "", "mathit": "", "limits": "",
+}
+
+
+def tex_plain(tex: Optional[str]) -> str:
+    r"""TeX формулы → строка знаков: «{\displaystyle f'(x_{0})=\lim _{\Delta x\to 0}{\frac {\Delta y}{\Delta x}}}» →
+    «f'(x₀) = lim_(Δx→0) (Δy)/(Δx)»; точки над буквой (производная по времени) — «ẋ». Неизвестная команда — её имя."""
+    t = (tex or "").strip()
+    if not t:
+        return ""
+    for _ in range(4):
+        t = re.sub(r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"(\1)/(\2)", t)
+        t = re.sub(r"\\sqrt\s*\{([^{}]*)\}", r"√(\1)", t)
+        t = re.sub(r"\\(?:dot)\s*\{([^{}])\}", "\\1\u0307", t)
+        t = re.sub(r"\\(?:ddot)\s*\{([^{}])\}", "\\1\u0308", t)
+    t = re.sub(r"\\([A-Za-z]+)", lambda m: _TEX_WORDS.get(m.group(1), m.group(1)), t)
+    t = re.sub(r"\s*([_^])\s*\{([^{}]{2,})\}", r"\1(\2)", t)  # «x^{n-1}» → «x^(n-1)», «lim_{Δx→0}» → «lim_(Δx→0)»
+    t = re.sub(r"([Δδ∂])\s+(?=[A-Za-zА-Яа-я])", r"\1", t)
+    t = re.sub(r"_\{([0-9])\}|_([0-9])", lambda m: "₀₁₂₃₄₅₆₇₈₉"[int(m.group(1) or m.group(2))], t)
+    t = re.sub(r"\^\{([0-9])\}|\^([0-9])", lambda m: "⁰¹²³⁴⁵⁶⁷⁸⁹"[int(m.group(1) or m.group(2))], t)
+    t = t.replace("\\,", " ").replace("\\;", " ").replace("\\!", "").replace("\\ ", " ").replace("\\{", "{").replace("\\}", "}")
+    t = re.sub(r"[{}]", "", t)
+    t = re.sub(r"\s*([=<>≤≥≠≈±+×→])\s*", r" \1 ", t)
+    return unicodedata.normalize("NFC", " ".join(t.split()))
+
+
 def read_html(name: str, html: str) -> DocumentText:
     from lxml import html as lh
 
@@ -1036,6 +1087,23 @@ def read_html(name: str, html: str) -> DocumentText:
                           " | //*[@id='toc'] | //*[contains(@class,'noprint')] | //*[contains(@class,'mw-cite-backlink')]"):
         if bad.getparent() is not None:
             bad.drop_tree()
+    # formulas (Wikipedia: MathML with a TeX annotation, a fallback picture): their TeX in plain signs, not the MathML's
+    # letters glued with «{\displaystyle {\dot {x}}}» (KB run 20.10: «например: x ˙ {\displaystyle {\dot {x}}}»)
+    for el in root.xpath("//*[contains(@class,'mwe-math-element')] | //math"):
+        if el.getparent() is None:
+            continue
+        tex = el.xpath(".//annotation[@encoding='application/x-tex']/text()")
+        alt = el.get("alttext") or "".join(el.xpath(".//img/@alt"))
+        plain = tex_plain(tex[0] if tex else alt)
+        tail = el.tail
+        parent = el.getparent()
+        prev = el.getprevious()
+        text = (plain or "") + (tail or "")
+        if prev is not None:
+            prev.tail = (prev.tail or "") + text
+        else:
+            parent.text = (parent.text or "") + text
+        parent.remove(el)
     main = root.xpath("//article") or root.xpath("//main") or root.xpath("//*[@role='main']") or root.xpath("//body") or [root]
     scope = max(main, key=lambda e: len(e.text_content() or ""))
 

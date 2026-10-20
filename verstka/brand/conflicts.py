@@ -124,6 +124,18 @@ def brand_conflicts(
         elif t != b:
             add(what, _hx(t), _hx(bh), _hx(b), "color", tpl_color(t))
 
+    # --- поля: брендбук шире шаблона — текст отодвигается от краёв (`apply._apply_margins`)
+    if brand.margins_px and 0 < brand.margins_px <= 200 and path is not None and path.exists():
+        try:
+            from verstka.brand.apply import template_inset_px
+            from verstka.brand.package import Package
+
+            inset = template_inset_px(Package(path))
+        except Exception:  # noqa: BLE001 - a template that does not read: no line
+            inset = None
+        if inset is not None and inset < brand.margins_px - 4:
+            add("Поля", f"{inset:g} px", f"{brand.margins_px:g} px", f"{brand.margins_px:g} px: текст отодвинут от краёв", "margins")
+
     # --- логотип: чей и где
     bdir = resolve_brand_dir(brand, brand_dir, workspace_root)
     found = any((p := logo_path(lg, bdir)) is not None and p.exists() for lg in brand.logos)

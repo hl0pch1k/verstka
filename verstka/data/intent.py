@@ -792,7 +792,10 @@ def _check_goal(mg: ModelGoal, quote: str, at: int, k: int, ctx: _Ctx) -> tuple[
         else:
             return None, _why_not(task, d)
     mm = ctx.measure(k, metric) if metric else None
-    if task == "shares" and mm is not None and not (mm.additive or mm.stock) and scores.get("comparison", 0.0) >= FEASIBLE:
+    if task == "shares" and mm is not None and not (mm.additive or mm.stock) and scores.get("comparison", 0.0) >= FEASIBLE \
+            and not getattr(p, "parts_of_whole", False):
+        # (доли, которые в сумме дают целое — «Доля, %» каналов 42 + 27 + 18 + 13, — и есть части целого: кольцо, как без
+        # модели; живой прогон 20.10 давал с моделью столбцы «Прямые продажи впереди», без неё — кольцо)
         # «покажите долю электронных выдач по филиалам» — колонка уже доля каждой строки: её не складывают в целое, а
         # сравнивают по строкам (F14: иначе план показал бы свою колонку)
         dropped.append(f"«{metric}» — не части целого: доли сравнены по строкам")

@@ -45,8 +45,11 @@ _STATE = re.compile(r"(?<![a-z])(hover|pressed|active|focus|disabled|overlay|sha
 NO_TOKEN = (
     "Чтобы прочитать файл Figma по ссылке, нужен токен доступа: добавьте FIGMA_TOKEN=… в файл .env "
     "(Figma → Settings → Security → Personal access tokens) и перезапустите Verstka. "
-    "Без токена загрузите экспорт токенов JSON (Tokens Studio → Export или переменные Figma)."
+    "Без токена загрузите сам файл .fig (в Figma: Файл → Сохранить локальную копию) или экспорт токенов JSON "
+    "(Tokens Studio → Export или переменные Figma)."
 )
+COMMUNITY = ("Это страница файла в Сообществе Figma, а не сам файл: откройте его в Figma (Open in Figma), сохраните "
+             "локальную копию .fig (Файл → Сохранить локальную копию) и загрузите её — или дайте ссылку на свою копию.")
 FIG_FILE = (
     "Файл .fig — внутренний формат Figma, без самой Figma его не прочитать. Дайте ссылку на файл (нужен FIGMA_TOKEN) "
     "или экспортируйте токены в JSON: плагин Tokens Studio → Export или переменные Figma."
@@ -69,6 +72,8 @@ def is_figma_url(s: str) -> bool:
 def figma_key(url: str) -> str:
     """Ключ файла из ссылки; у ветки — ключ ветки (по нему REST API отдаёт именно ветку)."""
     m = _URL_RE.match(normalize_url(url) or "")
+    if not m and re.search(r"figma\.com/community/(?:file|design)/", url or "", re.I):
+        raise BrandReadError(COMMUNITY)
     if not m:
         raise BrandReadError("Не похоже на ссылку на файл Figma: нужна ссылка вида https://www.figma.com/design/<ключ>/<название>.")
     return m.group(2) or m.group(1)

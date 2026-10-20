@@ -307,3 +307,23 @@ def test_reading_schema_is_lenient():
     assert g.period.kind == "latest" and g.threshold.value == 15 and g.threshold.unit == "дней"
     assert g.compare_to.kind == "plan" and g.categories == ["СБП"] and r.unanswerable == []
     json.dumps(GoalReading.model_json_schema())
+
+
+def test_model_shares_of_a_whole_stay_shares(skills):
+    """«Из чего складываются каналы продаж»: колонка «Доля, %» каналов в сумме даёт 100 — это части целого, и с моделью
+    вид тот же, что без неё (кольцо), а не «доли сравнены по строкам» (живой прогон 20.10: столбцы «Прямые продажи
+    впереди»). Доля каждой строки сама по себе («Доля онлайн, %» регионов) — по-прежнему сравнение."""
+    brief = "Из чего складываются каналы продаж?"
+    t = _t("Каналы.csv", [["Канал", "Доля, %"], ["Прямые продажи", 42], ["Партнёры", 27], ["Маркетплейс", 18], ["Сайт", 13]])
+    ans = _reading([{"span": "Из чего складываются каналы продаж", "dataset": "d1", "task": "shares", "metric": "Доля",
+                     "dimension": "Канал", "confidence": 0.95}])
+    r = read_goals(brief, [t], skills=skills, providers=_mock(ans))
+    assert r.understood[0].task == "shares"
+    p = plan_datasets([t], brief, goals=r.goals)[0]
+    assert p.task.task == "shares" and p.options[p.chosen].kind in ("doughnut", "pie")
+    intent.clear_cache()
+    t2 = _t("Госуслуги регионы.csv", REGIONS)
+    ans2 = _reading([{"span": "долю онлайн по регионам", "dataset": "d1", "task": "shares", "metric": "Доля онлайн",
+                      "dimension": "Регион", "confidence": 0.9}])
+    r2 = read_goals("Покажите долю онлайн по регионам.", [t2], skills=skills, providers=_mock(ans2))
+    assert r2.understood[0].task == "comparison"

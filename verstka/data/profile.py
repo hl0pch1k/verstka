@@ -750,8 +750,12 @@ def _axis_candidate(c: _Col, has_row_label: bool) -> bool:
         return False
     if _sorted_rows(ords):
         return True
+    uniq = np.unique(ords)
     if has_row_label:
-        return False
+        # журнал операций (заказ на строку, у каждой свой номер): дат много меньше строк и они идут почти подряд —
+        # это ось (выручка по месяцам), а не атрибут строки, как дата договора в списке клиентов
+        span = int(uniq[-1] - uniq[0]) + 1 if uniq.size else 1
+        return ords.size >= 200 and uniq.size >= 3 and uniq.size * 3 <= ords.size and uniq.size / span >= 0.5
     uniq = np.unique(ords)
     if _derive_freq(c.gran or "day", uniq) != "day" or c.gran != "day":
         return True

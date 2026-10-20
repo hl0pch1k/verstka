@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "11"  # 11: подложки шаблона — цветом фона бренда, логотип на подложке
+APPLY_VERSION = "12"  # 12: поля брендбука, логотип без правила места; 11: подложки шаблона — цветом фона бренда
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -441,6 +441,7 @@ class ApplyResult:
     logo_covers: int = 0  # обложек, разделов и финальных слайдов, получивших логотип бренда (у шаблона там его не было)
     caps_changed: int = 0  # стилей заголовков, где капс снят или поставлен по правилу брендбука
     refit: int = 0  # строк образцов, подогнанных после смены шрифта
+    margins_moved: int = 0  # заполнителей текста, отодвинутых от края до полей брендбука
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -460,6 +461,95 @@ _NO_CAPS_RE = re.compile(
     re.I,
 )
 _CAPS_RE = re.compile(r"заголовк\w*[^.;]{0,30}(?:капс\w*|заглавн\w*|прописн\w*|верхн\w+\s+регистр\w*)|headings?[^.;]{0,30}(?:all\s*caps|uppercase)", re.I)
+
+
+_TEXT_PH = {None, "title", "ctrTitle", "subTitle", "body", "obj", "dt", "ftr", "sldNum"}
+
+
+def margin_emu(brand: BrandSpec, sw: int, sh: int) -> Optional[tuple[float, float]]:
+    """Поля брендбука в EMU слайда (по горизонтали — от ширины 1920 px, по вертикали — от высоты 1080 px)."""
+    m = brand.margins_px
+    if not m or not 0 < m <= 200:
+        return None
+    return m / 1920.0 * sw, m / 1080.0 * sh
+
+
+def template_inset_px(pkg: Package) -> Optional[float]:
+    """Поле шаблона, px на 1920: самый узкий отступ заголовков и текста макетов от левого или правого края."""
+    sw, sh = pkg.slide_size()
+    insets: list[float] = []
+    for name in pkg.names():
+        if not re.match(r"^ppt/slideLayouts/slideLayout\d+\.xml$", name):
+            continue
+        root = pkg.xml(name)
+        for sp, box in _text_placeholders(root):
+            ph = sp.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+            if ph is not None and ph.get("type") in (None, "title", "body", "obj"):
+                x, y, cx, cy = box
+                insets.append(max(0.0, x))
+    if not insets:
+        return None
+    insets.sort()
+    return float(round(insets[len(insets) // 2] / sw * 1920.0))  # обычный отступ заголовков и текста слева
+
+
+def _text_placeholders(root):
+    if root is None:
+        return
+    for sp in root.iter(f"{{{P}}}sp"):
+        ph = sp.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+        if ph is None or ph.get("type") not in _TEXT_PH:
+            continue
+        xfrm = sp.find(f"{{{P}}}spPr/{{{A}}}xfrm")
+        if xfrm is None:
+            continue
+        off, ext = xfrm.find(f"{{{A}}}off"), xfrm.find(f"{{{A}}}ext")
+        try:
+            box = (float(off.get("x")), float(off.get("y")), float(ext.get("cx")), float(ext.get("cy")))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        yield sp, box
+
+
+def _apply_margins(pkg: Package, brand: BrandSpec) -> int:
+    """Поля брендбука («Поля — 48 px»): заполнители текста мастеров, макетов и образцов, стоящие ближе к краю, чем
+    велит брендбук, отодвигаются внутрь (левый край — на поле, правый — не дальше поля); сам блок не растёт и не
+    уезжает наружу, поле шаблона шире брендбука — как есть. Сборка берёт рамки заполнителей из копии — текст колоды
+    встаёт в поля бренда."""
+    sw, sh = pkg.slide_size()
+    mm = margin_emu(brand, sw, sh)
+    if mm is None:
+        return 0
+    mx, my = mm
+    tol_x, tol_y = 0.004 * sw, 0.004 * sh
+    moved = 0
+    for name in pkg.names():
+        if not _SHAPED_RE.match(name):
+            continue
+        root = pkg.xml(name)
+        changed = False
+        for sp, (x, y, cx, cy) in list(_text_placeholders(root)):
+            nx, ny, ncx, ncy = x, y, cx, cy
+            if x < mx - tol_x and x + cx > mx:
+                nx, ncx = mx, cx - (mx - x)
+            if nx + ncx > sw - mx + tol_x and nx < sw - mx:
+                ncx = sw - mx - nx
+            if y < my - tol_y and y + cy > my:
+                ny, ncy = my, cy - (my - y)
+            if ny + ncy > sh - my + tol_y and ny < sh - my:
+                ncy = sh - my - ny
+            if (nx, ny, ncx, ncy) == (x, y, cx, cy) or ncx < 0.3 * cx or ncy < 0.5 * cy or ncx <= 0 or ncy <= 0:
+                continue
+            xfrm = sp.find(f"{{{P}}}spPr/{{{A}}}xfrm")
+            xfrm.find(f"{{{A}}}off").set("x", str(int(round(nx))))
+            xfrm.find(f"{{{A}}}off").set("y", str(int(round(ny))))
+            xfrm.find(f"{{{A}}}ext").set("cx", str(int(round(ncx))))
+            xfrm.find(f"{{{A}}}ext").set("cy", str(int(round(ncy))))
+            moved += 1
+            changed = True
+        if changed:
+            pkg.dirty.add(name)
+    return moved
 
 
 def caps_rule(brand: BrandSpec) -> Optional[bool]:
@@ -574,6 +664,13 @@ def apply_brand(
                 _refit(root, swapped, res)
             if a or b:
                 pkg.dirty.add(name)
+
+    # поля брендбука — до логотипов: логотип встаёт в поле, а не под отодвинутый текст
+    if priority == "brand":
+        res.margins_moved = _apply_margins(pkg, brand)
+        if res.margins_moved:
+            res.warnings.append(f"Поля брендбука {brand.margins_px:g} px: текст макетов отодвинут от краёв "
+                                f"({res.margins_moved} {'рамка' if res.margins_moved == 1 else 'рамки' if 2 <= res.margins_moved % 10 <= 4 and not 12 <= res.margins_moved % 100 <= 14 else 'рамок'}).")
 
     # логотипы
     bdir = resolve_brand_dir(brand, brand_dir)

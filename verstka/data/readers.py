@@ -1447,6 +1447,39 @@ def _glue_unit_cells(rows: list[list[str]]) -> list[list[str]]:
     return rows[:k0] + [new_head] + rows[k0 + 1:]
 
 
+_INT_CELL = re.compile(r"^\s*[-−–]?\d{1,9}\s*$")
+_FRAC_CELL = re.compile(r"^\d{1,6}$")
+
+
+def _glue_decimal_cells(rows: list[list[str]]) -> tuple[list[list[str]], bool]:
+    """«Квартал,Прибыль, млн ₽» и «I кв. 2025,-12,5» — CSV через запятую с дробной запятой и без кавычек: и шапка, и
+    строки разрезаны в одном месте. Если ячейка шапки — одна единица, а во всех строках на её месте — цифры дроби после
+    целого слева, это одно число: «-12,5» и колонка «Прибыль, млн ₽» (иначе прибыль читается как «-12» и «5»)."""
+    body = [r for r in rows if any((c or "").strip() for c in r)]
+    if len(body) < 3:
+        return rows, False
+    head, data = body[0], body[1:]
+    if any(len(r) != len(head) for r in data):
+        return rows, False
+    units = [k for k, c in enumerate(head) if k > 0 and _UNIT_CELL.match(c or "")
+             and all(_INT_CELL.match(r[k - 1] or "") and _FRAC_CELL.match((r[k] or "").strip()) for r in data)]
+    if not units:
+        return rows, False
+    out: list[list[str]] = []
+    for r in rows:
+        if not any((c or "").strip() for c in r) or len(r) != len(head):
+            out.append(r)
+            continue
+        new: list[str] = []
+        for k, c in enumerate(r):
+            if k in units and new:
+                new[-1] = f"{new[-1].strip()}, {c.strip()}" if r is head else f"{new[-1].strip()},{c.strip()}"
+            else:
+                new.append(c)
+        out.append(new)
+    return out, True
+
+
 def _strip_pipes(r: list[str]) -> list[str]:
     if r and not r[0].strip():
         r = r[1:]
@@ -1464,9 +1497,12 @@ def _read_delimited(name: str, text: str, kind: SourceKind, digest: str, delim: 
     if delim == "auto":
         delim = "\t" if kind == "tsv" else _sniff_delimiter(lines)
     rows = _csv_rows(name, text, delim)
+    glued_dec = False
     if delim == ",":
         rows = _glue_unit_cells(rows)
-    file_dec = "." if delim == "," else None  # в CSV через запятую дробь пишут точкой
+        rows, glued_dec = _glue_decimal_cells(rows)
+    # в CSV через запятую дробь пишут точкой — кроме склеенных «-12,5» без кавычек (тогда дробь — запятая)
+    file_dec = "," if glued_dec else ("." if delim == "," else None)
     chunks = _split_stacked(rows)
     tables: list[Table] = []
     first_error = None
@@ -1570,6 +1606,10 @@ def _pipe_block(lines: list[str], i: int) -> Optional[tuple[int, list[list[str]]
                 rows.append(cells)
         j += 1
     single_pipe = all(len(_PIPE_SPLIT.findall(lines[k].strip())) <= 1 for k in range(i, j) if not _is_border(lines[k]))
+    if single_pipe and not has_border and len(rows) >= 3 and all(len(r) == 2 for r in rows):
+        # «Этап|Пользователи» и ниже «Зашли|10000» — таблица из двух колонок без рамки, если справа числа
+        if sum(_quantity(r[1]) is not None for r in rows[1:]) >= max(2, 0.8 * (len(rows) - 1)):
+            single_pipe = False
     if len(rows) < 2 or (single_pipe and not has_border):
         return None
     return j, rows, header_row

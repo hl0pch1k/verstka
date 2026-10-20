@@ -311,6 +311,29 @@ def pptx_theme(path: Path) -> tuple[list[ColorHit], list[FontHit], list[str]]:
         return colors, fonts, []
 
 
+_TEXT_EXT = {".txt", ".md", ".markdown"}
+
+
+def _text_spec(path: Path) -> Optional[BrandSpec]:
+    """Текстовый файл папки (README, «гайдлайн.md») — тем же разбором, что текст PDF: HEX/RGB/CMYK, шрифты, правила, поля.
+    Ничего из этого нет — None (обычный README о файлах)."""
+    from verstka.brand.pdf import pdf_colors, pdf_fonts, pdf_rules
+    from verstka.ingest.documents import decode_text
+
+    try:
+        text = decode_text(path.read_bytes())
+    except Exception:  # noqa: BLE001 - a file that does not read: nothing from it
+        return None
+    colors, w1 = make_palette(pdf_colors(text))
+    hits, fallback = pdf_fonts(text, None)
+    fonts, w2 = make_fonts(hits, fallback=fallback)
+    rules, margin, grid, place = pdf_rules(text)
+    if not colors and not fonts and not rules and not margin:
+        return None
+    return BrandSpec(source="folder", file=path.name, colors=colors, fonts=fonts, rules=rules, margins_px=margin, grid=grid,
+                     logo_place=place, warnings=w1 + w2)
+
+
 # ---- сборка ---------------------------------------------------------------------------------------------------------------------
 def _walk(root: Path) -> list[Path]:
     out: list[Path] = []
@@ -386,6 +409,7 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
     logo_files: list[tuple[PurePosixPath, Path]] = []
     slide_images: list[Path] = []
     pdfs: list[Path] = []
+    texts: list[Path] = []  # README.txt / гайдлайн.md: цвета, шрифты и правила словами
 
     def rel(p: Path) -> PurePosixPath:
         try:
@@ -417,6 +441,8 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
                 warnings.append(f"«{rel(p)}»: {e}")
         elif ext == ".pdf":
             pdfs.append(p)
+        elif ext in _TEXT_EXT and p.stat().st_size <= 200_000:
+            texts.append(p)
         elif ext in _PPTX_EXT:
             c, f, w = pptx_theme(p)
             warnings += w
@@ -439,6 +465,10 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
             pdf_spec = s
         specs.append(s)
 
+    for p in texts:
+        t = _text_spec(p)
+        if t is not None:
+            specs.append(t)
     colors = next((s.colors for s in specs if s.colors), [])
     fonts = next((s.fonts for s in specs if s.fonts), [])
     if not colors and theme_colors:
@@ -450,6 +480,14 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
         colors, _ = make_palette(slides_palette(slide_images))
         if colors:
             warnings.append("Цвета сняты с картинок примеров слайдов, роли угаданы по яркости — проверьте.")
+    elif colors and slide_images and texts and not any(c.role in ("background", "text") for c in colors):
+        # цвета названы только в README («основной #1B5E20, акцент #FF6F00»): фон и текст — с примеров слайдов
+        seen_hex = {c.hex for c in colors}
+        extra, _ = make_palette(slides_palette(slide_images))
+        add = [c for c in extra if c.role in ("background", "text") and c.hex not in seen_hex]
+        if add:
+            colors = list(colors) + add
+            warnings.append("Фон и цвет текста сняты с картинок примеров слайдов — проверьте.")
     for s in specs:
         warnings += s.warnings
     rules: list[BrandRule] = []

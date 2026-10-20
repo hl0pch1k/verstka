@@ -651,6 +651,40 @@ def pdf_logos(reader, page_texts: list[str], assets_dir: Path) -> list[BrandLogo
     return out
 
 
+SCAN_PALETTE = ("В PDF «{name}» нет текста (скан): цвета сняты с картинок страниц, роли угаданы по яркости; шрифты и правила "
+                "по картинке без модели не прочитать — включите чтение моделью или загрузите токены JSON.")
+
+
+def _scan_palette(path: Path, pages: int) -> list:
+    """Цвета скана: первые страницы картинкой → основные цвета по площади (белая бумага — фон, текст — тёмный)."""
+    from verstka.brand.common import ColorHit
+    from verstka.brand.folder import image_colors
+
+    merged: list[tuple[str, float]] = []
+    try:
+        imgs = _page_images(path, list(range(min(pages, 6))), max_w=800)
+    except Exception:  # noqa: BLE001 - pages that do not render: no colours
+        return []
+    for data in imgs:
+        tmp = io.BytesIO(data)
+        try:
+            cols = image_colors(tmp)  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001
+            continue
+        for hx_, share in cols:
+            k = next((i for i, (h, _) in enumerate(merged) if rgb_distance(h, hx_) < 40), None)
+            if k is None:
+                merged.append((hx_, share))
+            else:
+                merged[k] = (merged[k][0], merged[k][1] + share)
+    merged.sort(key=lambda x: -x[1])
+    hits = [ColorHit(h) for h, share in merged[:6] if share >= 0.01 * len(imgs)]
+    from verstka.brand.common import saturation
+
+    # чистый лист или чёрно-белый текст — не палитра бренда
+    return hits if any(saturation(h.hex) >= 0.25 for h in hits) else []
+
+
 # ---- модель ----------------------------------------------------------------------------------------------------------------
 def _page_images(path: Path, page_ids: list[int], max_w: int = 1600, on_page: Optional[Callable[[int, int], None]] = None) -> list[bytes]:
     """Страницы PDF → JPEG шириной не меньше 1600 px: HEX на образцах цвета мелкие, при 1024 px они не читаются."""
@@ -813,11 +847,15 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
     text = "\n".join(page_texts)
     can_vlm = bool(use_vlm and providers is not None and getattr(providers, "has", lambda r: False)("vlm"))
     scanned = not text.strip()
+    scan_hits: list = []
     if scanned and not can_vlm:
-        raise BrandReadError(
-            f"В PDF «{path.name}» нет текста — похоже, это скан или картинки. Без модели такой гайдлайн не прочитать: "
-            "включите чтение моделью или загрузите токены JSON."
-        )
+        # скан без модели: цвета — с картинок страниц (как у примеров слайдов), шрифтов и правил по картинке не прочитать
+        scan_hits = _scan_palette(path, len(page_texts))
+        if not scan_hits:
+            raise BrandReadError(
+                f"В PDF «{path.name}» нет текста — похоже, это скан или картинки. Без модели такой гайдлайн не прочитать: "
+                "включите чтение моделью или загрузите токены JSON."
+            )
     title = None
     try:
         title = (reader.metadata or {}).get("/Title")
@@ -826,7 +864,9 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
     name, name_trusted = _guess_name(title, page_texts, path.stem)
     rep.step("open", *open_text("pdf", path.name, len(page_texts)), {"name": name or "", "source": "pdf", "file": path.name, "pages": len(page_texts)})
 
-    colors, w1 = make_palette(pdf_colors(text))
+    colors, w1 = make_palette(pdf_colors(text) or scan_hits)
+    if scan_hits:
+        w1 = [SCAN_PALETTE.format(name=path.name)] + w1
     rep.step("palette", "палитра", palette_result(colors), {"colors": [c.model_dump(mode="json") for c in colors]})
     font_hits, fallback = pdf_fonts(text, name)
     fonts, w2 = make_fonts(font_hits, fallback=fallback)

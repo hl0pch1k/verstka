@@ -24,7 +24,7 @@ from verstka.data.aggregate import (
 from verstka.data.parse import is_total_label, iso_ord, period_str, quantity, season_name, split_unit
 from verstka.data.units import _num as _num_cell
 from verstka.data.words import (
-    PERIOD_WORDS, Phrase, count_dat, count_gen, count_words, duration_gen, duration_text, each_unit, file_title, fmt_num, fmt_pct,
+    PERIOD_WORDS, Phrase, count_dat, count_gen, count_words, duration_gen, duration_text, each_unit, file_title, technical_name, fmt_num, fmt_pct,
     fmt_pct_any, fmt_signed, fmt_value, head_word, is_counter, is_event_name, is_participle, is_plural_value, join_and,
     lower_first,
     metric_phrase, no_year, period_acc, period_dat_full, period_dative, period_gen, period_than, period_in, period_text, phrase,
@@ -543,7 +543,7 @@ def plain_headline(task: TaskKind, d: Data, own: bool = False) -> str:
     («покупок мест»), и тема его не повторяет."""
     m = d.main
     title_of = (lambda x: re.sub(r"\s*,[^,]*$", "", x.name).strip() or x.name) if own else _metric_title
-    if task == "dynamics" and d.time is not None and len(d.time.series) >= 2 and not d.time.dim:
+    if task == "dynamics" and d.time is not None and len(d.time.series) >= 2 and not d.time.dim and not (technical_name(d.profile.file) and not d.profile.sheet):
         return file_title(d.profile.file, d.profile.sheet)  # несколько рядов — тема по файлу, а не по первому ряду
     if task == "dynamics" and d.time is not None and d.time.from_columns:
         m = d.time.measure  # ось из колонок-периодов: ряд назван по датасету («Выручка»)
@@ -561,6 +561,12 @@ def plain_headline(task: TaskKind, d: Data, own: bool = False) -> str:
         p = phrase(d.entity)
         if p is not None and p.sure:
             return f"Список {p.low.gen_pl}"
+    if technical_name(d.profile.file) and not d.profile.sheet and m is not None:
+        # служебное имя файла («d03_cp1251.csv») — не тема: величина по разрезу («Доля по каналам») или сама величина
+        p = phrase(d.cats.dim) if d.cats is not None else None
+        if p is not None and p.sure:
+            return f"{title_of(m)} по {p.low.dat_pl}"
+        return title_of(m)
     return file_title(d.profile.file, d.profile.sheet)
 
 
@@ -1974,7 +1980,8 @@ def _wording(d: Data, cv: CatView, m: Optional[Measure]) -> str:
     if m.time_unit or unit in TO_MINUTES:
         return "delay" if _DELAY.search(m.name) else "long"
     bins = sum(1 for x in cv.labels if _BIN_LABEL.match(x) or _CLOCK_LAB.match(x)) >= 0.8 * max(1, len(cv.labels))
-    if (not cv.ranked and bins) or _WORSE.search(m.name) or _WORSE.search(title):
+    if (not cv.ranked and bins) or _WORSE.search(m.name) or _WORSE.search(title) or name_direction(m.name, unit) is True:
+        # меньше — лучше по смыслу величины (текучесть, затраты, жалобы): у первого не «впереди», а «больше всего»
         return "most"  # порядковые группы, а ещё ошибки, брак, отток, примеси — «больше/меньше всего», не «впереди»
     # ставка, уровень на душу населения, коэффициент — «выше/ниже всего»: высокая ставка или преступность — не успех
     if not m.additive and (_RATE.search(m.name) or _RATE.search(unit) or RATE_COLUMN.search(f"{m.name} {unit}")):

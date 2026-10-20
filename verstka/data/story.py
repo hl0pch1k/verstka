@@ -37,7 +37,7 @@ from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
 from verstka.data.profile import profile_table
-from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, stems_of, times_word, upper_first
+from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, stems_of, technical_name, times_word, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
 from verstka.schemas.outline import (
@@ -595,8 +595,19 @@ def _title(brief: Optional[Brief], plans: Sequence[DatasetPlan], tables: Sequenc
         if t:
             aud = brief.audience or aud
             return _cut(upper_first(t), MAX_TITLE), (f"Для {aud}" if aud else None), None
+    lead = re.match(r"^\s*([^:.!?\n]{3,70}):\s+\S", (brief.text if brief is not None else "") or "")
+    if lead and 1 <= len(lead.group(1).split()) <= 7 and not re.search(
+            r"(?i)\b(?:покаж|сравн|сделай|нуж[ен]|надо|хочу|слайд|цел[ьи]|задач|вопрос|данные|файл)", lead.group(1)):
+        # «Квартальный отчёт: найм, публикации, заказы» — название до двоеточия, а не темы файлов
+        t, aud = clean_deck_title(lead.group(1))
+        if t and len(t.split()) == 1 and aud:
+            t, aud = upper_first(" ".join(lead.group(1).split())), None  # «Отчёт» alone says nothing: «Отчёт для финансового директора»
+        if t:
+            aud = (brief.audience if brief is not None else None) or aud
+            return _cut(upper_first(t), MAX_TITLE), (f"Для {aud}" if aud else None), None
     names = [p.plain_headline for p in plans if p.slides > 0 and p.plain_headline]
-    files = [file_title(p.profile.file, p.profile.sheet) for p in plans if p.slides > 0]
+    files = [file_title(p.profile.file, p.profile.sheet) for p in plans if p.slides > 0
+             and not (technical_name(p.profile.file) and not p.profile.sheet)]
     topics = list(dict.fromkeys(x for x in (files or names) if x))
     own, own_aud = data_own_title(tables, plans)
     title = own or _topic_title(topics)
@@ -823,9 +834,22 @@ def _cards_head(plans: Sequence[DatasetPlan], cards: Sequence[NumberCallout]) ->
         h = re.sub(r"\s+[—–]\s+[\d\s→–.,'’-]+$", "", p.headline).strip() if p is not None else ""
         if not h:
             return "; ".join(f"{x.label.split(' · ')[0]} — {x.value}" for x in cards[:2])
-        heads.append(h if not heads else lower_first_soft(h))
+        heads.append(h if not heads or _names_first(h, p) else lower_first_soft(h))
     head = "; ".join(heads)
     return head if len(head) <= MAX_HEADLINE else heads[0]
+
+
+def _names_first(text: str, plan: Optional[DatasetPlan]) -> bool:
+    """The phrase starts with a name from the data — a category («Москва даёт 46% выручки», «Облачные серверы…»), not a
+    column («Выручка выросла…»): inside a joined heading it keeps its capital letter."""
+    if plan is None or not text:
+        return False
+    cols = {c.name.lower() for c in plan.profile.columns}
+    names = {str(v).strip() for c in plan.profile.columns if c.role == "dimension" for v in c.samples if isinstance(v, str)}
+    names |= {f.text.split(" — ", 1)[0].strip() for f in plan.headline_facts if " — " in f.text}
+    low = text.lower()
+    return any(n and n.lower() not in cols and low.startswith(n.lower()) and text[:1].isupper()
+               and (len(text) == len(n) or not text[len(n)].isalnum()) for n in names)
 
 
 def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[NumberCallout]:
@@ -1213,6 +1237,9 @@ def build_data_story(
     for j in range(0, min(len(ctx_lines), CONTEXT_LINES * MAX_CONTEXT_SLIDES), CONTEXT_LINES):
         chunk = ctx_lines[j : j + CONTEXT_LINES]
         head = "Контекст" if j == 0 else "Контекст (продолжение)"
+        if all("данными не подтверждается" in x or "не подтверждается данными" in x for x in chunk):
+            # только цели, на которые данных нет: так и сказано, а не «Контекст» (живой прогон 20.10)
+            head = "Чего нет в данных" if j == 0 else "Чего нет в данных (продолжение)"
         entries.append(_Entry(OutlineSlide(id=f"context-{j // CONTEXT_LINES + 1}", kind=PatternKind.bullets, headline=head, content=SlideContent(bullets=chunk), verbatim=True), "context", keep=3 - j // CONTEXT_LINES))
 
     data_entries: list[_Entry] = []

@@ -275,7 +275,7 @@ def _kind(t: Token, value: Any) -> Optional[str]:
         return "dimension"
     if ty == "" and parse_color(value) is not None:
         return "color"
-    if (ty == "" and isinstance(value, (str, list)) and _FONT_PATH.search(w) and not _NOT_FAMILY_PATH.search(last)
+    if (ty in ("", "string", "text") and isinstance(value, (str, list)) and _FONT_PATH.search(w) and not _NOT_FAMILY_PATH.search(last)
             and not (isinstance(value, str) and value.strip().lower() in _NOT_FAMILY_VALUES)):
         return "family"
     # «primary»: «blue» в группе цветов — название CSS-цвета
