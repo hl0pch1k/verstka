@@ -44,24 +44,34 @@
 <br>
 
 <p align="center">
-  <img src="docs/readme/showcase/ui-result.webp" width="100%" alt="Результат: колода «Закрытие Q3 2026 — VK Cloud» на шаблоне VK Tech с брендбуком VK Cloud, оценки трёх вариантов, кнопки «Скачать PowerPoint», PDF, «Изменить текст» и сводка проверки качества">
+  <img src="docs/readme/showcase/ui-result.webp" width="100%" alt="Результат: колода «Закрытие Q3 2026 — VK Cloud» на шаблоне VK Tech с брендбуком VK Cloud — 89 из 100, ошибок нет, 3 предупреждения; оценки трёх вариантов и кнопка «Скачать PowerPoint»">
 </p>
 
 <br>
 
 <p align="center">
-  <img src="docs/readme/showcase/ui-create.webp" width="49%" alt="Создать: текст с планом, три файла с данными и цели, найденные в тексте; ниже плита «03 Параметры и запуск»">
+  <img src="docs/readme/showcase/ui-create.webp" width="49%" alt="Создать: плита «01 Шаблон» с брендбуком, «02 Текст» с тремя файлами данных и базой знаний, «03 Параметры и запуск»">
   <img src="docs/readme/showcase/ui-brand.webp" width="49%" alt="Брендбук VK Cloud: палитра, шрифты и расхождения с шаблоном VK Tech с переключателем «Брендбук / Шаблон»">
 </p>
 
 <p align="center">
-  <img src="docs/readme/showcase/ui-build.webp" width="49%" alt="Сборка: раскладка десяти слайдов эскизами и «Как думает агент» — дизайнер, вёрстка, проверка, взгляд дизайнера">
-  <img src="docs/readme/showcase/ui-why.webp" width="49%" alt="Почему так: профиль файла с данными и три варианта визуализации с причинами — диаграмма рассеяния выбрана, столбцы и таблица можно пересобрать">
+  <img src="docs/readme/showcase/ui-build.webp" width="49%" alt="Сборка: раскладка слайдов эскизами и «Как думает агент» — дизайнер, вёрстка, проверка, взгляд дизайнера">
+  <img src="docs/readme/showcase/ui-why.webp" width="49%" alt="Почему так: профиль файла «Хранилище Q2 и Q3.csv» и три варианта визуализации с причинами — выбраны сгруппированные полосы">
 </p>
 
 <p align="center">
-  <img src="docs/readme/showcase/ui-remarks.webp" width="49%" alt="Замечания и «Исправить слайд»: замечание проверки рамкой прямо на слайде, пояснение справа и кнопка «Исправить слайд»">
-  <img src="docs/readme/showcase/ui-history.webp" width="49%" alt="Мои презентации: колоды за сегодня с шаблоном, числом слайдов и оценкой качества">
+  <img src="docs/readme/showcase/ui-quality.webp" width="49%" alt="Подробнее → Качество: 87 из 100, ошибок нет, 3 предупреждения, замечания по слайдам и «Взгляд дизайнера»">
+  <img src="docs/readme/showcase/ui-agent.webp" width="49%" alt="Подробнее → Агент: как работал агент — автор по базе знаний, аналитик по данным — и история правок">
+</p>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-helper.webp" width="49%" alt="Помощник открыт: просьба «на слайде 5 выдели Госсектор цветом», ответ «выделил „Госсектор“ цветом, 87 → 89» и «Показать слайд 5»">
+  <img src="docs/readme/showcase/ui-remarks.webp" width="49%" alt="Замечания и «Исправить слайд»: замечание проверки рамкой прямо на слайде и кнопка «Исправить слайд»">
+</p>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-unseen.webp" width="49%" alt="Сторонний шаблон Growing Liberty: «Итоги университета за 2026 год», 88 из 100, ошибок нет">
+  <img src="docs/readme/showcase/ui-history.webp" width="49%" alt="Мои презентации: три колоды за сегодня с шаблоном, числом слайдов и оценкой">
 </p>
 
 <br>
