@@ -19,6 +19,7 @@ same for every template (no template is tuned for). The picture itself is croppe
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from statistics import median
 from typing import Optional
@@ -355,6 +356,70 @@ def beside_strip(strip: tuple[int, int, int, int], sx: int, sw: int, W: int) -> 
         nx = max(sx, strip[2] + g)
         return nx, max(int(0.2 * W), sx + sw - nx)
     return sx, max(int(0.2 * W), min(sw, strip[0] - g - sx))
+
+
+WORD_ROOM = 0.97  # a word wider than this share of its line is broken by the renderer (audit/checks/layout.py)
+_WORD_SPLIT_RE = re.compile(r"[ \t\r\n]+|(?<=-)(?!\u2060)")
+
+
+def _broken_word(el) -> Optional[str]:
+    """The first word of a text box wider than its line at its own size (the renderer breaks it: «генерац/ии»)."""
+    from verstka.rendering.fonts import text_width_pt
+
+    body = el.find(".//" + q("p:txBody"))
+    b = _bbox(el)
+    if body is None or b is None:
+        return None
+    bp = body.find(q("a:bodyPr"))
+    if bp is not None and (bp.get("wrap") == "none" or bp.find(q("a:normAutofit")) is not None or bp.get("vert") not in (None, "horz")):
+        return None
+    l_ins = int(bp.get("lIns", 91440)) if bp is not None else 91440
+    r_ins = int(bp.get("rIns", 91440)) if bp is not None else 91440
+    usable = (b[2] - l_ins - r_ins) / EMU_PER_PT
+    if usable <= 0:
+        return None
+    for p in body.iter(q("a:p")):
+        ppr = p.find(q("a:pPr"))
+        bullet = ppr is not None and (ppr.find(q("a:buChar")) is not None or ppr.find(q("a:buAutoNum")) is not None)
+        indent = (int(ppr.get("marL") or 0) / EMU_PER_PT) if ppr is not None else 0.0
+        for r in p.iter(q("a:r")):
+            rpr = r.find(q("a:rPr"))
+            if rpr is None or not rpr.get("sz"):
+                continue  # an inherited size is not known here
+            size = int(rpr.get("sz")) / 100
+            latin = rpr.find(q("a:latin"))
+            family = latin.get("typeface") if latin is not None else None
+            caps = rpr.get("cap") == "all"
+            line = usable - max(indent, size * 1.1 if bullet else 0.0)
+            for word in _WORD_SPLIT_RE.split(r.findtext(q("a:t")) or ""):
+                word = word.strip()
+                if word and text_width_pt(word, family, size, rpr.get("b") == "1", caps=caps) > line * WORD_ROOM:
+                    return word
+    return None
+
+
+def crowded_beside(slide, strip: tuple[int, int, int, int], W: int, H: int) -> Optional[str]:
+    """Why the text laid out beside a picture's strip reads badly, None when it reads well: a word of the slide wider
+    than its line (a column too narrow for it — the jury of 20.10: «генерац/ии», «Канареечн/ая» beside an added
+    picture) or words that run under the strip (a heading cut by it: «Два правила для сложных случаев дан»)."""
+    tree = slide._element.cSld.find(q("p:spTree"))
+    if tree is None:
+        return None
+    pad = int(0.005 * W)
+    for el in tree.iter(q("p:sp")):
+        if _ours(el) or _ph_type(el) in MINOR_PH:
+            continue
+        text = _text_of(el)
+        b = _bbox(el)
+        if not text or b is None or (len(text) <= 4 and b[2] * b[3] < 0.012 * W * H):
+            continue
+        word = _broken_word(el)
+        if word:
+            return f"the word «{word[:40]}» is wider than its column beside the picture"
+        ink = _ink_box(el, b)
+        if _hits(ink, strip) and min(ink[0] + ink[2], strip[0] + strip[2]) - max(ink[0], strip[0]) > pad:
+            return f"the text «{text[:40]}» runs under the picture"
+    return None
 
 
 # ------------------------------------------------------------------ the frame

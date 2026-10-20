@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 
 import numpy as np
+import pytest
 from lxml import etree
 from PIL import Image
 from pptx import Presentation
@@ -270,29 +271,126 @@ def test_a_content_slides_picture_is_a_full_height_strip_away_from_the_layouts_l
     assert x >= sw + int(0.03 * W) and x + w == W - Inches(0.5)
 
 
-def test_pictures_on_means_pictures_in_the_deck():
-    """The owner (18.10): «если включено „Генерировать изображения“, картинки обязаны быть». A deck whose text placed
-    none gets them on short content slides spread over it — the same slides in every variant, described by the text's
-    own slide headings so the variants share them; tables, charts, covers never."""
-    from verstka.planning.pictures import AUTO_LABEL, ensure_pictures
+@pytest.fixture
+def env_deck(simple_deck, tmp_path):
+    from verstka.analysis.manifest import analyze_template
+    from verstka.ingest.workspace import TemplateWorkspace
+
+    manifest = analyze_template(simple_deck, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    return simple_deck, manifest, TemplateWorkspace.open(manifest.template_id, tmp_path / "ws")
+
+
+def _picture_deck(heads: dict[int, str], n: int = 10, kinds: dict[int, str] | None = None):
     from verstka.schemas.common import PatternKind as K
 
-    def deck():
-        sl = [OutlineSlide(id="t", kind=K.title, headline="Франция")]
-        for k in range(2, 11):
-            c = SlideContent(bullets=["Короткий пункт.", "Ещё пункт."]) if k != 6 else SlideContent(table={"columns": ["a", "b"], "rows": [["1", "2"]]})
-            sl.append(OutlineSlide(id=f"s{k}", kind=K.bullets if k != 6 else K.table, headline=f"Заголовок {k}", content=c, spec_ref=k))
-        return DeckOutline(title="Франция", slides=sl)
+    sl = [OutlineSlide(id="t", kind=K.title, headline="Склад в Подольске")]
+    for k in range(2, n + 1):
+        kind = (kinds or {}).get(k, "bullets")
+        c = SlideContent(bullets=["Короткий пункт.", "Ещё пункт."]) if kind != "table" else SlideContent(table={"columns": ["a", "b"], "rows": [["1", "2"]]})
+        sl.append(OutlineSlide(id=f"s{k}", kind=K(kind), headline=heads.get(k, f"Итоги квартала {k}"), content=c, spec_ref=k))
+    return DeckOutline(title="Склад", slides=sl)
 
-    a, b = deck(), deck()
-    text = "\n".join(f"Слайд {k}. Тема слайда {k}" for k in range(1, 11))
-    said = ensure_pictures([a, b], text)
+
+def test_pictures_go_only_where_the_slide_shows_a_thing_one_can_see():
+    """The jury of 20.10 (and VK's experts): a cloud for «облачные сервисы», an arrow «рост» on a slide about rising
+    costs, an envelope, a notebook — pictures that say nothing. A picture is added only on a short slide whose heading
+    names a thing one can see (a place, a device, a process at work), the same slide in every variant, described by
+    that thing and the heading; a deck of money and plans keeps none (never forced to two)."""
+    from verstka.planning.pictures import AUTO_LABEL, concrete_subject, ensure_pictures
+
+    assert concrete_subject("Перевод на сканеры и 6 кладовщиков стоят 2,9 млн ₽ в год") == ("сканер", "сканеры")
+    assert concrete_subject("Ошибки комплектации 0,8% превышают цель")[0] == "склад"
+    for abstract in ("Расходы на облачные сервисы выросли на 12%", "Выручка растёт быстрее плана", "Два правила для сложных случаев данных",
+                     "Глубина 1642 метров", "Q3: квартал закрыт с прибылью", "Мониторинг и машинное обучение", "Письмо клиентам и отчёт"):
+        assert concrete_subject(abstract) is None, abstract
+    heads = {3: "Перевод на сканеры окупится за год", 7: "Новый склад в Казани принимает 3 000 заказов"}
+    a, b = _picture_deck(heads), _picture_deck(heads)
+    said = ensure_pictures([a, b])
     got = [(i, s.content.photo_hint) for i, s in enumerate(a.slides) if s.content.photo_slot]
-    assert len(got) >= 2 and len(said) == len(got)
-    assert all(a.slides[i].kind.value not in ("title", "table") and h.startswith("Тема слайда") for i, h in got)
+    assert [i for i, _ in got] == [2, 6] and len(said) == 2
+    assert got[0][1] == "Сканер — Перевод на сканеры окупится за год" and got[1][1].startswith("Склад — ")
     assert [(i, s.content.photo_hint) for i, s in enumerate(b.slides) if s.content.photo_slot] == got
     assert all(a.slides[i].content.photo_slot == AUTO_LABEL and not a.slides[i].content.photo_own for i, _ in got)
-    assert ensure_pictures([a], text) == []  # enough already
+    assert ensure_pictures([a]) == []  # enough already
+    # money and plans only: no picture, and the run says why
+    plain = _picture_deck({})
+    said = ensure_pictures([plain])
+    assert not any(s.content.photo_slot for s in plain.slides) and said and said[0].startswith("no picture added")
+
+
+def test_one_thing_is_pictured_once_and_never_beside_steps_or_three_cards():
+    """One arrow on two slides (the jury's R05 s2 and s10): a thing the deck already shows is not pictured again (the
+    author's own picture of it included); steps, a timeline, two columns or three cards need the slide's width (R04 s15
+    «генерац/ии», R07 s7 «Канареечн/ая») and get no picture."""
+    from verstka.planning.pictures import ensure_pictures
+    from verstka.schemas.outline import SlideItem
+
+    heads = {2: "Склад в Казани", 4: "Склад в Подольске", 6: "Смартфон кладовщика", 8: "Экран приложения курьера", 10: "Сканеры на складе"}
+    o = _picture_deck(heads, n=12, kinds={10: "process"})
+    ensure_pictures([o])
+    things = [s.headline for s in o.slides if s.content.photo_slot]
+    assert things == ["Склад в Казани", "Смартфон кладовщика"]  # one warehouse, one phone; the process slide never
+    o = _picture_deck({3: "Сканеры на складе"}, n=6)
+    o.slides[2].content.items = [SlideItem(title=t, text="коротко") for t in ("Тест", "Трафик", "Учения")]
+    o.slides[2].content.bullets = []
+    assert not ensure_pictures([o])[0].startswith("picture added") and not o.slides[2].content.photo_slot
+    o = _picture_deck({3: "Сканеры на складе", 5: "Новые сканеры в зоне приёмки"}, n=8)
+    o.slides[2].content.photo_slot, o.slides[2].content.photo_hint = "Изображение", "сканер в руке кладовщика"
+    ensure_pictures([o])
+    assert not o.slides[4].content.photo_slot  # the author already shows a scanner
+
+
+def test_an_added_picture_leaves_a_slide_whose_words_it_would_break(env_deck):
+    """The jury of 20.10: the picture's strip narrowed the column and a long word broke («генерац/ии»). The renderer
+    lays such a slide out again without the added picture (an author's picture stays); a heading under its label stops
+    before the strip."""
+    from verstka.planning.pictures import AUTO_LABEL
+    from verstka.rendering.deck import DeckBuilder
+    from verstka.rendering.synth import render_synth
+    from verstka.schemas.common import PatternKind as K
+    from verstka.schemas.layout import LayoutSlide
+    from verstka.schemas.outline import SlideItem
+
+    deck, manifest, ws = env_deck
+
+    def render(oslide):
+        outline = DeckOutline(title="T", strategy="structured", slides=[oslide])
+        b = DeckBuilder(deck)
+        slide, warns = render_synth(b, LayoutSlide(outline_id=oslide.id, mode="synth", composition="cards"), oslide, manifest, ws, outline)
+        return b, slide, warns
+
+    long = "Сверхвысокопроизводительная"
+    items = [SlideItem(title=f"{long} {k}", text=f"{long}") for k in range(4)]
+    o = OutlineSlide(id="c", kind=K.cards, headline="Склад и сканеры", content=SlideContent(items=items, photo_slot=AUTO_LABEL, photo_hint="Склад — Склад и сканеры"))
+    b, slide, warns = render(o)
+    assert any("the added picture left out" in w for w in warns)
+    assert o.content.photo_slot is None and len(b.created) == 1
+    assert not [sh for sh in slide.shapes if sh.name == PHOTO_PLACE_NAME]
+    # a short slide keeps its picture, its text clear of the strip
+    o = OutlineSlide(id="d", kind=K.bullets, headline="Склад в Казани", content=SlideContent(bullets=["Две смены.", "Сорок человек."], photo_slot=AUTO_LABEL, photo_hint="Склад — Склад в Казани"))
+    b, slide, warns = render(o)
+    places = [sh for sh in slide.shapes if sh.name == PHOTO_PLACE_NAME]
+    assert places and not any("left out" in w for w in warns)
+    assert PL.crowded_beside(slide, (places[0].left, places[0].top, places[0].width, places[0].height), b.slide_w, b.slide_h) is None
+
+
+def test_crowded_beside_sees_a_broken_word_and_a_heading_under_the_strip():
+    prs, s = _deck()
+    sw = int(PL.STRIP_SHARE * W)
+    strip = (W - sw, 0, sw, H)
+    # «_deck»'s place stands where the strip would: ours, never counted
+    assert PL.crowded_beside(s, strip, W, H) is None
+    t = s.shapes.add_textbox(Inches(0.6), Inches(5.6), Inches(1.2), Inches(1))
+    t.text_frame.text = "Канареечная"
+    t.text_frame.word_wrap = True
+    t.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+    assert "Канареечная" in PL.crowded_beside(s, strip, W, H)
+    t._element.getparent().remove(t._element)
+    h = s.shapes.add_textbox(Inches(0.6), Inches(0.2), Inches(12), Inches(0.6))
+    h.text_frame.word_wrap = True
+    h.text_frame.text = "Два правила для сложных случаев данных и ещё несколько слов для длины"
+    h.text_frame.paragraphs[0].runs[0].font.size = Pt(24)
+    assert "under the picture" in PL.crowded_beside(s, strip, W, H)
 
 
 def test_a_place_verstka_chose_is_never_drawn_from_its_heading_alone(tmp_path):

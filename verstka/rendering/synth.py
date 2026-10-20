@@ -1054,7 +1054,32 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         outline = outline.model_copy(update={"strategy": style})
     if comp in _COVER_COMPS:
         return put_back_brand_logos(*_render_cover(builder, plan_slide, oslide, manifest, ws, outline), corner=False)
-    return put_back_brand_logos(*_render_content(builder, comp, oslide, manifest, ws, outline))
+    auto = _auto_picture(oslide)
+    before = (len(builder.created), {sld.get("id") for sld in builder.prs.slides._sldIdLst}) if auto else None
+    slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
+    strip = slide.__dict__.get("_photo_frame_box")
+    if auto and strip is not None and slide.__dict__.get("_photo_frame") is None:
+        # a picture Verstka added itself (planning/pictures.py) stays only where the text beside it reads in its own
+        # size: a word broken in the narrowed column or a heading under the strip — the slide is laid out again, whole,
+        # without the picture (the jury of 20.10: «генерац/ии», a heading cut by the picture)
+        from verstka.rendering.picture_layouts import crowded_beside
+        from verstka.rendering.renderer import _rollback
+
+        why = crowded_beside(slide, (strip.x, strip.y, strip.w, strip.h), builder.slide_w, builder.slide_h)
+        if why:
+            _rollback(builder, before)
+            oslide.content.photo_slot = None
+            oslide.content.photo_hint = None
+            slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
+            warns = [*warns, f"the added picture left out: {why}"]
+    return put_back_brand_logos(slide, warns)
+
+
+def _auto_picture(oslide: OutlineSlide) -> bool:
+    from verstka.planning.pictures import AUTO_LABEL
+
+    c = oslide.content
+    return bool(c is not None and c.photo_slot == AUTO_LABEL and not c.photo_own)
 
 
 @dataclass
@@ -3019,6 +3044,8 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
             ground = pal.bg
             color = _heading_on(ground, manifest, pal)
             right = min(int(manifest.tokens.spacing.safe_area.x2 * W), W - bb.x)
+            if slide.__dict__.get("_verstka_text_right") is not None:
+                right = min(right, int(slide.__dict__["_verstka_text_right"]))  # the picture's strip at the right edge
             width = min(_free_width(slide, Bbox(x=bb.x, y=y, w=right - bb.x, h=int(0.1 * H)), W, H, right, skip=(title_ph._element, back_el)), int(0.86 * W))
             size = head_size
             from verstka.rendering.fonts import wrap_lines
