@@ -7,6 +7,7 @@ import { type DeckFit } from "../deck/fit";
 import { PLATE_PAD } from "../deck/layout";
 import type { SheetTab } from "../deck/geometry";
 import type { IconName } from "../kit/icons";
+import { modelFailed } from "../../lib/modelText";
 import { qualityCard } from "./resultView";
 
 /** Пункт итогов: значок, жирное начало и остальное; `title` — подсказка целиком; `sheet` — вкладка «Подробнее», которую
@@ -40,7 +41,10 @@ export function sourceText(g: Generation, note: { title: string } | null): strin
   if (g.improved_from?.name) return `Текст из презентации «${templateTitle(g.improved_from.name)}»`;
   // колода из файлов с данными (V2 v105 `hpSrc`): текст слайдов написал агент — по брифу и файлам
   const files = g.dataset_ids?.length ?? 0;
-  if (files) return `Текст написал агент — по ${g.brief?.trim() ? "брифу и " : ""}${files} ${files % 10 === 1 && files % 100 !== 11 ? "файлу" : "файлам"} данных`;
+  // модель в сборке не участвовала (не ответила) — так и сказано: «Собрано без модели», а не «Текст написал агент»
+  const without = modelFailed(g);
+  if (files) return `${without ? "Собрано без модели" : "Текст написал агент"} — по ${g.brief?.trim() ? "брифу и " : ""}${files} ${files % 10 === 1 && files % 100 !== 11 ? "файлу" : "файлам"} данных`;
+  if (without) return "Собрано без модели — ваш текст разложен по правилам";
   return note?.title || "Ваш текст — агент разложил его по слайдам";
 }
 

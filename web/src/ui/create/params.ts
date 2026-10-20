@@ -9,7 +9,7 @@ import type { DataRequest } from "./dataRules";
 import { dictatedByHeadings, dictatedSlides } from "../../lib/textFacts";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
-import type { GenerateRequest, ImproveSource, Notice, StrategyInfo } from "../../types";
+import type { GenerateRequest, ImproveSource, ModelsStatus, Notice, StrategyInfo } from "../../types";
 
 /** Параметры сборки — черновик рядом с текстом (`verstka.brief_draft`, ключ `params`).
  *  - `slides`: null — степпер не трогали (12).
@@ -241,13 +241,29 @@ export function startFailure(note: Notice | null | undefined, since: number | nu
 /** Строка под сводкой: ошибка (поле пусто или коротко, нет шаблона, сервер не начал сборку; `echo` — она повторяет
  *  ошибку у поля «Текст», её читает та строка), тихая «Сборка уже идёт» со ссылкой «Вернуться к сборке» или тихий итог
  *  сборки, кончившейся без человека на её экране: «Сборка готова · Открыть», «Сборка не удалась · Посмотреть». */
-export type HeadLine = { kind: "error"; text: string; echo: boolean } | { kind: "busy" } | { kind: "ended"; ok: boolean; failed: boolean };
+export type HeadLine = { kind: "error"; text: string; echo: boolean } | { kind: "busy" } | { kind: "ended"; ok: boolean; failed: boolean }
+  | { kind: "model"; tone: "warn" | "info"; text: string };
+
+/** Строка состояния модели под сводкой (GET /api/models/status): честно, до сборки — модель не отвечает, сборка пойдёт
+ *  по правилам; работает запасная. Только когда человек просит модель («Модель пишет тексты»); состояние ещё не известно
+ *  (модель не звали) или всё в порядке — строки нет. */
+export function modelLine(st: Pick<ModelsStatus, "state" | "working_label"> | null | undefined, useModels: boolean): Extract<HeadLine, { kind: "model" }> | null {
+  if (!st) return null;
+  if (st.state === "off") return { kind: "model", tone: "warn", text: "Модель не подключена — соберу по правилам" };
+  if (!useModels) return null;
+  if (st.state === "down") return { kind: "model", tone: "warn", text: "Модель недоступна — соберу по правилам" };
+  if (st.state === "retry") return { kind: "model", tone: "warn", text: "Модель не отвечает — если не ответит, соберу по правилам" };
+  if (st.state === "fallback") return { kind: "model", tone: "info", text: st.working_label ? `Работает запасная модель — ${st.working_label}` : "Работает запасная модель" };
+  return null;
+}
 
 /** Какая строка стоит под сводкой: «Сборка уже идёт» (нажали «Создать», пока идёт сборка) сильнее ошибки, ошибка —
  *  итога сборки, кончившейся в другом месте; итог — тихий, он ждёт, пока его увидят (`failed` — её презентация не
  *  открылась: «Не удалось открыть презентацию · Открыть ещё раз»). */
-export function headLine(o: { busy: boolean; bad: string | null; echo: boolean; ended: { ok: boolean } | null; openFailed?: boolean }): HeadLine | null {
+export function headLine(o: { busy: boolean; bad: string | null; echo: boolean; ended: { ok: boolean } | null; openFailed?: boolean; model?: HeadLine | null }): HeadLine | null {
   if (o.busy) return { kind: "busy" };
   if (o.bad !== null) return { kind: "error", text: o.bad, echo: o.echo };
-  return o.ended ? { kind: "ended", ok: o.ended.ok, failed: o.ended.ok && !!o.openFailed } : null;
+  if (o.ended) return { kind: "ended", ok: o.ended.ok, failed: o.ended.ok && !!o.openFailed };
+  // состояние модели — тише всего: ошибка и итог сборки важнее
+  return o.model ?? null;
 }

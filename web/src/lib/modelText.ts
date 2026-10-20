@@ -57,8 +57,15 @@ const WHY: Record<string, string> = {
 /** The built-in planner took over because a model failed — and the server knows why (a notice is worth showing). */
 export function modelFailed(g: Generation): boolean {
   const p = g.planner;
-  return !!g.use_models && !!p && p.by_model === false && p.planned_by !== "supplied" && !!p.reason_code && p.reason_code !== "off";
+  if (!g.use_models || !p || p.by_model !== false || p.planned_by === "supplied") return false;
+  if (p.reason_code && p.reason_code !== "off") return true;
+  // колода из файлов: план по правилам без своей причины, а модель не ответила на шаге данных (generation.json
+  // `data_story.model_error`) — модель в сборке не участвовала
+  return !p.reason_code && !!g.data_story?.model_error && g.data_story.planned_by !== "model";
 }
+
+/** Модель не ответила только на шаге данных (своей причины у плана нет). */
+const dataOnly = (g: Generation) => !g.planner?.reason_code && !!g.data_story?.model_error;
 
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
@@ -207,13 +214,15 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
       ? unwritten
         ? "Это каркас: разделы с подсказками в заметках."
         : "В тексте только тема, поэтому это каркас: разделы с подсказками в заметках."
-      : `Собрано по вашему тексту без модели${slidesText ? ` — ${slidesText}` : ""}.`;
+      : dataOnly(g) ? "Модель не ответила — числа и слайды из файлов данных собраны по правилам, формулировки — без её правки."
+        : `Собрано по вашему тексту без модели${slidesText ? ` — ${slidesText}` : ""}.`;
     const offer = rebuildOffer(p, live);
     // «Модель недоступна» after the title «Модель сейчас недоступна» says nothing new
     const help = isUnavailable(offer.help) ? null : offer.help;
     const parts = [help ? lowerFirst(help) : null, skeleton || short ? (help ? cap(addTheses) : addTheses) : null];
     // a topic's text was not written: said plainly, whatever the model's reason (gate 4 G4-21)
-    const title = skeleton && unwritten ? (p?.reason_code && p.reason_code !== "off" && p.reason_code !== "rejected" ? "Модель недоступна — текст не написан" : "Текст не написан — это каркас") : whyNoModel(p);
+    const title = skeleton && unwritten ? (p?.reason_code && p.reason_code !== "off" && p.reason_code !== "rejected" ? "Модель недоступна — текст не написан" : "Текст не написан — это каркас")
+      : dataOnly(g) ? "Собрано без модели" : whyNoModel(p);
     return {
       owner: p?.owner ?? live?.status?.owner ?? null,
       title,
@@ -247,6 +256,7 @@ export function silentNote(g: Generation): string {
   if (!modelFailed(g)) return "";
   // «Модель сейчас недоступна. … Модель недоступна.»: the title already says it
   const help = plainAdvice(g.planner?.advice);
+  if (dataOnly(g)) return sentences(["Модель не ответила", "Собрал по файлам данных без неё — числа сверены", isUnavailable(help) ? null : help], true);
   return sentences([whyNoModel(g.planner), "Собрал по вашему тексту без модели", isUnavailable(help) ? null : help], true);
 }
 

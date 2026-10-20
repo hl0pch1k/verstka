@@ -24,8 +24,7 @@ import { ctaShort, paramsRow } from "./morph";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, paramsBrief, fontsHint, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
-  type HeadLine, type ImagesInfo, type SlidesView, type SwitchView, type VariantCard,
-} from "./params";
+  type HeadLine, type ImagesInfo, type SlidesView, type SwitchView, type VariantCard, modelLine } from "./params";
 
 export type { HeadLine } from "./params";
 
@@ -73,6 +72,7 @@ export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
     improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded, goBuild, data, kb,
+    modelStatus,
   } = useApp();
   const rise = useRise();
   const modelOn = useModelOn();
@@ -174,7 +174,7 @@ export function useParamsPlate(): ParamsPlate {
   const textBad = textIssue && (textIssue.kind === "empty" || textIssue.kind === "short") ? textIssue.text : null;
   const waitNow = dataWait === DATA_WAIT ? data.busy : dataWait === BRAND_WAIT ? ["run", "done", "out"].includes(data.brand.phase) : false;
   const bad = textBad ?? (noTpl && !templateId ? NO_TEMPLATE : null) ?? (waitNow ? dataWait : null) ?? failed;
-  const line = headLine({ busy: busyAsk && building, bad, echo: bad === textBad, ended: buildEnd, openFailed: openFail });
+  const line = headLine({ busy: busyAsk && building, bad, echo: bad === textBad, ended: buildEnd, openFailed: openFail, model: modelLine(modelStatus, params.useModels) });
 
   const writes: SwitchView = { on: modelOn && params.useModels, disabled: !modelOn, title: modelOn ? undefined : "Модель не подключена" };
   // взгляд дизайнера: пока не трогали — как модель; «Улучшить готовую»: модель смотрит на каждый новый слайд (так
@@ -208,6 +208,17 @@ export function GoLink({ label, busy, onClick }: { label: string; busy: boolean;
       <span className="pp-gol" style={{ opacity: busy ? 0 : 1 }}>{label}</span>
       <span className="pp-gos" aria-hidden="true" style={{ opacity: busy ? 1 : 0 }}><Spinner size={14} /></span>
     </button>
+  );
+}
+
+/** Строка состояния модели (не ошибка): значок и слова; модель недоступна — янтарная, работает запасная — голубая. */
+function ModelLine({ line }: { line: Extract<HeadLine, { kind: "model" }> }) {
+  const warn = line.tone === "warn";
+  return (
+    <p role="status" className="pp-busy pp-model" title={line.text} style={{ color: warn ? "#FBBF24" : "#7DD3FC" }}>
+      <span style={{ display: "flex", flex: "none" }}><Icon name={warn ? "alert" : "info"} size={16} /></span>
+      <span>{line.text}</span>
+    </p>
   );
 }
 
@@ -265,6 +276,7 @@ function ParamsLine({ pp }: { pp: ParamsPlate }) {
     <div id="pp-err" className={cls("pp-err", show(on))}>
       {shown?.kind === "busy" ? <BusyLine onBack={pp.goBuild} />
         : shown?.kind === "ended" ? <EndedLine line={shown} busy={pp.opening} onOpen={pp.openEnded} />
+        : shown?.kind === "model" ? <ModelLine line={shown} />
         : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
     </div>
   );

@@ -18,6 +18,7 @@ import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
+import { useHelperWant } from "../shell/helperMotion";
 import { ctaShort, type CheckItem } from "./compact";
 import type { NoteActions } from "./NotePill";
 import type { NoteView } from "./resultView";
@@ -214,8 +215,15 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
   const wrap = useDeckWrap();
   const short = ctaShort(wrap > 0 ? wrap - HELPER_COL : 0, (note ? 1 : 0) + 4);
   const tf = useTitleFit(d.title);
+  // помощник закрыт — компактного вида нет и для клавиатуры, чтения с экрана и щелчка: он прозрачен, но его кнопки
+  // («Новая презентация» и другие) лежали под заголовком полного вида и находились по имени (жюри, Playwright)
+  const want = useHelperWant();
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    root.current?.toggleAttribute("inert", !want);
+  }, [want]);
   return (
-    <div className={cls("hp-in", snap.wide && "hp-wide", snap.now && "hp-snap")}>
+    <div ref={root} className={cls("hp-in", snap.wide && "hp-wide", snap.now && "hp-snap")}>
       <div className="hp-top hp-xf">
         <div className="gh-top p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64, animationDelay: "160ms" }}>
           <div style={{ flex: 1, minWidth: 0 }}>

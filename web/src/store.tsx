@@ -1027,6 +1027,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!alive) return;
         setHealth((prev) => (prev && JSON.stringify(prev) === JSON.stringify(h) ? prev : h));
         setHealthError(false);
+        // состояние модели — с тем же шагом: «Создать» честно говорит, что модель недоступна, ещё до сборки
+        void refreshModelStatus();
       } catch {
         if (!alive) return;
         ok = false;
@@ -1043,7 +1045,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [report, selectTemplate, fetchGeneration, showFailedBuild]);
+  }, [report, selectTemplate, fetchGeneration, showFailedBuild, refreshModelStatus]);
 
   // Manifest follows templateId (re-runs when the API comes back online).
   useEffect(() => {

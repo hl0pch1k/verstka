@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { AuditReport, AuditSummary, Generation, Issue, Variant } from "../../types";
+import type { AuditReport, AuditSummary, Generation, Issue, PlannerInfo, Variant } from "../../types";
 import { compactChecks, ctaShort, headTight, panelFit, sourceText } from "./compact";
 
 const audit = (summary: Partial<AuditSummary> = {}, issues: Partial<Issue>[] = []): AuditReport => ({
@@ -79,4 +79,19 @@ test("headTight: только тесная колода и широкая кол
 test("panelFit: панель замечаний — 320 при открытом помощнике (колонка компактного вида), иначе 416 (полного)", () => {
   assert.equal(panelFit(true), "narrow");
   assert.equal(panelFit(false), "wide");
+});
+
+test("источник текста: модель в сборке не участвовала (не ответила) — «Собрано без модели», а не «Текст написал агент»", () => {
+  const planner = { planned_by: "rules", by_model: false, model: null, model_label: null, reason_code: null, reason: null, advice: null } as PlannerInfo;
+  const data = { datasets: 3, slides: 8, planned_by: "rules", model_error: "all model links failed" };
+  // файлы с данными, модель не ответила на шаге данных
+  assert.equal(sourceText(gen({ use_models: true, planner, dataset_ids: ["a", "b", "c"], brief: "Итоги", data_story: data }), null),
+    "Собрано без модели — по брифу и 3 файлам данных");
+  // модель ответила — как было
+  assert.equal(sourceText(gen({ use_models: true, planner: { ...planner, by_model: true, planned_by: "model" }, dataset_ids: ["a"], data_story: { ...data, planned_by: "model", model_error: null } }), null),
+    "Текст написал агент — по 1 файлу данных");
+  // свой текст, модель недоступна
+  assert.equal(sourceText(gen({ use_models: true, planner: { ...planner, reason_code: "no_credits" } }), null), "Собрано без модели — ваш текст разложен по правилам");
+  // модель выключили сами — это не «не участвовала по беде»
+  assert.equal(sourceText(gen({ use_models: false, planner: { ...planner, reason_code: "off" } }), null), "Ваш текст — агент разложил его по слайдам");
 });

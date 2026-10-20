@@ -2,8 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildRequest, buildRunning, chosenStrategies, eyesOn, headLine, OWN, PARAMS0, paramsBrief, picturesOn, presetParams, readParams, slidesView, slideWord,
-  START_FAILED, startFailure, stepSlides, summaryLine, toggleEyes, togglePictures, toggleStrategy, variantCards, type Params,
-} from "./params";
+  START_FAILED, startFailure, stepSlides, summaryLine, toggleEyes, togglePictures, toggleStrategy, variantCards, type Params, modelLine } from "./params";
 import type { ActiveJob } from "../../lib/jobState";
 import type { ImproveSource, StrategyInfo } from "../../types";
 
@@ -265,4 +264,21 @@ test("«Подобрать шрифты»: по умолчанию включё�
   assert.equal(readParams({ fonts: false }).fonts, false);
   assert.equal(readParams({}).fonts, true);
   assert.equal(presetParams(P(), { pickFonts: false }).fonts, false);
+});
+
+test("строка модели на «Создать»: недоступна — по правилам, запасная — какая; тише ошибки и итога сборки", () => {
+  const st = (state: string, working_label: string | null = null) => ({ state, working_label }) as never;
+  assert.deepEqual(modelLine(st("down"), true), { kind: "model", tone: "warn", text: "Модель недоступна — соберу по правилам" });
+  assert.equal(modelLine(st("retry"), true)?.tone, "warn");
+  assert.deepEqual(modelLine(st("fallback", "Qwen3.6-27B"), true), { kind: "model", tone: "info", text: "Работает запасная модель — Qwen3.6-27B" });
+  assert.equal(modelLine(st("off"), false)?.text, "Модель не подключена — соберу по правилам");
+  // всё в порядке, ещё не звали, модель выключили сами, состояния нет — строки нет
+  assert.equal(modelLine(st("ok"), true), null);
+  assert.equal(modelLine(st("unknown"), true), null);
+  assert.equal(modelLine(st("down"), false), null);
+  assert.equal(modelLine(null, true), null);
+  const model = modelLine(st("down"), true);
+  assert.deepEqual(headLine({ busy: false, bad: null, echo: false, ended: null, model }), model);
+  assert.equal(headLine({ busy: false, bad: "Напишите текст", echo: false, ended: null, model })?.kind, "error");
+  assert.equal(headLine({ busy: false, bad: null, echo: false, ended: { ok: true }, model })?.kind, "ended");
 });
