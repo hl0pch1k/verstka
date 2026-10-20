@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from verstka.data.aggregate import MAX_SLIDES, RATE_GOAL, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import FactSet, facts_for, plain_headline
 from verstka.data.goals import Goal, goal_ask, goal_focus, goal_match, goals_of, stems_of
-from verstka.data.words import stem_in
+from verstka.data.words import same_stem, stem_in
 from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
 from verstka.data.parse import split_unit
@@ -992,9 +992,13 @@ def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:
         series.append(InlineSeries(name=names.get(x.name, x.name), values=list(vals), unit=unit))
     # ось значений — по величине («Приём», единицу «чел.» дописывает движок); группа частей из шапки («Форма
     # обучения») — заголовок легенды, а не оси
+    title = _series_title(d)
+    if title == "Значение" or any(same_stem(a, b) for a in stems_of(title) for b in stems_of(cv.dim or "")):
+        # «Сегменты.csv» с колонками-годами: «Сегменты» — это категории, а не величина на оси (жюри R25: ошибка
+        # аудита «ось названа как категории») — ось называет единица
+        title = unit or "Значение"
     return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit, x_title=cv.dim,
-                     y_title=_series_title(d) if _series_title(d) != "Значение" else (unit or "Значение"),
-                     legend_title=d.group_name, source=src)
+                     y_title=title, legend_title=d.group_name, source=src)
 
 
 def _parts_doughnut(d: Data, src: str) -> Union[ChartSpec, NotBuilt]:

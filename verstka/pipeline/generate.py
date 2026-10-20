@@ -614,6 +614,14 @@ def generate_variants(
                 eyes_seen[name] = EyesOutcome(skipped=f"failed: {str(e)[:160]}", skipped_code="failed").summary()
                 say(skip_message("failed"))
             v["timings"]["eyes"] = round(time.time() - tey, 2)
+            if content_on:
+                # the model's content checks of this variant now, beside the next variants' layout and the pictures'
+                # drawing — not all three after the export, where they held the deck for 30 s (jury 20.10, round 4)
+                try:
+                    _check_content([v], manifest, ws, providers_base, skills, gen_stats, t_start, brief, writer_audit,
+                                   use_vlm=use_vlm, use_llm=use_llm, early=True)
+                except Exception:  # noqa: BLE001 - they run after the export instead
+                    log.warning("early content checks failed on %s", name, exc_info=True)
         try:
             from verstka.rendering.renderer import strip_outline_marks
 
@@ -632,7 +640,9 @@ def generate_variants(
             v["warnings"].append(f"pictures: the places were not read ({str(e)[:120]})")
         return v
 
-    eyes_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="eyes") if eyes_on else None
+    content_on = bool(audit and audit_models and providers_base is not None and skills is not None and (use_vlm or use_llm))
+    # one look per variant side by side (each with its content checks): the third variant never waits for the first two
+    eyes_pool = ThreadPoolExecutor(max_workers=max(2, len(strategies)), thread_name_prefix="eyes") if eyes_on else None
     eyes_jobs: list = []
     try:
         for i, name in enumerate(strategies):
@@ -791,9 +801,19 @@ def generate_variants(
     else:
         finished = [_finish(v) for v in pending]
 
-    if audit and audit_models and providers_base is not None and skills is not None and (use_vlm or use_llm):
-        report("audit: content checks by the model", 0.95)
-        _check_content(finished, manifest, ws, providers_base, skills, gen_stats, t_start, brief, writer_audit, use_vlm=use_vlm, use_llm=use_llm)
+    if content_on:
+        late = [v for v in finished if not v.get("content_checked")]
+        if late:
+            report("audit: content checks by the model", 0.95)
+            _check_content(late, manifest, ws, providers_base, skills, gen_stats, t_start, brief, writer_audit, use_vlm=use_vlm, use_llm=use_llm)
+        for v in finished:
+            # (checked early: the report the pictures re-audited keeps the remarks — `_audit_with_pictures` — and says
+            # the checks ran)
+            rep = v.get("audit")
+            if v.get("content_checked") and rep is not None:
+                ran = list(rep.summary.checks_run)
+                rep.summary.checks_run = ran + [c for c in v.get("content_ran", []) if c not in ran]
+                rep.recompute()
     for v in finished:
         name, vdir, audit_report = v["name"], v["vdir"], v["audit"]
         if audit_report is not None:
@@ -1102,13 +1122,13 @@ def relay_without_pictures(v: dict, oids: dict[str, str], manifest: TemplateMani
 
 # the remarks that never leave with a deck while a rung of the autofix ladder is left for their slide
 RELAY_CHECKS = frozenset({"word_break", "text_under_picture", "text_clipped", "text_overflow", "overlap"})
-CONTENT_CHECKS_END_S = 275.0  # the content checks end by this second of the generation (the 5 minutes, a margin kept)
+CONTENT_CHECKS_END_S = 235.0  # the content checks end by this second of the generation (4:30 at the most, a margin kept)
 CONTENT_CHECKS_MIN_S = 20.0  # and get at least this long when the model budget is spent
-CONTENT_CHECKS_LAST_S = 270.0  # none start past this second
+CONTENT_CHECKS_LAST_S = 215.0  # none start past this second (jury 20.10, round 4: 4:12 in the interface, 229 s in the CLI)
 
 
 def _check_content(finished: list[dict], manifest: TemplateManifest, ws: TemplateWorkspace, providers: ProviderRegistry, skills, stats: list, t_start: float,
-                   brief: Optional[Brief], writer_audit, *, use_vlm: bool, use_llm: bool) -> None:
+                   brief: Optional[Brief], writer_audit, *, use_vlm: bool, use_llm: bool, early: bool = False) -> None:
     """The model's content checks (audit/model_checks.py: the 11 questions of the ТЗ's appendix 1 per slide by its
     picture, the deck's coherence) on each finished deck, all variants side by side, once: their remarks join the
     variant's report. Bounded by the generation's 5 minutes: a check the time does not allow is skipped and said so
@@ -1128,7 +1148,14 @@ def _check_content(finished: list[dict], manifest: TemplateManifest, ws: Templat
         if rep0 is None:
             return
         tc = time.time()
-        imgs = {k: Path(p) for k, p in enumerate(v.get("images") or [], 1)}
+        if early:
+            # (right after «Взгляд дизайнера», while the other variants are laid out and the pictures are drawn: the
+            # slides as the audit rendered them — the content the 11 questions ask about is the same after the pictures)
+            imgs = {int(k): Path(p) for k, p in (rep0.slide_images or {}).items() if Path(p).exists()}
+            if use_vlm and not imgs:
+                return
+        else:
+            imgs = {k: Path(p) for k, p in enumerate(v.get("images") or [], 1)}
         try:
             rep = run_audit(v["vdir"] / "deck.pptx", manifest, v["outline"], ws, providers=reg, skills=skills, use_vlm=use_vlm and bool(imgs), use_llm=use_llm,
                             render=False, existing_images=imgs, strategy=v["name"], brief_text=brief.text if brief else None, writer=writer_audit)
@@ -1143,8 +1170,10 @@ def _check_content(finished: list[dict], manifest: TemplateManifest, ws: Templat
                 i.id = f"{i.id}m"
             rep0.issues.append(i)
         ran = list(rep0.summary.checks_run)
-        rep0.summary.checks_run = ran + [c for c in ((SLIDE_CONTENT.id,) if use_vlm and imgs else ()) + ((DECK_COHERENCE.id,) if use_llm else ()) if c not in ran]
+        v["content_ran"] = [c for c in ((SLIDE_CONTENT.id,) if use_vlm and imgs else ()) + ((DECK_COHERENCE.id,) if use_llm else ())]
+        rep0.summary.checks_run = ran + [c for c in v["content_ran"] if c not in ran]
         rep0.recompute()
+        v["content_checked"] = True
         v["timings"]["content_checks"] = round(time.time() - tc, 2)
 
     with ThreadPoolExecutor(max_workers=max(1, min(3, len(finished)))) as ex:

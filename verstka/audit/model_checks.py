@@ -126,7 +126,7 @@ class CoherenceAudit(BaseModel):
     language_ok: bool = True
 
 
-def run_model_checks(ctx: AuditContext, skills: SkillsRegistry, providers: ProviderRegistry, use_vlm: bool = True, use_llm: bool = True, max_workers: int = 4) -> tuple[list[Issue], list[str]]:
+def run_model_checks(ctx: AuditContext, skills: SkillsRegistry, providers: ProviderRegistry, use_vlm: bool = True, use_llm: bool = True, max_workers: int = 8) -> tuple[list[Issue], list[str]]:
     issues: list[Issue] = []
     warnings: list[str] = []
     outline = ctx.outline
@@ -157,8 +157,26 @@ def run_model_checks(ctx: AuditContext, skills: SkillsRegistry, providers: Provi
 
     figures_checked = bool(getattr(ctx, "figure_stats", None) and (ctx.figure_stats or {}).get("checked"))
     chrome_texts = _chrome_texts(ctx)
+    def coherence() -> tuple[list[Issue], list[str]]:
+        out: list[Issue] = []
+        try:
+            seq = [{"slide": s.index, "headline": (next((o.headline for o in outline.slides if o.id == s.outline_id), "") if outline and s.outline_id else ""), "text": " ".join(e.text for e in s.texts)[:300]} for s in ctx.ir.slides]
+            res = skills.run("deck_coherence_audit", providers, {"sequence_json": json.dumps(seq, ensure_ascii=False)})
+            coh: CoherenceAudit = res.parsed
+            for it in coh.issues:
+                out.append(ctx.new_issue(DECK_COHERENCE, it.slide, it.text, severity="info", details={"question": 11}))
+            if not coh.language_ok:
+                out.append(ctx.new_issue(DECK_COHERENCE, 0, "колода не на одном языке", details={"question": 9}))
+            return out, []
+        except (ProviderError, ValueError, KeyError) as e:
+            return out, [f"coherence audit skipped: {str(e)[:160]}"]
+
+    # the deck's coherence (one text call) beside the slides' pictures, not after them: the checks' time is their
+    # slowest call, not the sum (jury 20.10, round 4: the generation's 5 minutes)
+    coh_pool = ThreadPoolExecutor(max_workers=1) if use_llm and providers.has("llm") and ctx.ir.slides else None
+    coh_job = coh_pool.submit(coherence) if coh_pool is not None else None
     if use_vlm and providers.has("vlm"):
-        with ThreadPoolExecutor(max_workers=min(max_workers, providers.limits.max_concurrency)) as ex:
+        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, providers.limits.max_concurrency))) as ex:
             for idx, parsed, err in ex.map(slide_task, ctx.ir.slides):
                 if err:
                     warnings.append(f"slide {idx}: content audit skipped: {err}")
@@ -174,15 +192,9 @@ def run_model_checks(ctx: AuditContext, skills: SkillsRegistry, providers: Provi
                     if not a.ok and a.question in CONTENT_QUESTIONS:
                         sev = QUESTION_SEVERITY.get(a.question, "warn")
                         issues.append(ctx.new_issue(SLIDE_CONTENT, idx, f"{CONTENT_QUESTIONS[a.question]} — нет. {a.evidence}".strip(), severity=sev, details={"question": a.question}))
-    if use_llm and providers.has("llm") and ctx.ir.slides:
-        try:
-            seq = [{"slide": s.index, "headline": (next((o.headline for o in outline.slides if o.id == s.outline_id), "") if outline and s.outline_id else ""), "text": " ".join(e.text for e in s.texts)[:300]} for s in ctx.ir.slides]
-            res = skills.run("deck_coherence_audit", providers, {"sequence_json": json.dumps(seq, ensure_ascii=False)})
-            coh: CoherenceAudit = res.parsed
-            for it in coh.issues:
-                issues.append(ctx.new_issue(DECK_COHERENCE, it.slide, it.text, severity="info", details={"question": 11}))
-            if not coh.language_ok:
-                issues.append(ctx.new_issue(DECK_COHERENCE, 0, "колода не на одном языке", details={"question": 9}))
-        except (ProviderError, ValueError, KeyError) as e:
-            warnings.append(f"coherence audit skipped: {str(e)[:160]}")
+    if coh_job is not None:
+        got, w = coh_job.result()
+        issues.extend(got)
+        warnings.extend(w)
+        coh_pool.shutdown(wait=False)
     return issues, warnings

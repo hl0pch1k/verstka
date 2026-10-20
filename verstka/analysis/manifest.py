@@ -462,7 +462,9 @@ def analyze_template(
 
     results = {}
     indices = sorted(shapes_by_slide)
-    workers = max_workers if (use_llm or use_vlm) and providers is not None else 1
+    # (as many slides side by side as the models config allows — 8 for VK inference / Polza: a 54-slide template took
+    # 133 s at 4, the generation's 5 minutes, jury 20.10, round 4)
+    workers = max(max_workers, min(8, int(providers.limits.max_concurrency))) if (use_llm or use_vlm) and providers is not None else 1
     if workers > 1:
         with ThreadPoolExecutor(max_workers=min(workers, providers.limits.max_concurrency if providers else workers)) as ex:
             for i, res in ex.map(_classify, indices):

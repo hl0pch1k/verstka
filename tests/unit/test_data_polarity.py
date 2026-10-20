@@ -261,3 +261,20 @@ def test_a_firm_ok_noun_keeps_its_vowel():
     from verstka.data.words import phrase
 
     assert phrase("Игрок").low.dat_pl == "игрокам" and phrase("Звонок").low.dat_pl == "звонкам"
+
+
+def test_market_headline_and_axis_say_something():
+    """Жюри, раунд 4 (R25): «Провайдер Г — 8%» при «Остальные — 20%» — не последний на деле, в заголовок не идёт; ось
+    столбцов сегментов по годам — единица, а не «Сегменты» (так называются категории)."""
+    from verstka.data.plan import chart_spec_of
+
+    t = read_file(MARKET / "Доли игроков 2025.csv")
+    q = "Кто главные игроки, какие доли"
+    r = read_goals(q, t, reading=GoalReading.model_validate(
+        {"goals": [{"span": q, "dataset": "d1", "task": "comparison", "metric": "Доля рынка", "ask": "max"}], "unanswerable": []}))
+    p = plan_datasets(t, q, goals=r.goals)[0]
+    assert p.headline.startswith("Провайдер А") and "Провайдер Г" not in p.headline, p.headline
+    t = read_file(MARKET / "Сегменты.csv")
+    p = plan_datasets(t, "")[0]
+    sp = chart_spec_of(p, t[0])
+    assert sp.y_title == "млрд ₽", sp.y_title

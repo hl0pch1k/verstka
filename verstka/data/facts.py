@@ -2088,6 +2088,8 @@ def _comparison(d: Data) -> FactSet:
                unit, f"Наименьшее значение — у {'категорий' if len(last_ks) > 1 else 'категории'} «{last_lab}».",
                prov=p_last)
         fs.ctx["last_label"] = last_lab
+        # («Остальные — 20%» в данных: последний из названных — не последний на деле, заголовок его не называет)
+        fs.ctx["tail_hidden"] = any(is_other_label(x) for x in cv.labels)
         labels.extend(cv.labels[k] for k in last_ks)
         if lo > 0 and lv / lo >= 2:
             r = round(lv / lo, 1)

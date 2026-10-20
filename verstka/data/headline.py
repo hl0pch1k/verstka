@@ -644,7 +644,7 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             mg = _f(fs, "margin")
             if mg is not None:
                 head += f", отрыв от второго места — {fmt_value(mg.value, u)}"  # «с каким отрывом» — ответ в заголовке
-            elif last is not None and c.get("last_label"):
+            elif last is not None and c.get("last_label") and not _hidden_tail(c):
                 head += f", {low_w} — {c['last_label']}: {fmt_value(last.value, u)}"
         else:
             by = f" по {c['by_metric']}" if c.get("by_metric") else ""
@@ -660,7 +660,7 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
             mg = _f(fs, "margin")
             if mg is not None and not c.get("signed"):
                 head += f", отрыв от второго места — {fmt_value(mg.value, u)}"  # «с каким отрывом» — ответ в заголовке
-            elif last is not None and c.get("last_label"):
+            elif last is not None and c.get("last_label") and not _hidden_tail(c):
                 head += f", {c['last_label']} — {val(last.value)}"
     else:
         head = c.get("plain", leader)
@@ -679,6 +679,14 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         head += (", все " if c.get("neg_all") and int(neg.value) > 1 else ", ") + \
             f"{count_words(int(neg.value), *forms)} в минусе"
     return head, c.get("caption")
+
+
+def _hidden_tail(c: dict) -> bool:
+    """Последний из названных — не последний на деле: строка «Остальные» / «Прочие» прячет меньших («Провайдер А
+    впереди: 31%, Провайдер Г — 8%» при «Остальные — 20%» — вторая половина ни о чём, жюри R25)."""
+    from verstka.data.aggregate import is_other_label
+
+    return bool(c.get("tail_hidden")) or any(is_other_label(str(x)) or str(x).startswith("Остальные ") for x in c.get("labels") or [])
 
 
 def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
