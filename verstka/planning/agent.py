@@ -6361,6 +6361,17 @@ def run_agent(
             long_doc = DG.is_long_document(brief.text, len(plan.items) if plan.form == "letter" else 0)
         else:
             long_doc = topic_note is None and (DG.is_long_document(brief.text) or (no_model and DG.is_document(brief.text)))
+        if not long_doc and plan is None and no_model and brief.slide_count and topic_note is None and not DG._SLIDE_RE.search(brief.text):
+            # «Сделай 8 слайдов …» without a model: the author's count, ±0, of the brief's own statements
+            from verstka.planning.meaning import title_of_request
+
+            fit = DG.fit_short_brief(brief.text, brief.slide_count, title_of_request(brief.text))
+            if fit is not None and fit.slides:
+                if not fit.title:
+                    fit.title = brief.title_hint or "Презентация"
+                brief = brief.model_copy(update={"text": fit.text()})
+                plan_note = (f"Аналитик: просили {ru_count(int(brief.slide_count), 'слайд', 'слайда', 'слайдов')} — "
+                             f"собрал их из утверждений текста: по мысли на слайд.")
         if long_doc:
             plan = None
             # a long document (a transcript, a report) is material, not a plan: a deck of 10–15 slides of its meaning

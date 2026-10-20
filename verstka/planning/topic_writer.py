@@ -341,7 +341,7 @@ def topic_subject(topic: str) -> str:
     s = _ABOUT_RE.sub("", s, count=1)
     s = _TAIL_RE.sub("", s)
     head, _, tail = s.partition(": ")
-    if tail and re.match(r"^(?:коротко|кратко|вкратце|в\s+двух\s+словах|для\s+\S+)(?:\s+для\s+[^:]{2,40})?$", head.strip(), re.I):
+    if tail and re.match(r"^(?:коротко|кратко|вкратце|в\s+двух\s+словах|для\s+[^:]{1,40})(?:\s+для\s+[^:]{2,40})?$", head.strip(), re.I):
         s = tail.strip()  # «Коротко для руководителей: что такое облачные вычисления…» — the request is after the colon
     elif tail and 1 <= len(head.split()) <= 8:
         s = head  # «производную функции: определение, смысл, правила» — what it is about

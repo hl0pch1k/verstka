@@ -939,7 +939,8 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
                  lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
-                 lambda: hero_of_headline(o), lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: dedupe_lines(o), lambda: keep_author_points(o, brief_text), lambda: name_cover(o, brief_text), lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
+                 lambda: hero_of_headline(o), lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: dedupe_lines(o), lambda: keep_author_points(o, brief_text), lambda: name_cover(o, brief_text), lambda: deck_title_said(o, brief_text), lambda: goal_headlines(o, brief_text), lambda: no_meta_lines(o),
+                 lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
         try:
             said.extend(step())
         except Exception:  # noqa: BLE001 - one pass failing leaves the others
@@ -1543,4 +1544,171 @@ def dedupe_lines(o: DeckOutline) -> list[str]:
                     continue
                 keep.append(x)
             setattr(c, field, keep)
+    return said
+
+
+
+# ------------------------------------------------------------------ what the author says to the deck is done, never shown
+
+
+_ASK_TITLE_RE = re.compile(
+    r"^(?:(?:слайд|slide)\s*№?\s*\d{1,3}\s*[:.)—–-]\s*)?(?:обложка|титул\w*|титульный\s+слайд|cover)\s*[:—–-]\s*"
+    r"|^(?:нужно|надо|хочу|прошу)\s+(?:рассказать|показать|представить|объяснить)\s+"
+    r"|^(?:сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|создай(?:те)?|нужн[аоы]?|нужен)\b",
+    re.I,
+)
+_FOR_CLASS_RE = re.compile(r"^(?:лекци\w+|урок\w*|заняти\w+|презентаци\w+|доклад\w*)?\s*(?:для\s+[^:.,]{2,40})?\s*:\s*(?P<t>.+)$", re.I)
+
+
+def title_of_request(text: str) -> Optional[str]:
+    """What a deck is about when its text opens with what it says to the deck: «Обложка — Итоги хакатона 2025» →
+    «Итоги хакатона 2025»; «Сделай 8 слайдов, без картинок. Тема: онбординг …» → «Онбординг …»; «Нужно рассказать совету
+    директоров про переход на облако» → «Переход на облако»; «Лекция для 10 класса: производная функции» →
+    «Производная функции». None when the text says nothing such."""
+    from verstka.planning.directives import strip_count_phrase
+
+    t = " ".join((text or "").split())
+    if not t:
+        return None
+    m = re.search(r"(?:^|[.!?]\s+)(?:тема|topic)\s*:\s*(?P<t>[^.!?\n]{3,120})", t, re.I)
+    if m:
+        return H.cap_first(H.strip_end(m.group("t")))
+    line = next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), t)
+    first = (H.split_sentences(line) or [line])[0]
+    m = re.match(r"^(?:(?:слайд|slide)\s*№?\s*\d{1,3}\s*[:.)—–-]\s*)?(?:обложка|титул\w*|титульный\s+слайд|cover)\s*[:—–-]\s*(?P<t>.+)$", first, re.I)
+    if m:
+        return H.cap_first(H.strip_end(m.group("t")))
+    m = _FOR_CLASS_RE.match(first)
+    if m and (re.match(r"^(?:лекци|урок|заняти|презентаци|доклад|для\s)", first, re.I)):
+        return H.cap_first(H.strip_end(m.group("t")))
+    if _ASK_TITLE_RE.match(first):
+        from verstka.planning.topic_writer import topic_subject
+
+        rest = re.sub(r"^(?:нужно|надо|хочу|прошу)\s+(?:рассказать|показать|представить|объяснить)\s+", "", first, flags=re.I)
+        rest = re.sub(r"^(?:[а-яё]+\s+){1,4}?(?=(?:про|о|об|обо)\s)", "", rest, flags=re.I)  # «совету директоров про …»
+        rest = re.sub(r"^(?:про|о|об|обо)\s+", "", rest, flags=re.I)
+        sub = topic_subject(rest) if _ASK_TITLE_RE.match(rest) else rest
+        sub = strip_count_phrase(sub) or sub
+        sub = re.sub(r"(?:^|,\s*)(?:без|с)\s+(?:картин\w+|изображени\w+|фото\w*|иллюстраци\w+)\b", "", sub, flags=re.I).strip(" ,.")
+        if sub and not _ASK_TITLE_RE.match(sub) and len(sub.split()) <= 14:
+            from verstka.planning.brief_structure import _nominative
+
+            return H.cap_first(H.strip_end(_nominative(sub) or sub))
+    return None
+
+
+def _said_to_deck(title: str) -> bool:
+    t = H.strip_end(title or "")
+    return bool(_ASK_TITLE_RE.match(t) or re.search(r"\bбез\s+(?:картин|изображени|фото)|\bслайд(?:ов|а)\b|^для\s+\d+\s+класс|^sc/|\.txt$|\.md$", t, re.I)
+                or re.match(r"^(?:лекци\w+|урок\w*)\s+для\s", t, re.I))
+
+
+def deck_title_said(o: DeckOutline, brief_text: str) -> list[str]:
+    """The deck's title and its cover never print what the author said to the deck (scenarios 20.10: «Сделай, без
+    картинок», «Обложка — Итоги хакатона 2025», «Для 10 класса», «Нужно рассказать совету директоров …»): the
+    subject it names takes their place."""
+    said: list[str] = []
+    cover = o.slides[0] if o.slides and o.slides[0].kind == PatternKind.title else None
+    old = (cover.headline if cover is not None else o.title) or ""
+    if not (_said_to_deck(old) or _said_to_deck(o.title or "")):
+        return said
+    new = title_of_request(brief_text) or title_of_request(old)
+    if not new or _said_to_deck(new):
+        return said
+    if _said_to_deck(o.title or "") or not o.title:
+        o.title = new
+    if cover is not None and _said_to_deck(cover.headline or ""):
+        cover.headline = new
+    said.append(f"the deck's title «{old[:50]}» is what the author said to the deck → «{new}»")
+    return said
+
+
+_GOAL_RE = re.compile(r"^(?:покажи(?:те)?|подчеркни(?:те)?|продемонстрируй(?:те)?|докажи(?:те)?|show)\s*,?\s*(?:что|that)\s+(?P<t>.+)$", re.I)
+
+
+def goal_headlines(o: DeckOutline, brief_text: str) -> list[str]:
+    """«Покажи, что найм в разработку вырос сильнее всего» is the author's point for the deck, not a slide of text
+    (scenarios 20.10, D10): the slide that says only it goes; the slide of the data it is about (its table or chart)
+    takes it as its heading — with the figures of the row it names as its conclusion line."""
+    said: list[str] = []
+    goals = []
+    for line in (brief_text or "").splitlines():
+        for sent in H.split_sentences(line.strip()) or []:
+            m = _GOAL_RE.match(sent.strip())
+            if m:
+                goals.append(H.cap_first(H.strip_end(m.group("t"))))
+    if not goals:
+        return said
+    for g in goals:
+        gst = _stems5(g)
+        # the slide that only repeats the ask goes
+        for s in list(o.slides):
+            if s.kind in _FRAME or s.content.table or s.content.chart or s.content.numbers:
+                continue
+            text = _slide_text(s)
+            only_goal = bool(_GOAL_RE.match(H.strip_end(s.headline or "").strip())) or (len(gst & _stems5(text)) >= 2 and len(_stems5(text) - gst) <= 1)
+            if only_goal and len(o.slides) > 2:
+                o.slides.remove(s)
+                said.append(f"slide {s.id}: the author's point «{g[:50]}» is no slide of its own")
+        data = [s for s in o.slides if (s.content.table or s.content.chart) and len(gst & _stems5(_slide_text(s) + " " + _table_text(s))) >= 1]
+        if not data:
+            continue
+        s = data[0]
+        if s.headline and not _topic(s.headline) and s.headline != g:
+            s.takeaway = s.takeaway or s.headline
+        s.section = s.section or (s.headline if _topic(s.headline) else None)
+        s.headline = g
+        row = _row_named(s, g)
+        if row and not s.takeaway:
+            s.takeaway = row
+        said.append(f"slide {s.id}: the author's point «{g[:50]}» heads the slide of its data")
+    return said
+
+
+def _table_text(s: OutlineSlide) -> str:
+    t = s.content.table
+    return " ".join(" ".join(r) for r in ([t.columns, *t.rows] if t is not None else []))
+
+
+def _row_named(s: OutlineSlide, goal: str) -> Optional[str]:
+    """«Разработка: 14 → 31 (×2,2)» — the row of the slide's table the goal names, from its first number to its last."""
+    t = s.content.table
+    if t is None:
+        return None
+    gst = _stems5(goal)
+    for r in t.rows:
+        if r and _stems5(r[0]) & gst:
+            vals = [cell_number(c) for c in r[1:]]
+            vals = [v for v in vals if v is not None]
+            if len(vals) >= 2 and vals[0]:
+                ch = f"×{fmt(round(vals[-1] / vals[0], 1))}" if vals[-1] / vals[0] >= 1.5 else f"{signed(round((vals[-1] / vals[0] - 1) * 100))}%"
+                return f"{H.cap_first(r[0].strip())}: {fmt(vals[0])} → {fmt(vals[-1])} ({ch})"
+    return None
+
+
+_META_RE = re.compile(
+    r"^(?:(?:главный\s+)?вывод\s*:\s*)?(?:(?:эта|данная|в)\s+)?(?:таблиц[аеы]|слайд[еа]?|график[еа]?|диаграмм[аеы]|данн(?:ые|ых)|схем[аеы])\s+"
+    r"(?:содерж\w+|показыва\w+|представля\w+|отража\w+|демонстриру\w+|приводит\w*|перечисля\w+|описыва\w+|собира\w+)\s+(?P<t>.+)$"
+    r"|^на\s+(?:слайде|графике|диаграмме)\s+(?:показан\w*|представлен\w*|приведен\w*|приведён\w*)\s+(?P<t2>.+)$",
+    re.I,
+)
+
+
+def no_meta_lines(o: DeckOutline) -> list[str]:
+    """A heading or a conclusion says what the content says, never what the slide holds (scenarios 20.10: «Вывод:
+    Таблица содержит производные шести основных элементарных функций»): a conclusion line of that kind goes; a heading of
+    that kind becomes the table's conclusion when the cells give one, else its subject («Производные шести основных
+    элементарных функций»)."""
+    said: list[str] = []
+    for s in o.slides:
+        if s.takeaway and _META_RE.match(H.strip_end(s.takeaway)):
+            said.append(f"slide {s.id}: the line «{s.takeaway[:50]}» says what the slide holds — dropped")
+            s.takeaway = None
+        m = _META_RE.match(H.strip_end(s.headline or ""))
+        if m:
+            got = table_conclusion(s.content.table, _chart_values(s) or None) if s.content.table is not None else None
+            new = got[0] if got else H.cap_first((m.group("t") or m.group("t2") or "").strip())
+            if new:
+                said.append(f"slide {s.id}: the heading «{s.headline[:50]}» said what the slide holds → «{new[:50]}»")
+                s.headline = new
     return said

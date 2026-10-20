@@ -577,3 +577,58 @@ def test_the_large_figure_is_the_heading_s_and_no_line_twice():
     dedupe_lines(o)
     s = o.slides[0]
     assert not s.content.numbers and s.kind == K.bullets and s.content.bullets == ["Байкал вытянут на 636 км в форме полумесяца, а его ширина от 24 до 79 км"]
+
+
+# ------------------------------------------------------------------ scenarios: what the author says to the deck
+
+
+def test_what_the_author_says_to_the_deck_is_never_its_title():
+    from verstka.planning.meaning import deck_title_said, title_of_request
+
+    assert title_of_request("Нужно рассказать совету директоров про переход компании на облачную инфраструктуру. Сейчас серверы стареют.") == "Переход компании на облачную инфраструктуру"
+    assert title_of_request("Слайд 1: Обложка — Итоги хакатона 2025\nСлайд 2: 412 участников") == "Итоги хакатона 2025"
+    assert title_of_request("Сделай 8 слайдов, без картинок. Тема: онбординг новых сотрудников в отделе продаж.") == "Онбординг новых сотрудников в отделе продаж"
+    assert title_of_request("Лекция для 10 класса: производная функции") == "Производная функции"
+    o = DeckOutline(title="Сделай, без картинок", slides=[OutlineSlide(id="c", kind=K.title, headline="Сделай, без картинок")])
+    deck_title_said(o, "Сделай 8 слайдов, без картинок. Тема: онбординг новых сотрудников в отделе продаж.")
+    assert o.title == o.slides[0].headline == "Онбординг новых сотрудников в отделе продаж"
+
+
+def test_the_author_s_count_holds_without_a_model():
+    st = load_strategies()
+    text = ("Сделай 8 слайдов, без картинок. Тема: онбординг новых сотрудников в отделе продаж. Первая неделя — знакомство с продуктом, "
+            "вторая — работа с CRM, третья — первые звонки под присмотром наставника. Наставник закреплён на 3 месяца. Цель — выход на план за 90 дней вместо 150.")
+    res = run_agent(parse_brief_text(text), None, [st["structured"]])
+    o = res.outlines["structured"]
+    assert len(o.slides) == 8
+    assert o.slides[0].headline == "Онбординг новых сотрудников в отделе продаж"
+    assert "Вторая неделя" in _all_text(o) and "без картинок" not in _all_text(o).lower()
+
+
+def test_the_author_s_point_heads_the_slide_of_its_data():
+    st = load_strategies()
+    text = ("# Итоги найма за полугодие\n\nПокажи, что найм в разработку вырос сильнее всего.\n\n| Отдел | I полугодие 2025 | II полугодие 2025 |\n|---|---|---|\n"
+            "| Разработка | 14 | 31 |\n| Продажи | 9 | 12 |\n| Поддержка | 7 | 8 |\n| Маркетинг | 3 | 4 |\n\nИсточник: HR-отчёт.\n")
+    from verstka.planning.facts import basic_facts
+    from verstka.planning.outline import plan_outline
+
+    b = parse_brief_text(text)
+    res = run_agent(b, None, [st["structured"]])
+    o = res.outlines.get("structured") if res is not None else None
+    if o is None:  # (no slides dictated, no model: the planner lays the brief out, as the pipeline does)
+        o, _ = plan_outline(b, None, st["structured"], basic_facts(b.text), None, None)
+    assert not any(s.kind != K.table and "Покажи" in s.headline for s in o.slides)
+    tab = next(s for s in o.slides if s.content.table is not None)
+    assert tab.headline == "Найм в разработку вырос сильнее всего"
+    assert "14" in (tab.takeaway or "") and "31" in (tab.takeaway or "")
+
+
+def test_a_heading_never_says_what_the_slide_holds():
+    from verstka.planning.meaning import no_meta_lines
+    from verstka.schemas.outline import TableData
+
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.table, headline="Вывод: Таблица содержит производные шести основных элементарных функций",
+                                                    takeaway="На слайде показаны основные производные", content=SlideContent(table=TableData(columns=["f", "f'"], rows=[["x^n", "n·x^(n-1)"]])))])
+    no_meta_lines(o)
+    assert o.slides[0].headline == "Производные шести основных элементарных функций" and o.slides[0].takeaway is None
+    assert DG.headline_of("Правила: (u+v)' = u' + v'; (uv)' = u'v + uv'.") == "Правила: (u+v)' = u' + v'; (uv)' = u'v + uv'"

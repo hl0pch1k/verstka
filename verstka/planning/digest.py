@@ -393,7 +393,7 @@ def headline_of(sentence: str, max_words: int = HEAD_WORDS, fallback: Optional[s
     ended = not sentence.rstrip().endswith(":")
     s = H.strip_end(sentence)
     # an aside in brackets is no part of a title («Байкал (бур. Байгал далай) — …», «заголовок-вывод («…»)»)
-    bare = re.sub(r"\s*\([^()]*\)", "", s).strip()
+    bare = re.sub(r"\s*\((?=[^()]*\s)(?![^()]*[=+^'*/<>])[^()]*\)", "", s).strip()  # (never a formula's brackets: «(u+v)' = u' + v'»)
     if _words(bare) >= 3 and _balanced(bare):
         s = bare
     # spoken asides between commas are no part of a title («…своих, значит, наработок», «Предоставится, если быть
@@ -858,3 +858,72 @@ def no_source_text(topic: str) -> str:
     if 2 <= len(parts) <= 8:
         out += "\nСлайд 3. Что должна раскрыть презентация\n" + "".join(f"- {x}.\n" for x in parts)
     return out
+
+
+# ------------------------------------------------------------------ a short brief to the count the author asked for
+
+
+_ENUM_PART_RE = re.compile(r"^(?P<head>[^—–,]{2,40}?)\s+[—–]\s+(?P<rest>.+)$")
+_ASK_SENT_RE = re.compile(r"^(?:сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|создай(?:те)?|нужн[аоы]?|нужен)\b", re.I)
+
+
+def _units_of(sentence: str) -> list[str]:
+    """A sentence that lists parts of one kind («Первая неделя — знакомство с продуктом, вторая — работа с CRM, третья
+    — первые звонки») as its parts, each whole («Вторая неделя — работа с CRM»); any other sentence as it is."""
+    parts = [x.strip() for x in re.split(r",\s+(?=[а-яё\w-]+\s+[—–]\s)", H.strip_end(sentence)) if x.strip()]
+    if len(parts) < 3 or not all(_ENUM_PART_RE.match(x) for x in parts):
+        return [H.strip_end(sentence)]
+    head0 = _ENUM_PART_RE.match(parts[0]).group("head").split()
+    noun = head0[-1] if len(head0) >= 2 else ""
+    out = [parts[0]]
+    for x in parts[1:]:
+        m = _ENUM_PART_RE.match(x)
+        h = m.group("head")
+        out.append(H.cap_first(f"{h} {noun} — {m.group('rest')}" if noun and len(h.split()) == 1 else x))
+    return [H.cap_first(x) for x in out]
+
+
+def fit_short_brief(text: str, slides: int, title: Optional[str] = None) -> Optional[Digest]:
+    """A short brief the author asked a number of slides for («Сделай 8 слайдов …»), without a model (scenarios 20.10:
+    3 slides for 8): every statement its slide (a list of parts of one kind — every part), its title the statement's
+    point or its subject; fewer than asked — the deck's plan first and its main points last; more — neighbours share a
+    slide. The author's words only; None when the brief has under two statements."""
+    from verstka.planning.directives import strip_count_phrase
+
+    sents = []
+    for line in (text or "").splitlines():
+        for s in H.split_sentences(line.strip()) or []:
+            s = s.strip()
+            if not s or _ASK_SENT_RE.match(s) or re.match(r"^(?:тема|topic)\s*:", s, re.I) or not (strip_count_phrase(s) or "").strip(" .!"):
+                continue
+            sents.append(s)
+    units = [u for s in sents for u in _units_of(s)]
+    if len(units) < 2:
+        return None
+    want = max(1, int(slides) - 1)
+    out: list[DigestSlide] = []
+    for u in units:
+        m = _ENUM_PART_RE.match(u)
+        if m and _words(m.group("head")) <= 5:
+            out.append(DigestSlide(title=H.cap_first(m.group("head")), points=[H.cap_first(H.strip_end(u))]))
+        else:
+            t = headline_of(u)
+            if t == H.strip_end(u):
+                # «Наставник закреплён на 3 месяца»: its subject heads it, the statement is its line (a title alone is a divider)
+                subj = re.split(r"\s+(?=[а-яё]+(?:ли|ла|ло|л|ет|ют|ит|ат|ят|ся|сь|ут|ен|ена|ено|ены|ан|ана|ано|аны)\b)", t, maxsplit=1)[0]
+                t = subj if 1 <= _words(subj) <= 5 and subj != t else t
+            out.append(DigestSlide(title=t, points=[H.cap_first(H.strip_end(u))]))
+    while len(out) > want and len(out) >= 2:
+        # the two neighbours that say least share a slide
+        k = min(range(len(out) - 1), key=lambda i: len(out[i].points) + len(out[i + 1].points) + _words(out[i].title + out[i + 1].title) / 50)
+        a, b = out[k], out[k + 1]
+        out[k] = DigestSlide(title=a.title, points=[*(a.points or [a.title]), *(b.points or [b.title])][:POINTS + 1])
+        del out[k + 1]
+    if len(out) < want and len(out) >= 3:
+        out.insert(0, DigestSlide(title="О чём презентация", points=[x.title for x in out][:6]))
+    if len(out) < want:
+        keys = [u for u in units if _FIG_RE.search(u) or _DECISION_RE.search(u)][-3:]
+        if keys:
+            out.append(DigestSlide(title="Главное", points=[H.strip_end(x) for x in keys]))
+    d = Digest(title=title or "", slides=out[:want], by="rules", words=_words(text))
+    return d
