@@ -58,6 +58,7 @@ _LEAD_IN_RE = re.compile(
     re.I,
 )
 _FIG_RE = re.compile(r"\d")
+_BRACKET_RE = re.compile(r"\s*\(([^()]{3,80})\)")
 _DASH_SPLIT_RE = re.compile(r"\s+[—–]\s+|\s+-\s+")
 
 
@@ -159,6 +160,14 @@ def _split_item(text: str) -> tuple[str, list[str]]:
     t = _strip_seq(_plain(text))
     if not t:
         return "", []
+    # «как менялось число обращений за год (покажи рост)»: an ask to the designer in brackets is the slide's intent — a
+    # line of its own the form is read from, never a part of the heading or of the text
+    asks = [m.group(1).strip() for m in _BRACKET_RE.finditer(t) if is_directive(m.group(1).strip())]
+    if asks:
+        t = _BRACKET_RE.sub(lambda m: "" if is_directive(m.group(1).strip()) else m.group(0), t)
+        t = re.sub(r"\s+([,.;:!?])", r"\1", " ".join(t.split())).strip()
+        title, lines = _split_item(t) if t else ("", [])
+        return title, [*lines, *(H.cap_first(H.strip_end(a)) + "." for a in asks)]
     sents = H.split_sentences(t) or [t]
     first = sents[0]
     # «Где мы сейчас. В компании 1 240 сотрудников …»: a short first sentence without figures is the title
@@ -255,6 +264,8 @@ def _audience_phrase(who: str) -> str:
             if end in ("ей", "ов") and len(ws) == 1:
                 break
             ws[0] = w[: len(w) - len(end)] + rep
+            if end == "ого" and len(ws) > 1 and re.search(r"[бвгдзклмнпрстфхцчшщ]а$", ws[1].lower()) and len(ws[1]) > 4:
+                ws[1] = ws[1][:-1]  # «операционного директора» → «Операционный директор»
             break
     else:
         if re.search(r"[бвгдзклмнпрстфхцчшщ]а$", low) and len(low) > 4:
@@ -346,7 +357,9 @@ def _preamble(lines: list[str]) -> tuple[Optional[str], Optional[str], Optional[
             if topic and title is None:
                 title = topic
             if who and audience is None:
-                audience = _audience_phrase(who)
+                from verstka.planning.directives import strip_count_phrase
+
+                audience = _audience_phrase(strip_count_phrase(who) or who)
             # the request's other sentences (the slide count, the audience said apart) stay
             for s in sents:
                 if not _TASK_RE.search(s) and not _LEAD_IN_RE.match(s) and not re.match(r"^(?:примерно|вот)\s+так", s, re.I):
@@ -372,7 +385,10 @@ def _preamble(lines: list[str]) -> tuple[Optional[str], Optional[str], Optional[
             kept.extend(sents[1:])
             continue
         kept.append(ln)
-    return title, subtitle, audience, kept
+    from verstka.planning.directives import strip_count_phrase
+
+    # («— для операционного директора, слайдов 8–10»: the slide count stays a rule of the deck, never its title)
+    return strip_count_phrase(title) or None, strip_count_phrase(subtitle) or None, strip_count_phrase(audience) or None, kept
 
 
 def _letter_units(lines: list[str]) -> list[list[str]]:

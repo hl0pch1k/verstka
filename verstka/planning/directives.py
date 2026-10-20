@@ -161,6 +161,15 @@ def clean_text(text: Optional[str], shown: Optional[set] = None) -> Optional[str
     changed = False
     for sent in sentences(text) or [text]:
         ask, rest = split_directive(sent)
+        if ask is None and re.search(r"[:—–]\s+\S", sent):
+            # «Как менялось число обращений за год: Покажи рост.» — the ask joined to the line it is about
+            cut = list(re.finditer(r"\s*[:—–]\s+(?=\S)", sent))[-1]
+            head, tail = sent[: cut.start()], sent[cut.end():]
+            a2, r2 = split_directive(tail)
+            if a2 is not None and not r2.strip(" .!") and head.strip():
+                changed = True
+                out.append(H.strip_end(head.rstrip(" :—–")) + ".")
+                continue
         if ask is None:
             out.append(sent)
             continue
@@ -242,9 +251,44 @@ def scrub_slide(slide) -> list[str]:
     return said
 
 
+# the deck's size said to the planner, never a line of the deck («, слайдов 8–10», «6–8 слайдов», «на 10 слайдов»): the
+# jury's cover read «, слайдов 8–10 · Доля обращений…»
+_COUNT_PHRASE_RE = re.compile(
+    r"[\s,;:—–·-]*(?:(?:не\s+более|не\s+больше|максимум|ровно|до|на|из)\s+)?"
+    r"(?:слайдов\s*[:—–-]?\s*\d{1,2}(?:\s*(?:[–—−-]|до)\s*\d{1,2})?(?!\d)|\d{1,2}(?:\s*(?:[–—−-]|до)\s*\d{1,2})?\s+слайд(?:ов|а)?(?![а-яё]))",
+    re.I,
+)
+
+
+def strip_count_phrase(text: Optional[str]) -> Optional[str]:
+    """`text` without the deck's size said in it; the punctuation around the cut tidied."""
+    if not text or not re.search(r"слайд", text, re.I):
+        return text
+    t = _COUNT_PHRASE_RE.sub("", text)
+    t = re.sub(r"\s+([,.;:])", r"\1", t)
+    t = re.sub(r"^[\s,;:—–·.-]+|[\s,;:—–·-]+$", "", t)
+    t = re.sub(r"\s{2,}", " ", t)
+    return t
+
+
 def scrub_outline(outline) -> list[str]:
-    """scrub_slide over every slide of a planned deck; what changed (for the plan's warnings)."""
+    """scrub_slide over every slide of a planned deck; what changed (for the plan's warnings). The deck's size said
+    in its title, the cover's title or subtitle is cut out of them."""
     out: list[str] = []
+    for attr in ("title", "subtitle"):
+        v = getattr(outline, attr, None)
+        nv = strip_count_phrase(v)
+        if nv != v:
+            setattr(outline, attr, nv if (nv or attr == "subtitle") else v)
+            out.append(f"deck {attr}: the slide count cut out of it")
+    if outline.slides:
+        cover = outline.slides[0]
+        for attr in ("headline", "subtitle"):
+            v = getattr(cover, attr, None)
+            nv = strip_count_phrase(v)
+            if nv != v and (nv or attr == "subtitle"):
+                setattr(cover, attr, nv or None if attr == "subtitle" else nv)
+                out.append(f"slide {cover.id}: the slide count cut out of its {attr}")
     for s in outline.slides:
         try:
             for x in scrub_slide(s):

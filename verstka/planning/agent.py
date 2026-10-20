@@ -6312,7 +6312,29 @@ def run_agent(
         if pictured != brief.text:
             brief = brief.model_copy(update={"text": pictured})  # «Добавь картинку …»: the picture's place, not a line
 
-        plan = as_slides(brief.text)
+        from verstka.planning import digest as DG
+
+        plan = as_slides(brief.text) if not DG.is_long_document(brief.text) else None
+        # (a letter of more parts than a deck has slides is prose, not a plan: its paragraphs are no slides)
+        if plan is None and DG.is_long_document(brief.text) or (plan is not None and plan.form == "letter" and DG.is_long_document(brief.text, len(plan.items))):
+            plan = None
+            # a long document (a transcript, a report) is material, not a plan: a deck of 10–15 slides of its meaning
+            # (or the person's count), never one slide per paragraph (jury 20.10, R13: 159 slides of raw speech)
+            dg = None
+            try:
+                lang = "ru" if re.search(r"[А-Яа-яЁё]", brief.text) else "en"
+                dg = DG.digest(brief.text, brief.slide_count, skills=kw.get("skills"), providers=kw.get("providers"),
+                               title_hint=brief.title_hint, language=lang)
+            except Exception:  # noqa: BLE001 - the document as it is
+                log.warning("document digest failed", exc_info=True)
+            if dg is not None:
+                brief = brief.model_copy(update={"text": dg.text(), "slide_count": brief.slide_count or dg.size})
+                plan_note = DG.note(dg)
+                if progress is not None:
+                    try:
+                        progress({"type": "agent", "step": "analyst", "message": plan_note, "slide": None, "variant": None})
+                    except Exception:  # noqa: BLE001 - the event is a courtesy
+                        pass
         if plan is not None:
             upd: dict[str, Any] = {"text": plan.text}
             if plan.audience and not brief.audience:
@@ -6332,9 +6354,14 @@ def run_agent(
     from verstka.planning.meaning import finish_deck
 
     dictated = bool(res.structure is not None and res.structure.specs)
+    # the deck's size: the person's count (the form, «6–8 слайдов», «не более 10») in every path; a deck the planner
+    # made of its own storyline — 15 slides at most (jury 20.10: a PDF brief became 16 slides)
+    from verstka.planning.meaning import DEFAULT_MAX_SLIDES
+
+    limit = brief.slide_count or (None if dictated else DEFAULT_MAX_SLIDES)
     for name, o in list(res.outlines.items()):
         try:
-            o2, said = finish_deck(o, brief.text, author_order=dictated)
+            o2, said = finish_deck(o, brief.text, author_order=dictated, limit=limit)
         except Exception:  # noqa: BLE001 - the plan as the agent made it
             log.warning("meaning passes failed on %s", name, exc_info=True)
             continue
@@ -6342,9 +6369,19 @@ def run_agent(
             o2.agent_log = [plan_note, *o2.agent_log]
         res.outlines[name] = o2
         res.warnings.setdefault(name, []).extend(said)
+    if res.outlines and all(o.planned_by not in ("agent", "model") for o in res.outlines.values()):
+        # no model: the three variants take their strategies' forms even when the rules laid them out alike
+        from verstka.planning.meaning import diversify_variants
+
+        try:
+            for name, lines in diversify_variants(res.outlines, limit).items():
+                res.warnings.setdefault(name, []).extend(f"variants: {x}" for x in lines)
+        except Exception:  # noqa: BLE001 - the variants as laid out
+            log.warning("variants not diversified", exc_info=True)
     if plan_note:
         for name in res.warnings:
-            res.warnings[name] = [f"plan_form: the brief's plan read as dictated slides", *res.warnings[name]]
+            res.warnings[name] = ["digest: a long document condensed into the deck's slides" if plan_note.startswith("Аналитик: длинный документ")
+                                  else "plan_form: the brief's plan read as dictated slides", *res.warnings[name]]
     return res
 
 

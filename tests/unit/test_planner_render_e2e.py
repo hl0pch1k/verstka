@@ -176,5 +176,5 @@ def test_a_spent_model_budget_still_delivers_the_decks(simple_deck, tmp_path):
     providers.limits.time_budget_s = 0
     res = generate_variants(simple_deck, brief=parse_brief_text(BRIEF), strategies=["structured"], out_dir=tmp_path / "out", workspace_root=tmp_path / "ws", providers=providers, skills=SkillsRegistry.load(), use_vlm=False, audit=False, autofix=False, exports=[], render_images=False)
     v = res.variants[0]
-    assert (v.out_dir / "deck.pptx").exists() and len(v.outline.slides) >= 5
+    assert (v.out_dir / "deck.pptx").exists() and len(v.outline.slides) >= 4  # (no farewell after the ask, jury 20.10)
     assert any("time budget" in w for w in v.warnings) and providers.roles["llm"].calls == []

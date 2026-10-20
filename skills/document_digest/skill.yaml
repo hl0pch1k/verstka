@@ -1,0 +1,17 @@
+name: document_digest
+version: 1.0.0
+role: llm
+description: >
+  A long document (a meeting transcript, a report, a long PDF) is material, not a plan of slides
+  (verstka/planning/digest.py): the model condenses it into a deck of a given number of slides — one thought per slide,
+  the title a conclusion, 2–3 facts, figures or decisions under it; spoken filler, greetings and the talk about the
+  meeting itself never reach a slide. Every figure must be the document's (the code drops a line with any other).
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.planning.digest.DigestAnswer
+params:
+  temperature: 0.1
+  max_tokens: 3000
+changelog:
+  - "1.0.0: jury 20.10 (R13): a 6 000-word transcript in DOCX became 159 slides of raw speech; now a deck of 10–15 slides of its meaning"

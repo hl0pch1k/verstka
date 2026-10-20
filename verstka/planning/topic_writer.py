@@ -1036,6 +1036,116 @@ def kb_weigh_fixes(slides: list[TopicSlide], issues: list[FactIssue], kb: Any, r
     return keep
 
 
+_REF_NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
+_REF_NAME_RE = re.compile(r"(?<=[\s(«\"])[A-ZА-ЯЁ][a-zа-яё]{3,}")
+
+
+def _ref_figures(text: str) -> set[str]:
+    t = re.sub(r"(?<=\d)[\s\u00a0\u202f](?=\d{3}(?!\d))", "", text or "")
+    return {m.group(0).replace(",", ".") for m in _REF_NUM_RE.finditer(t)}
+
+
+def _ref_names(text: str) -> set[str]:
+    return {m.group(0) for m in _REF_NAME_RE.finditer(" " + (text or ""))}
+
+
+def _ref_has_name(name: str, low: str) -> bool:
+    return name.lower()[:max(4, len(name) - 2)] in low
+
+
+def ref_misses(statement: str, ref: str, ref_figs: Optional[set] = None, ref_low: Optional[str] = None) -> int:
+    """How much of a statement its reference does not state: its figures the reference never gives and its names
+    (capitalised words inside the sentence: «Малави», «Каспийское») the reference never names. 0 — all there."""
+    figs = ref_figs if ref_figs is not None else _ref_figures(ref)
+    low = ref_low if ref_low is not None else (ref or "").lower()
+    return len(_ref_figures(statement) - figs) + sum(1 for n in _ref_names(statement) if not _ref_has_name(n, low))
+
+
+def ref_weigh_fixes(slides: list[TopicSlide], issues: list[FactIssue], paras: list[str], res: Any = None) -> list[FactIssue]:
+    """A deck written by the topic's reference (Wikipedia): the fact check's correction stays only when the reference
+    backs it no worse than the statement it corrects (jury 20.10, R01: «…Танганьика (1470 м) и Каспийское море (1025
+    м)» of the article was «corrected» to «…и озеро Малави (706 м)», which the article never says). A correction the
+    reference does not back: the statement stays when the reference states it, else it goes — never an unconfirmed
+    fact for an unconfirmed fact. Without a reference nothing can confirm a correction: the disputed statement goes."""
+    said = {x["id"]: x["text"] for x in statements(slides)}
+    ref = "\n".join(paras or [])
+    figs, low = _ref_figures(ref), ref.lower()
+    out: list[FactIssue] = []
+    for it in issues:
+        before, fix = said.get(it.id.strip()), (it.fix or "").strip()
+        if not before or not fix:
+            out.append(it)
+            continue
+        if not ref:
+            out.append(FactIssue(id=it.id, problem=it.problem, fix=""))
+            if res is not None:
+                res.warnings.append(f"topic_fact_check: the correction of {it.id} has no reference to back it — the statement goes")
+            continue
+        # what the correction changes: the figures and names it brings in, and those it takes out
+        new = [f for f in _ref_figures(fix) - _ref_figures(before) if f not in figs]
+        new += [n for n in _ref_names(fix) - _ref_names(before) if not _ref_has_name(n, low)]
+        if not new:
+            out.append(it)
+            continue
+        old_ok = not ((_ref_figures(before) - _ref_figures(fix)) - figs) and all(_ref_has_name(n, low) for n in _ref_names(before) - _ref_names(fix))
+        if res is not None:
+            res.warnings.append(f"topic_fact_check: the correction of {it.id} brings {', '.join(new[:4])} the reference does not state — "
+                                + ("kept as written (the reference states it)" if old_ok else "the statement goes"))
+        if not old_ok:
+            out.append(FactIssue(id=it.id, problem=it.problem, fix=""))
+    return out
+
+
+# a comparison a reader takes for a fact: «в несколько раз», «крупнейший», «самое глубокое», «единственный», «первый в
+# мире» — on a slide only when the reference says so too (jury 20.10, R01: «объём превышает пять Великих озёр в несколько
+# раз» — 1,04 times)
+_COMPARATIVE_RE = re.compile(
+    r"\b(?:в\s+(?:несколько|много|десятки|сотни|разы)\s*(?:раз)?|в\s+разы|во\s+много\s+раз|многократно|"
+    r"крупнейш\w*|величайш\w*|глубочайш\w*|древнейш\w*|старейш\w*|"
+    r"сам(?:ый|ая|ое|ые|ого|ой|ом|ых|ым|ую)\s+[а-яё]{3,}(?=[^.;]{0,60}\b(?:в\s+мире|на\s+планете|на\s+земле|в\s+европе|в\s+азии|в\s+евразии|в\s+россии|в\s+стране|среди)\b)|"
+    r"перв(?:ый|ая|ое|ым|ой)\s+в\s+мире|больше\s+всех|лучш(?:ий|ая|ее|ие)\s+в\s+мире)",
+    re.I,
+)
+_STEM_RE = re.compile(r"[а-яёa-z]{5,}", re.I)
+
+
+def _comparison_backed(phrase: str, statement: str, sentences: list[str]) -> bool:
+    words = phrase.lower().split()
+    key = words[0][:6] if words[0].startswith(("крупн", "велич", "глубоч", "древн", "старей", "многокр", "перв", "лучш", "больш")) else None
+    if words[0].startswith("сам") and len(words) > 1:
+        key = words[1][:5]
+    want = {w.lower()[:5] for w in _STEM_RE.findall(statement)} - {phrase.lower()[:5]}
+    for sent in sentences:
+        low = sent.lower()
+        if key is not None:
+            hit = (key in low and (not words[0].startswith("сам") or re.search(r"\bсам(?:ый|ая|ое|ые|ого|ой|ом|ых|ым)\s+" + re.escape(key), low)))
+        else:
+            hit = bool(re.search(r"в\s+(?:несколько|много|десятки|сотни)\s+раз|в\s+разы|во\s+много\s+раз|многократно", low))
+        if hit and len(want & {w.lower()[:5] for w in _STEM_RE.findall(sent)}) >= 1:
+            return True
+    return False
+
+
+def unbacked_comparisons(slides: list[TopicSlide], paras: list[str]) -> list[dict]:
+    """The statements with a comparison the reference does not make (or no reference at all): out of the deck. Returns
+    what went ({"slide", "id", "text", "why"})."""
+    from verstka.planning import heuristics as H
+
+    sentences = [x for p in (paras or []) for x in (H.split_sentences(p) or [p])]
+    issues: list[FactIssue] = []
+    gone: list[dict] = []
+    for st in statements(slides):
+        m = _COMPARATIVE_RE.search(st["text"] or "")
+        if not m or _comparison_backed(m.group(0), st["text"], sentences):
+            continue
+        issues.append(FactIssue(id=st["id"], problem="a comparison the reference does not make", fix=""))
+        gone.append({"slide": int(st["id"][1:].split(".")[0]), "id": st["id"], "text": st["text"],
+                     "why": f"сравнение «{m.group(0)}» не подтверждено источником"})
+    if issues:
+        apply_fixes(slides, issues)
+    return gone
+
+
 def kb_figure_check(slides: list[TopicSlide], kb: Any, given: str = "") -> list[dict]:
     """The statements with a figure no document of the base states (nor the person's request): out of the deck.
     Returns what went ({"slide", "id", "text", "why"})."""
@@ -1374,6 +1484,8 @@ def write_topic_deck(
         skipped: list[dict] = []
         if kb is not None:
             issues = kb_weigh_fixes(slides, issues, kb, res)
+        else:
+            issues = ref_weigh_fixes(slides, issues, paras, res)
         changed = apply_fixes(slides, issues, skipped)
         if skipped:
             res.warnings.append(f"topic_fact_check: {len(skipped)} correction(s) about another statement not applied: " + "; ".join(x["id"] for x in skipped[:6]))
@@ -1397,6 +1509,12 @@ def write_topic_deck(
             emit(f"проверил факты: {_fixes_ru(len(changed))}{part}." if changed else f"проверил факты: ошибок не нашёл{part}.")
     else:
         res.check_skipped = "no_time" if stmts else "empty"
+    if kb is None:
+        # a comparison («в несколько раз», «крупнейший») stays only when the reference makes it too
+        cmp_gone = unbacked_comparisons(slides, paras)
+        if cmp_gone:
+            res.removed.extend(cmp_gone)
+            emit(f"убрал {ru_count(len(cmp_gone), 'сравнение', 'сравнения', 'сравнений')}, которых нет в источнике.")
     res.seconds["check"] = round(time.monotonic() - tc, 2)
 
     # 6. the text; with the knowledge base every statement keeps the fragment it comes from

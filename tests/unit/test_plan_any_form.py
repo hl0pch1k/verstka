@@ -254,18 +254,20 @@ def test_cells():
     assert cell_number("4 800") == 4800 and cell_number("12,5%") == 12.5 and cell_number("−5") == -5 and cell_number("н/д") is None
 
 
-def test_a_bare_thanks_after_the_ask_stays_and_carries_the_ask_otherwise():
+def test_a_bare_thanks_after_the_ask_goes_and_carries_the_ask_otherwise():
+    """(jury 20.10: the deck ends on its ask — a farewell the author did not write is no slide, and never a «Спасибо за
+    внимание» under the ask)"""
     brief = "Итоги.\n\nПросим утвердить бюджет 12 млн рублей и старт пилота с 1 ноября."
     o = DeckOutline(title="T", slides=[_slide(1, "title", "T"), _slide(2, headline="Рынок растёт", content=SlideContent(bullets=["a"])),
                                        _slide(3, headline="Что просим", content=SlideContent(bullets=["Утвердить бюджет 12 млн рублей"])),
                                        _slide(4, "thanks", "Спасибо за внимание")])
     close_story(o, brief)
-    assert [s.id for s in o.slides] == ["sl1", "sl2", "sl3", "sl4"] and o.slides[-1].headline == "Спасибо за внимание"
+    assert [s.id for s in o.slides] == ["sl1", "sl2", "sl3"]
     o2 = DeckOutline(title="T", slides=[_slide(1, "title", "T"), _slide(2, headline="Рынок растёт", content=SlideContent(bullets=["a"])),
                                         _slide(3, headline="План", content=SlideContent(bullets=["b"])), _slide(4, "thanks", "Спасибо за внимание")])
     close_story(o2, brief)
     assert o2.slides[-1].headline == "Просим утвердить бюджет 12 млн рублей и старт пилота с 1 ноября"
-    assert o2.slides[-1].subtitle == "Спасибо за внимание"
+    assert not o2.slides[-1].subtitle
 
 
 def test_a_planners_ask_slide_goes_last_the_authors_order_stays():

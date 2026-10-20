@@ -1295,7 +1295,9 @@ def plan_outline(
     try:
         from verstka.planning.meaning import finish_deck
 
-        o, said = finish_deck(o, brief.text, author_order=False)
+        from verstka.planning.meaning import DEFAULT_MAX_SLIDES
+
+        o, said = finish_deck(o, brief.text, author_order=False, limit=brief.slide_count or DEFAULT_MAX_SLIDES)
         warnings = list(warnings) + said
     except Exception:  # noqa: BLE001 - the plan as planned
         log.warning("meaning passes failed", exc_info=True)

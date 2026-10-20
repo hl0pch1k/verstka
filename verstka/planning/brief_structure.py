@@ -1686,8 +1686,13 @@ def read_structure(text: str, md_slides: bool = False) -> BriefStructure:
     if raw and str(raw).isdigit():
         st.slide_count = int(raw)
     else:
+        from verstka.planning.brief import slide_range
+
+        rng = slide_range(body)  # «6–8 слайдов», «слайдов 8–10»: at most the upper bound
         cm = _COUNT_RE.search(body)
-        if cm:
+        if rng is not None:
+            st.slide_count = rng[1]
+        elif cm:
             st.slide_count = int(next(g for g in cm.groups() if g))
     # global rules, disclaimer, notes, rounding (a bracketed note about a picture is its place's, never a rule of the
     # whole deck: «[Место под изображение: экран панели …]» reached every slide's designer as one)

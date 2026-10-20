@@ -306,7 +306,8 @@ def test_plan_outline_without_a_model_gives_the_same_deck():
     s = get_strategy("structured")
     outline, warnings = plan_outline(b, None, s, basic_facts(b.text), None, None)  # type: ignore[arg-type]
     assert any("no LLM provider" in w for w in warnings)
-    assert [x.kind for x in outline.slides] == EXPECTED_KINDS["structured"]
+    # the meaning passes after the planner: the deck ends on its ask — no farewell the author did not write (jury 20.10)
+    assert [x.kind for x in outline.slides] == EXPECTED_KINDS["structured"][:-1]
 
 
 # ---------------------------------------------------------------------------------------------- a fixed small deck

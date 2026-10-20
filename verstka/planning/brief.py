@@ -25,6 +25,35 @@ SLIDE_COUNT_RE = re.compile(
     re.I,
 )
 
+# a range of slides («6–8 слайдов», «слайдов 8–10», «8-10 slides»): the deck keeps within it — its upper bound is the
+# deck's size (the jury's knowledge-base deck asked «6–8 слайдов» and got 12)
+SLIDE_RANGE_RE = re.compile(
+    r"(?<![\d.,])(?<!по\s)(?<!в\s)(\d{1,2})\s*(?:[–—−-]|до)\s*(\d{1,2})\s+(?:слайд(?:ов|а)?(?![а-яё])|slides?\b)"
+    r"|(?<![а-яё])слайд(?:ов|а)?\s*(?:[:—–-]\s*)?(?:от\s+)?(\d{1,2})\s*(?:[–—−-]|до)\s*(\d{1,2})(?!\d|[.,]\d)",
+    re.I,
+)
+
+
+def slide_range(text: str) -> Optional[tuple[int, int]]:
+    """(at least, at most) of a range of slides the text asks for, None without one."""
+    m = SLIDE_RANGE_RE.search(text or "")
+    if not m:
+        return None
+    a, b = [int(g) for g in m.groups() if g]
+    lo, hi = min(a, b), max(a, b)
+    return (lo, hi) if 1 <= lo <= hi <= 60 else None
+
+
+def slide_count_of(text: str) -> Optional[int]:
+    """The deck's size the text asks for: the upper bound of a range («6–8 слайдов» → 8), else «не более 10 слайдов» /
+    «на 8 слайдов» / «Сделай 12 слайдов»."""
+    r = slide_range(text)
+    if r is not None:
+        return r[1]
+    m = SLIDE_COUNT_RE.search(text or "")
+    return int(next(g for g in m.groups() if g)) if m else None
+
+
 _KEY_ALIASES = {
     "slides": "slide_count",
     "slide_count": "slide_count",
@@ -69,15 +98,20 @@ def parse_brief_text(text: str) -> Brief:
     if "purpose" in fields and fields["purpose"] is not None:
         fields["purpose"] = normalize_purpose(fields["purpose"])
     if "slide_count" in fields and fields["slide_count"] is not None:
+        raw = fields["slide_count"]
         try:
-            fields["slide_count"] = int(fields["slide_count"])
+            fields["slide_count"] = int(raw)
         except (TypeError, ValueError):
-            fields.pop("slide_count")
-    # "не более N слайдов" written inside the text also counts as an instruction
+            got = slide_count_of(f"{raw} слайдов") if isinstance(raw, str) else None  # «slides: 6–8»
+            if got:
+                fields["slide_count"] = got
+            else:
+                fields.pop("slide_count")
+    # "не более N слайдов", «6–8 слайдов» written inside the text also count as an instruction
     if "slide_count" not in fields:
-        m2 = SLIDE_COUNT_RE.search(body)
-        if m2:
-            fields["slide_count"] = int(next(g for g in m2.groups() if g))
+        got = slide_count_of(body)
+        if got:
+            fields["slide_count"] = got
     if "title_hint" not in fields:
         from verstka.planning.brief_structure import without_code
 

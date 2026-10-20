@@ -26,7 +26,7 @@ from typing import Optional
 from verstka.planning import heuristics as H
 from verstka.planning.directives import scrub_outline
 from verstka.schemas.common import PatternKind
-from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, TableData
+from verstka.schemas.outline import DeckOutline, NumberCallout, OutlineSlide, SlideContent, SlideItem, TableData
 
 log = logging.getLogger(__name__)
 
@@ -390,6 +390,9 @@ def _label_from(value: str, brief_text: str) -> Optional[str]:
 _COUNT_VALUE_RE = re.compile(r"^\d{1,3}(?:[\s\u00a0\u202f]\d{3})*$")
 
 
+_MONTH_RE = re.compile(r"^(?:январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[а-яёa-z]*$", re.I)
+
+
 def _counted(value: str, label: str, brief_text: str) -> Optional[str]:
     """A bare count («40») whose label does not name what it counts («рост вызван наймом инженеров в облако»): the
     words the brief writes right after it («40 инженеров в облачное направление» → «Инженеров в облачное
@@ -402,6 +405,8 @@ def _counted(value: str, label: str, brief_text: str) -> Optional[str]:
     if len(hits) != 1:
         return None
     words = hits[0].group("w").split()
+    if _MONTH_RE.match(words[0]):
+        return None  # «1 мая 1999 года» is a date, not a count of «Мая» (jury 20.10, R01: KPI «1 · Мая»)
     if words[0].lower() in {"человек", "чел", "штук", "шт", "единиц", "раз", "позиций"}:
         # «пришли 310 человек»: what is counted is said before the figure, in its clause
         before = re.split(r"[,;:.]\s+|\s[—–]\s", (brief_text or "")[: hits[0].start()])[-1].strip()
@@ -471,8 +476,43 @@ def label_figures(o: DeckOutline, brief_text: str) -> list[str]:
                     said.append(f"slide {s.id}: the figure {n.value} «{n.label}» says nothing of what it is — dropped")
                     continue
             keep.append(n)
+        # a small bare number the brief never writes as a figure is an ordinal or a count made up from words («На
+        # втором этапе» → «2 · Этап хакатона», jury 20.10 R04): no key figure of the slide
+        c = s.content
+        if brief_text:
+            for n in [n for n in keep if _unstated_small(n.value, brief_text)]:
+                text_left = bool(c.bullets or c.paragraphs or c.items or c.columns or c.chart or c.table)
+                if len(keep) > 1 or text_left:
+                    keep.remove(n)
+                elif s.takeaway and s.kind in (PatternKind.big_number, PatternKind.stat_row):
+                    # the slide's one «figure» was made up: its conclusion line is its text
+                    keep.remove(n)
+                    c.paragraphs = [s.takeaway]
+                    s.takeaway = None
+                    s.kind = PatternKind.bullets
+                else:
+                    continue
+                said.append(f"slide {s.id}: the figure {n.value} «{n.label}» is not a figure of the brief — dropped")
         s.content.numbers = keep
     return said
+
+
+_SMALL_INT_RE = re.compile(r"^\s*(\d{1,2})\s*$")
+
+
+def _unstated_small(value: str, brief_text: str) -> bool:
+    m = _SMALL_INT_RE.match(value or "")
+    if not m or int(m.group(1)) > 12:
+        return False
+    n = m.group(1)
+    for hit in re.finditer(rf"(?<![\d.,]){n}(?![\d]|[.,]\d)", brief_text):
+        before, after = brief_text[max(0, hit.start() - 2):hit.start()], brief_text[hit.end():hit.end() + 2]
+        if re.match(r"[.)]\s", after) and (hit.start() == 0 or before.endswith(("\n", "# ", "  "))):
+            continue  # «2. Требования к сервису»: the number of a list item
+        if re.match(r"\s?[–—-]\s?\d", after) or re.search(r"\d\s?[–—-]\s?$", before):
+            continue  # «2–3 варианта»: a range
+        return False
+    return True
 
 
 # ------------------------------------------------------------------ a heading that says the slide's point
@@ -765,7 +805,13 @@ def close_story(o: DeckOutline, brief_text: str, *, author_order: bool = False) 
         return said
     prev = body[-1]
     if _asks(prev) or _CONCLUSION_RE.match(prev.headline or "") or (prev.takeaway and _CONCLUSION_RE.match(prev.takeaway)):
-        return said  # the story ends on its ask; the farewell after it is a courtesy, not instead of the point
+        # the story ends on its ask: a farewell the author did not write is no slide of it (jury 20.10: «Спасибо за
+        # внимание» after the deck's point)
+        if len(slides) <= 3:
+            return said  # (a deck of a cover and one slide keeps its closing)
+        slides.remove(last)
+        said.append(f"slide {last.id}: the farewell «{(last.headline or '')[:40]}» dropped — the deck ends on its ask «{prev.headline[:60]}»")
+        return said
     from verstka.planning.agent import ask_shown, brief_asks
 
     shown = " ".join(_slide_text(s) for s in body)
@@ -773,21 +819,70 @@ def close_story(o: DeckOutline, brief_text: str, *, author_order: bool = False) 
     point = _conclusion(brief_text)
     if asks:
         last.headline = H.cap_first(H.strip_end(asks[0]))
-        last.subtitle = point if point and point.lower() not in shown.lower() else "Спасибо за внимание"
+        last.subtitle = point if point and point.lower() not in shown.lower() else None
         said.append(f"slide {last.id}: the farewell carries the brief's ask «{last.headline[:60]}»")
     elif point:
         last.headline = point
-        last.subtitle = "Спасибо за внимание"
+        last.subtitle = None
         said.append(f"slide {last.id}: the farewell carries the brief's conclusion «{point[:60]}»")
+    elif len(slides) > 3:
+        # nothing to end on but a farewell: the deck ends on its last slide of content
+        slides.remove(last)
+        said.append(f"slide {last.id}: the farewell «{(last.headline or '')[:40]}» dropped — no slide of a farewell the author did not write")
+    return said
+
+
+DEFAULT_MAX_SLIDES = 15  # a deck the planner made (no count asked, no slides dictated): 10–15 slides at most
+
+
+def _weight(s: OutlineSlide) -> float:
+    """How much a slide carries: its words, its figures, a chart or a table (a slide of data is worth keeping)."""
+    c = s.content
+    w = len(_slide_text(s).split()) + 8 * len(c.numbers)
+    w += 40 * bool(c.chart or c.table or c.chart2 or c.formula or c.code) + 60 * bool(s.data)
+    return float(w)
+
+
+def cap_slides(o: DeckOutline, limit: Optional[int], brief_text: str = "") -> list[str]:
+    """The deck within its size: the count the person asked for («6–8 слайдов», «не более 10», the form's field), or
+    DEFAULT_MAX_SLIDES for a deck the planner made. What goes first: section dividers, the agenda, a farewell the
+    author did not write, then the slides that carry least — never the cover, never the last slide (the deck's point),
+    never a slide the author dictated («Слайд 3. …», an item of the author's plan)."""
+    said: list[str] = []
+    if not limit or len(o.slides) <= limit:
+        return said
+    limit = max(2, int(limit))
+    authors_thanks = _authors_thanks(brief_text)
+
+    def drop(s: OutlineSlide, why: str) -> None:
+        o.slides.remove(s)
+        said.append(f"slide {s.id} «{(s.headline or '')[:50]}» dropped: {why} (the deck has at most {limit} slides)")
+
+    for kinds, why in (((PatternKind.section,), "a section divider"), ((PatternKind.agenda,), "the agenda")):
+        for s in [x for x in o.slides[1:] if x.kind in kinds]:
+            if len(o.slides) <= limit:
+                return said
+            drop(s, why)
+    for s in [x for x in o.slides[1:] if _bare_thanks(x) and not authors_thanks]:
+        if len(o.slides) <= limit:
+            return said
+        drop(s, "a farewell")
+    while len(o.slides) > limit and len(o.slides) > 2:
+        middle = o.slides[1:-1] if o.slides[0].kind == PatternKind.title else o.slides[:-1]
+        pool = [x for x in middle if x.spec_ref is None and not x.continues]
+        if not pool:  # the slides the author dictated stay: their count is the author's
+            break
+        drop(min(pool, key=_weight), "it carries least")
     return said
 
 
 # ------------------------------------------------------------------ the passes
 
 
-def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: bool = False) -> tuple[DeckOutline, list[str]]:
+def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: bool = False, limit: Optional[int] = None) -> tuple[DeckOutline, list[str]]:
     """The deck after the meaning passes (a copy) and what they changed, in English (the plan's warnings).
-    `author_order`: the slides are the ones the author dictated, in the author's order — no slide is moved."""
+    `author_order`: the slides are the ones the author dictated, in the author's order — no slide is moved. `limit`:
+    the deck's size at most (cap_slides), the last pass."""
     o = outline.model_copy(deep=True)
     said: list[str] = []
     from verstka.planning.proportions import check_outline
@@ -797,7 +892,7 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
                  lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
-                 lambda: lead_figure(o), lambda: ensure_cover(o)):
+                 lambda: lead_figure(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
         try:
             said.extend(step())
         except Exception:  # noqa: BLE001 - one pass failing leaves the others
@@ -989,3 +1084,128 @@ def ensure_cover(o: DeckOutline) -> list[str]:
     o.slides.insert(0, OutlineSlide(id=sid, kind=PatternKind.title, headline=title, subtitle=o.subtitle,
                                     rationale="Обложка с названием колоды: автор начал сразу с содержания."))
     return [f"a cover «{title[:60]}» before the first slide «{o.slides[1].headline[:40]}»"]
+
+
+# ------------------------------------------------------------------ three variants of one deck without a model
+
+
+_QUESTION_HEAD_RE = re.compile(r"^(?:сколько|как|что|где|когда|почему|зачем|кто|какой|какая|какие|каких|откуда|куда|чем)\b", re.I)
+_LEAD_PREP_RE = re.compile(r"^(?:на|в|до|с|со|к|по|за|от|из|при|около|почти|более|менее|свыше)\s+", re.I)
+
+
+def _thin(s: OutlineSlide, sentences_max: int = 1, words_max: int = 30) -> Optional[str]:
+    """The one line a slide of text says (one line of bullets or paragraphs of at most `sentences_max` sentences and
+    `words_max` words, nothing else), None for any other slide."""
+    c = s.content
+    if s.kind in _FRAME or s.kind in (PatternKind.quote,) or c.chart or c.chart2 or c.table or c.numbers or c.items or c.columns or c.code or c.formula:
+        return None
+    if c.photo_slot or c.image_hint or s.data is not None:
+        return None
+    lines = [*c.bullets, *c.paragraphs]
+    if len(lines) != 1:
+        return None
+    from verstka.planning.faithful import sentences
+
+    ss = sentences(lines[0]) or [lines[0]]
+    return lines[0] if len(ss) <= sentences_max and len(lines[0].split()) <= words_max else None
+
+
+def _kpi_label(topic: str, clause: str, value: str) -> str:
+    t = H.strip_end(topic or "")
+    if t and not _QUESTION_HEAD_RE.match(t) and len(t.split()) <= 5 and not re.search(r"\d", t):
+        return t
+    lab = (clause or "").replace(value, " ")
+    lab = re.sub(r"\d[\d\s  .,]*\s*(?:%|млн|млрд|тыс\.?|₽|руб\w*)?", " ", lab)
+    lab = " ".join(lab.split()).strip(" ,;:—–-")
+    lab = _LEAD_PREP_RE.sub("", lab)
+    # (only a word or two of the clause itself: «заказов»; a clause cut around its figure — «у старого приложения было
+    # и» — is no label)
+    if not lab or len(lab.split()) > 2 or re.search(r"\b(?:и|а|но|или|было|были|был|была)$", lab, re.I):
+        return ""
+    return H.cap_first(lab)
+
+
+def _as_figure(s: OutlineSlide, line: str) -> bool:
+    """A slide of one sentence with a figure, shown large: the sentence heads it (its point), the figure under it with
+    the slide's subject («Ошибки комплектации») or its own words as the label. False when the sentence has no figure."""
+    if not _topic(s.headline):
+        return False  # the heading already states the slide's point: it stays
+    kp = H.kpis_of(line)
+    if not kp:
+        return False
+    k = kp[0]
+    head = H.strip_end(line)
+    n = len(re.sub(r"(?<=\d)[\s  ](?=\d{3}\b)", "", head).split())
+    if n > 14 or head.endswith((":", "?")):
+        return False
+    label = _kpi_label(s.headline, k.clause, k.value)
+    if not label:
+        return False
+    old = s.headline
+    s.headline = head
+    s.section = s.section or old
+    s.content.bullets, s.content.paragraphs = [], []
+    s.content.numbers = [NumberCallout(value=k.value, label=label)]
+    s.kind = PatternKind.big_number
+    return True
+
+
+def _merge_pair(a: OutlineSlide, la: str, b: OutlineSlide, lb: str) -> None:
+    """Two neighbouring slides of one sentence each as one slide of two columns: each column the slide's subject and its
+    sentence; the heading — the first sentence when it states its point, else the two subjects."""
+    ta, tb = H.strip_end(a.headline), H.strip_end(b.headline)
+    a.content.bullets, a.content.paragraphs = [], []
+    a.content.columns = [SlideItem(title=ta, text=H.strip_end(la) + "."), SlideItem(title=tb, text=H.strip_end(lb) + ".")]
+    a.kind = PatternKind.two_column
+    if _asks(b):
+        # the problem beside what is asked for it: the ask heads the slide, the deck still ends on it
+        a.headline = tb
+        a.content.columns[1] = SlideItem(title="Что предлагаем", text=H.strip_end(lb) + ".")
+    elif _point_ok(la, 10):
+        a.headline = H.strip_end(la)
+    elif len(ta.split()) + len(tb.split()) <= 7 and not _QUESTION_HEAD_RE.match(tb):
+        a.headline = f"{ta} и {tb[:1].lower() + tb[1:] if not (len(tb) > 1 and tb[1:2].isupper()) else tb}"
+    a.section = a.section or ta
+    a.notes = "\n\n".join(x for x in (a.notes, b.notes) if x)
+
+
+def _same_slide(a: OutlineSlide, b: OutlineSlide) -> bool:
+    return a.kind == b.kind and H.strip_end(a.headline) == H.strip_end(b.headline) and _slide_text(a) == _slide_text(b)
+
+
+def diversify_variants(outlines: dict, limit: Optional[int] = None) -> dict[str, list[str]]:
+    """Three variants of a deck the rules laid out (no model) that came out alike — the same form on most slides (jury
+    20.10, R14: all 7 slides alike in the three) — take the forms their strategies stand for: the visual one shows a
+    slide's one stated figure large under the sentence that states it (the slide's point heads it), the compact one
+    puts two neighbouring slides of one sentence each side by side (fewer slides). The structured one stays as laid out.
+    The author's sentences stay whole; only their places change. Returns what changed per variant."""
+    said: dict[str, list[str]] = {}
+    base = outlines.get("structured")
+    if base is None:
+        return said
+    for name in ("visual", "compact"):
+        o = outlines.get(name)
+        if o is None or len(o.slides) != len(base.slides):
+            continue
+        alike = sum(1 for a, b in zip(base.slides, o.slides) if _same_slide(a, b))
+        if alike < max(2, (len(o.slides) + 1) // 2):
+            continue
+        out: list[str] = []
+        if name == "visual":
+            for s in o.slides[1:]:
+                line = _thin(s)
+                if line and _as_figure(s, line):
+                    out.append(f"slide {s.id}: its figure shown large under the sentence that states it")
+        else:
+            k = 1
+            while k < len(o.slides) - 1:
+                a, b = o.slides[k], o.slides[k + 1]
+                la, lb = _thin(a, 3, 45), _thin(b, 3, 45)
+                if la and lb and not _asks(a) and (not _asks(b) or k + 1 == len(o.slides) - 1):
+                    _merge_pair(a, la, b, lb)
+                    o.slides.remove(b)
+                    out.append(f"slide {a.id}: «{H.strip_end(la)[:40]}» and «{H.strip_end(lb)[:40]}» side by side")
+                k += 1
+        if out:
+            said[name] = out
+    return said

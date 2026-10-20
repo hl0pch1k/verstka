@@ -334,10 +334,14 @@ def test_slides_without_headings_take_the_texts_own_first_words():
     res, _ = _run("Слайд 1.\n\nПервый абзац про теплицу и полив растений. Второе предложение про датчики влажности.\n\n"
                   "Слайд 2.\n\nЕщё абзац про контроллер и насос. И ещё одно предложение про бак с водой.\n\n"
                   "Слайд 3.\n\nТретий абзац про результаты эксперимента. Финал этой истории про экономию воды.\n")
-    for o in res.outlines.values():
+    for name, o in res.outlines.items():
         assert not any(re.search(r"\bСлайд\s+\d", s.headline) for s in o.slides)
         assert all(s.kind.value != "section" for s in o.slides)
-        assert o.slides[2].headline == "Ещё абзац про контроллер и насос"
+        if name == "compact":
+            # (without a model the compact variant puts two neighbouring slides of one line each side by side)
+            assert [c.title for c in o.slides[1].content.columns] == ["Первый абзац про теплицу и полив растений", "Ещё абзац про контроллер и насос"]
+        else:
+            assert o.slides[2].headline == "Ещё абзац про контроллер и насос"
 
 
 def test_reading_a_long_paragraph_without_a_split_point_is_fast():

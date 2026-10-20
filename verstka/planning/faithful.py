@@ -1036,9 +1036,12 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
             r.used.update(contacts)
     elif _AGENDA_RE.match(r.title) and (r.of("list") or len(paras) >= 2) and not rich:
         r.role = "agenda"
-    elif not first and not derived and not any(k in r.asks for k in ("chart", "table", "formula")) and (not parts or (len(parts) == 1 and paras and len(rest) == 1 and words(rest[0]) <= 14 and not _VALUE_RE.search(rest[0]))):
-        # a title over one short line (or none): a divider of the deck's parts — never a line that states a figure («За
-        # год волонтёры собрали 48 тонн мусора» is the slide's point, shown as its content)
+    elif not first and not derived and not any(k in r.asks for k in ("chart", "table", "formula")) and (not parts or (
+            len(parts) == 1 and paras and len(rest) == 1 and words(rest[0]) <= 14 and not _VALUE_RE.search(rest[0]) and (_part_name(r.title) or _PART_MARK_RE.match(r.title)))):
+        # a title alone, or a part's name («Проблема», «Наша команда») over one short line: a divider of the deck's
+        # parts — never a point of the author's plan with its content («Главное узкое место — вторая линия, нагрузка
+        # растёт, а людей столько же» is a slide of content, jury 20.10), never a line that states a figure («За год
+        # волонтёры собрали 48 тонн мусора» is the slide's point, shown as its content)
         r.role = "section"
     elif not r.title:
         r.title = fields.get("title") or _heading_of(r)
@@ -2229,6 +2232,9 @@ class Plan:
     readings: list[Reading]
     decks: dict  # variant → [OutlineSlide]
     lines: dict  # variant → [(position, message)]
+
+
+_PART_MARK_RE = re.compile(r"^\s*(?:часть|раздел|глава|блок|этап|part|section|chapter)\s*(?:\d{1,2}|[IVX]{1,4})?\b", re.I)
 
 
 def _part_name(title: str) -> bool:
