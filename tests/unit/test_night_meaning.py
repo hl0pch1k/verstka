@@ -548,3 +548,32 @@ def test_a_table_of_two_measures_by_periods_never_adds_them_up():
 
     got = table_conclusion(TableData(columns=["Квартал", "Выручка, млн ₽", "Клиенты"], rows=[["Q1 2026", "301", "980"], ["Q3 2026", "412", "1240"]]), None)
     assert got == ("Выручка: 301 → 412 млн ₽ за Q1 2026–Q3 2026 (+37%)", "Клиенты: 980 → 1 240 (+27%)")
+
+
+# ------------------------------------------------------------------ round 4
+
+
+def test_a_statement_that_gives_a_year_to_another_person_or_another_share_goes():
+    from verstka.planning.topic_writer import source_mismatches
+
+    paras = ["В 1684 году Лейбниц опубликовал первую работу по дифференциальному исчислению. Метод флюксий Ньютона издан в 1736 году.",
+             "Байкал — крупнейший пресноводный биогеоценоз, две трети видов животных и растений эндемичны."]
+    sl = [TopicSlide.model_validate({"title": "Трети видов Байкала — эндемики", "points": ["Трети видов Байкала не встречаются нигде больше.", "Две трети видов Байкала — эндемики."],
+                                     "timeline": [{"when": "1684", "what": "Ньютон опубликовал трактат о методе флюксий"},
+                                                  {"when": "1684", "what": "Лейбниц опубликовал работу о дифференциальном исчислении"}]})]
+    gone = source_mismatches(sl, paras)
+    assert {g["id"] for g in gone} == {"s2.p1", "s2.t1", "s2.title"}
+    assert sl[0].title == "Две трети видов Байкала — эндемики"
+    assert sl[0].points == ["Две трети видов Байкала — эндемики."] and [e.what for e in sl[0].timeline] == ["Лейбниц опубликовал работу о дифференциальном исчислении"]
+
+
+def test_the_large_figure_is_the_heading_s_and_no_line_twice():
+    from verstka.planning.meaning import dedupe_lines, hero_of_headline
+
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.big_number, headline="Байкал вытянут на 636 км в форме полумесяца", content=SlideContent(
+        numbers=[NumberCallout(value="30 км³/год", label="объём стока которой")],
+        bullets=["Байкал вытянут на 636 км в форме полумесяца", "Байкал вытянут на 636 км в форме полумесяца, а его ширина от 24 до 79 км"]))])
+    hero_of_headline(o)
+    dedupe_lines(o)
+    s = o.slides[0]
+    assert not s.content.numbers and s.kind == K.bullets and s.content.bullets == ["Байкал вытянут на 636 км в форме полумесяца, а его ширина от 24 до 79 км"]

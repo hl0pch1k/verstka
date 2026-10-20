@@ -939,7 +939,7 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
                  lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
-                 lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: keep_author_points(o, brief_text), lambda: name_cover(o, brief_text), lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
+                 lambda: hero_of_headline(o), lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: dedupe_lines(o), lambda: keep_author_points(o, brief_text), lambda: name_cover(o, brief_text), lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
         try:
             said.extend(step())
         except Exception:  # noqa: BLE001 - one pass failing leaves the others
@@ -1291,6 +1291,11 @@ def sensible_labels(o: DeckOutline, brief_text: str) -> list[str]:
         for n in c.numbers:
             v = " ".join((n.value or "").split())
             lab = H.strip_end(n.label or "").strip()
+            cut = re.split(r"\s*,?\s*(?<![а-яё])(?:котор\w+|чей|чья|чьё|чьи)(?![а-яё])", lab, maxsplit=1, flags=re.I)[0].strip(" ,")
+            if cut != lab:
+                # «объём стока которой» — a label cut off its sentence: what is before the clause, or nothing
+                lab = H.cap_first(cut) if len(cut.split()) >= 1 else ""
+                n.label = lab
             low = lab.lower()
             if not re.search(r"\d", v) and not re.search(r"[×≈∞]", v) and len(c.numbers) > 1:
                 said.append(f"slide {s.id}: «{v} · {lab}» has no figure — it is no key figure, dropped")
@@ -1470,7 +1475,7 @@ def promised_counts_kept(o: DeckOutline) -> list[str]:
         shown = _shown_count(s)
         if shown < 2:
             continue
-        for attr in ("headline", "subtitle"):
+        for attr in ("headline", "subtitle", "takeaway"):
             v = getattr(s, attr) or ""
             m = _PROMISE_RE.search(v)
             if not m:
@@ -1482,4 +1487,60 @@ def promised_counts_kept(o: DeckOutline) -> list[str]:
             new = H.cap_first(re.sub(r"\s{2,}", " ", new))
             setattr(s, attr, new)
             said.append(f"slide {s.id}: «{v[:50]}» promised {n}, the slide shows {shown} — the number goes")
+    return said
+
+
+
+def hero_of_headline(o: DeckOutline) -> list[str]:
+    """A slide's large figure is the one its heading speaks of (jury 20.10, round 4: «Байкал вытянут на 636 км …» over a
+    large «30 км³/год · объём стока которой» — a figure of the notes, about another thing): a key figure the heading and
+    the slide's own lines never state goes when the heading states a figure (lead_figure then sets the heading's)."""
+    from verstka.planning.brief_structure import numbers_of
+
+    said: list[str] = []
+    for s in o.slides:
+        c = s.content
+        if not c.numbers or s.kind in _FRAME:
+            continue
+        head_vals = {round(v, 2) for v in numbers_of(s.headline or "") if not (1900 <= v <= 2100)}
+        if not head_vals:
+            continue
+        shown_text = " ".join([s.headline or "", *c.bullets, *c.paragraphs, *(x for it in [*c.items, *c.columns] for x in (it.title, it.text, *it.bullets))])
+        shown_vals = {round(v, 2) for v in numbers_of(shown_text)}
+        # (only a figure torn from another sentence: its label a clause of it — «объём стока которой» —, or none; a
+        # figure that explains the heading with its own words stays: «40 · инженеров в облачное направление»)
+        keep = [n for n in c.numbers if {round(v, 2) for v in numbers_of(n.value)} & shown_vals or not numbers_of(n.value)
+                or not (not (n.label or "").strip() or re.search(r"(?<![а-яё])(?:котор\w+|чей|чья|чьё|чьи)(?![а-яё])", n.label or "", re.I))]
+        gone = [n for n in c.numbers if n not in keep]
+        if not gone:
+            continue
+        c.numbers = keep
+        said += [f"slide {s.id}: «{n.value} · {n.label}» is not what the heading speaks of — dropped" for n in gone]
+        if not keep and s.kind in (PatternKind.big_number, PatternKind.stat_row):
+            s.kind = PatternKind.bullets  # (the heading states its figure; the lines say the rest)
+    return said
+
+
+def _norm_line(t: str) -> str:
+    return " ".join(re.sub(r"[^\wё%]+", " ", (t or "").lower()).split())
+
+
+def dedupe_lines(o: DeckOutline) -> list[str]:
+    """No line twice on a slide: the same line, or one that only repeats a longer one beside it, goes (jury 20.10,
+    round 4: «Байкал вытянут … полумесяца» over «Байкал вытянут … полумесяца, а его ширина …»)."""
+    said: list[str] = []
+    for s in o.slides:
+        c = s.content
+        for field in ("bullets", "paragraphs"):
+            lines = list(getattr(c, field))
+            if len(lines) < 2:
+                continue
+            norm = [_norm_line(x) for x in lines]
+            keep = []
+            for i, x in enumerate(lines):
+                if any(j != i and norm[i] and (norm[i] == norm[j] and j < i or (norm[i] != norm[j] and norm[i] in norm[j])) for j in range(len(lines))):
+                    said.append(f"slide {s.id}: the line «{x[:50]}» said twice — once")
+                    continue
+                keep.append(x)
+            setattr(c, field, keep)
     return said

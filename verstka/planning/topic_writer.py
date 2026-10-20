@@ -1154,6 +1154,84 @@ def unbacked_comparisons(slides: list[TopicSlide], paras: list[str]) -> list[dic
     return gone
 
 
+_YEAR_RE = re.compile(r"(?<![\d,.])(1[0-9]{3}|20[0-9]{2})(?![\d])")
+_FRACTIONS = (
+    ("2/3", r"дв(?:е|ух|ум|умя)\s+трет(?:и|ей|ям|ями|ях)|2/3"),
+    ("3/4", r"тр(?:и|ёх|ех)\s+четверт(?:и|ей)|3/4"),
+    ("1/3", r"(?<!две\s)(?<!двух\s)(?<!двум\s)(?<![а-яё])трет(?:ь|и|ью)(?![а-яё])|1/3"),
+    ("1/4", r"(?<!три\s)(?<!трёх\s)(?<!трех\s)(?<![а-яё])четверт(?:ь|и|ью)(?![а-яё])|1/4"),
+    ("1/2", r"(?<![а-яё])половин\w*|1/2"),
+)
+
+
+def _fractions(text: str) -> set[str]:
+    return {k for k, rx in _FRACTIONS if re.search(rx, text or "", re.I)}
+
+
+def _names(text: str) -> set[str]:
+    """The proper names inside a statement (capitalised words not opening it), by their first five letters."""
+    return {m.group(0).lower()[:5] for m in re.finditer(r"(?<=[\s(«\"—–-])[A-ZА-ЯЁ][a-zа-яё]{3,}", " " + (text or "")[1:])}
+
+
+def source_mismatches(slides: list[TopicSlide], paras: list[str]) -> list[dict]:
+    """Every statement with a year and a name, or a share said in words, read against the article (jury 20.10, round
+    4: «1684 — Ньютон опубликовал метод флюксий» where the article's 1684 is Leibniz's; «трети видов» where it says
+    «две трети»): a year whose sentences in the article name none of the statement's people, a share the article's
+    sentences about the same thing give otherwise — the statement goes. Returns what went."""
+    from verstka.planning import heuristics as H
+
+    sents = [x for p in (paras or []) for x in (H.split_sentences(p) or [p])]
+    if not sents:
+        return []
+    stems = [{w.lower()[:5] for w in re.findall(r"[а-яёa-z]{5,}", x, re.I)} for x in sents]
+    issues: list[FactIssue] = []
+    gone: list[dict] = []
+    for st in statements(slides):
+        field_ = st["id"].split(".", 1)[1]
+        if re.match(r"[a-z]+", field_).group(0) in _NO_FIGURE_CHECK:
+            continue
+        text = st["text"] or ""
+        why = None
+        names = _names(text)
+        for y in set(_YEAR_RE.findall(text)):
+            with_year = [x for x in sents if re.search(rf"(?<![\d]){y}(?![\d])", x)]
+            if with_year and names and not any(n in x.lower() for x in with_year for n in names):
+                why = f"в статье {y} год — не о {', '.join(sorted(names))}"
+                break
+        if why is None:
+            fr = _fractions(text)
+            if fr:
+                own = {w.lower()[:5] for w in re.findall(r"[а-яёa-z]{5,}", text, re.I)}
+                near = [x for x, ss in zip(sents, stems) if len(own & ss) >= 2 and _fractions(x)]
+                if near and not (fr & set().union(*(_fractions(x) for x in near))):
+                    why = f"доля «{', '.join(sorted(fr))}» не совпадает со статьёй ({', '.join(sorted(set().union(*(_fractions(x) for x in near))))})"
+        if why:
+            issues.append(FactIssue(id=st["id"], problem="does not match the source", fix=""))
+            gone.append({"slide": int(st["id"][1:].split(".")[0]), "id": st["id"], "text": text, "why": why})
+    if issues:
+        apply_fixes(slides, issues)
+    # a title is no statement to drop: a share in it the article gives otherwise is said as the article says it
+    # («Трети видов Байкала — эндемики» → «Две трети видов Байкала — эндемики»)
+    for k, sl in enumerate(slides, 2):
+        fr = _fractions(sl.title)
+        if len(fr) != 1:
+            continue
+        own = {w.lower()[:5] for w in re.findall(r"[а-яёa-z]{5,}", sl.title + " " + (sl.lead or ""), re.I)}
+        near = set().union(*([_fractions(x) for x, ss in zip(sents, stems) if len(own & ss) >= 2 and _fractions(x)] or [set()]))
+        if len(near) == 1 and near != fr:
+            want = next(iter(near))
+            rx = dict(_FRACTIONS)[next(iter(fr))]
+            new = re.sub(rx, _FRACTION_WORDS[want], sl.title, count=1, flags=re.I)
+            if new != sl.title:
+                new = new[:1].upper() + new[1:]
+                gone.append({"slide": k, "id": f"s{k}.title", "text": sl.title, "why": f"доля в заголовке — как в статье: {want}", "after": new})
+                sl.title = new
+    return gone
+
+
+_FRACTION_WORDS = {"2/3": "две трети", "3/4": "три четверти", "1/3": "треть", "1/4": "четверть", "1/2": "половина"}
+
+
 def unsourced_figures(slides: list[TopicSlide], given: str = "") -> list[dict]:
     """A topic written without any source: the statements with a figure the person did not give go (formulas and their
     worked examples stay — their digits are mathematics, not facts). Returns what went."""
@@ -1592,6 +1670,12 @@ def write_topic_deck(
         if fig_gone:
             res.removed.extend(fig_gone)
             emit(f"источника нет — убрал {ru_count(len(fig_gone), 'утверждение', 'утверждения', 'утверждений')} с цифрами, которые нечем подтвердить.")
+    if kb is None and paras:
+        # each statement with a year and a name, or a share in words, read against the article itself
+        mis = source_mismatches(slides, paras)
+        if mis:
+            res.removed.extend(mis)
+            emit(f"сверил с текстом статьи — убрал {ru_count(len(mis), 'утверждение', 'утверждения', 'утверждений')}, расходящихся с ним.")
     if kb is None:
         # a comparison («в несколько раз», «крупнейший») stays only when the reference makes it too
         cmp_gone = unbacked_comparisons(slides, paras)

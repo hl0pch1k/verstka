@@ -1,5 +1,5 @@
 name: topic_slide_writer
-version: 1.4.0
+version: 1.5.0
 role: llm
 description: >
   Writer mode, step 2 (verstka/planning/topic_writer.py): writes one content slide of a deck planned by
@@ -21,3 +21,4 @@ changelog:
   - "1.2.2: a change names both of its periods; every point is a whole sentence (qa6) (2026-10-17)"
   - "1.3.0: the picture is the slide's concrete subject, never a symbol; a slide with a picture is short (the owner, 18.10)"
   - "1.4.0: complete definitions in mathematics (the derivative through its limit), properties named rightly, a written count matches the items shown (jury 20.10, round 3)"
+  - "1.5.0: a worked example reaches its answer; a conclusion counts what the slide shows (jury 20.10, round 4)"
