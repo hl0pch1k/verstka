@@ -530,3 +530,21 @@ def test_a_wiki_page_loses_its_footnote_marks_and_back_matter():
                             "<p>Облачные вычисления<sup class='reference'>[4]</sup> — модель[5] (PaaS, англ. Platform as a Service).</p>"
                             "<h2>Примечания</h2><p>1. Сноска</p></article></body></html>")
     assert [(b.kind, b.text) for b in d.blocks] == [("heading", "Модели"), ("para", "Облачные вычисления — модель (PaaS, англ. Platform as a Service).")]
+
+
+# ------------------------------------------------------------------ without a model: speech, two measures
+
+
+def test_a_talk_s_sentence_becomes_a_statement():
+    assert DG.unspeak("Мы предлагаем использовать модель класса Text Image до 20 млрд параметров.") == "Предлагаем использовать модель класса Text Image до 20 млрд параметров."
+    assert DG.unspeak("В качестве решения нужно прикрепить ссылку на ваше хранилище, значит, заранее.") == "В качестве решения нужно прикрепить ссылку на хранилище, заранее."
+    assert DG.unspeak("Если говорить о формальностях, то итогом решения будет сервис.") == "Итогом решения будет сервис."
+    assert DG.score_sentence("Давайте, если вы хотите, посмотрим на интересный вопрос.") < 0
+
+
+def test_a_table_of_two_measures_by_periods_never_adds_them_up():
+    from verstka.planning.meaning import table_conclusion
+    from verstka.schemas.outline import TableData
+
+    got = table_conclusion(TableData(columns=["Квартал", "Выручка, млн ₽", "Клиенты"], rows=[["Q1 2026", "301", "980"], ["Q3 2026", "412", "1240"]]), None)
+    assert got == ("Выручка: 301 → 412 млн ₽ за Q1 2026–Q3 2026 (+37%)", "Клиенты: 980 → 1 240 (+27%)")
