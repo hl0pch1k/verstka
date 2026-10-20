@@ -326,3 +326,79 @@ def test_the_content_checks_are_on_by_default_with_the_text_model():
     assert _content_checks_on(GenerateRequest(template_id="t", audit_models=False)) is False
     assert _content_checks_on(GenerateRequest(template_id="t", use_models=False)) is False
     assert _content_checks_on(GenerateRequest(template_id="t", use_models=False, audit_models=True)) is True
+
+
+def test_a_preview_not_rendered_yet_is_not_a_404_while_the_deck_is_built(tmp_path, monkeypatch):
+    """The build screen asks for slides/slide-001.jpg before the export rendered it: 202 «not yet» (a transparent pixel),
+    never a 404 in the page's console; a finished deck without the preview still answers 404."""
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("VERSTKA_WORKSPACE", str(tmp_path / "ws"))
+    import verstka.api.app as app_module
+
+    importlib.reload(app_module)
+    c = TestClient(app_module.app)
+    gid, _ = app_module.store.new_generation_dir()
+    app_module.store.write_generation_meta(gid, {"id": gid, "status": "running", "strategies": ["structured"]})
+    (app_module.store.generation_dir(gid) / "structured").mkdir(parents=True, exist_ok=True)
+    r = c.get(f"/api/generations/{gid}/structured/slides/slide-001.jpg")
+    assert r.status_code == 202 and r.headers["content-type"].startswith("image/gif")
+    app_module.store.merge_generation_meta(gid, {"status": "done"})
+    assert c.get(f"/api/generations/{gid}/structured/slides/slide-001.jpg").status_code == 404
+
+
+def test_every_table_keeps_within_ten_rows_and_five_columns():
+    from verstka.pipeline.generate import tables_within_limits
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, TableData
+
+    wide = TableData(columns=["Месяц", "Май", "Июнь", "Июль", "Август", "Сентябрь"], rows=[["Активные, чел.", "1200", "3400", "6100", "9800", "12400"]])
+    long = TableData(columns=["Регион", "Выручка"], rows=[[f"Регион {i}", str(100 + i)] for i in range(1, 13)])
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind="table", headline="Динамика", content=SlideContent(table=wide)),
+                                       OutlineSlide(id="b", kind="table", headline="Продажи по регионам", content=SlideContent(table=long))])
+    done = tables_within_limits(o)
+    assert o.slides[0].content.table.columns == ["Месяц", "Активные, чел."] and o.slides[0].content.table.rows[0] == ["Май", "1200"]
+    assert len(o.slides) == 3 and all(len(s.content.table.rows) <= 10 for s in o.slides)
+    assert o.slides[2].continues == "b" and o.slides[2].id == "b-t2"
+    assert sum(len(s.content.table.rows) for s in o.slides[1:]) == 12  # no row lost
+    assert len(done) == 2
+
+
+def test_a_label_chip_never_takes_the_next_slides_label():
+    from verstka.rendering.synth import _section_of
+    from verstka.schemas.outline import DeckOutline, OutlineSlide
+
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="1", kind="title", headline="Склад"),
+                                       OutlineSlide(id="2", kind="stat_row", headline="48 200 заказов", section="Сколько отгрузили"),
+                                       OutlineSlide(id="3", kind="chart", headline="Скорость сборки"),
+                                       OutlineSlide(id="4", kind="bullets", headline="Дальше"),
+                                       OutlineSlide(id="5", kind="bullets", headline="Итоги", section="Выводы"),
+                                       OutlineSlide(id="6", kind="bullets", headline="Ещё", section="Выводы")])
+    assert _section_of(o.slides[2], o) == ""  # «Сколько отгрузили» is slide 2's own label
+    assert _section_of(o.slides[3], o) == "Выводы"  # a real section, shared by two slides
+
+
+def test_an_empty_place_says_why_and_a_lost_original_picture_is_a_fault(tmp_path):
+    """The person's place left empty: a note with the reason the build wrote (images.json); the original deck's picture
+    not carried over («Улучшить готовую»): a warning — never a grey place nobody notices (jury, round 2)."""
+    from verstka.audit.checks.integrity import photo_place_empty
+    from verstka.audit.registry import AuditContext
+    from verstka.schemas.common import Bbox, BboxFrac, PatternKind
+    from verstka.schemas.deck_ir import DeckIR, IRElement, IRSlide
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+    from verstka.schemas.template import SlideSize, TemplateManifest, Tokens
+
+    (tmp_path / "images.json").write_text(json.dumps({"pictures": [{"slide": 1, "outline_id": "a", "status": "free", "why": "генерация изображений выключена"}]}), encoding="utf-8")
+
+    def run(hint: str):
+        place = IRElement(id="ph", type="shape", name=PHOTO_PLACE_NAME, fill_hex="FFE9D6", line_hex="FFB27A", bbox=Bbox(x=0, y=0, w=1000, h=1000), bbox_frac=BboxFrac(x=0.5, y=0.2, w=0.4, h=0.6))
+        o = DeckOutline(title="T", slides=[OutlineSlide(id="a", kind=PatternKind.bullets, headline="Экран", content=SlideContent(bullets=["Баланс"], photo_slot="Изображение", photo_hint=hint))])
+        man = TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=12192000, h=6858000), tokens=Tokens(), patterns=[], n_slides=1)
+        ir = DeckIR(source=str(tmp_path / "deck.pptx"), slide_w=12192000, slide_h=6858000, slides=[IRSlide(index=1, elements=[place], outline_id="a")])
+        return photo_place_empty(AuditContext(ir=ir, manifest=man, outline=o))
+
+    asked = run("Экран приложения")
+    assert [i.severity for i in asked] == ["info"] and "генерация изображений выключена" in asked[0].message
+    lost = run("Изображение со слайда 5 исходной презентации · 729ed8")
+    assert [i.severity for i in lost] == ["warn"] and "исходной презентации не перенесена" in lost[0].message

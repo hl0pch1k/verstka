@@ -869,10 +869,11 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
             tk = time.monotonic()
             outline, kb_writer = _with_knowledge(outline, data_brief, req.knowledge_id, gdir, progress, use_models)
             steps["knowledge"] = time.monotonic() - tk
-    # «Улучшить готовую» laid out in another template: the original deck's pictures come from its own workspace
+    # «Улучшить готовую»: the original deck's pictures come from its own workspace — always, whatever template the deck is
+    # laid out on (its fonted or branded copy has none of them: jury 20.10, the picture of slide 5 lost to a grey place)
     source_pictures = None
     src_tid = (req.improved_from or {}).get("template_id")
-    if src_tid and src_tid != req.template_id:
+    if src_tid:
         try:
             source_pictures = store.workspace(str(src_tid)).dir
         except FileNotFoundError:
@@ -2398,12 +2399,33 @@ def slide_list(gid: str, strategy: str) -> dict:
     return {"slides": sorted(p.name for p in d.glob("slide-*.jpg")) if d.is_dir() else []}
 
 
+# a transparent pixel: the answer for a preview not rendered yet while the deck is being built or edited (202)
+_PENDING_PIXEL = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
+
+
 @app.get("/api/generations/{gid}/{strategy}/slides/{name}")
 def slide_image(gid: str, strategy: str, name: str):
+    from fastapi.responses import Response
+
     vdir = _variant_dir(gid, strategy)
     if not re.fullmatch(r"slide-\d{3}\.jpg", name):
         raise HTTPException(404, "Не найдено")
+    if not (vdir / "slides" / name).is_file() and _still_building(gid, vdir):
+        # the build screen asks for a preview the export has not rendered yet (or an edit is putting its new previews
+        # in place): «not yet», never a 404 in the page's console (jury 20.10)
+        return Response(content=_PENDING_PIXEL, status_code=202, media_type="image/gif", headers={"Retry-After": "1", "Cache-Control": "no-store"})
     return _serve_file(vdir / "slides", name, media_type="image/jpeg")
+
+
+def _still_building(gid: str, vdir: Path) -> bool:
+    """The generation is still running, or its variant's previews are being replaced (an edit's scratch folder)."""
+    try:
+        meta = store.read_generation_meta(gid) or {}
+    except Exception:  # noqa: BLE001 - an unreadable meta: not building
+        meta = {}
+    if meta.get("status") in ("running", "queued"):
+        return True
+    return any(p.is_dir() for p in vdir.parent.glob(f".{vdir.name}.*"))
 
 
 @app.get("/api/generations/{gid}/{strategy}/eyes/{stage}/{name}")

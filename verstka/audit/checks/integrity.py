@@ -630,9 +630,31 @@ def _grey(hex_: Optional[str]) -> bool:
     return mx == 0 or (mx - mn) / mx < 0.12
 
 
+def _why_free(ctx: AuditContext, osl, index: int) -> str:
+    """Why the deck's picture place is empty, from the generation's picture records (images.json beside the deck):
+    «: генерация изображений выключена»; "" when the records do not say."""
+    import json
+    from pathlib import Path
+
+    try:
+        recs = json.loads((Path(ctx.ir.source).parent / "images.json").read_text(encoding="utf-8")).get("pictures") or []
+    except (OSError, ValueError, AttributeError, TypeError):
+        return ""
+    oid = getattr(osl, "id", None)
+    for r in recs:
+        if not isinstance(r, dict) or r.get("status") == "generated":
+            continue
+        if (oid and r.get("outline_id") == oid) or r.get("slide") == index:
+            why = str(r.get("why") or "").strip()
+            if why:
+                return f": {why}"
+    return ""
+
+
 @check(PHOTO_PLACE_EMPTY)
 def photo_place_empty(ctx: AuditContext) -> list[Issue]:
     from verstka.images.places import is_own
+    from verstka.ingest.deck_text import is_source_hint
     from verstka.planning.pictures import AUTO_LABEL
     from verstka.schemas.outline import PHOTO_PLACE_NAME
 
@@ -651,12 +673,18 @@ def photo_place_empty(ctx: AuditContext) -> list[Issue]:
             elif own:
                 out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под фото автора — серая заглушка без оформления", bboxes=[e.bbox_frac], element_ids=[e.id],
                                          suggestion="Оформить место как место для фото: оттенок цвета шаблона, рамка, подпись."))
+            elif c is not None and is_source_hint(c.photo_hint):
+                # «Улучшить готовую»: the original deck's picture always goes back to its place — a place left empty is a
+                # fault (jury 20.10: «Изображение со слайда 5 исходной презентации» stood grey and unnoticed)
+                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "картинка исходной презентации не перенесена: на её месте пустое место" + _why_free(ctx, osl, s.index),
+                                         bboxes=[e.bbox_frac], element_ids=[e.id],
+                                         suggestion="Верните картинку исходного слайда на её место или уберите место кнопкой «Исправить слайд»."))
             elif c is not None and c.photo_slot and c.photo_slot != AUTO_LABEL and designed:
                 # the person asked for this picture («добавь картинку», a described place): the place stays as they asked,
-                # its reason said with the build (images.json, the timeline) — a note, not a fault (the owner's rule, 20.10)
-                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под картинку, которую вы просили, оставлено свободным: картинки нет", severity="info",
+                # with the reason it is empty — a note, not a fault (the owner's rule, 20.10)
+                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под картинку, которую вы просили, оставлено свободным" + (_why_free(ctx, osl, s.index) or ": картинки нет"), severity="info",
                                          bboxes=[e.bbox_frac], element_ids=[e.id],
-                                         suggestion="Вставьте своё изображение, попросите нарисовать его ещё раз или уберите место кнопкой «Исправить слайд»."))
+                                         suggestion="Вставьте своё изображение, включите «С изображениями» и соберите снова, попросите нарисовать его ещё раз или уберите место кнопкой «Исправить слайд»."))
             else:
                 out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под картинку осталось пустым: картинки нет", bboxes=[e.bbox_frac], element_ids=[e.id],
                                          suggestion="Макет без места под картинку или рисунок шаблона, который подходит к слайду."))

@@ -650,6 +650,9 @@ def generate_variants(
                 warnings.extend(w)
                 if written:
                     v_outline = _mark_written(v_outline, writer_res)
+            # every path (the agent, the rules, a deck improved, an edit, a supplied plan) keeps a table within the ТЗ's
+            # 10 rows and 5 columns: a wide one-row table turned, a long one continued on the next slide
+            warnings.extend(tables_within_limits(v_outline))
             taken = shown_except(name)  # what the other variants show: those laid out before, the slides their look moved
             taken0 = {k: set(v) for k, v in taken.items()}
             outline0 = v_outline.model_copy(deep=True)
@@ -741,8 +744,11 @@ def generate_variants(
         v["warnings"].extend(applied.warnings)
         v["picture_records"] = records
         _say_pictures_made(progress, v["name"], records, said_pictures)
+        free = any(r.get("status") != "generated" for r in records)
         if applied.changed:
             v["pictures_changed"] = True
+        if applied.changed or free:
+            # (a place left free: the audit reads why from images.json, now written, and says it with its remark)
             if v["audit"] is not None:
                 try:
                     v["audit"] = _audit_with_pictures(v, manifest, ws, brief, writer_audit)
@@ -940,6 +946,46 @@ def _audit_with_pictures(v: dict, manifest: TemplateManifest, ws: TemplateWorksp
     new.iterations = old.iterations
     new.recompute()
     return new
+
+
+TABLE_MAX_COLS = 5
+
+
+def tables_within_limits(o: DeckOutline) -> list[str]:
+    """The deck's tables within 10 rows of data and 5 columns (the ТЗ, the organisers' chat), whatever planned them: a
+    table wider than 5 columns with a few rows (months across, a measure down: «Месяц | Май | … | Сентябрь») is turned
+    — the months down, the measures across —, a table longer than 10 rows goes on over continuation slides
+    (planning/faithful.split_long_tables: the header repeated, no row lost). In place; returns what was done."""
+    from verstka.planning.faithful import MAX_TABLE_ROWS, split_long_tables
+
+    done: list[str] = []
+    for s in o.slides:
+        t = s.content.table
+        if t is None or not t.rows or getattr(s, "data", None) is not None:
+            continue  # (a data deck's tables are the data story's: verstka/data keeps them within the limits itself)
+        ncol = max(len(t.columns), max(len(r) for r in t.rows))
+        if ncol > TABLE_MAX_COLS and len(t.rows) + 1 <= TABLE_MAX_COLS and ncol - 1 <= MAX_TABLE_ROWS and len(t.columns) == ncol:
+            rows = [list(r) + [""] * (ncol - len(r)) for r in t.rows]
+            s.content.table = t.model_copy(update={"columns": [t.columns[0]] + [str(r[0]) for r in rows],
+                                                   "rows": [[t.columns[k]] + [str(r[k]) for r in rows] for k in range(1, ncol)]})
+            done.append(f"table of slide «{s.headline[:40]}» turned: {ncol} columns → {ncol - 1} rows")
+    long = [s for s in o.slides if s.content.table is not None and len(s.content.table.rows) > MAX_TABLE_ROWS and getattr(s, "data", None) is None]
+    if not long:
+        return done
+    out = []
+    long_ids = {id(s) for s in long}
+    for s in o.slides:
+        if id(s) not in long_ids:
+            out.append(s)
+            continue
+        for c, _i, j in split_long_tables([s]):
+            if j > 0:
+                c.id = f"{s.id}-t{j + 1}"
+                c.continues = s.id
+                done.append(f"table of slide «{s.headline[:40]}» continued on its next slide ({len(c.content.table.rows) if c.content.table else 0} rows)")
+            out.append(c)
+    o.slides = out
+    return done
 
 
 def free_added_places(records: list[dict], outline: DeckOutline) -> dict[str, str]:

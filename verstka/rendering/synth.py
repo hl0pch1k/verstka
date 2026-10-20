@@ -4127,9 +4127,18 @@ def _section_of(oslide: OutlineSlide, outline: DeckOutline) -> str:
     if oslide.id not in ids:
         return ""
     i = ids.index(oslide.id)
+    # a neighbour's section is borrowed only when it is a real section — one several slides share; a label only one
+    # slide carries is that slide's own («Сколько отгрузили»), never the next slide's (ЛЦТ, jury 20.10: «СКОЛЬКО
+    # ОТГРУЗИЛИ» over «Скорость сборки»)
+    count: dict[str, int] = {}
+    for s in outline.slides:
+        k = (s.section or "").strip().lower()
+        if k:
+            count[k] = count.get(k, 0) + 1
     for j in (i - 1, i + 1):
         if 0 <= j < len(outline.slides) and outline.slides[j].kind not in _COVER_KINDS and (outline.slides[j].section or "").strip():
-            return outline.slides[j].section.strip()
+            if count.get(outline.slides[j].section.strip().lower(), 0) >= 2:
+                return outline.slides[j].section.strip()
     return ""
 
 
