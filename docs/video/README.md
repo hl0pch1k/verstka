@@ -4,7 +4,7 @@
 
 **Актуальная версия — это текущее решение.**
 
-[`verstka-stage2.mp4`](verstka-stage2.mp4) · 9 мин 44 с · [смотреть в браузере](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4)
+[`verstka-stage2.mp4`](verstka-stage2.mp4) (он же [`verstka-demo.mp4`](verstka-demo.mp4)) · 9 мин 44 с · [смотреть в браузере](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4)
 
 Запись экрана живого сервиса в интерфейсе «Слои», 20.10. Без ускорений: разборы брендбука и шаблона и все сборки идут в реальном времени, таймер интерфейса в кадре. Все тексты и правки — модель Qwen3.8-27B на инференсе VK; картинки — Z-Image. Поверх экрана — только субтитры, курсор, заставка и финальная плита.
 
@@ -21,7 +21,7 @@
 
 > **Архив.** Видео первой ступени показывает прошлую версию сервиса и прежний интерфейс; актуальное решение — в видео второй ступени выше.
 
-[`verstka-demo.mp4`](verstka-demo.mp4) · 8 мин 54 с · [смотреть в браузере](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4)
+[`verstka-stage1.mp4`](verstka-stage1.mp4) · 8 мин 54 с · [смотреть в браузере](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4)
 
 Запись экрана живого сервиса в браузере Chrome: один непрерывный дубль, без монтажа и без ускорения. Поверх экрана добавлены только подписи к шагам (сверху по центру), курсор и титры в начале и в конце.
 
