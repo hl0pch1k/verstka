@@ -267,3 +267,20 @@ export function retryWords(p: PlannerInfo | null | undefined): string | null {
   const help = plainAdvice(p?.advice);
   return help && !isUnavailable(help) ? help : null;
 }
+
+/** The model's state as the screens show it: a poll every 20 s that brings only a link's new answer time or the same
+ *  pause counted down is no news, and the whole app never re-renders for it (a re-render in the click frame of the
+ *  helper is a heavy first frame in Safari). `retry_in` counts as the same when it ends within 5 s of the old one. */
+export function sameModelStatus(prev: ModelsStatus | null, prevAt: number, next: ModelsStatus, now: number): boolean {
+  if (!prev) return false;
+  const shown = (st: ModelsStatus) =>
+    JSON.stringify({
+      ...st,
+      retry_in: null,
+      links: st.links.map(({ last_ok: _ok, last_error: _err, last_error_at: _at, until, ...link }) => ({ ...link, paused: !!until })),
+    });
+  if (shown(prev) !== shown(next)) return false;
+  if (!prev.retry_in !== !next.retry_in) return false;
+  if (!prev.retry_in || !next.retry_in) return true;
+  return Math.abs(prevAt + prev.retry_in * 1000 - (now + next.retry_in * 1000)) <= 5000;
+}

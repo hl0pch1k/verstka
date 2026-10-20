@@ -8,6 +8,7 @@ import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage } from "./lib/motion";
+import { sameModelStatus } from "./lib/modelText";
 import { draftBrief, writeDraft } from "./lib/draft";
 import { reloadPlan, replayWanted } from "./lib/reload";
 import { variantRev, withRev } from "./lib/rev";
@@ -168,7 +169,8 @@ export interface AppState {
    *  кончилась или не началась (её начало видно по `buildJob`, отказ — по строке области «Сборка»); false — повторять
    *  нечего (запрос неизвестен). `deck` — открытая презентация (результат): повторяется её запрос — свой запрос
    *  страницы, если это её сборка, иначе собранный из меты (`requestOf`), а не запрос последней сборки. */
-  retryBuild(deck?: GenerationMeta | null): Promise<boolean>;
+  /** `template`: the same request on another template (the «Шаблоны» section over the deck: «Пересобрать на нём»). */
+  retryBuild(deck?: GenerationMeta | null, template?: string | null): Promise<boolean>;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string, show?: SlideLink): void; // ts = unix seconds (fmtDate-compatible); show — «Показать слайд N»
   /** Строки статуса по областям — показываются рядом с местом действия (всплывающих уведомлений в «Слоях» нет). */
   notices: Partial<Record<NoticeArea, Notice>>;
@@ -480,10 +482,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // quiet: the indicator simply keeps its last state when the call fails (the red banner covers a lost server)
+  const statusAt = useRef(0);
   const refreshModelStatus = useCallback(async () => {
     try {
       const st = await api.modelsStatus();
-      setModelStatus((prev) => (prev && JSON.stringify(prev) === JSON.stringify(st) ? prev : st));
+      const now = Date.now();
+      setModelStatus((prev) => {
+        if (sameModelStatus(prev, statusAt.current, st, now)) return prev;
+        statusAt.current = now;
+        return st;
+      });
     } catch {
       /* an older server without the endpoint, or offline */
     }
@@ -882,14 +890,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [generationDeps, keepBuild]);
 
-  const retryBuild = useCallback(async (deck?: GenerationMeta | null) => {
+  const retryBuild = useCallback(async (deck?: GenerationMeta | null, template?: string | null) => {
     // a deck: its own request (the page's, if it is its build), else from its meta. No deck: the build the build screen
     // shows — its own request, never the request of another build followed since
     const shown = latest.current.buildJob?.generation ?? lastBuild.current?.gid ?? null;
     const last = deck ? askOf(deck, asks.current.get(deck.id) ?? lastBuild.current)
       : askFor(shown, [asks.current.get(shown ?? ""), lastBuild.current, readPendingBuild()]);
     if (!last) return false;
-    await startGeneration(last.request, last.expected);
+    await startGeneration(template ? { ...last.request, template_id: template } : last.request, last.expected);
     return true;
   }, [startGeneration]);
 

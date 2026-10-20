@@ -1105,6 +1105,24 @@ def test_a_rebuild_is_offered_only_for_reasons_it_can_get_past(warning, retryabl
     assert rejected["retryable"] is True
 
 
+def test_a_backup_that_answers_is_what_works_while_the_main_link_fails():
+    """VK answers 500 on every call (no pause: the chain tries it again each time) and Polza answers: the line says
+    the backup works, never «не отвечает»; the same model on another service is named with its service."""
+    now = time.time()
+    vk = _link(VK_MODEL, "error", host=VK_HOST, label="Qwen3.8-27B (VK)", available=True, until=None, last_error="HTTP 500")
+    polza = _link(MAIN, "ok", label="Qwen3.8-27B (Polza)", available=True, last_ok=now)
+    s = summarize([vk, polza, _link(BACKUP, "unknown", label="Qwen3.6-27B (Polza)", available=True)], configured=True, ctx=VK)
+    assert s["state"] == "fallback" and s["working_label"] == "Qwen3.8-27B (Polza)"
+    assert s["summary"] == "Qwen3.8-27B (Polza) · запасная модель" and s["advice"] == "Сейчас отвечает запасная модель — соберите ещё раз."
+    # the main link answered after the backup: it failed once since, and it is tried again — not the backup's turn
+    again = summarize([{**vk, "last_ok": now}, {**polza, "last_ok": now - 600}], configured=True, ctx=VK)
+    assert again["state"] == "retry" and again["working_label"] == "Qwen3.8-27B"
+    # a backup never called yet: nothing answered, the main link is tried again
+    assert summarize([vk, _link(MAIN, "unknown", label="Qwen3.8-27B (Polza)", available=True)], configured=True, ctx=VK)["state"] == "retry"
+    # the main link answers: the backup's old answer is not news
+    assert summarize([{**vk, "state": "ok", "last_ok": now}, polza], configured=True, ctx=VK)["state"] == "ok"
+
+
 def test_the_live_advice_follows_the_live_state():
     ok = summarize([_link(MAIN, "ok", available=True)], configured=True)
     assert ok["advice"] == "Модель снова отвечает — соберите ещё раз." and ok["retryable"] is True

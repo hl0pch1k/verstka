@@ -697,6 +697,42 @@ def _hint(primary: dict, ctx: ChainContext, *, backup: bool) -> Optional[str]:
     return advice(_link_code(primary), ctx, link_of(primary))
 
 
+def _failed(link: dict) -> bool:
+    return link["state"] not in ("ok", "unknown", "off")
+
+
+def _answered_after(primary: dict, rest: list[dict]) -> Optional[dict]:
+    """The backup that answered after the main link's last answer, while the main link stands failed (a chain calls
+    a backup only when the links before it fail: its answer is newer than the main link's)."""
+    if not _failed(primary):
+        return None
+    since = _as_time(primary.get("last_ok"))
+    for link in rest:
+        if link["state"] == "ok" and (since is None or (_as_time(link.get("last_ok")) or 0) > since):
+            return link
+    return None
+
+
+def _as_time(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _backup_name(backup: dict, primary: dict) -> str:
+    """The backup's short name; its full label when the short one is the main model's too («Qwen3.8-27B (Polza)»
+    after «Qwen3.8-27B (VK)»): the same model on another service."""
+    name = _short_name(backup)
+    if name != _short_name(primary):
+        return name
+    label = _label(backup)
+    if label != name:
+        return label
+    where = service(backup.get("host"))
+    return f"{name} ({where})" if where else name
+
+
 def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext] = None) -> dict:
     """Overall state + one short line («Qwen3.8-27B · доступна», «Qwen3.8-27B · недоступна», «Qwen3.6-27B · запасная
     модель») + the hint. The failed link's reason stays in `links[].state` / `last_error`: never in these words.
@@ -710,6 +746,19 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
         return {**none, "state": "off", "summary": "Модель не подключена", "retryable": False}
     primary = active[0]
     pname = _short_name(primary)
+    if _usable(primary) and (answered := _answered_after(primary, active[1:])) is not None:
+        # the main link failed and is tried again on the next call, but the chain's answers come from a backup
+        # (VK answers 500 on every call, Polza answers): what works now is the backup, never «не отвечает»
+        bname = _backup_name(answered, primary)
+        return {
+            **none,
+            "state": "fallback",
+            "summary": f"{bname} · запасная модель",
+            "hint": _hint(primary, ctx, backup=True),
+            "working_label": bname,
+            "advice": "Сейчас отвечает запасная модель — соберите ещё раз.",
+            "owner": owner_reasons((_link_code(x), link_of(x), x.get("last_error")) for x in active if _failed(x)),
+        }
     if _usable(primary):
         state = primary["state"] if primary["state"] in ("ok", "unknown") else "retry"
         words = {
@@ -720,7 +769,7 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
         return {**none, "state": state, "summary": f"{pname} · доступна", "working_label": pname, "advice": words[state]}
     backup = next((link for link in active[1:] if _usable(link)), None)
     if backup is not None:
-        bname = _short_name(backup)
+        bname = _backup_name(backup, primary)
         ok = backup["state"] == "ok"
         return {
             **none,

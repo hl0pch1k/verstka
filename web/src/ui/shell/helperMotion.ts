@@ -136,6 +136,9 @@ let commit: ((open: boolean) => void) | null = null;
 /** Состояние React (`ui.helper`), как его видел ход. */
 let state = false;
 let running: { dir: "open" | "close"; timer: number; step2: number } | null = null;
+/** Идёт ход помощника: периодические перемены в колоде (печать подсказки поля) ждут его конца — ни одной раскладки
+ *  и перерисовки плиты в кадрах хода. */
+export const helperRunning = () => running !== null;
 let pending: boolean | null = null;
 let geo: Geo | null = null;
 /** Замер устарел: помеченное поменяло размер (ResizeObserver) или окно — другое. */

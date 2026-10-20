@@ -33,6 +33,7 @@ import {
   textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twRestart, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
 import { usePhone } from "../shell/tier";
+import { helperRunning } from "../shell/helperMotion";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 /** Строка хода чтения: документ («doc:Отчёт.docx») или презентация «Улучшить готовую». */
@@ -364,6 +365,11 @@ function TypingHint({ live, tw, writer, hidden }: { live: boolean; tw: MutableRe
     setS(tw.current.s);
     let t = 0;
     const tick = () => {
+      // ход помощника: печать ждёт его конца (буква в кадре хода — перерисовка плиты в Safari)
+      if (helperRunning()) {
+        t = window.setTimeout(tick, 120);
+        return;
+      }
       const r = twStep(tw.current.s);
       tw.current.s = r.s;
       setS(r.s);
