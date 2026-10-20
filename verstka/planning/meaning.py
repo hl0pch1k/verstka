@@ -178,6 +178,21 @@ def table_conclusion(t: TableData, focus: Optional[list[list[float]]] = None, su
         hit = [c for c in cols if {round(c.values[i], 2) for i in body if c.values[i] is not None} in fsets]
         if 1 <= len(hit) <= 2:
             cols = hit
+    if len(cols) == 2 and (cols[0].unit != cols[1].unit or bool(_COUNT_NAME_RE.search(cols[0].name)) != bool(_COUNT_NAME_RE.search(cols[1].name))):
+        # «Квартал | Выручка, млн ₽ | Клиенты»: two measures, never added up — how each moved over the periods
+        if len(body) >= 2 and all(_PERIOD_LABEL_RE.match((labels[i] or "").strip()) for i in body):
+            i0, i1 = body[0], body[-1]
+            moves = []
+            for c in cols:
+                a, b = c.values[i0], c.values[i1]
+                if a is None or b is None or not a or a == b:
+                    return None
+                ch = f"×{fmt(round(b / a, 1))}" if b / a >= 1.5 else f"{signed(round((b / a - 1) * 100))}%"
+                moves.append((c, a, b, ch))
+            (c0, a0, b0, ch0), (c1, a1, b1, ch1) = moves
+            return (f"{H.cap_first(c0.name)}: {fmt(a0)} → {_with_unit(b0, c0.unit)} за {labels[i0]}–{labels[i1]} ({ch0})",
+                    f"{H.cap_first(c1.name)}: {fmt(a1)} → {_with_unit(b1, c1.unit)} ({ch1})")
+        return None
     if len(cols) == 2:
         a, b = cols
         additive = not (_RATE_RE.search(a.name + " " + (a.unit or "")) or _RATE_RE.search(t.columns[0]))

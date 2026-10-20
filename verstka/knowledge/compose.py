@@ -72,6 +72,17 @@ def _slide(title: str, frags: list[Fragment], used: set[str]) -> tuple[list[str]
     return body + table, took
 
 
+def _point(x: str) -> str:
+    """A line of the slide: the document's sentence, its long tail cut where a phrase ends (never to a stub)."""
+    if x.startswith("|") or x.endswith(":") or len(x.split()) <= 24:
+        return x
+    from verstka.planning import digest as DG
+    from verstka.planning import heuristics as H
+
+    h = DG.headline_of(x, 20)
+    return (h if len(h.split()) >= 8 else H.short(x, 26)).rstrip(".") + "."
+
+
 def _clean_item(item: str) -> str:
     """A plan item as a slide title: its own words, without the author's ask after a dash («— покажи на графике»)."""
     head = re.split(r"\s+[—–-]\s+", item, maxsplit=1)[0]
@@ -116,15 +127,47 @@ def compose_text(kb: KbReference, topic: str, plan: Optional[list[str]] = None, 
                 continue  # the document's own title over its opening lines: its sections say more
             if key not in seen:
                 seen.append(key)
-        topics = [(sec, f"{sec} {topic}") for _, sec in seen[: max(1, slides - 1)]]
+        # the parts the request names come first, whole: «какие бывают модели обслуживания» — every section under
+        # «Модели обслуживания» (IaaS, PaaS, SaaS), never one or two of them (jury 20.10, round 3); the document's own
+        # opening first when the request asks what something is
+        want = set(tokens(topic))
+        groups: list[tuple[str, str]] = []
+        lead: list[tuple[str, str]] = []
+        for f in kb.frags:
+            if len(f.section) >= 2:
+                parent = set(tokens(f.section[0]))
+                if parent and parent <= want:
+                    key = (f.doc, f.section[-1])
+                    if key not in groups:
+                        groups.append(key)
+            elif not f.section and re.search(r"\bчто\s+так(?:ое|ие)\b", topic, re.I) and not lead:
+                lead = [(f.doc, kb.title_of(f.doc))]
+        order = [*lead, *groups, *[k for k in seen if k not in groups and k not in lead]]
+        topics = [(sec, f"{sec} {topic}") for _, sec in order[: max(1, slides - 1)]]
+        own = {sec: d for d, sec in order}
+    if plan:
+        own = {}
     for title, query in topics:
         frags = [f for f, sc in kb.search.top(query, 3, min_score=MIN_SCORE)]
         if not plan:
-            frags = [f for f in frags if (f.section[-1] if f.section else kb.title_of(f.doc)) == title] or frags
+            # the section's own fragments, in the document's order (a search may bring the next section's)
+            mine = [f for f in kb.frags if f.doc == own.get(title) and (f.section[-1] if f.section else kb.title_of(f.doc)) == title][:3]
+            frags = mine or [f for f in frags if (f.section[-1] if f.section else kb.title_of(f.doc)) == title] or frags
         body, took = _slide(title, frags, used)
         if not body:
             continue
-        out += ["", f"Слайд {n}. {title}", *body]
+        from verstka.planning import digest as DG
+
+        # every line a whole statement of a slide's length (the document's own words, its long tail cut where a
+        # phrase ends); the title the first statement's point when it is one and names the section, else the section
+        body = [_point(x) for x in body]
+        head = DG.headline_of(body[0]) if body and not body[0].startswith("|") else title
+        sec_stems = set(tokens(title))
+        if not (DG.title_ok(head) and sec_stems and sec_stems <= set(tokens(head))):
+            head = title
+        elif len(body) > 1 and re.sub(r"\s*\([^()]*\)", "", head).rstrip(".") == re.sub(r"\s*\([^()]*\)", "", body[0]).rstrip("."):
+            body = body[1:]  # (the title says the first line: once)
+        out += ["", f"Слайд {n}. {head}", *body]
         if slides_out is not None:
             rows = [[c.strip() for c in ln.strip("| ").split(" | ")] for ln in body if ln.startswith("|") and not ln.startswith("|---")]
             slides_out.append({"n": n, "title": title, "points": [x for x in body if not x.startswith("|") and not x.endswith(":")],
@@ -157,6 +200,9 @@ def _digest_text(kb: KbReference, topic: str, title: str, slides: int) -> Option
     from verstka.planning import digest as DG
 
     hits = [f for f, _ in kb.search.top(topic, 40, min_score=MIN_SCORE) if not f.table]
+    if len(hits) < 3 * slides:
+        # a request the base answers in few fragments: the base itself is the material — all its text, in order
+        hits = [f for f in kb.frags if not f.table] or hits
     if not hits:
         return None
     hits.sort(key=lambda f: (f.doc, f.n))

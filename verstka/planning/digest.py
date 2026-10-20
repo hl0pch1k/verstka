@@ -175,6 +175,38 @@ class _Doc:
     heads: dict[int, str] = field(default_factory=dict)  # paragraph index → the heading it opens under
     tables: list[tuple[int, list[str], str]] = field(default_factory=list)  # (paragraph, rows, the line before it)
     words: int = 0
+    speech: bool = False  # a talk (a transcript): its sentences are said, its slides restate them
+
+
+# a talk's own turns of phrase: no slide line says them
+_TALK_RE = re.compile(r"(?<![\wё])(?:давайте|если\s+вы|интересно\s+посмотреть|как-то|какие-то|какой-то|какая-то|в\s+целом|о\s+котор\w+\s+говорил\w*|"
+                      r"так\s+вот|ничего\s+плохого|я\s+бы|мне\s+бы|вам\s+(?:скажу|расскажу)|мы\s+с\s+вами|как\s+вы\s+(?:знаете|видите)|"
+                      r"это\s+тоже\s+в\s+плюс|будет\s+в\s+плюс|с\s+точки\s+зрения|(?:первый|второй|третий|следующий|интересный|хороший)\s+вопрос|"
+                      r"вопрос\s*:|ответ\s*:|по-моему|вроде|может\s+быть|напомните|поправить|вместе\s+с\s+нами|на\s+встрече|"
+                      r"(?<![а-яё])(?:вы|вас|вам|вами)(?![а-яё]))(?![\wё])", re.I)
+_ASIDE_RE = re.compile(r",\s*(?:значит|вот|ну|как\s+бы|собственно|скажем|в\s+общем|кстати|конечно|видимо|наверное|да|то\s+есть|так\s+сказать|"
+                       r"к\s+примеру|например|по\s+сути|грубо\s+говоря|честно\s+говоря|если\s+быть\s+\w+|соответственно|в\s+принципе|как\s+говорится)\s*(?=[,.!?]|$)", re.I)
+_SPEECH_SWAPS = (
+    (re.compile(r"^(?:ну|вот|итак|значит|так|да|смотрите|давайте)\s*,?\s+", re.I), ""),
+    (re.compile(r"^если\s+говорить\s+(?:о|об|про)\s+[^,]{2,60},\s*(?:то\s+)?", re.I), ""),
+    (re.compile(r"^(?:мы|я)\s+(?=[а-яё]+(?:ем|им|ём|ю|у)\b)", re.I), ""),  # «Мы предлагаем …» → «Предлагаем …»
+    (re.compile(r"\b(?:у\s+нас|у\s+вас)\s+", re.I), ""),
+    (re.compile(r"\bвы\s+(?:можете|сможете)\b", re.I), "можно"),
+    (re.compile(r"\b(?:вам|вы)\s+(?:нужно|надо|необходимо|должны)\b", re.I), "нужно"),
+    (re.compile(r"\b(?:ваш|ваша|ваше|ваши|вашего|вашей|вашему|вашим|ваших|вашу|наш|наша|наше|наши|нашего|нашей|нашему|нашим|наших|нашу)\s+", re.I), ""),
+    (re.compile(r"\bвсё-таки\b\s*|\bвообще\b\s*|\bпросто\b\s*|\bдействительно\b\s*", re.I), ""),
+)
+
+
+def unspeak(s: str) -> str:
+    """A sentence of a talk as a line of a slide: no asides («, значит,»), no lead-ins («Если говорить о формальностях,
+    то»), no «мы»/«вы»/«ваш» — the statement itself («Мы предлагаем использовать модель…» → «Предлагаем использовать
+    модель…», «прикрепить ссылку на ваше хранилище» → «прикрепить ссылку на хранилище»)."""
+    t = _ASIDE_RE.sub("", s)
+    for rx, rep in _SPEECH_SWAPS:
+        t = rx.sub(rep, t)
+    t = re.sub(r"\s{2,}", " ", t).strip(" ,")
+    return H.cap_first(t) if t else s
 
 
 def _clean_sentence(s: str) -> str:
@@ -210,6 +242,9 @@ def score_sentence(s: str) -> float:
     sc += 1.2 * min(3, len(_DECISION_RE.findall(s)))
     sc += 0.8 * min(2, len(_QUOTED_RE.findall(s))) + 0.4 * min(3, len(_TERM_RE.findall(s)))
     sc -= 2.5 * len(_FILLER_RE.findall(s))
+    sc -= 2.0 * len(_TALK_RE.findall(s))
+    if re.match(r"^[^\s,]+(?:\s[^\s,]+)?,\s", s):
+        sc -= 3.0  # («Проектной работы, и всегда …»: a sentence cut by the transcript)
     sc -= 3.0 * bool(_GREETING_RE.search(s))
     sc -= 1.2 * min(3, len(_FIRST_PERSON_RE.findall(s)))
     sc -= 1.0 * min(3, len(_MEETING_RE.findall(s)))
@@ -226,6 +261,8 @@ def _read(text: str) -> _Doc:
     body = _body(text)
     lines = body.splitlines()
     doc = _Doc(title=None)
+    speech = len(_FILLER_RE.findall(body)) + len(_FIRST_PERSON_RE.findall(body)) > max(8, _words(body) // 120)
+    doc.speech = speech
     para = 0
     head: Optional[str] = None
     pending_table: list[str] = []
@@ -261,7 +298,9 @@ def _read(text: str) -> _Doc:
             c = _clean_sentence(sent)
             if not c:
                 continue
-            sc = score_sentence(c) - (2.0 if sent.strip()[:1].islower() else 0.0)  # (a piece of a sentence cut by speech)
+            sc = score_sentence(c)
+            if speech:
+                c = unspeak(c)  # (scored as said — its speech counts against it —, shown as a statement) - (2.0 if sent.strip()[:1].islower() else 0.0)  # (a piece of a sentence cut by speech)
             if sc > -2:
                 # a paragraph's first sentence says what it is about; the lead of an article («Общие сведения») most of all
                 sc += (1.0 if k == 0 else 0.0) + (2.0 if head == LEAD_HEAD else 0.0)
@@ -321,8 +360,8 @@ def _complete(t: str, max_words: int) -> bool:
     """A finished thought short enough for a title: 3+ words, a verb (or «X — Y»), quotes and brackets closed, an end that is
     no preposition or conjunction."""
     w = _words(t)
-    if not 3 <= w <= max_words or not _balanced(t) or not _VERB_RE.search(" " + t):
-        return False
+    if not 5 <= w <= max_words or not _balanced(t) or not _VERB_RE.search(" " + t):
+        return False  # (4 words and fewer say no point: «Платформа как услуга — модель»)
     last = _bare((t.split() or [""])[-1])
     # («Предоставится, Qen 3.8 …», «Проектной работы, и всегда …»: a word or two cut off the sentence before)
     return (bool(last) and last not in _TAIL_BAD and not _DANGLING_RE.match(last) and not _FRAGMENT_RE.match(t)
@@ -385,7 +424,7 @@ def headline_of(sentence: str, max_words: int = HEAD_WORDS, fallback: Optional[s
         tail = s.split(" — ", 1)[1]
         tail_main = re.split(r",\s+|\s+[—–]\s+", tail, maxsplit=1)[0]
         cand = f"{head} — {tail_main}"
-        if _words(cand) <= limit and _balanced(cand) and _clean_end(cand) == cand and not _DANGLING_RE.match(_bare(cand.split()[-1])):
+        if 5 <= _words(cand) <= limit and _balanced(cand) and _clean_end(cand) == cand and not _DANGLING_RE.match(_bare(cand.split()[-1])):
             return H.cap_first(cand)
     if fallback:
         return H.cap_first(H.strip_end(fallback))
@@ -530,7 +569,8 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
         return None
     size = deck_size(slides, doc.words)
     n_content = max(1, size - 2)  # cover and the closing
-    per = 2 if doc.words < 1000 else POINTS  # a short document: fewer lines a slide, more slides of its parts
+    per = 2 if doc.words < 1000 or doc.speech else POINTS  # a short document or a talk: fewer lines a slide, more slides
+    point_floor = 2.0 if doc.speech else -99.0  # (a talk's weak sentences are speech, not facts)
     used: list[str] = []
 
     def fresh(s: _Sent) -> bool:
@@ -562,7 +602,7 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
             lead = max(pick[:3], key=lambda s: s.score - max(0, s.words - HEAD_WORDS - 2) * 0.5 - 4 * bool(_FRAGMENT_RE.match(s.text))
                        - 3 * (not title_ok(headline_of(s.text))))
             title = headline_of(lead.text, fallback=heading_of(lead))
-            rest = sorted((s for s in pick if s is not lead), key=lambda s: s.pos)
+            rest = sorted((s for s in pick if s is not lead and s.score >= point_floor), key=lambda s: s.pos)
             points = [point_of(s.text) for s in rest][:per]
             if _words(H.strip_end(lead.text)) - _words(title) >= 3:
                 points = [point_of(lead.text), *points][:per]
@@ -799,9 +839,22 @@ def no_source_text(topic: str) -> str:
     """The honest deck of a topic nobody could write: no model, no article — the cover and what to do."""
     from verstka.planning.topic_writer import topic_subject
 
-    title = H.cap_first(H.strip_end(topic_subject(topic) or topic))[:120]
-    return (f"Слайд 1. Обложка\nНазвание: {title}\n\n"
-            "Слайд 2. Текст презентации не написан: модель недоступна, статья по теме не найдена\n"
-            "- Модель, которая пишет текст по теме, сейчас не отвечает.\n"
-            "- Статью по теме в Википедии найти не удалось.\n"
-            "- Добавьте свой текст, документ или базу знаний — колода соберётся из них.\n")
+    subject = topic_subject(topic) or topic
+    from verstka.planning.brief_structure import _nominative
+
+    core = re.sub(r"^для\s+", "", subject)
+    core = _nominative(core) or core
+    core = re.sub(r"^(\w+(?:инг|ент|ект|ер|ор))а(?=\s)", r"\1", core)  # «онбординга новых сотрудников» → «онбординг новых сотрудников»
+    core = re.sub(r"^(\w+ци)и(?=\s)", r"\1я", core)  # «адаптации персонала» → «адаптация персонала»
+    title = H.cap_first(H.strip_end(core))[:120]
+    # «…: первая неделя, кто есть кто, инструменты, как ставят цели и что считается успехом» — what the deck must tell
+    tail = topic.split(":", 1)[1] if ":" in topic else ""
+    parts = [H.cap_first(H.strip_end(x.strip())) for x in re.split(r",\s*|\s+и\s+(?=(?:как|что|кто|где|когда|зачем|почему)\b)", tail) if len(x.split()) >= 1 and x.strip()]
+    out = (f"Слайд 1. Обложка\nНазвание: {title}\n\n"
+           "Слайд 2. Текст презентации не написан: модель недоступна, статья по теме не найдена\n"
+           "- Модель, которая пишет текст по теме, сейчас не отвечает.\n"
+           "- Статью по теме в Википедии найти не удалось.\n"
+           "- Добавьте свой текст, документ или базу знаний — колода соберётся из них.\n")
+    if 2 <= len(parts) <= 8:
+        out += "\nСлайд 3. Что должна раскрыть презентация\n" + "".join(f"- {x}.\n" for x in parts)
+    return out

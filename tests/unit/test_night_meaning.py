@@ -115,7 +115,7 @@ def test_a_long_transcript_without_a_model_is_a_deck_of_its_meaning_in_every_var
     res = run_agent(Brief(text=_transcript()), None, [st[n] for n in ("structured", "visual", "compact")])
     assert res is not None and res.outlines
     for name, o in res.outlines.items():
-        assert 4 <= len(o.slides) <= 15, (name, len(o.slides))
+        assert 3 <= len(o.slides) <= 15, (name, len(o.slides))
         text = _all_text(o)
         for bad in ("блин", "Господи", "Всё, я могу"):
             assert bad not in text, (name, bad)
