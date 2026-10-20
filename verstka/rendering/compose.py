@@ -779,6 +779,66 @@ def pull_figure(text: str) -> Optional[str]:
     return found[0].replace(" ", "")
 
 
+_PAIR_FIG_RE = re.compile(r"(?<![\w.,])(\d{1,3}(?:[\u00a0\u202f ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)(\s?(?:%|₽|×|(?:млн|млрд|тыс\.?)(?:\s?(?:₽|руб\.?|рублей))?))(?![\w])")
+_PAIR_PREP = ("на", "при", "до", "в", "с", "от", "за", "по", "около", "почти", "более", "менее")
+
+
+def _drop_tail_prep(text: str) -> tuple[str, str]:
+    """(text without its last word when that word is a preposition, the preposition or "")."""
+    words = text.rstrip().split()
+    if words and words[-1].lower() in _PAIR_PREP:
+        return " ".join(words[:-1]), words[-1]
+    return text.strip(), ""
+
+
+def figure_pair(text: str) -> Optional[tuple[str, tuple[str, str], tuple[str, str]]]:
+    """(lead, (figure, label), (figure, label)) of a short thesis that sets one figure against another — the fact and the
+    month before, the fact and its goal, a share against a share: «48 200 заказов, на 12% больше, чем в августе» →
+    ("", ("48 200", "заказов"), ("12%", "больше, чем в августе")); «0,8% заказов, цель — не больше 0,5%» → ("",
+    ("0,8%", "заказов"), ("0,5%", "цель — не больше")); «Главная проблема — ночная смена: на неё приходится 61% ошибок
+    при 35% объёма» → ("Главная проблема — ночная смена: на неё приходится", ("61%", "ошибок"), ("35%", "объёма")).
+    A preposition that tied a figure to the sentence («на 12%», «при 35%») leaves with it. None — no second figure, more
+    than two, or the words around a figure would be lost."""
+    t = " ".join((text or "").split()).rstrip(".")
+    if not 20 <= len(t) <= 200:
+        return None
+    lead = leading_figure(t)
+    if lead is not None:
+        v1, rest = lead
+        found = [m for m in _PAIR_FIG_RE.finditer(rest)]
+        if len(found) != 1 or len(re.findall(r"\d+(?:[.,]\d+)?", rest.replace("\u00a0", " "))) > len(re.findall(r"\d+(?:[.,]\d+)?", found[0].group(0).replace("\u00a0", " "))):
+            return None
+        m = found[0]
+        # (the clause the second figure stands in starts at the last comma before it — «, цель — не больше 0,5%» —, or
+        # at a dash or a colon when there is no comma)
+        cut = next((c for c in (rest.rfind(sep, 0, m.start()) for sep in (", ", " — ", ": ")) if c > 0), -1)
+        if cut <= 0:
+            return None
+        l1 = rest[:cut].strip(" ,—:;")
+        clause = rest[cut:].strip(" ,—:;")
+        cm = _PAIR_FIG_RE.search(clause)
+        before, _prep = _drop_tail_prep(clause[: cm.start()])
+        l2 = " ".join((before + " " + clause[cm.end():]).split()).strip(" ,—:;")
+        l2 = re.sub(r"\s+([,.;:])", r"\1", l2)
+        v2 = (cm.group(1) + cm.group(2)).strip()
+        if not l1 or len(l2.split()) < 1 or re.fullmatch(r"(?:19|20|21)\d{2}", cm.group(1)):
+            return None
+        return "", (v1, l1), (v2, l2)
+    found = list(_PAIR_FIG_RE.finditer(t))
+    if len(found) != 2 or len(re.findall(r"\d+(?:[.,]\d+)?", t.replace("\u00a0", " "))) != len(re.findall(r"\d+(?:[.,]\d+)?", " ".join(m.group(0) for m in found).replace("\u00a0", " "))):
+        return None
+    m1, m2 = found
+    if not all(m.group(2).strip() for m in found):
+        return None  # two bare numbers are no comparison of shares or sums
+    head = t[: m1.start()].rstrip()
+    between, _p = _drop_tail_prep(t[m1.end(): m2.start()])
+    l1 = between.strip(" ,—:;")
+    l2 = t[m2.end():].strip(" ,—:;")
+    if len(head.split()) < 2 or not l1 or not l2 or len(l1.split()) > 4 or len(l2.split()) > 4:
+        return None
+    return head, ((m1.group(1) + m1.group(2)).strip(), l1), ((m2.group(1) + m2.group(2)).strip(), l2)
+
+
 _ORDINAL_RE = re.compile(r"(?<![\w])\d+\s?-\s?(?:й|я|е|го|му|м|х|ый|ой|ий|ая|ое|ые)(?![а-яё])", re.I)
 _MONEY_WORD_RE = re.compile(r"(\d)\s?(?:рубл(?:ей|я|ь)|руб\.?)(?![а-яё])", re.I)
 _PLAIN_FIG_RE = re.compile(r"(?<![\w.,:])\d{1,3}(?: \d{3})+(?:[.,]\d+)?(?![\w:])|(?<![\w.,:])\d+(?:[.,]\d+)?(?![\w:%])")
@@ -3076,6 +3136,11 @@ class Composer:
             up = [x for x in sorted(k.sizes) if 0.03 * k.hpt - 0.05 <= x <= fs / FIG_RATIO + 0.05]
             if up and up[0] > lab_size:
                 lab_size = up[0]
+            if getattr(self, "_hero_solo", False) and not has_side:
+                # a thesis's figure alone: its words at 4.5–5 % of the slide height (the template's size there, else
+                # 4.5 %), never closer than 1.6× to the figure
+                want = [x for x in sorted(k.sizes) if 0.045 * k.hpt - 0.05 <= x <= 0.05 * k.hpt + 0.05]
+                lab_size = max(lab_size, min(want[0] if want else round(0.045 * k.hpt * 2) / 2, fs / FIG_RATIO))
         label = [self.P(distinct_label(num.value, num.label, self.o.headline), lab_size, colors.text)]
         lab_h = self.h(label, int(left_w * 0.92))
         left_h = fig_h - tg + int(k.vgap * 0.4) + lab_h
@@ -3100,7 +3165,7 @@ class Composer:
         # the figure's box (its line's room over the letters included) starts inside the area, never over the heading
         # (VK Tech: «4,8 из 5» at 166 pt — its box ran up over «Студенты оценивают…»)
         y0 = max(y0, min(area.y + tg, area.y2 - block_h))
-        if self.strategy == "visual" and not has_side:
+        if (self.strategy == "visual" or getattr(self, "_hero_solo", False)) and not has_side:
             # the visual variant's lone figure stands on the area's axis, its label centred under it
             fw = _emu(self.figure_para(num.value, fs, colors.figure, colors.muted)[1])
             cx = area.x + (area.w - min(fw, left_w)) // 2
@@ -3226,17 +3291,68 @@ class Composer:
         height, a figure, not a poster —, the words under it. A thesis opening with its figure keeps the rest as the
         label («48 200» over «заказов, на 12% больше, чем в августе»); one with a percentage inside keeps the whole
         sentence under the figure pulled out of it. False — no figure to lead with, nothing drawn."""
+        pair = figure_pair(text)
+        if pair is not None and self.figure_pair_block(area, *pair):
+            return True
         lead = leading_figure(text)
         if lead is None:
             pulled = pull_figure(text)
             lead = (pulled, text.strip()) if pulled else None
         if lead is None:
             return False
-        self._hero_cap = 0.14 * self.kit.hpt
+        # a figure with nothing to compare it with: larger, its words larger, both in the middle of the area — a
+        # figure at the left over a small line left the right half of the slide empty (Inspiration, 20.10)
+        self._hero_cap, self._hero_solo = 0.18 * self.kit.hpt, True
         try:
             self.big_number(area, NumberCallout(value=lead[0], label=lead[1]), extra=[], others=[])
         finally:
-            self._hero_cap = None
+            self._hero_cap, self._hero_solo = None, False
+        return True
+
+    def figure_pair_block(self, area: Bbox, lead: str, a: tuple[str, str], b: tuple[str, str]) -> bool:
+        """Two figures side by side, each over its words — the fact and the month before, the fact and its goal («0,8%
+        заказов» | «0,5% цель — не больше»), one share against another —, at one size, a hairline between them; the
+        words that lead into them («Главная проблема — ночная смена: на неё приходится») over the pair. False when the
+        figures do not fit their halves at a figure's size (nothing drawn)."""
+        k = self.kit
+        colors = k.colors
+        gap = k.gap * 3
+        half = (area.w - gap) // 2
+        fs = None
+        for size in k.figure_sizes(min(k.figure_cap(2, False, self.strategy), 0.14 * k.hpt), k.display):
+            if max(self.figure_para(v, size, colors.figure, colors.muted)[1] for v, _ in (a, b)) <= _pt(half) * 0.9:
+                fs = size
+                break
+        if fs is None or fs < 1.6 * (k.head_size or k.h2):
+            return False
+        lab_size = k.lead
+        up = [x for x in sorted(k.sizes) if 0.04 * k.hpt - 0.05 <= x <= fs / FIG_RATIO + 0.05]
+        if up and up[0] > lab_size:
+            lab_size = up[0]
+        fig_h = _emu(fs * max(1.12, k.line))
+        figs = [self.figure_para(a[0], fs, colors.figure, colors.muted)[0], self.figure_para(b[0], fs, colors.text, colors.muted)[0]]
+        labels = [[self.P(a[1], lab_size, colors.text)], [self.P(b[1], lab_size, colors.text)]]
+        lab_h = max(self.h(lp, int(half * 0.92)) for lp in labels)
+        lead_p = [self.P(lead, lab_size, colors.text)] if lead else []
+        lead_h = self.h(lead_p, area.w) if lead_p else 0
+        optics = [self._figure_optics(f, fig_h) for f in figs]
+        tg = max(t for _, t in optics)
+        pair_h = fig_h - tg + int(k.vgap * 0.4) + lab_h
+        block_h = (lead_h + k.vgap if lead_p else 0) + pair_h
+        if block_h > area.h:
+            return False
+        y0 = self._place_v(area, block_h)
+        if lead_p:
+            self.cv.text(Bbox(x=area.x, y=y0, w=area.w, h=lead_h), lead_p, name="Lead")
+            y0 += lead_h + k.vgap
+        y0 = max(y0, area.y + tg)
+        for i, (fig, lab) in enumerate(zip(figs, labels)):
+            x = area.x + i * (half + gap)
+            lsb = optics[i][0]
+            self.cv.text(Bbox(x=x - lsb, y=y0 - tg, w=half + lsb, h=fig_h), [fig], anchor="b", name="Figure")
+            self.cv.text(Bbox(x=x, y=y0 + fig_h - tg + int(k.vgap * 0.4), w=int(half * 0.92), h=lab_h), lab, name="Label")
+        xm = area.x + half + gap // 2
+        self.cv.line(xm, y0, xm, y0 + pair_h, colors.divider, 1.0)
         return True
 
     def paragraphs(self, area: Bbox, texts: list[str]) -> None:

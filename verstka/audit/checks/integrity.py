@@ -143,6 +143,16 @@ def _present(wanted: str, have: str) -> bool:
         value, label = got
         if _norm_text(label)[:CONTENT_KEY_CHARS] in have and _norm_text(value) in have:
             return True
+    from verstka.rendering.compose import figure_pair
+
+    pair = figure_pair(wanted)
+    if pair is not None:
+        # a thesis that sets one figure against another, set as two figures over their words («0,8%» over «заказов»,
+        # «0,5%» over «цель — не больше») with the words leading into them over the pair — compose.figure_pair
+        lead, (v1, l1), (v2, l2) = pair
+        parts = [x for x in (lead, l1, l2) if x]
+        if all(_norm_text(x)[:CONTENT_KEY_CHARS] in have for x in parts) and _norm_text(v1) in have and _norm_text(v2) in have:
+            return True
     return False
 
 

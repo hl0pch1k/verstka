@@ -425,3 +425,39 @@ def test_a_slide_numbers_cached_text_follows_the_slide(simple_deck, tmp_path):
     out = b.save(tmp_path / "d.pptx")
     nums = [[t.text for t in s._element.iter(q("a:t")) if t.getparent().get("type") == "slidenum"] for s in Presentation(str(out)).slides]
     assert nums == [[str(i)] for i in range(1, len(nums) + 1)]
+
+
+def test_a_figure_set_against_another_is_a_pair():
+    from verstka.rendering.compose import figure_pair
+
+    assert figure_pair("48 200 заказов, на 12% больше, чем в августе.") == ("", ("48 200", "заказов"), ("12%", "больше, чем в августе"))
+    assert figure_pair("0,8% заказов, цель — не больше 0,5%.") == ("", ("0,8%", "заказов"), ("0,5%", "цель — не больше"))
+    assert figure_pair("Главная проблема — ночная смена: на неё приходится 61% ошибок при 35% объёма.") == (
+        "Главная проблема — ночная смена: на неё приходится", ("61%", "ошибок"), ("35%", "объёма"))
+    assert figure_pair("48 200 заказов за сентябрь") is None  # nothing to compare with
+    assert figure_pair("Загрузка в среднем 23%, но в пиковые дни 97%, из-за чего ночные расчёты не успевают") is None
+
+
+def test_a_pair_stands_side_by_side_and_a_lone_figure_in_the_middle(env):
+    """Inspiration «главная цифра» (20.10): the figure at the left over a 3.6 % line left the right half empty — a
+    second figure stands beside the first at its size; a lone one grows (to 18 % of the height), its words to 4.5 %,
+    both centred in the area."""
+    o = OutlineSlide(id="f", kind=PatternKind.bullets, headline="Ошибки комплектации", content=SlideContent(bullets=["0,8% заказов, цель — не больше 0,5%."]))
+    c, W, H = _composer(env, o)
+    n0 = len(c.cv.tree)
+    area = Bbox(x=int(0.06 * W), y=int(0.2 * H), w=int(0.88 * W), h=int(0.68 * H))
+    c.compose("bullets", area)
+    figs = [el for el in list(c.cv.tree)[n0:] if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith("Figure")]
+    assert len(figs) == 2
+    xs = sorted(element_bbox(f)[0] for f in figs)
+    assert xs[1] - xs[0] > 0.35 * W  # side by side, not stacked
+    o2 = OutlineSlide(id="g", kind=PatternKind.bullets, headline="Сколько отгрузили", content=SlideContent(bullets=["48 200 заказов за сентябрь по всем складам."]))
+    c2, _, _ = _composer(env, o2)
+    n0 = len(c2.cv.tree)
+    c2.compose("bullets", area)
+    els = list(c2.cv.tree)[n0:]
+    lab = next(el for el in els if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith("Label"))
+    size = max(int(r.get("sz")) / 100 for r in lab.iter(q("a:rPr")) if r.get("sz"))
+    assert size >= 0.044 * c2.kit.hpt, size
+    lb = element_bbox(lab)
+    assert abs((lb[0] + lb[2] / 2) - (area.x + area.w / 2)) < 0.05 * W  # centred in the area
