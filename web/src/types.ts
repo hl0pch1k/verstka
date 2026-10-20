@@ -661,7 +661,9 @@ export type ChatAction =
   | { type: "generation_started"; job_id: string; generation_id: string }
   | { type: "jobs"; jobs: { strategy: string; job_id: string }[] }
   | { type: "open_tab"; tab: string; slide?: number }
-  | { type: "edit"; job_id: string; strategy: string; generation_id: string; slide?: number | null };
+  | { type: "edit"; job_id: string; strategy: string; generation_id: string; slide?: number | null }
+  /** The variant is busy with another change: the helper queues the message and sends it again after that one. */
+  | { type: "busy"; generation_id: string; strategy: string };
 // what an edit job answers (verstka/api/app.py _edit_job): the agent's reply and the slide to show
 export interface EditResult { reply: string; changed: boolean; slide?: number | null; strategy?: string; score?: number | null; kind?: string }
 export interface ChatResponse { reply: string; intent: string; actions: ChatAction[]; template_id: string | null; generation_id: string | null }

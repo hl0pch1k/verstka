@@ -317,3 +317,44 @@ export function placeholderFor(c: { screen: Screen; deck: boolean; slide: number
   if (c.screen === "result" && c.deck) return c.short ? `Слайд ${c.slide}: что поменять?` : `Что поменять на слайде ${c.slide}?`;
   return c.short ? "Вопрос или текст" : "Вопрос или текст презентации";
 }
+
+// ── очередь: вторая просьба, пока вариант меняется по первой
+/** Просьба, которую сервер не начал — её вариант занят другой правкой (`busy` в ответе): ждёт в очереди и уходит ещё
+ *  раз, когда вариант освободится. `target` — о чём спросили тогда (презентация, вариант, слайд), а не что на экране
+ *  потом; `key` — вариант (workKey); `tries` — сколько раз сервер ответил «занят»; `after` — раньше не отправлять (мс). */
+export interface Queued {
+  id: string;
+  message: string;
+  target: { generation_id: string | null; strategy: string | null; slide: number | null };
+  key: string;
+  tries: number;
+  after: number;
+}
+
+/** Повтор, когда сервер снова ответил «занят», а здесь о работе над вариантом не знают (её начали в другой вкладке). */
+export const QUEUE_WAIT = 4000;
+/** Столько раз «занят» подряд (около трёх минут) — просьба из очереди снимается со словами, что её не выполнили. */
+export const QUEUE_TRIES = 45;
+export const QUEUE_GAVE_UP = "Вариант всё ещё меняется — просьбу из очереди не выполнил. Повторите её, когда правка закончится.";
+
+/** Просьба в кавычках, длинная — с многоточием. */
+const quoted = (message: string) => {
+  const t = message.replace(/\s+/g, " ").trim();
+  return `«${t.length > 60 ? `${t.slice(0, 59).trimEnd()}…` : t}»`;
+};
+
+/** Ответ на просьбу, поставленную в очередь: что она не потерялась и когда начнётся. `ahead` — сколько просьб перед ней. */
+export function queuedText(message: string, ahead: number): string {
+  const place = ahead > 0 ? ` (перед ней ещё ${plural(ahead, "просьба", "просьбы", "просьб")})` : "";
+  return `Этот вариант сейчас меняется — поставил ${quoted(message)} в очередь${place}. Начну, как только закончу текущую правку.`;
+}
+
+/** Тихая строка ленты, когда просьба из очереди ушла. */
+export const queueStartText = (message: string) => `Беру из очереди: ${quoted(message)}.`;
+
+/** Следующая просьба очереди, которую можно отправить сейчас: только первая (порядок просьб сохраняется), когда её вариант
+ *  свободен и время повтора пришло; иначе null. */
+export function queueHead(queue: Queued[], busy: readonly string[], now: number): Queued | null {
+  const head = queue[0];
+  return head && !busy.includes(head.key) && head.after <= now ? head : null;
+}

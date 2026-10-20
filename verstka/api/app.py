@@ -3306,6 +3306,9 @@ def chat(req: ChatRequest) -> dict:
             except HTTPException as e:
                 r = None
                 reply = (e.detail if isinstance(e.detail, str) else "Не получилось") + ("." if isinstance(e.detail, str) and not e.detail.endswith(".") else "")
+                if e.status_code == 409 and e.detail == _VARIANT_BUSY:
+                    # the variant is busy with another change: the helper queues the message and sends it again after
+                    actions.append({"type": "busy", "generation_id": gen_id, "strategy": v["strategy"]})
             if r is not None:
                 reply = (f"Убираю изображение со слайда {n} — место останется под ваше фото…" if action == "remove"
                          else f"Рисую новое изображение для слайда {n}" + (f": «{wish}»" if wish else "") + "…")
@@ -3339,6 +3342,8 @@ def chat(req: ChatRequest) -> dict:
                     r = None
                 if r is None:
                     reply = "Этот вариант уже меняется — дождитесь, пока закончу."
+                    # the helper queues the message and sends it again once the change running now is over
+                    actions.append({"type": "busy", "generation_id": gen_id, "strategy": v["strategy"]})
                 else:
                     slides_ = (v.get("outline") or {}).get("slides") or []
                     n_ = parsed.slides[0] if parsed.slides else None

@@ -80,3 +80,19 @@ def test_chat_edits_the_slide_on_screen_after_another_was_discussed(tmp_path, mo
     req = A.ChatRequest(session_id="this-slide", message="переделай этот слайд", generation_id="g1", strategy="structured", slide=4)
     r = A.chat(req)
     assert "слайд 4" in r["reply"] and r["actions"][0]["slide"] == 4 and sent["slide"] == 4
+
+
+def test_a_busy_variant_answers_with_a_busy_action(monkeypatch):
+    """A second change while the first runs: the reply says the variant is busy and the `busy` action lets the helper
+    queue the message (it sends it again once the change running now is over) instead of losing it."""
+    import verstka.api.app as A
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(A, "_generation_payload", lambda gid: {"variants": [{"strategy": "structured", "outline": {"slides": [{"kind": "title"}] + [{"kind": "bullets"}] * 4}}]})
+
+    def busy(*_a, **_k):
+        raise HTTPException(409, A._VARIANT_BUSY)
+
+    monkeypatch.setattr(A, "edit_variant", busy)
+    r = A.chat(A.ChatRequest(session_id="busy-edit", message="на слайде 2 сделай таблицей", generation_id="g1", strategy="structured", slide=3))
+    assert "уже меняется" in r["reply"] and r["actions"] == [{"type": "busy", "generation_id": "g1", "strategy": "structured"}]

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor, latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob, editLink, linkOpen } from "./chat";
+import { asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor, latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob, editLink, linkOpen, queuedText, queueStartText, queueHead, type Queued } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
 
@@ -304,4 +304,18 @@ test("ответ о правке: «Показать слайд N» — когд
   assert.equal(linkOpen({ gid: "g1", strategy: null, slide: 3 }, "g1"), true);
   assert.equal(linkOpen({ gid: "g1", strategy: null, slide: 3 }, "g2"), false);
   assert.equal(linkOpen(undefined, "g1"), false);
+});
+
+test("a second change while the first runs waits in the queue and goes when its variant is free", () => {
+  assert.equal(queuedText("на слайде 2 сделай таблицей", 0),
+    "Этот вариант сейчас меняется — поставил «на слайде 2 сделай таблицей» в очередь. Начну, как только закончу текущую правку.");
+  assert.ok(/в очередь \(перед ней ещё 2 просьбы\)\./.test(queuedText("убери слайд 4", 2)));
+  assert.equal(queueStartText("на слайде 2 сделай таблицей"), "Беру из очереди: «на слайде 2 сделай таблицей».");
+  assert.ok(/^Беру из очереди: «а{59}…»\.$/.test(queueStartText("а".repeat(80))));
+  const q = (id: string, key: string, after = 0): Queued => ({ id, message: id, target: { generation_id: "g", strategy: "s", slide: 2 }, key, tries: 1, after });
+  // the head only: the order of the person's requests stays
+  assert.equal(queueHead([q("a", "g|s"), q("b", "g|t")], ["g|s"], 10), null);
+  assert.equal(queueHead([q("a", "g|s"), q("b", "g|t")], [], 10)?.id, "a");
+  assert.equal(queueHead([q("a", "g|s", 50)], [], 10), null);
+  assert.equal(queueHead([], [], 10), null);
 });
