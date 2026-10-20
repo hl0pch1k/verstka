@@ -930,7 +930,7 @@ def _heading_of(r: "Reading") -> str:
             clause = re.split(r"[,:;]\s|\s[—–]\s", s0, maxsplit=1)[0]
             if 2 <= words(clause) <= 10:
                 return H.strip_end(clause)
-            return " ".join(s0.split()[:7]).rstrip(",;:—–") + "…"
+            return H.safe_head(s0, " ".join(s0.split()[:7])).rstrip(",;:—–") + "…"
         if p.kind in ("list", "flow") and p.label:
             return H.strip_end(p.label)
         if p.kind in ("image", "chart", "table", "note") and (p.label or p.text):
@@ -2431,3 +2431,571 @@ def drop_one_sentence(slide, target: Optional[str] = None) -> str:
             gone = it.bullets.pop()
             return f"one line less: «{gone[:60]}» (it stays in the notes)"
     return "skip"
+
+
+# ------------------------------------------------------------------ a document of the author's own, laid out whole
+
+# «Модель пишет тексты» off: a report, a talk or a lecture the author wrote (prose, no «Слайд N.») is laid out WHOLE —
+# every sentence on a slide (jury 5: VKT-A lost ≈45 % of its sentences to the digest, L-B its main result, E-A its
+# formulas and homework). The author's sections («Исходная точка. …», «Деньги. …») are the slides, a long one goes on
+# over as many slides as it needs; the deck's cover is the author's title line. Only a talk written down as said (a
+# transcript) or a document too long for a deck is condensed (planning/digest.py).
+
+PROSE_SLIDE_CHARS = 560  # a slide's sentences, in characters: what every variant shows whole (the visual one too)
+PROSE_SLIDE_SENTS = 4
+PROSE_MAX_CHARS = 820  # … up to this when the document is long or the person asked for fewer slides
+PROSE_MAX_SLIDES = 24  # content slides a document may take without a count asked: more is no deck — it is condensed
+PROSE_MIN_PARAS = 2
+
+_PROSE_LABEL_MAX = 7
+_CLAUSE_CUT_RE = re.compile(
+    r",\s+(?=(?:но|а|однако|хотя|потому|поэтому|чтобы|что|когда|если|где|котор\w+|причём|причем|благодаря|несмотря|"
+    r"включая|в\s+том\s+числе|but|which|because|when|where)\b)|\s*;\s+",
+    re.I,
+)
+_CONTEXT_RE = re.compile(
+    r"\b(?:выступлени\w*|доклад\w*|лекци\w*|курс\w*|конференци\w*|семинар\w*|вебинар\w*|форум\w*|секци\w*|направлени\w*|"
+    r"кафедр\w*|факультет\w*|автор\w*|подготовил\w*|для\s+(?:технического|совета|комитета|руководств\w*|правлени\w*)|"
+    r"talk|lecture|course|conference|session|prepared\s+by)\b",
+    re.I,
+)
+
+
+balanced = H.balanced
+safe_cut = H.cut_ok
+
+
+def short_heading(sentence: str, max_words: int = 10) -> Optional[str]:
+    """A heading of an author's sentence that never spoils it: the label before its colon («Главный урок: …» → «Главный
+    урок») or its dash («Первая волна — 64 сервиса» → «Первая волна»), the sentence itself when it is short, else its
+    main clause (before «, но …», «, который …», «;») — each a whole phrase of the author: no bracket, formula, figure
+    or unit cut in two. None when no such part is short enough (the caller then takes the section's own name)."""
+    s = H.strip_end(" ".join((sentence or "").split()))
+    if not s:
+        return None
+    m = re.match(r"^(?P<l>[^:]{2,90}?)\s*:(?!(?<=\d:)\d)\s+\S", s)
+    if m and 1 <= words(m.group("l")) <= 10 and not re.search(r"\d", m.group("l")) and safe_cut(s, m.group("l")):
+        return H.cap_first(m.group("l").strip())
+    parts = re.split(r"\s+[—–]\s+", s, maxsplit=1)
+    if len(parts) == 2 and 1 <= words(parts[0]) <= 6 and not re.search(r"\d", parts[0]) and safe_cut(s, parts[0]):
+        return H.cap_first(parts[0].strip())
+    if words(s) <= max_words + 2 and balanced(s):
+        return H.cap_first(s)
+    head = _CLAUSE_CUT_RE.split(s, maxsplit=1)[0].strip()
+    if head != s and 3 <= words(head) <= max_words + 2 and safe_cut(s, head):
+        return H.cap_first(head.rstrip(" ,;:—–-"))
+    return None
+
+
+@dataclass
+class ProseSlide:
+    title: str
+    lines: list[str] = field(default_factory=list)  # the author's sentences, whole, in order
+    label: str = ""  # the author's own name of the section the slide belongs to ("" — none)
+    notes: list[str] = field(default_factory=list)  # sentences that did not fit the slides the person asked for
+
+
+@dataclass
+class ProseDeck:
+    title: str
+    subtitle: str = ""
+    slides: list[ProseSlide] = field(default_factory=list)
+    preamble: list[str] = field(default_factory=list)  # the request's own lines (not content: «Сделай 8 слайдов …»)
+    sentences: list[str] = field(default_factory=list)  # every content sentence of the document, in order
+    words: int = 0
+
+    def text(self) -> str:
+        """The deck in the analyst's form: the cover's fields, then «Слайд N. Заголовок» and one sentence a line."""
+        out = list(self.preamble)
+        out += ["", "Слайд 1. Обложка", f"Название: {self.title}"]
+        if self.subtitle:
+            out.append(f"Подзаголовок: {self.subtitle}")
+        for n, s in enumerate(self.slides, 2):
+            out += ["", f"Слайд {n}. {s.title}"]
+            out += [x if _ends_statement(x) or x.startswith("### ") else x + "." for x in s.lines]
+            if s.notes:
+                out += ["", "[Заметки докладчика: " + " ".join(s.notes).replace("[", "(").replace("]", ")") + "]"]
+        return "\n".join(out).strip() + "\n"
+
+    @property
+    def size(self) -> int:
+        return len(self.slides) + 1
+
+    @property
+    def in_notes(self) -> int:
+        return sum(len(s.notes) for s in self.slides)
+
+
+def _prose_paragraphs(body: str) -> list[str]:
+    paras = [" ".join(p.split()) for p in re.split(r"\n\s*\n", body) if p.strip()]
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    if len(paras) <= 2 and len(lines) >= 4 and all(_ends_statement(x) or len(x.split()) <= 12 for x in lines):
+        return lines  # a text written line by line: its lines are its paragraphs
+    return paras
+
+
+def _section_of(par: str) -> tuple[str, list[str]]:
+    """(the author's name of the section, its sentences): «Исходная точка. На старте …» → («Исходная точка», […]) — a
+    short first sentence of a few words without figures over the rest is the section's name, never a statement."""
+    ss = sentences(par)
+    if len(ss) >= 2:
+        first = ss[0]
+        if (words(first) <= _PROSE_LABEL_MAX and not re.search(r"\d", first) and first.rstrip().endswith((".", ":"))
+                and not first.rstrip().endswith("?") and balanced(first)):
+            return H.cap_first(H.strip_end(first)), ss[1:]
+    return "", ss
+
+
+def _chunks(ss: list[str], cap: int, per: int) -> list[list[str]]:
+    """The sentences in consecutive slides of about the same size: as few as hold them within `cap` characters and
+    `per` sentences a slide (a sentence longer than `cap` stands alone — it is never cut)."""
+    if not ss:
+        return []
+    total = sum(len(x) + 1 for x in ss)
+    n = max(-(-total // cap), -(-len(ss) // per), 1)
+    while True:
+        target = total / n
+        out: list[list[str]] = [[]]
+        used = 0
+        for s in ss:
+            size = len(s) + 1
+            if out[-1] and (used + size > cap or len(out[-1]) >= per or (used >= target * 0.92 and len(out) < n)):
+                out.append([])
+                used = 0
+            out[-1].append(s)
+            used += size
+        if len(out) <= n or n >= len(ss):
+            return out
+        n += 1
+
+
+# a sentence that leans on the one before it («Эта операция …», «Обозначим её …»): no heading of a slide of its own
+_ANAPHORA_RE = re.compile(r"^(?:эт(?:а|о|от|и|у|ой|ого|им|их)|е[её]|его|их|она|он|оно|они|тогда|затем|потом|также|кроме\s+того|"
+                          r"но|и|а|или|при\s+этом|поэтому|обозначим|первое|второе|третье|первая|вторая|третья|во-первых|"
+                          r"во-вторых|в-третьих|this|these|it|they|then|but|and)\b", re.I)
+
+
+def _heading_in(lines: list[str]) -> tuple[Optional[str], int]:
+    """A heading for a slide of these sentences (short_heading of the first one that gives one, never a sentence that
+    leans on the one before it) and the index of the sentence it is — -1 when it is only a part of that sentence."""
+    for i, x in enumerate(lines):
+        got = short_heading(x)
+        whole = bool(got) and H.strip_end(got) == H.strip_end(x)
+        if not got or _ANAPHORA_RE.match(got) or words(got) < (3 if whole else 2):
+            continue
+        if whole and i > 0:
+            continue  # (a later sentence whole as the heading would read before the ones it follows)
+        return got, (i if whole else -1)
+    return None, -1
+
+
+def _slides_of_section(label: str, ss: list[str], cap: int, per: int) -> list[ProseSlide]:
+    out: list[ProseSlide] = []
+    for k, chunk in enumerate(_chunks(ss, cap, per)):
+        lines = list(chunk)
+        title = ""
+        if k == 0 and label:
+            title = label
+        else:
+            got, at = _heading_in(lines)
+            if got and at == 0 and len(lines) >= 2:
+                title = got
+                lines = lines[1:]  # the sentence is the slide's heading: not repeated under it
+            elif got:
+                title = got  # the phrase heads the slide, the sentence stays whole under it
+            elif label:
+                title = f"{label} (продолжение)"
+            else:
+                title = f"{out[-1].title} (продолжение)" if out else ""
+        out.append(ProseSlide(title=title, lines=lines, label=label))
+    return out
+
+
+def _cover_line(par: str) -> Optional[str]:
+    """The document's title line: one line of a few words over the text, without a final period (or one short sentence)."""
+    if "\n" in par.strip():
+        return None
+    t = par.strip()
+    if words(t) > 22 or not balanced(t):
+        return None
+    if not t.endswith((".", "!", "…")):
+        return t
+    return H.strip_end(t) if words(t) <= 12 and len(sentences(t)) == 1 else None
+
+
+def is_speech(text: str) -> bool:
+    """A talk written down as said (a transcript): its sentences are speech, condensed rather than laid out whole."""
+    from verstka.planning import digest as DG
+
+    try:
+        return bool(DG._read(text).speech) or bool(re.search(r"(?m)^\s*\[?\(?\d{1,2}:\d{2}", text or "")) or len(
+            re.findall(r"(?m)^\s*(?:Спикер\s*\d+|Speaker\s*\d+|Участник\s*\d*|Модератор|Ведущ\w+)\s*:", text or "")) >= 3
+    except Exception:  # noqa: BLE001 - no speech found
+        return False
+
+
+def prose_deck(text: str, slide_count: Optional[int] = None, *, title_hint: Optional[str] = None) -> Optional[ProseDeck]:
+    """The author's document laid out whole (see the section's comment): None when the text is no such document —
+    it dictates its slides, has markdown headings, code, tables or bracketed notes of its own (the dictated paths read
+    those), is a transcript, or is too long for a deck of slides. `slide_count` (the person's count): the content goes
+    on that many slides less the cover; the sentences that do not fit go to the speaker notes, said so."""
+    from verstka.planning.plan_form import _GREETING_RE, _SIGN_OFF_RE, _TASK_RE
+
+    body = (text or "").strip()
+    if not body or re.search(r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*\d{1,3}\b", body):
+        return None
+    if "```" in body or sum(1 for ln in body.splitlines() if re.match(r"^\s*#{1,6}\s+\S", ln)) >= 2:
+        return None
+    if any(_TABLE_ROW_RE.match(ln) for ln in body.splitlines()) or _NOTE_RE.search(body) or re.search(r"(?m)^\s*\[[^\]]{3,}\]\s*$", body):
+        return None
+    if is_speech(body):
+        return None
+    paras = _prose_paragraphs(body)
+    if len(paras) < PROSE_MIN_PARAS:
+        return None
+    deck = ProseDeck(title="")
+    # the request («Сделай презентацию по этому тексту на 8 слайдов»), a greeting, a sign-off: no content of the deck
+    while paras and len(sentences(paras[0])) <= 2 and words(paras[0]) <= 40 and (_TASK_RE.search(paras[0]) or _GREETING_RE.match(paras[0])):
+        deck.preamble.append(paras.pop(0))
+    while paras and _SIGN_OFF_RE.match(paras[-1]):
+        paras.pop()
+    if not paras:
+        return None
+    title = _cover_line(re.sub(r"^\s*#\s+", "", paras[0]))
+    if title is not None and len(paras) >= 2:
+        deck.title = H.strip_end(title)
+        deck.sentences.extend(sentences(paras.pop(0)))
+        # the line under the title that says where and for whom the text is (the conference, the course): the cover's
+        nxt = paras[0] if paras else ""
+        if nxt and len(paras) >= 2 and words(nxt) <= 32 and len(sentences(nxt)) <= 2 and not _section_of(nxt)[0] and _CONTEXT_RE.search(nxt):
+            deck.subtitle = nxt
+            deck.sentences.extend(sentences(paras.pop(0)))
+    sections = [_section_of(p) for p in paras]
+    if not deck.title:
+        deck.title = H.strip_end(title_hint) if title_hint else (sections[0][0] or short_heading(sections[0][1][0], 8) or "")
+        if not deck.title:
+            return None
+    for _, ss in sections:
+        deck.sentences.extend(ss)
+    deck.sentences = [x for x in deck.sentences if x.strip()]
+    deck.words = sum(words(x) for x in deck.sentences)
+    content = sum(1 for lb, _ in sections if lb) + sum(len(ss) for _, ss in sections)
+    if content < 3:
+        return None
+    room = max(1, int(slide_count) - 1) if slide_count else None
+    cap = PROSE_SLIDE_CHARS
+    per = PROSE_SLIDE_SENTS
+    while True:
+        slides = [s for lb, ss in sections for s in _slides_of_section(lb, ss, cap, per)]
+        limit = room or PROSE_MAX_SLIDES
+        if len(slides) <= limit or cap >= PROSE_MAX_CHARS:
+            break
+        cap = min(PROSE_MAX_CHARS, cap + 100)
+        per += 1
+    if room is None and len(slides) > PROSE_MAX_SLIDES:
+        return None  # a document longer than a deck: condensed (planning/digest.py)
+    if room is not None and len(slides) > room:
+        slides = _fit_count(sections, room)
+    if room is not None and len(slides) < room:
+        slides = _spread(slides, room)
+    for s in slides:
+        if not s.title:
+            s.title = deck.title
+    deck.slides = slides
+    return deck
+
+
+def _fit_count(sections: list[tuple[str, list[str]]], room: int) -> list[ProseSlide]:
+    """The person asked for fewer slides than the sections take: neighbouring sections share a slide (the later ones
+    under their own names, «### Деньги»), a slide shows what fits it and the rest of its sentences go to its notes."""
+    groups: list[list[tuple[str, list[str]]]] = [[sec] for sec in sections]
+    size = lambda g: sum(sum(len(x) + 1 for x in ss) + len(lb) for lb, ss in g)  # noqa: E731
+    while len(groups) > room:
+        k = min(range(len(groups) - 1), key=lambda i: size(groups[i]) + size(groups[i + 1]))
+        groups[k:k + 2] = [groups[k] + groups[k + 1]]
+    out: list[ProseSlide] = []
+    for g in groups:
+        lb0, ss0 = g[0]
+        title = lb0 or (_heading_in(ss0)[0] if ss0 else "") or ""
+        lines: list[str] = []
+        for j, (lb, ss) in enumerate(g):
+            if j and lb:
+                lines.append(f"### {lb}")
+            lines.extend(ss)
+        shown: list[str] = []
+        notes: list[str] = []
+        used = 0
+        for x in lines:
+            if x.startswith("### "):
+                shown.append(x)
+                continue
+            if notes or (shown and used + len(x) + 1 > PROSE_MAX_CHARS):
+                notes.append(x)
+                continue
+            shown.append(x)
+            used += len(x) + 1
+        while shown and shown[-1].startswith("### "):
+            notes.insert(0, shown.pop()[4:] + ".")
+        out.append(ProseSlide(title=title or "", lines=shown, label=lb0, notes=notes))
+    return out
+
+
+def _spread(slides: list[ProseSlide], room: int) -> list[ProseSlide]:
+    """The person asked for more slides than the text takes: the fullest slides are split (each sentence still whole)."""
+    out = list(slides)
+    while len(out) < room:
+        k = max(range(len(out)), key=lambda i: (len(out[i].lines), sum(len(x) for x in out[i].lines)))
+        s = out[k]
+        if len(s.lines) < 2 or any(x.startswith("### ") for x in s.lines) or s.notes:
+            break
+        half = (len(s.lines) + 1) // 2
+        a, b = s.lines[:half], s.lines[half:]
+        got, at = _heading_in(b)
+        if got and at == 0 and len(b) >= 2:
+            second = ProseSlide(title=got, lines=b[1:], label=s.label)
+        else:
+            second = ProseSlide(title=got or (f"{s.label} (продолжение)" if s.label else s.title), lines=b, label=s.label)
+        out[k:k + 1] = [ProseSlide(title=s.title, lines=a, label=s.label), second]
+    return out
+
+
+# ------------------------------------------------------------------ the author's text against the deck: nothing lost
+
+
+_SOFT_RE = re.compile("[\u00ad\u200b\u200c\u200d\u2060\ufeff]")
+_TOKEN_RE = re.compile(r"[\wё²³¹⁰⁴-⁹′″°%₽$€+*/=<>≤≥≈−×·^]+(?:\([^()\s]*(?:\([^()\s]*\))?[^()\s]*\))?|\([^()]{1,40}\)", re.I)
+_FIGURE_TOKEN_RE = re.compile(rf"(?<![\w.,])(?:{_NUM_SRC})(?:\s?(?:%|‰|₽|\$|€))?", re.I)
+
+
+def norm_text(text: str) -> str:
+    """The text as the check compares it: soft hyphens and joiners out, every space one space, «ё» as «е», lower case."""
+    t = _SOFT_RE.sub("", text or "")
+    t = re.sub("[\u00a0\u202f\u2009\u2007]", " ", t).replace("ё", "е").replace("Ё", "Е").replace("−", "-")
+    t = re.sub(r"(?<=\d)\s+(?=[%‰₽$€])", "", t)  # «14 %» and «14%» are one figure
+    return " ".join(t.split()).lower()
+
+
+def _tokens(text: str) -> list[str]:
+    return [m.group(0).strip("-") for m in _TOKEN_RE.finditer(norm_text(text)) if m.group(0).strip("-")]
+
+
+def figures_in(text: str) -> list[str]:
+    """The figures of a text with their «%»/currency sign, as the check compares them («14 %» → «14%», «1 140»)."""
+    out = []
+    for m in _FIGURE_TOKEN_RE.finditer(norm_text(text)):
+        out.append(re.sub(r"\s+", "", m.group(0)))
+    return out
+
+
+def _num_text(v: float) -> str:
+    """A chart's value as the author writes it: «4,8», «1 140», «20» (a whole number without «,0»)."""
+    if float(v).is_integer():
+        return f"{int(v):,}".replace(",", " ")
+    return f"{v:.6g}".replace(".", ",")
+
+
+def slide_text(s) -> str:
+    """What one slide shows — its heading, lead, text, cards, figures, table, chart's data — as one text."""
+    c = s.content
+    bits = [s.headline or "", getattr(s, "subtitle", "") or "", s.takeaway or "", s.footnote or "", c.quote or "", c.formula or "",
+            *c.bullets, *c.paragraphs]
+    for it in (*c.items, *c.columns):
+        bits += [it.title or "", it.text or "", *it.bullets]
+    for nb in c.numbers:
+        bits += [nb.value or "", nb.label or ""]
+    if c.table is not None:
+        bits += [*(c.table.columns or []), *(x for row in c.table.rows for x in row)]
+    for ch in (c.chart, c.chart2):
+        if ch is not None:
+            bits += [ch.title or "", ch.unit or "", *ch.categories]
+            for se in ch.series:
+                bits += [se.name or "", se.unit or "", *(_num_text(v) for v in se.values if v is not None)]
+    return "\n".join(str(b) for b in bits if b)
+
+
+def reading_sentences(r: "Reading") -> list[str]:
+    """The sentences of a slide's text the slide is to show (its paragraphs and list lines, its lead, result, caveat)."""
+    out = [x for p in r.of("para") for x in p.sentences if designer_ask(x) is None]
+    out += [x for p in r.of("list") for x in p.items]
+    return out
+
+
+def whole_first(forms: list, r: "Reading") -> list:
+    """The forms of a slide that show every sentence of the slide's text, in the order they came — all of them when none
+    does. Deterministic, the same check as `coverage`."""
+    want = reading_sentences(r)
+    if not want:
+        return forms
+    whole, part = [], []
+    seen: set = set()
+    for f in forms:
+        if id(f) in seen:
+            continue
+        seen.add(id(f))
+        t = norm_text(slide_text(f.slide))
+        toks = [set(_tokens(t))]
+        missing = [x for x in want if not _covered(x, [t], toks)]
+        c = f.slide.content
+        if missing and f is forms[0] and f.kind in ("stat_row", "big_number") and not c.paragraphs and len(c.bullets) + len(missing) <= 6:
+            # the variant's own row of figures: the figures large and the author's sentences whole under them — the main
+            # result stands out, nothing is lost (another variant's first form stays its own: the variants differ)
+            c.bullets = [*c.bullets, *(H.strip_end(x) + ("." if not H.ABBR_END_RE.search(H.strip_end(x)) else "") for x in missing)]
+            f.shown = _shown(f.slide)
+            missing = []
+        (part if missing else whole).append(f)
+    # a form that drops a sentence is no choice while another shows them all (a template that holds a table and not
+    # two columns would take the table first)
+    return whole or part
+
+
+def outline_texts(outline) -> tuple[list[str], list[str]]:
+    """(each slide's shown text, each slide's notes) of a DeckOutline — the cover's title and subtitle included."""
+    shown, notes = [], []
+    for k, s in enumerate(outline.slides):
+        t = slide_text(s)
+        if k == 0:
+            t = "\n".join(x for x in (t, getattr(outline, "title", "") or "", getattr(outline, "subtitle", "") or "") if x)
+        shown.append(t)
+        notes.append(s.notes or "")
+    return shown, notes
+
+
+@dataclass
+class Coverage:
+    total: int = 0
+    on_slides: int = 0
+    in_notes: list[str] = field(default_factory=list)  # sentences only the speaker notes keep
+    lost: list[str] = field(default_factory=list)  # sentences neither a slide nor the notes keep
+    figures_lost: list[str] = field(default_factory=list)  # figures of the text no slide shows
+
+    def line(self) -> str:
+        return (f"предложений автора {self.total}: на слайдах {self.on_slides}, только в заметках {len(self.in_notes)}, "
+                f"потеряно {len(self.lost)}" + (f"; цифр не на слайдах: {len(self.figures_lost)}" if self.figures_lost else ""))
+
+
+def _covered(sentence: str, texts: list[str], toks: list[set]) -> bool:
+    want = _tokens(sentence)
+    if not want:
+        return True
+    n = norm_text(H.strip_end(sentence))
+    figs = set(figures_in(sentence))
+    for t, have in zip(texts, toks):
+        if n and n in t:
+            return True
+        hit = sum(1 for w in want if w in have)
+        if not figs <= set(figures_in(t)):
+            continue
+        if hit >= max(1, int(len(want) * 0.9 + 0.999)):
+            return True  # nine words of ten (a heading may hold its label, the text the rest)
+        if figs and _as_figures(want, figs, t):
+            return True
+    return False
+
+
+def _as_figures(want: list[str], figs: set, text: str) -> bool:
+    """A sentence the slide states as its figures — a card «99,6% → 99,95%» over its label «Доступность критичных
+    сервисов за третий квартал»: two lines next to each other hold every figure of it, two words of three, and its
+    subject (its first three words) as written. Words of the sentence spread over the slide's other cards never count."""
+    lines = [x for x in text.split("\n") if x.strip()]
+    head = " ".join(w for w in want[:3])
+    for i in range(len(lines)):
+        win = " ".join(lines[i:i + 2])
+        if not figs <= set(figures_in(win)):
+            continue
+        toks = _tokens(win)
+        have = set(toks)
+        if sum(1 for w in want if w in have) >= len(want) * 0.65 and head in " ".join(toks):
+            return True
+    return False
+
+
+def coverage(sentences_: list[str], shown: list[str], notes: list[str]) -> Coverage:
+    """Every sentence of the author against the deck — deterministic: a sentence is on a slide when one slide shows its
+    words (all of its figures and formulas, nine words of ten at least: a heading may hold its label and the text the
+    rest), in the notes when only the notes do, else lost. The figures of the text no slide shows are listed too."""
+    st = [norm_text(x) for x in shown]
+    nt = [norm_text(x) for x in notes]
+    stoks = [set(_tokens(x)) for x in shown]
+    ntoks = [set(_tokens(x)) for x in notes]
+    cov = Coverage(total=len(sentences_))
+    for s in sentences_:
+        if _covered(s, st, stoks):
+            cov.on_slides += 1
+        elif _covered(s, nt, ntoks):
+            cov.in_notes.append(s)
+        else:
+            cov.lost.append(s)
+    have = set(f for x in shown for f in figures_in(x))
+    seen: set = set()
+    for s in sentences_:
+        for f in figures_in(s):
+            if f not in have and f not in seen:
+                seen.add(f)
+                cov.figures_lost.append(f)
+    return cov
+
+
+def outline_coverage(outline, sentences_: list[str]) -> Coverage:
+    shown, notes = outline_texts(outline)
+    return coverage(sentences_, shown, notes)
+
+
+def keep_lost(outline, cov: Coverage) -> int:
+    """The sentences no slide and no note kept go to the notes of the slide that shares most words with them, said so
+    («Из текста автора: …») — the speaker has every sentence of the author. Returns how many."""
+    if not cov.lost or not outline.slides:
+        return 0
+    shown, _ = outline_texts(outline)
+    toks = [set(_tokens(x)) for x in shown]
+    for s in cov.lost:
+        want = set(_tokens(s))
+        k = max(range(len(outline.slides)), key=lambda i: (len(want & toks[i]), -i))
+        sl = outline.slides[k]
+        add = "Из текста автора: " + s
+        sl.notes = (sl.notes + "\n\n" + add) if (sl.notes or "").strip() else add
+    return len(cov.lost)
+
+
+def restore_on_slides(outline, cov: Coverage, keep_in_notes: tuple = ()) -> int:
+    """The author's sentences a later pass took off the slide they were laid out on (it read «Сравните время работы …»,
+    the lecture's homework, as an ask to the designer) go back on that slide, in the author's order — into its list, its
+    cards or its columns beside the sentence before them. `keep_in_notes`: the sentences the layout itself put in the
+    notes (the person's slide count left no room). Returns how many came back."""
+    from verstka.schemas.outline import SlideItem
+
+    keep = {norm_text(H.strip_end(x)) for x in keep_in_notes}
+    back = 0
+    for sent in list(cov.in_notes):
+        key = norm_text(H.strip_end(sent))
+        if key in keep:
+            continue
+        host = next((s for s in outline.slides if key and key in norm_text(s.notes or "")), None)
+        if host is None or host.kind.value in ("title", "section", "thanks", "agenda", "table", "chart", "code"):
+            continue
+        c = host.content
+        order = [norm_text(H.strip_end(x)) for x in sentences(host.notes or "")]
+        before = order[: order.index(key)] if key in order else []
+        line = H.strip_end(sent) + ("" if H.ABBR_END_RE.search(H.strip_end(sent)) else ".")
+
+        def after(texts: list[str]) -> int:
+            """Where the sentence goes in a list of texts: after the last one that holds a sentence before it."""
+            at = 0
+            for i, t in enumerate(texts):
+                nt = norm_text(t)
+                if any(b and b in nt for b in before):
+                    at = i + 1
+            return at
+
+        if c.items and len(c.items) < 6 and all(not it.bullets for it in c.items):
+            c.items.insert(after([it.text for it in c.items]), SlideItem(title="", text=line))
+        elif c.columns:
+            col = max(range(len(c.columns)), key=lambda i: (after(c.columns[i].bullets) > 0, -i)) if any(after(x.bullets) for x in c.columns) else len(c.columns) - 1
+            c.columns[col].bullets.insert(after(c.columns[col].bullets) if after(c.columns[col].bullets) else len(c.columns[col].bullets), line)
+        elif c.bullets or not c.paragraphs:
+            c.bullets.insert(after(c.bullets) if c.bullets else 0, line)
+        else:
+            c.paragraphs.insert(after(c.paragraphs), line)
+        cov.in_notes.remove(sent)
+        cov.on_slides += 1
+        back += 1
+    return back

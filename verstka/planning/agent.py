@@ -429,6 +429,9 @@ class _Ctx:
     written: bool = False  # the brief is the writer's text (planning/writer.py): a year is never a slide's key figure
     verbatim: bool = False  # the user's own text laid out as written: the rules never shorten a sentence (faithful.py)
     room: Any = None  # what the template's samples hold, by kind (planning/faithful.py `Room`)
+    # the author's document laid out whole (faithful.prose_deck): a slide's form shows every sentence of its text — a
+    # figures form (a chart, a row of figures, a table) leads only when it leaves none of them to the notes
+    whole: bool = False
 
 
 def _dupe_series(a: Series, b: Series) -> bool:
@@ -6156,6 +6159,8 @@ def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
                 # the variant's first choice, when it is one of its own forms, stands even without a sample of it
                 data.append(F.Form(sl.kind.value, sl, F._shown(sl), structural=True, own=not data and sl.kind.value in own))
     out = (data + [f for f in forms if f.structural]) if data else forms
+    if data and getattr(ctx, "whole", False):
+        out = out + [f for f in forms if not f.structural]  # (the text forms stand by: see whole_first below)
     for f in out:
         sl = f.slide
         if spec is not None:
@@ -6170,6 +6175,11 @@ def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
                 sl.content.photo_slot = spec.photo
             if spec.photo_own:
                 sl.content.photo_own = True
+    if getattr(ctx, "whole", False):
+        # the author's document laid out whole: a form that leaves a sentence of the slide's text off the slide (the
+        # compact variant's table of the figures without the sentences around them) stands after one that shows them
+        # all and is no longer the slide's own form — every sentence of the author on the slide
+        out = F.whole_first(out, r)
     return out
 
 
@@ -6336,6 +6346,8 @@ def run_agent(
     planning/meaning.py (no ask to the designer on a slide, a deck that ends on its conclusion and ask, figures that
     say what they mean, tables with a conclusion counted from their cells)."""
     plan_note: Optional[str] = None
+    prose_sentences: Optional[list[str]] = None  # the author's document laid out whole: every sentence it has (the check)
+    prose_notes: tuple = ()  # … and those its layout put in the notes (the person's slide count left no room)
     if structure is None and not written and brief.text:
         from verstka.planning.directives import picture_asks_as_notes
         from verstka.planning.plan_form import as_slides
@@ -6372,6 +6384,39 @@ def run_agent(
                 brief = brief.model_copy(update={"text": fit.text()})
                 plan_note = (f"Аналитик: просили {ru_count(int(brief.slide_count), 'слайд', 'слайда', 'слайдов')} — "
                              f"собрал их из утверждений текста: по мысли на слайд.")
+        # a «letter» of short parts under a title line that asks for nothing (no «Сделай презентацию …», no «Сначала …,
+        # потом …») is the author's text too, not a plan for the deck: laid out whole the same way
+        theses = (plan is not None and plan.form == "letter" and topic_note is None and not long_doc
+                  and not _asks_for_deck(brief.text))
+        if no_model and (long_doc or theses):
+            # «Модель пишет тексты» off (or no model): the author's own report, talk or lecture is laid out WHOLE — every
+            # sentence on a slide, the author's sections as the slides, the title line as the cover (planning/faithful.py
+            # prose_deck; jury 5: the digest lost ≈45 % of VKT-A, L-B's main result, E-A's formulas). A transcript or a
+            # document longer than a deck is condensed below, as before.
+            from verstka.planning.faithful import prose_deck
+
+            pd = None
+            try:
+                pd = prose_deck(brief.text, brief.slide_count, title_hint=brief.title_hint)
+            except Exception:  # noqa: BLE001 - the digest then
+                log.warning("prose layout failed", exc_info=True)
+            if pd is not None:
+                plan = None
+                long_doc = False
+                prose_sentences = list(pd.sentences)
+                prose_notes = tuple(x for sl in pd.slides for x in sl.notes)
+                brief = brief.model_copy(update={"text": pd.text()})
+                plan_note = (f"Аналитик: это готовый текст автора ({ru_count(pd.words, 'слово', 'слова', 'слов')}, "
+                             f"{ru_count(len(pd.sentences), 'предложение', 'предложения', 'предложений')}) — раскладываю его целиком: "
+                             f"разделы автора — слайды, длинный раздел — на несколько слайдов, обложка — заголовок автора; "
+                             f"колода — {ru_count(pd.size, 'слайд', 'слайда', 'слайдов')}"
+                             + (f"; в заданное число слайдов не уместились и ушли в заметки докладчика: {ru_count(pd.in_notes, 'предложение', 'предложения', 'предложений')}" if pd.in_notes else ", каждое предложение — на слайде")
+                             + ".")
+                if progress is not None:
+                    try:
+                        progress({"type": "agent", "step": "analyst", "message": plan_note, "slide": None, "variant": None})
+                    except Exception:  # noqa: BLE001 - the event is a courtesy
+                        pass
         if long_doc:
             plan = None
             # a long document (a transcript, a report) is material, not a plan: a deck of 10–15 slides of its meaning
@@ -6404,6 +6449,8 @@ def run_agent(
                     progress({"type": "agent", "step": "analyst", "message": plan_note, "slide": None, "variant": None})
                 except Exception:  # noqa: BLE001 - the event is a courtesy
                     pass
+    if prose_sentences:
+        kw["whole"] = True
     res = _run_agent(brief, manifest, strategies, structure=structure, written=written, progress=progress, **kw)
     if res is None:
         return res
@@ -6434,11 +6481,59 @@ def run_agent(
                 res.warnings.setdefault(name, []).extend(f"variants: {x}" for x in lines)
         except Exception:  # noqa: BLE001 - the variants as laid out
             log.warning("variants not diversified", exc_info=True)
+    if prose_sentences:
+        _check_prose(res, prose_sentences, progress, prose_notes)
     if plan_note:
         for name in res.warnings:
             res.warnings[name] = ["digest: a long document condensed into the deck's slides" if plan_note.startswith("Аналитик: длинный документ")
                                   else "plan_form: the brief's plan read as dictated slides", *res.warnings[name]]
     return res
+
+
+def _asks_for_deck(text: str) -> bool:
+    """The text asks for the deck or walks through it in order («Сделай презентацию …», «Сначала …», «Потом …», «Покажи
+    на графике …»): a plan for the deck, not the author's text to lay out whole."""
+    from verstka.planning.directives import split_directive
+    from verstka.planning.plan_form import _SEQ_RE, _TASK_RE
+
+    if _TASK_RE.search(text or ""):
+        return True
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+    if sum(1 for p in paras if _SEQ_RE.match(p)) >= 2:
+        return True
+    from verstka.planning.faithful import sentences
+
+    return any(split_directive(x)[0] is not None and not split_directive(x)[1] for p in paras for x in sentences(p))
+
+
+def _check_prose(res: AgentResult, sentences_: list[str], progress: Optional[EventFn], in_notes: tuple = ()) -> None:
+    """The author's document laid out whole (planning/faithful.py prose_deck), checked against every variant —
+    deterministic, no model: each sentence of the author is on a slide or (only when the person's slide count left no
+    room) in the speaker notes; a sentence a later pass took off every slide and note goes back to the notes of the slide
+    it belongs to, said so. The count goes to the variant's log and warnings («проверка текста автора: …»)."""
+    from verstka.planning.faithful import keep_lost, outline_coverage, restore_on_slides
+
+    said: list[str] = []
+    for name, o in res.outlines.items():
+        try:
+            cov = outline_coverage(o, sentences_)
+            # a sentence a later pass took off its slide goes back on it; one no slide and no note keeps — to the notes
+            restore_on_slides(o, cov, in_notes)
+            back = keep_lost(o, cov)
+        except Exception:  # noqa: BLE001 - the deck as planned
+            log.warning("prose coverage check failed on %s", name, exc_info=True)
+            continue
+        line = f"Проверка текста автора ({name}): {cov.line()}" + (f"; {back} вернул в заметки докладчика" if back else "")
+        o.agent_log = [*o.agent_log, line]
+        res.warnings.setdefault(name, []).append(
+            f"verbatim coverage: {cov.total} sentences, {cov.on_slides} on slides, {len(cov.in_notes)} in notes only, {len(cov.lost)} lost"
+            + (f" (kept in notes)" if back else "") + (f", figures not on slides: {', '.join(cov.figures_lost[:8])}" if cov.figures_lost else ""))
+        said.append(f"{name}: на слайдах {cov.on_slides} из {cov.total}, потеряно {len(cov.lost)}")
+    if said and progress is not None:
+        try:
+            progress({"type": "agent", "step": "critic", "message": "Проверка текста автора: " + "; ".join(said) + ".", "slide": None, "variant": None})
+        except Exception:  # noqa: BLE001 - the event is a courtesy
+            pass
 
 
 def _run_agent(
@@ -6457,6 +6552,7 @@ def _run_agent(
     coverage: bool = True,
     written: bool = False,
     verbatim: bool = False,
+    whole: bool = False,
 ) -> Optional[AgentResult]:
     """Brief → a designed, compiled and grounded DeckOutline per strategy (planned_by "agent" when a model designed
     at least one slide, "rules" otherwise). A variant the agent cannot plan is missing from `outlines`: every one
@@ -6501,6 +6597,7 @@ def _run_agent(
     fx = _resolve_facts(facts, brief, common, structure)
     ctx = _build_ctx(brief, structure, fx, manifest)
     ctx.written = written
+    ctx.whole = whole
     tracker.emit("analyst", f"Аналитик: {describe_structure(structure)}.")
 
     # 2. storyline

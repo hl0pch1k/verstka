@@ -351,7 +351,7 @@ def _bare(word: str) -> str:
 def _clean_end(t: str) -> str:
     """The text without the words it may not end on (a preposition, a conjunction, «в связи», «в соответствии», «№»)."""
     ws = t.rstrip(" ,;:—–-").split()
-    while len(ws) > 2 and (_bare(ws[-1]) in _TAIL_BAD or not _bare(ws[-1])):
+    while len(ws) > 2 and (_bare(ws[-1]) in _TAIL_BAD or (not _bare(ws[-1]) and ws[-1] not in ("%", "‰", "₽", "$", "€"))):
         ws.pop()
     return " ".join(ws).rstrip(" ,;:—–-")
 
@@ -416,7 +416,8 @@ def headline_of(sentence: str, max_words: int = HEAD_WORDS, fallback: Optional[s
             return H.cap_first(lab.group("l").strip()) + ": " + (rest[:1].lower() + rest[1:] if rest[1:2].islower() else rest)
     main = _SUBORDINATE_RE.split(s, maxsplit=1)[0].strip(" ,;:—–-")
     for cand in (main, *_shorter(main), *_phrase_cuts(main, limit)):
-        if _complete(cand, limit):
+        # (never a figure without its unit, a formula or a list of figures cut in two: heuristics.cut_ok)
+        if _complete(cand, limit) and H.cut_ok(s, cand):
             return H.cap_first(cand)
     # «Байкал — самое глубокое озеро на планете, крупнейший …»: the statement before the dash's tail
     if " — " in s:
@@ -424,18 +425,18 @@ def headline_of(sentence: str, max_words: int = HEAD_WORDS, fallback: Optional[s
         tail = s.split(" — ", 1)[1]
         tail_main = re.split(r",\s+|\s+[—–]\s+", tail, maxsplit=1)[0]
         cand = f"{head} — {tail_main}"
-        if 5 <= _words(cand) <= limit and _balanced(cand) and _clean_end(cand) == cand and not _DANGLING_RE.match(_bare(cand.split()[-1])):
+        if 5 <= _words(cand) <= limit and _balanced(cand) and _clean_end(cand) == cand and not _DANGLING_RE.match(_bare(cand.split()[-1])) and H.cut_ok(s, cand):
             return H.cap_first(cand)
     if fallback:
         return H.cap_first(H.strip_end(fallback))
     head = re.split(r",\s+|\s+[—–]\s+", main, maxsplit=1)[0]
-    if 3 <= _words(head) <= limit and _balanced(head) and _clean_end(head) == head:
+    if 3 <= _words(head) <= limit and _balanced(head) and _clean_end(head) == head and H.cut_ok(s, head):
         return H.cap_first(head)  # «Тайминг на хокатоне»: the subject, never a run-on cut mid-phrase
     main = re.sub(r"^[^\s,]+(?:\s[^\s,]+)?,\s+(?=\S+\s+\S+\s+\S+)", "", main)  # (words cut off the sentence before)
     cut = _clean_end(clip_words(main if _words(main) >= 4 else s, limit))
     while not _balanced(cut) and _words(cut) > 3:
         cut = _clean_end(" ".join(cut.split()[:-1]))
-    return H.cap_first(cut)
+    return H.cap_first(H.safe_head(s, cut))
 
 
 def _shorter(t: str) -> list[str]:

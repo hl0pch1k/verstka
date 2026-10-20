@@ -104,15 +104,91 @@ def words(text: str) -> list[str]:
 
 
 def short(text: str, max_words: int) -> str:
-    """Cut to max_words at a clause boundary when possible (no ellipsis: slides are not snippets)."""
+    """Cut to max_words at a clause boundary when possible (no ellipsis: slides are not snippets) — never inside
+    brackets or a formula, never a figure without its unit or a list of figures in two (safe_head)."""
     ws = text.split()
     if len(ws) <= max_words:
         return strip_end(text)
     cut = clip_words(text, max_words)
     m = list(re.finditer(r"[,;:—–]\s", cut))
-    if m and m[-1].start() > len(cut) * 0.5:
+    if m and m[-1].start() > len(cut) * 0.5 and cut_ok(text, cut[: m[-1].start()]):
         cut = cut[: m[-1].start()]
-    return strip_end(cut.rstrip(" ,;:—–-"))
+    return strip_end(safe_head(text, cut.rstrip(" ,;:—–-")))
+
+
+# a unit right after a figure: «14 %», «4,8 секунды», «58 млн», «2 часа» — a heading never keeps the figure without it
+_UNIT_AFTER_RE = re.compile(
+    r"^\s?(?:%|‰|°|₽|\$|€|×|(?:тыс|млн|млрд|трлн|руб|коп|долл|евро|шт|чел|мин|сек|секунд|час|ч|дн|дней|дня|недел|месяц|мес|"
+    r"лет|год|раз|км|кг|мл|гб|мб|тб|мс|пп|п\.\s?п|балл|процент|человек|сотрудник)[а-яё]*\.?)(?![a-z])",
+    re.I,
+)
+_CUT_TAIL_BAD = {
+    "в", "во", "на", "с", "со", "к", "ко", "по", "за", "от", "до", "из", "у", "о", "об", "при", "для", "без", "через", "под", "над",
+    "между", "и", "а", "но", "или", "что", "чтобы", "как", "где", "когда", "если", "не", "ни", "же", "то", "the", "of", "and", "to",
+    "in", "for", "with", "a", "an",
+}
+
+
+def balanced(t: str) -> bool:
+    """Brackets and quotes closed: «d(B)», «O((V + E) log V)», «“…”» whole or not at all."""
+    return (t.count("(") == t.count(")") and t.count("[") == t.count("]") and t.count("«") == t.count("»")
+            and t.count("\"") % 2 == 0 and t.count("“") == t.count("”"))
+
+
+def _rest_after(whole: str, head: str) -> Optional[str]:
+    """What of `whole` comes after its prefix `head` (spacing and the first letter's case aside); None if no prefix."""
+    w, h = " ".join(whole.split()), " ".join(head.split())
+    if not h:
+        return w
+    if w[: len(h)].lower() == h.lower():
+        return w[len(h):]
+    return None
+
+
+def cut_ok(whole: str, head: str) -> bool:
+    """`head`, the start of `whole`, may stand alone: brackets and quotes closed, no preposition or conjunction at its
+    end, no operator of a formula («1 + 2 =») at its end, never a figure cut from its unit («с 14 % до 9» of «…до 9 %»)
+    or from the figures it lists («из 1 000» of «из 1 000, 10 000 и 100 000 вершин»)."""
+    h = " ".join((head or "").split()).rstrip(" ,;:—–-")
+    if not h or not balanced(h):
+        return False
+    last = re.sub(r"[^\wё-]", "", h.split()[-1].lower())
+    if h[-1] in "+-−×*/=<>≤≥^(" or (last and last in _CUT_TAIL_BAD):
+        return False
+    rest = _rest_after(whole, h)
+    if rest and re.search(r"(?<![\wё])(?:с|со|от|from)\s+[\d.,\s  ]+\s?(?:%|‰|₽|[а-яё]+\.?)?$", h, re.I) and re.match(r"^\s+(?:до|по|to)\s+\d", rest, re.I):
+        return False  # «снизились с 14 %» of «…с 14 % до 9 %»: the change without where it went
+    if rest and re.search(r"\d$", h):
+        if _UNIT_AFTER_RE.match(rest) or re.match(r"^\s?\d", rest) or re.match(r"^\s*[,;]\s*\d", rest) or re.match(r"^\s+(?:и|или|и\s+до|до|–|—|-|…|\.\.\.)\s*\d", rest, re.I) \
+                or re.match(r"^\s*[+\-−×*/=<>≤≥^]", rest):
+            return False
+    return True
+
+
+def safe_head(whole: str, head: str, min_words: int = 2) -> str:
+    """`head` (a shortening of `whole`) made safe (cut_ok): the unit of its last figure taken along when that is all it
+    misses («…с 14 % до 9» → «…с 14 % до 9 %»), else words dropped from its end until it stands alone; `head` as it is
+    when nothing shorter does (the caller's own fallback)."""
+    h = " ".join((head or "").split()).rstrip(" ,;:—–-")
+    if cut_ok(whole, h):
+        return h
+    rest = _rest_after(whole, h)
+    if rest:
+        # the figure's own words first: its unit, the end of its «с … до …», the figures it lists (four words at most)
+        for k in range(1, 5):
+            m = re.match(r"^(?:\s*\S+){%d}" % k, rest)
+            if m is None:
+                break
+            cand = (h + m.group(0)).rstrip(" ,;:—–-")
+            if re.search(r"[\d%‰₽$€]", m.group(0)) and cut_ok(whole, cand):
+                return strip_end(cand)
+    ws = h.split()
+    while len(ws) > min_words:
+        ws.pop()
+        cand = " ".join(ws).rstrip(" ,;:—–-")
+        if cut_ok(whole, cand):
+            return cand
+    return h
 
 
 def parse_number(text: str) -> Optional[float]:
