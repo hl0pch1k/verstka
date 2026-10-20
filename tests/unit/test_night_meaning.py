@@ -450,3 +450,83 @@ def test_a_digest_title_is_a_finished_thought_never_a_sentence_cut_off():
         assert last not in DG._TAIL_BAD and DG._balanced(t) and len(t.split()) <= DG.HEAD_WORDS + 4, t
     assert DG.headline_of("Сложные случаи при избыточном объёме данных и при нетипизируемых данных, когда график нечитаем и нужен совсем другой вид.",
                           fallback="Сложные случаи") == "Сложные случаи"
+
+
+# ------------------------------------------------------------------ round 3
+
+
+def test_a_pitch_is_named_after_its_product_never_presentation():
+    from verstka.planning.plan_form import as_slides
+
+    text = ("Привет! Нужен питч нашего стартапа для инвесторов на демо-дне, 8–10 слайдов.\n\n"
+            "1. Проблема: малый бизнес теряет до 30% заявок ночью.\n"
+            "2. Решение: «Ответ24» — ИИ-ассистент, который отвечает клиентам за 5 секунд.\n"
+            "3. Просим: 120 млн рублей на 18 месяцев.\n")
+    p = as_slides(text)
+    assert p.title == "Ответ24" and p.subtitle.startswith("Питч стартапа")
+    assert "Привет" not in p.text
+    from verstka.planning.meaning import name_cover
+
+    o = DeckOutline(title="Презентация", slides=[OutlineSlide(id="c", kind=K.title, headline="Презентация")])
+    name_cover(o, text)
+    assert o.slides[0].headline == "Ответ24"
+
+
+def test_series_of_different_units_never_share_an_axis():
+    from verstka.planning.meaning import split_mixed_units
+    from verstka.schemas.outline import ChartSpec, InlineSeries
+
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.chart, headline="h", content=SlideContent(chart=ChartSpec(
+        type="column", categories=["Q1", "Q2", "Q3"], series=[InlineSeries(name="Выручка, млн ₽", values=[301, 349, 412]), InlineSeries(name="Клиенты", values=[980, 1105, 1240])])))])
+    split_mixed_units(o)
+    assert o.slides[0].content.chart.split
+    o2 = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.chart, headline="h", content=SlideContent(chart=ChartSpec(
+        type="column", categories=["Q1", "Q2"], series=[InlineSeries(name="План", values=[1, 2]), InlineSeries(name="Факт", values=[1, 3])])))])
+    split_mixed_units(o2)
+    assert not o2.slides[0].content.chart.split
+
+
+def test_a_table_of_periods_says_how_the_total_moved():
+    from verstka.planning.meaning import table_conclusions
+    from verstka.schemas.outline import TableData
+
+    t = TableData(columns=["Год", "Дата-центры", "Разработка", "Продажи"], rows=[["2025", "120", "80", "40"], ["2026", "180", "110", "65"], ["2027", "240", "150", "90"]])
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.table, headline="Инвестиции по годам", content=SlideContent(table=t))])
+    table_conclusions(o)
+    assert o.slides[0].headline == "Инвестиции: 240 → 480 за 2025–2027 (×2)"
+
+
+def test_a_heading_never_promises_more_than_the_slide_shows():
+    from verstka.planning.meaning import promised_counts_kept
+    from verstka.schemas.outline import SlideItem
+
+    o = DeckOutline(title="t", slides=[
+        OutlineSlide(id="a", kind=K.cards, headline="Успех оценивается по трём показателям", content=SlideContent(items=[SlideItem(title="a"), SlideItem(title="b")])),
+        OutlineSlide(id="b", kind=K.bullets, headline="Выручка выросла в 2 раза за год", content=SlideContent(bullets=["a", "b", "c"]))])
+    promised_counts_kept(o)
+    assert [s.headline for s in o.slides] == ["Успех оценивается по показателям", "Выручка выросла в 2 раза за год"]
+
+
+def test_a_topic_without_any_source_keeps_no_made_up_figure():
+    from verstka.planning.topic_writer import unsourced_figures
+
+    slides = [TopicSlide(title="Первая неделя", lead="Первая неделя — знакомство с командой и продуктом.",
+                         points=["Ежедневная планёрка длится 30–40 минут.", "Наставник отвечает на вопросы новичка.", "Цель — 10 звонков в день."])]
+    gone = unsourced_figures(slides, "онбординг отдела продаж: первая неделя")
+    assert len(gone) == 2 and slides[0].points == ["Наставник отвечает на вопросы новичка."]
+
+
+def test_a_lecture_request_is_about_its_subject_and_a_bare_count_is_the_deck_s_size():
+    from verstka.planning.topic_writer import topic_subject
+
+    assert topic_subject("Сделай лекцию для студентов первого курса про производную функции: определение, геометрический смысл") == "производную функции"
+    assert parse_brief_text("Коротко: что такое облачные вычисления. 7 слайдов.").slide_count == 7
+
+
+def test_a_wiki_page_loses_its_footnote_marks_and_back_matter():
+    from verstka.ingest.documents import read_html
+
+    d = read_html("x.html", "<html><body><article><h2>Модели<span class='mw-editsection'>[править | править код]</span></h2>"
+                            "<p>Облачные вычисления<sup class='reference'>[4]</sup> — модель[5] (PaaS, англ. Platform as a Service).</p>"
+                            "<h2>Примечания</h2><p>1. Сноска</p></article></body></html>")
+    assert [(b.kind, b.text) for b in d.blocks] == [("heading", "Модели"), ("para", "Облачные вычисления — модель (PaaS, англ. Platform as a Service).")]

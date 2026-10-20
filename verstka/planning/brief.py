@@ -51,7 +51,11 @@ def slide_count_of(text: str) -> Optional[int]:
     if r is not None:
         return r[1]
     m = SLIDE_COUNT_RE.search(text or "")
-    return int(next(g for g in m.groups() if g)) if m else None
+    if m:
+        return int(next(g for g in m.groups() if g))
+    # «… модели обслуживания. 7 слайдов.» — the deck's size said on its own after the request
+    m = re.search(r"(?:^|[.!?,;:—–]\s*)(\d{1,2})\s+слайд(?:ов|а)\s*[.!]?\s*$", (text or "").strip(), re.I | re.M)
+    return int(m.group(1)) if m else None
 
 
 _KEY_ALIASES = {

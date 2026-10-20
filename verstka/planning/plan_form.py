@@ -48,7 +48,7 @@ _SIGN_OFF_RE = re.compile(
 # пожалуйста, слайды к планёрке по складу»)
 _TASK_RE = re.compile(
     r"\b(?:нуж(?:на|ен|ны|но)|подготовь(?:те)?|сделай(?:те)?|собери(?:те)?|сверстай(?:те)?|набросай(?:те)?|сгенерируй(?:те)?|"
-    r"создай(?:те)?|прошу|помоги(?:те)?)\b[^.!?]{0,80}?\b(?:презентаци\w*|слайд\w*|колод\w*|деку|деки)\b",
+    r"создай(?:те)?|прошу|помоги(?:те)?)\b[^.!?]{0,80}?\b(?:презентаци\w*|слайд\w*|колод\w*|деку|деки|питч\w*|доклад\w*|выступлени\w*|лекци\w*)",
     re.I,
 )
 # «Примерно так:», «Структура:», «План такой:», «Тезисы:» — the line that opens the plan
@@ -362,7 +362,7 @@ def _preamble(lines: list[str]) -> tuple[Optional[str], Optional[str], Optional[
                 audience = _audience_phrase(strip_count_phrase(who) or who)
             # the request's other sentences (the slide count, the audience said apart) stay
             for s in sents:
-                if not _TASK_RE.search(s) and not _LEAD_IN_RE.match(s) and not re.match(r"^(?:примерно|вот)\s+так", s, re.I):
+                if not _TASK_RE.search(s) and not _LEAD_IN_RE.match(s) and not _GREETING_RE.match(s) and not re.match(r"^(?:примерно|вот)\s+так", s, re.I):
                     kept.append(s)
             continue
         m = re.match(r"^(?:тема|название|topic|title)\s*:\s*(?P<v>.+)$", ln, re.I)
@@ -389,6 +389,32 @@ def _preamble(lines: list[str]) -> tuple[Optional[str], Optional[str], Optional[
 
     # («— для операционного директора, слайдов 8–10»: the slide count stays a rule of the deck, never its title)
     return strip_count_phrase(title) or None, strip_count_phrase(subtitle) or None, strip_count_phrase(audience) or None, kept
+
+
+_NAME_RE = re.compile(r"«(?P<n>[A-ZА-ЯЁ0-9][^«»]{1,30})»")
+_ASK_LINE_RE = re.compile(r"\b(?:нуж(?:ен|на|ны|но)|подготовь(?:те)?|сделай(?:те)?|собери(?:те)?)\s+(?P<what>[^.!?,]{4,80})", re.I)
+
+
+def _named_subject(items: list["PlanItem"], pre: list[str]) -> tuple[Optional[str], Optional[str]]:
+    """(title, subtitle) of a plan whose request names no topic («Нужен питч нашего стартапа для инвесторов»): the name
+    the plan gives its product or project in quotes («Ответ24»), under it what the deck is («Питч стартапа для инвесторов
+    на демо-дне») — never the bare word «Презентация» (jury 20.10, round 3)."""
+    text = " ".join([*(it.title for it in items), *(x for it in items for x in it.lines)])
+    m = _NAME_RE.search(text)
+    if not m or len(m.group("n").split()) > 4:
+        return None, None
+    sub = None
+    for ln in pre:
+        am = _ASK_LINE_RE.search(_plain(ln))
+        if am:
+            what = re.sub(r"\b(?:нашего|нашей|наших|наш|наша|наше|моего|моей|мой|своего|своей)\s+", "", am.group("what"), flags=re.I)
+            from verstka.planning.directives import strip_count_phrase
+
+            what = (strip_count_phrase(what) or what).strip(" ,.")
+            if 2 <= len(what.split()) <= 10:
+                sub = H.cap_first(what)
+            break
+    return m.group("n").strip(), sub
 
 
 def _letter_units(lines: list[str]) -> list[list[str]]:
@@ -496,6 +522,9 @@ def _letter(lines: list[str]) -> Optional[PlanForm]:
     if any(not it.title for it in items):
         return None
     title, subtitle, audience, kept = _preamble(pre)
+    if not title:
+        title, sub2 = _named_subject(items, pre)
+        subtitle = subtitle or sub2
     return PlanForm(form="letter", items=items, title=title, subtitle=subtitle, audience=audience, preamble=kept)
 
 
@@ -553,6 +582,9 @@ def read_plan(text: str) -> Optional[PlanForm]:
         if rest:
             items[-1].lines.extend(_plain(x) if not _is_table(x) else x.strip() for x in rest)
         title, subtitle, audience, kept = _preamble(before)
+        if not title:
+            title, sub2 = _named_subject(items, before)
+            subtitle = subtitle or sub2
         return PlanForm(form=kind, items=items, title=title, subtitle=subtitle, audience=audience, preamble=kept, front=front)
     got = _letter(lines)
     if got is not None:

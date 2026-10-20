@@ -314,7 +314,9 @@ _ASK_RE = re.compile(
     r"(?:мне\s+|me\s+|нам\s+)?(?:a\s+|an\s+)?(?:\S*\s+)?",
     re.I,
 )
-_DECK_WORD_RE = re.compile(r"^(?:\S*презент\S*|\S*слайд\S*|доклад\w*|deck|presentation|slides?)\s*", re.I)
+_DECK_WORD_RE = re.compile(r"^(?:\S*презент\S*|\S*слайд\S*|доклад\w*|лекци\w*|урок\w*|заняти\w*|семинар\w*|питч\w*|выступлени\w*|deck|presentation|slides?|lecture|talk)\s*", re.I)
+# «для студентов первого курса про производную…»: who it is for, before what it is about
+_FOR_WHOM_RE = re.compile(r"^для\s+.{2,60}?\s+(?=(?:про|о|об|обо|на\s+тему|по\s+теме)\s)", re.I)
 _ABOUT_RE = re.compile(r"^(?:про|о|об|обо|на\s+тему|по\s+теме|по|about|on)\s+", re.I)
 _TAIL_RE = re.compile(r"\s*(?:,?\s*(?:на|из)\s+\d+\s+слайд\w*|,?\s*\d+\s+слайд\w*)\s*$", re.I)
 
@@ -335,8 +337,12 @@ def topic_subject(topic: str) -> str:
             rest = tail_word + " " + rest
         s = rest
     s = _DECK_WORD_RE.sub("", s, count=1)
+    s = _FOR_WHOM_RE.sub("", s, count=1)
     s = _ABOUT_RE.sub("", s, count=1)
     s = _TAIL_RE.sub("", s)
+    head = re.split(r"\s*:\s+", s, maxsplit=1)[0]  # «производную функции: определение, смысл, правила» — what it is about
+    if head != s and 1 <= len(head.split()) <= 8:
+        s = head
     s = s.strip(" .!?:;«»\"'")
     return s or t.strip(" .!?")
 
@@ -1146,6 +1152,26 @@ def unbacked_comparisons(slides: list[TopicSlide], paras: list[str]) -> list[dic
     return gone
 
 
+def unsourced_figures(slides: list[TopicSlide], given: str = "") -> list[dict]:
+    """A topic written without any source: the statements with a figure the person did not give go (formulas and their
+    worked examples stay — their digits are mathematics, not facts). Returns what went."""
+    have = _ref_figures(given)
+    issues: list[FactIssue] = []
+    gone: list[dict] = []
+    for st in statements(slides):
+        field_ = st["id"].split(".", 1)[1]
+        if re.match(r"[a-z]+", field_).group(0) in _NO_FIGURE_CHECK + ("st",):
+            continue
+        bad = _ref_figures(st["text"]) - have
+        if bad:
+            issues.append(FactIssue(id=st["id"], problem="a figure with no source", fix=""))
+            gone.append({"slide": int(st["id"][1:].split(".")[0]), "id": st["id"], "text": st["text"],
+                         "why": "источника нет, цифры " + ", ".join(sorted(bad)) + " нечем подтвердить"})
+    if issues:
+        apply_fixes(slides, issues)
+    return gone
+
+
 def kb_figure_check(slides: list[TopicSlide], kb: Any, given: str = "") -> list[dict]:
     """The statements with a figure no document of the base states (nor the person's request): out of the deck.
     Returns what went ({"slide", "id", "text", "why"})."""
@@ -1557,6 +1583,13 @@ def write_topic_deck(
             emit(f"проверил факты: {_fixes_ru(len(changed))}{part}." if changed else f"проверил факты: ошибок не нашёл{part}.")
     else:
         res.check_skipped = "no_time" if stmts else "empty"
+    if kb is None and not paras:
+        # no source at all (no article, no base): a figure nobody can back is made up — «планёрка 30–40 минут», «10
+        # звонков в день» (jury 20.10, round 3); the statements say it in general words or go
+        fig_gone = unsourced_figures(slides, " ".join([mode.topic, *mode.theses, *plan_items]))
+        if fig_gone:
+            res.removed.extend(fig_gone)
+            emit(f"источника нет — убрал {ru_count(len(fig_gone), 'утверждение', 'утверждения', 'утверждений')} с цифрами, которые нечем подтвердить.")
     if kb is None:
         # a comparison («в несколько раз», «крупнейший») stays only when the reference makes it too
         cmp_gone = unbacked_comparisons(slides, paras)
@@ -1564,6 +1597,20 @@ def write_topic_deck(
             res.removed.extend(cmp_gone)
             emit(f"убрал {ru_count(len(cmp_gone), 'сравнение', 'сравнения', 'сравнений')}, которых нет в источнике.")
     res.seconds["check"] = round(time.monotonic() - tc, 2)
+
+    # the person's count is the deck's size (jury 20.10, round 3: 9 slides at «6–8», 11 at «7»): the slides that carry
+    # least go, the last one (the conclusion and the ask) stays
+    if brief.slide_count and len(slides) > max(1, int(brief.slide_count) - 1):
+        keep_n = max(1, int(brief.slide_count) - 1)
+        while len(slides) > keep_n:
+            body = slides[:-1] if len(slides) > 1 else slides
+            thin = min(body, key=lambda x: len(statements([x])))
+            k = slides.index(thin)
+            del slides[k]
+            if k < len(plan.slides):
+                del plan.slides[k]  # (the plan's slide goes with it: the text pairs them)
+            res.edits.append({"slide": 0, "kind": "over_count", "text": thin.title})
+        emit(f"оставил {ru_count(len(slides) + 1, 'слайд', 'слайда', 'слайдов')}, как просили.")
 
     # 6. the text; with the knowledge base every statement keeps the fragment it comes from
     text = render_text(plan, slides)

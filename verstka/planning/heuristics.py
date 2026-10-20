@@ -17,7 +17,8 @@ from verstka.schemas.outline import Series, TableData
 # ------------------------------------------------------------------ text primitives
 
 # a sentence ends at «.!?» before a capital, a quote or a digit — not after an initial («J. Fry & Sons», «А. С. Пушкин»)
-_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])(?<!(?<![\w])[A-ZА-ЯЁ]\.)\s+(?=[A-ZА-ЯЁ«\"0-9])")
+# (never after a language's or another usual abbreviation: «(PaaS, англ. Platform as a Service)», «лат. Lacus»)
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])(?<!(?<![\w])[A-ZА-ЯЁ]\.)(?<!\bангл\.)(?<!\bлат\.)(?<!\bнем\.)(?<!\bфр\.)(?<!\bгреч\.)(?<!\bбур\.)(?<!\bкит\.)(?<!\bяп\.)\s+(?=[A-ZА-ЯЁ«\"0-9])")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 _TABLE_RULE_RE = re.compile(r"^\s*\|?\s*:?-{2,}")
 _NUMBER_RE = re.compile(

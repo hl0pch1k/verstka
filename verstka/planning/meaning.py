@@ -90,7 +90,7 @@ class _Col:
 
 _TOTAL_RE = re.compile(r"^(?:итого|всего|итог|в\s+сумме|сумма|total)\b", re.I)
 # a column whose rows do not add up: a price, a share, a rate, a time, a score
-_RATE_RE = re.compile(r"цен|стоимост|средн|дол[яи]|%|процент|ставк|курс|срок|скорост|время|балл|рейтинг|конверси|маржин|рентабел|на\s+одн|за\s+одн|чек|cpl|cpa|ctr|cac|ltv", re.I)
+_RATE_RE = re.compile(r"(?<![а-яё-])цен(?:а|ы|у|ой|е|ам|ами|ах|ник\w*|ов\w*)?(?![а-яё])|стоимост|средн|дол[яи]|%|процент|ставк|курс|срок|скорост|время|балл|рейтинг|конверси|маржин|рентабел|на\s+одн|за\s+одн|чек|cpl|cpa|ctr|cac|ltv", re.I)
 _PLAN_RE = re.compile(r"\bплан|\bцел[ьи]\b|\bбюджет|\bпрогноз|\btarget|\bplan", re.I)
 _FACT_RE = re.compile(r"\bфакт|\bисполн|\bитог\b|\bрезультат|\bactual", re.I)
 
@@ -132,7 +132,34 @@ def _low(label: str) -> str:
     return label[:1].lower() + label[1:]
 
 
-def table_conclusion(t: TableData, focus: Optional[list[list[float]]] = None) -> Optional[tuple[str, Optional[str]]]:
+_PERIOD_LABEL_RE = re.compile(r"^(?:(?:19|20)\d{2}(?:\s*г\.?)?|[IV]{1,3}\s*кв\.?.*|Q[1-4].*|\d\s*кв.*|[1-4]-?й?\s*квартал.*|"
+                              r"январ\w*|феврал\w*|март\w*|апрел\w*|ма[йя]|июн\w*|июл\w*|август\w*|сентябр\w*|октябр\w*|ноябр\w*|декабр\w*)$", re.I)
+
+
+def _period_growth(labels: list[str], cols: list, body: list[int], subject: Optional[str]) -> Optional[tuple[str, Optional[str]]]:
+    """A table of periods by rows and parts by columns («Год | Дата-центры | Разработка | Продажи»): the total from the
+    first period to the last («Инвестиции: 240 → 480 млн ₽ за 2025–2027, ×2»), the part that grows fastest under it."""
+    if len(body) < 2 or len(cols) < 2 or not all(_PERIOD_LABEL_RE.match((labels[i] or "").strip()) for i in body):
+        return None
+    if any(_RATE_RE.search(c.name + " " + (c.unit or "")) for c in cols):
+        return None
+    i0, i1 = body[0], body[-1]
+    if any(c.values[i0] is None or c.values[i1] is None for c in cols):
+        return None
+    a, b = sum(c.values[i0] for c in cols), sum(c.values[i1] for c in cols)
+    if a <= 0 or a == b:
+        return None
+    unit = next((c.unit for c in cols if c.unit), None)
+    ratio = b / a
+    change = f"×{fmt(round(ratio, 1))}" if ratio >= 1.5 else f"{signed(round((ratio - 1) * 100))}%"
+    name = H.cap_first(re.sub(r"\s+по\s+(?:годам|кварталам|месяцам|периодам)\b.*$", "", H.strip_end(subject or ""), flags=re.I)) or "Всего"
+    head = f"{name}: {fmt(a)} → {_with_unit(b, unit)} за {labels[i0]}–{labels[i1]} ({change})"
+    fast = max(cols, key=lambda c: (c.values[i1] / c.values[i0]) if c.values[i0] else 0)
+    detail = f"Быстрее всех растёт статья «{fast.name}»: {fmt(fast.values[i0])} → {fmt(fast.values[i1])}" if fast.values[i0] and fast.values[i1] / fast.values[i0] > ratio * 1.05 else None
+    return head, detail
+
+
+def table_conclusion(t: TableData, focus: Optional[list[list[float]]] = None, subject: Optional[str] = None) -> Optional[tuple[str, Optional[str]]]:
     """(the conclusion heading, a line of detail or None) counted from the table's cells; None when the table gives
     no clear one. `focus`: the values of each series a chart of the slide shows — the columns it draws are the ones
     concluded on."""
@@ -142,6 +169,10 @@ def table_conclusion(t: TableData, focus: Optional[list[list[float]]] = None) ->
     if not cols or len(labels) < 2:
         return None
     body = [i for i in range(len(labels)) if i != total]
+    if total is None and not focus and len(cols) >= 3:
+        got = _period_growth(labels, cols, body, subject)
+        if got is not None:
+            return got
     if focus:
         fsets = [{round(v, 2) for v in f} for f in focus if f]
         hit = [c for c in cols if {round(c.values[i], 2) for i in body if c.values[i] is not None} in fsets]
@@ -329,7 +360,7 @@ def table_conclusions(o: DeckOutline) -> list[str]:
         if s.kind in _FRAME or s.content.table is None:
             continue
         try:
-            got = table_conclusion(s.content.table, _chart_values(s) or None)
+            got = table_conclusion(s.content.table, _chart_values(s) or None, subject=s.headline if _topic(s.headline) else None)
         except Exception:  # noqa: BLE001 - the slide as planned
             log.warning("table conclusion failed on %s", s.id, exc_info=True)
             continue
@@ -889,11 +920,11 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
     from verstka.planning.proportions import check_outline
 
     # (the proportions before the tables' conclusions: those are counted from the cells, not said by anyone)
-    for step in (lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: tidy_values(o), lambda: keep_table_beside_chart(o), lambda: keep_author_tables(o, brief_text), lambda: keep_figures(o) if o.planned_by not in ("agent", "model") else [], lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
+    for step in (lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: tidy_values(o), lambda: split_mixed_units(o), lambda: keep_table_beside_chart(o), lambda: keep_author_tables(o, brief_text), lambda: keep_figures(o) if o.planned_by not in ("agent", "model") else [], lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
                  lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
-                 lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: keep_author_points(o, brief_text), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
+                 lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: keep_author_points(o, brief_text), lambda: name_cover(o, brief_text), lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
         try:
             said.extend(step())
         except Exception:  # noqa: BLE001 - one pass failing leaves the others
@@ -1246,6 +1277,9 @@ def sensible_labels(o: DeckOutline, brief_text: str) -> list[str]:
             v = " ".join((n.value or "").split())
             lab = H.strip_end(n.label or "").strip()
             low = lab.lower()
+            if not re.search(r"\d", v) and not re.search(r"[×≈∞]", v) and len(c.numbers) > 1:
+                said.append(f"slide {s.id}: «{v} · {lab}» has no figure — it is no key figure, dropped")
+                continue  # («Яндекс · Профиль CTO» beside «14 · Команда»: a word is no key figure)
             if re.match(r"^слайд", low) or re.search(r"слайд(?:ов|а)?$", f"{v} {low}"):
                 said.append(f"slide {s.id}: «{v} · {lab}» is the deck's size said to the planner — dropped")
                 continue
@@ -1319,4 +1353,118 @@ def keep_author_points(o: DeckOutline, brief_text: str) -> list[str]:
             continue
         c.bullets = [*c.bullets, *(H.strip_end(x) + "." for x in lost)][:6]
         said.append(f"slide {s.id}: the author's points back on the slide: " + "; ".join(f"«{x[:40]}»" for x in lost))
+    return said
+
+
+
+_GENERIC_TITLE_RE = re.compile(r"^(?:презентация|presentation|без названия|untitled|слайды|колода|доклад|питч)$", re.I)
+
+
+def name_cover(o: DeckOutline, brief_text: str) -> list[str]:
+    """A cover titled with a bare word («Презентация») takes the deck's subject: the name the text gives its product or
+    project in quotes («Ответ24»), else the deck's own title (jury 20.10, round 3: a startup's pitch under «Презентация»)."""
+    if not o.slides or o.slides[0].kind != PatternKind.title:
+        return []
+    cover = o.slides[0]
+    if not _GENERIC_TITLE_RE.match(H.strip_end(cover.headline or "").strip()):
+        return []
+    name = None
+    for m in re.finditer(r"«(?P<n>[A-ZА-ЯЁ0-9][^«»]{1,30})»", brief_text or ""):
+        if len(m.group("n").split()) <= 4:
+            name = m.group("n").strip()
+            break
+    if name is None and o.title and not _GENERIC_TITLE_RE.match(H.strip_end(o.title)):
+        name = H.strip_end(o.title)
+    if not name:
+        return []
+    old = cover.headline
+    cover.headline = name
+    if _GENERIC_TITLE_RE.match(H.strip_end(o.title or "")):
+        o.title = name
+    return [f"slide {cover.id}: the cover «{old}» → the deck's subject «{name}»"]
+
+
+
+_UNIT_TAIL_RE = re.compile(r",\s*(?P<u>(?:тыс\.?|млн|млрд|трлн)?\s*(?:₽|руб\.?|рублей|\$|€|%|шт\.?|чел\.?|ч|час\w*|мин|дн\w*|п\.\s?п\.)|(?:тыс\.?|млн|млрд)|%)\s*$", re.I)
+_COUNT_NAME_RE = re.compile(r"клиент|заказ|сотрудник|пользовател|человек|подписчик|покупател|заявк|сделк|обращени|штук|единиц|устройств", re.I)
+
+
+def _series_unit(name: str, unit: Optional[str]) -> Optional[str]:
+    if unit:
+        return " ".join(unit.lower().split())
+    m = _UNIT_TAIL_RE.search(name or "")
+    return " ".join(m.group("u").lower().split()) if m else None
+
+
+def split_mixed_units(o: DeckOutline) -> list[str]:
+    """Series of different units never share one axis (jury 20.10, round 3: revenue in млн ₽ and clients in pieces as
+    one set of columns — the clients' bars crushed the revenue): each becomes a chart of its own side by side, under
+    its name and unit."""
+    said: list[str] = []
+    for s in o.slides:
+        ch = s.content.chart
+        if ch is None or ch.split or len(ch.series) < 2 or ch.type in ("pie", "doughnut", "scatter"):
+            continue
+        units = [_series_unit(x.name, x.unit) for x in ch.series]
+        known = {u for u in units if u}
+        mixed = len(known) >= 2 or (len(known) == 1 and any(u is None and _COUNT_NAME_RE.search(x.name or "") for u, x in zip(units, ch.series))
+                                    and not _COUNT_NAME_RE.search(next(x.name for u, x in zip(units, ch.series) if u)))
+        if not mixed:
+            continue
+        ch.split = True
+        for u, x in zip(units, ch.series):
+            if u and not x.unit:
+                x.unit = u
+        said.append(f"slide {s.id}: the chart's series measure different things ({', '.join(x.name for x in ch.series)}) — each on its own axis")
+    return said
+
+
+
+_COUNT_WORDS = {
+    2: r"дв(?:а|е|ух|ум|умя)", 3: r"тр(?:и|ёх|ех|ём|ем|емя|ёмя)", 4: r"четыр(?:е|ёх|ех|ём|ем|ьмя)", 5: r"пят(?:ь|и|ью)",
+    6: r"шест(?:ь|и|ью)", 7: r"сем(?:ь|и|ью)", 8: r"восем(?:ь|ью)|восьми", 9: r"девят(?:ь|и|ью)", 10: r"десят(?:ь|и|ью)",
+}
+_PROMISE_RE = re.compile(
+    r"(?<![\wё-])(?<!\bв\s)(?<!\bна\s)(?<!\bдо\s)(?<!\bза\s)(?<!\bот\s)(?P<n>" + "|".join(f"(?:{v})" for v in _COUNT_WORDS.values()) + r"|[2-9]|10)\s+"
+    r"(?=[а-яё]{3,})(?!раз|процент|млн|млрд|тыс|год|лет|дн|дне|час|минут|секунд|месяц|недел|рубл|человек|сотрудник|клиент|штук|сантиметр|метр|километр|литр|тонн|градус)",
+    re.I,
+)
+
+
+def _promise_value(word: str) -> Optional[int]:
+    if word.isdigit():
+        return int(word)
+    for n, rx in _COUNT_WORDS.items():
+        if re.fullmatch(rx, word, re.I):
+            return n
+    return None
+
+
+def _shown_count(s: OutlineSlide) -> int:
+    c = s.content
+    return max(len(c.items), len(c.columns), len(c.numbers), len(c.bullets), len(c.paragraphs) if len(c.paragraphs) > 1 else 0)
+
+
+def promised_counts_kept(o: DeckOutline) -> list[str]:
+    """A heading that promises a number of things the slide does not show («оценивается по трём показателям» over two
+    cards, «четыре формулы» over three — jury 20.10, round 3) loses the number: «по показателям», «формулы»."""
+    said: list[str] = []
+    for s in o.slides:
+        if s.kind in _FRAME or s.verbatim or s.content.chart is not None or s.content.table is not None:
+            continue  # (the author's own words stay as written)
+        shown = _shown_count(s)
+        if shown < 2:
+            continue
+        for attr in ("headline", "subtitle"):
+            v = getattr(s, attr) or ""
+            m = _PROMISE_RE.search(v)
+            if not m:
+                continue
+            n = _promise_value(m.group("n"))
+            if n is None or n == shown or re.search(r"\d", v[m.end():m.end() + 1]):
+                continue
+            new = (v[: m.start()] + v[m.end():]).strip()
+            new = H.cap_first(re.sub(r"\s{2,}", " ", new))
+            setattr(s, attr, new)
+            said.append(f"slide {s.id}: «{v[:50]}» promised {n}, the slide shows {shown} — the number goes")
     return said

@@ -54,7 +54,7 @@ class Fragment:
 
 
 def _sentences(text: str, limit: int) -> list[str]:
-    parts = re.split(r"(?<=[.!?…»])\s+(?=[«A-ZА-ЯЁ0-9])", text)
+    parts = re.split(r"(?<=[.!?…»])(?<!\bангл\.)(?<!\bлат\.)(?<!\bнем\.)(?<!\bфр\.)(?<!\bгреч\.)(?<!\bт\.)(?<!\bг\.)(?<!\bгг\.)(?<!\bсм\.)(?<!\bим\.)(?<!\bул\.)(?<!\bдр\.)(?<!\bнапр\.)\s+(?=[«A-ZА-ЯЁ0-9])", text)
     out: list[str] = []
     cur = ""
     for p in parts:

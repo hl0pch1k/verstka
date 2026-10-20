@@ -1012,6 +1012,10 @@ def document_tables(name: str, data: bytes) -> list:
 _DROP_TAGS = ("script", "style", "noscript", "nav", "header", "footer", "aside", "form", "svg", "iframe", "button", "template", "select")
 
 
+_WIKI_MARK_RE = re.compile(r"\[(?:\d{1,3}|[a-zа-я]|источник не указан[^\]]*|править(?:\s*\|\s*править код)?|прим\.[^\]]*|нет в источнике[^\]]*|уточнить[^\]]*)\]", re.I)
+_BACKMATTER_RE = re.compile(r"^(?:примечани|литератур|ссылки|см\.?\s*также|источники|библиограф|комментари|notes|references|see also|external links|further reading)", re.I)
+
+
 def read_html(name: str, html: str) -> DocumentText:
     from lxml import html as lh
 
@@ -1026,14 +1030,32 @@ def read_html(name: str, html: str) -> DocumentText:
         bad.drop_tree()
     for bad in root.xpath("//*[@role='navigation' or @role='banner' or @role='contentinfo' or @aria-hidden='true']"):
         bad.drop_tree()
+    # a wiki's footnote marks, edit links, navigation boxes and its table of contents are no text of the page
+    # («вычислений[4]», «[править | править код]» — jury 20.10, round 3)
+    for bad in root.xpath("//sup[contains(@class,'reference')] | //*[contains(@class,'mw-editsection')] | //*[contains(@class,'navbox')]"
+                          " | //*[@id='toc'] | //*[contains(@class,'noprint')] | //*[contains(@class,'mw-cite-backlink')]"):
+        if bad.getparent() is not None:
+            bad.drop_tree()
     main = root.xpath("//article") or root.xpath("//main") or root.xpath("//*[@role='main']") or root.xpath("//body") or [root]
     scope = max(main, key=lambda e: len(e.text_content() or ""))
 
     def text_of(el) -> str:
-        return " ".join((el.text_content() or "").split())
+        t = " ".join((el.text_content() or "").split())
+        t = _WIKI_MARK_RE.sub("", t).replace("\u0301", "")
+        return re.sub(r"\s+([,.;:])", r"\1", t).strip()
 
+    skip_level: Optional[int] = None  # inside «Примечания», «Литература», «Ссылки», «См. также»
     for el in scope.iter("h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "table", "blockquote", "dd", "pre"):
         if el.getparent() is None:
+            continue
+        if el.tag[0] == "h" and el.tag[1:].isdigit():
+            lv = int(el.tag[1:])
+            if skip_level is not None and lv <= skip_level:
+                skip_level = None
+            if skip_level is None and _BACKMATTER_RE.match(text_of(el)):
+                skip_level = lv
+                continue
+        if skip_level is not None:
             continue
         if any(a.tag in ("table", "li", "p", "blockquote") for a in el.iterancestors()) and el.tag != "table":
             if el.tag == "p" and any(a.tag in ("li", "blockquote") for a in el.iterancestors()) and not any(a.tag == "table" for a in el.iterancestors()):

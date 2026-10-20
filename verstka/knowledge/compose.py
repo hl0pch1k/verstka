@@ -27,7 +27,7 @@ def _sentences(text: str) -> list[str]:
         line = line.strip().lstrip("—-• ").strip()
         if not line:
             continue
-        for s in re.split(r"(?<=[.!?…])\s+(?=[«A-ZА-ЯЁ0-9])", line):
+        for s in re.split(r"(?<=[.!?…])(?<!\bангл\.)(?<!\bлат\.)(?<!\bнем\.)(?<!\bфр\.)(?<!\bгреч\.)(?<!\bт\.)(?<!\bг\.)(?<!\bгг\.)(?<!\bсм\.)(?<!\bим\.)(?<!\bул\.)(?<!\bдр\.)(?<!\bнапр\.)\s+(?=[«A-ZА-ЯЁ0-9])", line):
             s = s.strip()
             if len(s) >= 12:
                 out.append(s if s.endswith((".", "!", "?", "…", ":")) else s + ".")
