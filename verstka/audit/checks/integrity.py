@@ -616,7 +616,9 @@ PHOTO_PLACE_EMPTY = CheckSpec(
     "своё фото, — не ошибка, если оно оформлено как место для фото (оттенок цвета шаблона, пунктирная рамка, подпись): "
     "это сведение. Серая заглушка без оформления — предупреждение, как и место под картинку, которую должна была "
     "нарисовать модель, а её нет (генерация выключена, не успела, не ответила): такому слайду нужен макет без места "
-    "под картинку или уместный рисунок шаблона.",
+    "под картинку или уместный рисунок шаблона (сборка сама перекладывает такой слайд). Место под картинку, которую "
+    "человек просил («добавь картинку», описание в тексте), оформленное как место для фото, — сведение: оно остаётся, "
+    "причина названа в ходе сборки.",
 )
 
 
@@ -631,6 +633,7 @@ def _grey(hex_: Optional[str]) -> bool:
 @check(PHOTO_PLACE_EMPTY)
 def photo_place_empty(ctx: AuditContext) -> list[Issue]:
     from verstka.images.places import is_own
+    from verstka.planning.pictures import AUTO_LABEL
     from verstka.schemas.outline import PHOTO_PLACE_NAME
 
     out: list[Issue] = []
@@ -648,6 +651,12 @@ def photo_place_empty(ctx: AuditContext) -> list[Issue]:
             elif own:
                 out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под фото автора — серая заглушка без оформления", bboxes=[e.bbox_frac], element_ids=[e.id],
                                          suggestion="Оформить место как место для фото: оттенок цвета шаблона, рамка, подпись."))
+            elif c is not None and c.photo_slot and c.photo_slot != AUTO_LABEL and designed:
+                # the person asked for this picture («добавь картинку», a described place): the place stays as they asked,
+                # its reason said with the build (images.json, the timeline) — a note, not a fault (the owner's rule, 20.10)
+                out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под картинку, которую вы просили, оставлено свободным: картинки нет", severity="info",
+                                         bboxes=[e.bbox_frac], element_ids=[e.id],
+                                         suggestion="Вставьте своё изображение, попросите нарисовать его ещё раз или уберите место кнопкой «Исправить слайд»."))
             else:
                 out.append(ctx.new_issue(PHOTO_PLACE_EMPTY, s.index, "место под картинку осталось пустым: картинки нет", bboxes=[e.bbox_frac], element_ids=[e.id],
                                          suggestion="Макет без места под картинку или рисунок шаблона, который подходит к слайду."))

@@ -38,7 +38,18 @@ def build_run_manifest(
     slides: list[dict],
     usage: Optional[dict] = None,
     extra: Optional[dict] = None,
+    answered: Optional[dict[str, dict[str, int]]] = None,
 ) -> dict:
+    described = providers.describe() if providers else {"llm": {"backend": "none"}, "vlm": {"backend": "none"}}
+    for role, models in (answered or {}).items():
+        d = described.get(role)
+        if isinstance(d, dict) and models:
+            # the model that answered most of the role's calls is the role's model; the configured one stays named
+            top = max(models.items(), key=lambda kv: kv[1])[0]
+            if top != d.get("model"):
+                d["configured_model"] = d.get("model")
+                d["model"] = top
+            d["answered_by"] = dict(models)
     return {
         "verstka_version": __version__,
         "git_commit": git_commit(),
@@ -48,7 +59,7 @@ def build_run_manifest(
         "strategy": strategy,
         "inputs": {"brief_sha256": brief_hash, "outline_sha256": outline_hash},
         "skills": skills.versions() if skills else {},
-        "providers": providers.describe() if providers else {"llm": {"backend": "none"}, "vlm": {"backend": "none"}},
+        "providers": described,
         "timings_s": timings,
         "usage": usage or {},
         "applied_fixes": applied_fixes,

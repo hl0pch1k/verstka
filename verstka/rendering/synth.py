@@ -1723,6 +1723,20 @@ def _photo_frame_beside(slide: Slide, area: Bbox, kit, pal: "_Palette", name: st
     return Bbox(x=area.x, y=area.y, w=area.w - pw - g, h=area.h)
 
 
+def _strip_left(slide: Slide, outline: DeckOutline, W: int, H: int) -> bool:
+    """The compact variant mirrors the picture's strip to the left edge — unless the slide's picture ground draws an
+    object in the top right, where the heading would then stand (Blueprint's pencil and eraser crossed the compact
+    variant's headings, jury 20.10): the strip on the right covers it instead."""
+    if outline.strategy != "compact":
+        return False
+    try:
+        from verstka.rendering.cutouts import cutout_boxes
+
+        return not cutout_boxes(slide, Bbox(x=W // 2, y=0, w=W - W // 2, h=int(0.3 * H)))
+    except Exception:  # noqa: BLE001 - the mirrored strip as before
+        return True
+
+
 def _photo_strip(slide: Slide, box: tuple[int, int, int, int], kit, pal: "_Palette", name: str) -> None:
     """The picture's place as a full-height strip at the slide's edge (rendering/picture_layouts.py `picture_strip`):
     square-cornered, in the quiet fill of a free place; the picture fills it whole."""
@@ -1801,7 +1815,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     if photo:
         from verstka.rendering.picture_layouts import beside_strip, picture_strip
 
-        strip_box = picture_strip(slide, W, H, left=(outline.strategy == "compact"))
+        strip_box = picture_strip(slide, W, H, left=_strip_left(slide, outline, W, H))
         sx, sw = beside_strip(strip_box, sx, sw, W)
         if strip_box[0] > 0:
             slide.__dict__["_verstka_text_right"] = sx + sw  # the heading stops before the strip
@@ -1890,6 +1904,15 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         # to a picture the composed slide does not keep) sets letters one under the other — the page's width instead
         wide_x = min(page_left, sx)
         wide_w = max(int(safe.x2 * W), sx + sw) - wide_x
+        if strip_box is not None:
+            # never under the picture's strip (synth_sidebar43, 20.10: the column widened to 80% ran under the photo
+            # place): the column widens up to the strip, a gutter away
+            g = int(0.03 * W)
+            if strip_box[0] > 0:
+                wide_w = min(wide_w, strip_box[0] - g - wide_x)
+            else:
+                lim = strip_box[0] + strip_box[2] + g
+                wide_w, wide_x = wide_x + wide_w - max(wide_x, lim), max(wide_x, lim)
         if wide_w > sw:
             warnings.append(f"content column widened from {sw / W:.0%} to {wide_w / W:.0%} of the slide")
             sx, sw = wide_x, wide_w

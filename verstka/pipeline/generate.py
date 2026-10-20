@@ -88,8 +88,9 @@ class _Recorder:
     # a caller may name the call's skill (`skill=`) when it parses the answer itself (schema None: the writer's calls)
     labels_calls = True
 
-    def __init__(self, inner, sink: list, stats: Optional[list] = None) -> None:
+    def __init__(self, inner, sink: list, stats: Optional[list] = None, role: Optional[str] = None) -> None:
         self.inner = inner
+        self.role = role
         self.sink = sink
         self.stats = stats if stats is not None else []
         self.name = getattr(inner, "name", "provider")
@@ -102,7 +103,7 @@ class _Recorder:
         label = kwargs.pop("skill", None)
         if label and getattr(self.inner, "labels_calls", False):
             kwargs["skill"] = label  # a recorder inside this one (the agent's in the generation's) names the call too
-        rec = {"skill": label or getattr(schema, "__name__", None) or "text", "ok": False}
+        rec = {"skill": label or getattr(schema, "__name__", None) or "text", "ok": False, **({"role": self.role} if self.role else {})}
         t, sent = time.monotonic(), requests_sent()
         try:
             res = self.inner.complete(messages, **kwargs)
@@ -112,7 +113,8 @@ class _Recorder:
             raise
         else:
             u = getattr(res, "usage", None)
-            rec.update(ok=True, tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, cost_rub=getattr(u, "cost_rub", None), attempts=getattr(res, "attempts", 1))
+            rec.update(ok=True, tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, cost_rub=getattr(u, "cost_rub", None), attempts=getattr(res, "attempts", 1),
+                       model=getattr(res, "model", None) or self.model)
             self.sink.append(getattr(res, "model", None) or self.model)
             return res
         finally:
@@ -133,7 +135,7 @@ def _recording(providers: Optional[ProviderRegistry], stats: Optional[list] = No
         return None, sink
     try:
         reg = copy.copy(providers)
-        reg.roles = {role: _Recorder(p, sink, stats) for role, p in providers.roles.items()}
+        reg.roles = {role: _Recorder(p, sink, stats, role) for role, p in providers.roles.items()}
         return reg, sink
     except Exception:  # noqa: BLE001 - recording is a nicety, planning must not depend on it
         return providers, sink
@@ -370,6 +372,7 @@ def generate_variants(
     manifest = analyze_template(template, workspace_root=workspace_root, providers=providers, skills=skills, use_llm=use_llm, use_vlm=use_vlm, force=force_analyze, progress=lambda s, f: report(f"analyze: {s}", 0.15 * f))
     analyze_s = round(time.time() - ta, 2)
     budget_end: Optional[float] = None
+    providers_base = providers  # (unbound: the content checks after the export get their own time, see _check_content)
     if providers is not None:
         # brief → decks gets a fixed model budget: past it every model step takes its deterministic path, so a slow
         # or congested backend costs quality, never the 5 minutes a deck may take. It counts from the start of the
@@ -449,7 +452,10 @@ def generate_variants(
     elif brief is not None and outline is None:
         facts = basic_facts(brief.text, structure=agent_result.structure)
     n = len(strategies)
-    audit_render = bool(audit_models and use_vlm)  # the VLM checks look at slide images; deterministic ones read XML
+    # the content checks by the model (the 11 questions of the ТЗ's appendix 1) look once at the finished deck — its
+    # exported previews — after the deterministic audit and autofix (`_check_content`): never inside the autofix loop,
+    # where every pass rendered the slides again and asked the model again
+    audit_render = False
     planned: dict[str, tuple[DeckOutline, list[str], float]] = {}
     plan_models: dict[str, Optional[str]] = {}  # strategy → the model that wrote its plan (None: the rules did)
     plan_raw: dict[str, list] = {}  # strategy → the planner's answers as the model wrote them (planner_raw.json)
@@ -664,12 +670,20 @@ def generate_variants(
             if audit:
                 tau = time.time()
                 report(f"{name}: audit", base + span * 0.65)
-                audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None, writer=writer_audit)
+                audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=None, skills=None, use_vlm=False, use_llm=False, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None, writer=writer_audit)
                 if autofix and audit_report.summary.errors + audit_report.summary.warnings > 0:
                     report(f"{name}: autofix ({audit_report.summary.errors} errors)", base + span * 0.8)
-                    audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit, others=taken0)
+                    audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=False, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit, others=taken0)
                     if rr is not None:
                         render = rr
+                    left = {i.id for i in audit_report.issues if i.check_id in RELAY_CHECKS and i.severity in ("error", "warn") and i.kind != "model" and i.autofix is not None and i.autofix.action != "none"}
+                    if left:
+                        # a word broken in the middle, a heading under the picture, a text cut by the slide's edge never
+                        # leave with the deck: their slides go up the ladder again (the next sample, the composer, a size
+                        # of the scale) before the deck is given out (jury 20.10: the audit saw them and gave the deck)
+                        audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=False, only_ids=left, max_iterations=2, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit, others=taken0)
+                        if rr is not None:
+                            render = rr
                 timings["audit"] = round(time.time() - tau, 2)
             # the variants after this one know what it SHOWS on each slide — the sample a fallback or the autofix put
             # there, nothing for a slide composed — not what it planned (three variants converged on one sample)
@@ -703,14 +717,30 @@ def generate_variants(
 
             left = (maker.deadline - time.monotonic()) if maker is not None and maker.deadline is not None else 0.0
             applied = apply_pictures(v["vdir"] / "deck.pptx", v["pictures"], wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
-            write_records(v["vdir"], applied.records)
+            records = applied.records
+            # a place Verstka added itself whose picture did not come goes, and its slide is laid out again without it:
+            # no grey «Место под изображение» in a finished deck nobody asked a picture for (jury 20.10, R13/R15)
+            drop = free_added_places(records, v["outline"])
+            if drop:
+                try:
+                    relaid = relay_without_pictures(v, drop, manifest, ws, brief.text if brief else None, writer_audit)
+                except Exception as e:  # noqa: BLE001 - the places stay as they are, the audit says so
+                    log.warning("slides without their picture not laid out again", exc_info=True)
+                    v["warnings"].append(f"pictures: the empty places stayed ({str(e)[:120]})")
+                    relaid = []
+                if relaid:
+                    records = [r for r in records if str(r.get("outline_id") or "") not in drop]
+                    applied.changed.extend(k for k in relaid if k not in applied.changed)
+                    v["warnings"].append(f"pictures: slides {relaid} laid out again without the picture's place (no picture: {'; '.join(sorted(set(drop.values())))[:160]})")
+                    _say_relaid(progress, v["name"], relaid, v["outline"], drop, said_pictures)
+            write_records(v["vdir"], records)
         except Exception as e:  # noqa: BLE001
             log.warning("pictures not put in", exc_info=True)
             v["warnings"].append(f"pictures: not put in ({str(e)[:120]})")
             continue
         v["warnings"].extend(applied.warnings)
-        v["picture_records"] = applied.records
-        _say_pictures_made(progress, v["name"], applied.records, said_pictures)
+        v["picture_records"] = records
+        _say_pictures_made(progress, v["name"], records, said_pictures)
         if applied.changed:
             v["pictures_changed"] = True
             if v["audit"] is not None:
@@ -752,6 +782,9 @@ def generate_variants(
     else:
         finished = [_finish(v) for v in pending]
 
+    if audit and audit_models and providers_base is not None and skills is not None and (use_vlm or use_llm):
+        report("audit: content checks by the model", 0.95)
+        _check_content(finished, manifest, ws, providers_base, skills, gen_stats, t_start, brief, writer_audit, use_vlm=use_vlm, use_llm=use_llm)
     for v in finished:
         name, vdir, audit_report = v["name"], v["vdir"], v["audit"]
         if audit_report is not None:
@@ -769,7 +802,10 @@ def generate_variants(
         export_paths = {"pptx": vdir / "deck.pptx", **v["exports"]}
         timings = v["timings"]
         vr = VariantResult(strategy=name, out_dir=vdir, outline=v["outline"], plan=v["plan"], render=v["render"], images=v["images"], warnings=v["warnings"], seconds=round(time.time() - v["ts"], 2), audit=audit_report, exports=export_paths, timings=timings)
-        timings["total"] = vr.seconds
+        # the variant's own steps, and the generation's wall time so far (the plan, shared by the variants, included:
+        # «total» was the variant's own seconds and read shorter than its plan — jury 20.10)
+        timings["variant"] = vr.seconds
+        timings["total"] = round(time.time() - t0, 2)
         vr.planner = {"planned_by": v["outline"].planned_by, "model": plan_models.get(name)}
         if name in agent_info and v["outline"].planned_by in ("agent", "rules"):
             vr.planner["agent"] = agent_info[name]  # the planning agent's own plan (not another variant's, shared)
@@ -789,6 +825,7 @@ def generate_variants(
             skills=skills,
             providers=providers,
             timings=timings,
+            answered=answered_by(gen_stats),
             applied_fixes=audit_report.applied_fixes if audit_report else [],
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
@@ -869,12 +906,28 @@ def _say_pictures_made(progress: Optional[ProgressFn], name: str, records: list[
         elif r.get("error") or (r.get("why") and r.get("why") not in ("место под ваше фото — вставьте его в PowerPoint", "генерация изображений выключена")):
             k = ("free", r.get("hint") or r.get("label"), r.get("slide"))
             text = f"Вёрстка: слайд {r.get('slide')} — место под изображение осталось свободным: {r.get('why')}."
+        elif r.get("why") == "генерация изображений выключена" and not r.get("own"):
+            # the person asked for this picture: its place stays, and why it is empty is said (the owner's rule, 20.10)
+            k = ("free", r.get("hint") or r.get("label"), r.get("slide"))
+            text = f"Вёрстка: слайд {r.get('slide')} — место под изображение, которое вы просили, оставлено свободным: генерация изображений выключена. Включите «С изображениями» или вставьте своё изображение."
         else:
             continue
         if k in said:
             continue
         said.add(k)
         sink({"type": "agent", "step": "compile", "message": text, "slide": r.get("slide"), "variant": name, "share": 0.855})
+
+
+def _say_relaid(progress: Optional[ProgressFn], name: str, slides: list[int], outline: DeckOutline, why: dict[str, str], said: set) -> None:
+    sink = _event_sink(progress)
+    for k in slides:
+        oid = outline.slides[k - 1].id if 0 < k <= len(outline.slides) else ""
+        key = ("relaid", k)
+        if key in said:
+            continue
+        said.add(key)
+        reason = why.get(oid) or "изображения нет"
+        sink({"type": "agent", "step": "compile", "message": f"Вёрстка: слайд {k} — изображение не получилось ({reason}): место под него убрано, слайд сверстан заново без него.", "slide": k, "variant": name, "share": 0.855})
 
 
 def _audit_with_pictures(v: dict, manifest: TemplateManifest, ws: TemplateWorkspace, brief: Optional[Brief], writer_audit) -> AuditReport:
@@ -887,6 +940,147 @@ def _audit_with_pictures(v: dict, manifest: TemplateManifest, ws: TemplateWorksp
     new.iterations = old.iterations
     new.recompute()
     return new
+
+
+def free_added_places(records: list[dict], outline: DeckOutline) -> dict[str, str]:
+    """The places Verstka added itself (planning/pictures.py AUTO_LABEL) whose picture did not come (the model off,
+    late, failed, no description): outline id → why. A place the person asked for — described in the text, «добавь
+    картинку», their own photo — is never among them: it stays, its reason said (the owner's rule of 20.10)."""
+    from verstka.planning.pictures import AUTO_LABEL
+
+    by_id = {s.id: s for s in outline.slides}
+    out: dict[str, str] = {}
+    for r in records:
+        if r.get("status") in ("generated", "removed") or r.get("own"):
+            continue
+        osl = by_id.get(str(r.get("outline_id") or ""))
+        c = osl.content if osl is not None else None
+        if c is None or c.photo_slot != AUTO_LABEL or c.photo_own:
+            continue
+        out.setdefault(osl.id, str(r.get("why") or "изображения нет"))
+    return out
+
+
+def relay_without_pictures(v: dict, oids: dict[str, str], manifest: TemplateManifest, ws: TemplateWorkspace, brief_text: Optional[str], writer_audit) -> list[int]:
+    """The slides `oids` (outline id → why) laid out again without their picture's place: matched afresh (another
+    sample or the composer — the place no longer asks for a picture slot), rendered in a scratch deck, fixed there by
+    the autofix on those slides only, and spliced into the variant's deck — every other slide (its picture too) keeps
+    its XML. A grey «Место под изображение» never reaches a finished deck for a picture Verstka itself added. Updates
+    v["outline"], v["plan"], v["render"]; returns the slide numbers laid out again ([] — nothing done)."""
+    from verstka.audit.autofix import autofix_loop
+    from verstka.pipeline.revise import _with_entry, splice_slide
+    from verstka.rendering.renderer import strip_outline_marks
+
+    vdir: Path = v["vdir"]
+    o = v["outline"].model_copy(deep=True)
+    pos = {s.id: k for k, s in enumerate(o.slides, 1)}
+    changed = sorted(pos[oid] for oid in oids if oid in pos)
+    if not changed:
+        return []
+    for k in changed:
+        c = o.slides[k - 1].content
+        c.photo_slot, c.photo_hint, c.photo_own = None, None, False
+    strategy = load_strategies().get(v["name"]) or next(iter(load_strategies().values()))
+    others = {k: set(x) for k, x in (v.get("others") or {}).items()}
+    fresh = match_outline(o.model_copy(deep=True), manifest, strategy, ws=ws, taken={k: set(x) for k, x in others.items()})
+    plan = v["plan"].model_copy(deep=True)
+    for k in changed:
+        oid = o.slides[k - 1].id
+        plan = _with_entry(plan, fresh.for_outline(oid), oid)
+    work = vdir / "deck.relay.pptx"
+    spliced = vdir / "deck.splice.pptx"
+    try:
+        rr = render_deck(o, plan, manifest, ws, work, shown=others)
+        rep = run_audit(work, manifest, o, ws, use_vlm=False, use_llm=False, render=False, strategy=v["name"], brief_text=brief_text, writer=writer_audit)
+        ids = {i.id for i in rep.issues if i.slide in changed and i.severity in ("error", "warn") and i.kind != "model" and i.autofix is not None and i.autofix.action != "none"}
+        if ids:
+            rep, plan, o, rr2 = autofix_loop(work, rep, o, plan, manifest, ws, max_iterations=2, only_ids=ids, render=False, brief_text=brief_text, writer=writer_audit, others=others)
+            rr = rr2 or rr
+        deck = vdir / "deck.pptx"
+        for k in changed:
+            splice_slide(deck, work, k, spliced)
+            spliced.replace(deck)
+        strip_outline_marks(deck)
+    finally:
+        work.unlink(missing_ok=True)
+        spliced.unlink(missing_ok=True)
+    new_o = v["outline"].model_copy(deep=True)
+    new_plan = v["plan"].model_copy(deep=True)
+    for k in changed:
+        oid = o.slides[k - 1].id
+        new_o.slides[k - 1] = o.slides[k - 1].model_copy(deep=True)
+        new_plan = _with_entry(new_plan, plan.for_outline(oid), oid)
+    v["outline"], v["plan"] = new_o, new_plan
+    render: RenderResult = v["render"]
+    fresh_slides = {s.index: s for s in rr.slides}
+    for j, s in enumerate(render.slides):
+        if s.index in changed and s.index in fresh_slides:
+            ns = fresh_slides[s.index]
+            ns.warnings = [*ns.warnings, f"laid out again without the picture's place: {oids.get(ns.outline_id, '')}".rstrip(": ")]
+            render.slides[j] = ns
+    return changed
+
+
+# the remarks that never leave with a deck while a rung of the autofix ladder is left for their slide
+RELAY_CHECKS = frozenset({"word_break", "text_under_picture", "text_clipped", "text_overflow", "overlap"})
+CONTENT_CHECKS_END_S = 275.0  # the content checks end by this second of the generation (the 5 minutes, a margin kept)
+CONTENT_CHECKS_MIN_S = 20.0  # and get at least this long when the model budget is spent
+CONTENT_CHECKS_LAST_S = 270.0  # none start past this second
+
+
+def _check_content(finished: list[dict], manifest: TemplateManifest, ws: TemplateWorkspace, providers: ProviderRegistry, skills, stats: list, t_start: float,
+                   brief: Optional[Brief], writer_audit, *, use_vlm: bool, use_llm: bool) -> None:
+    """The model's content checks (audit/model_checks.py: the 11 questions of the ТЗ's appendix 1 per slide by its
+    picture, the deck's coherence) on each finished deck, all variants side by side, once: their remarks join the
+    variant's report. Bounded by the generation's 5 minutes: a check the time does not allow is skipped and said so
+    (`content_checks` in the report's warnings), the deck is never held."""
+    from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+
+    now = time.monotonic()
+    if now > t_start + CONTENT_CHECKS_LAST_S:
+        for v in finished:
+            v["warnings"].append("content checks skipped: the generation's 5 minutes are nearly spent")
+        return
+    end = max(t_start + CONTENT_CHECKS_END_S, now + CONTENT_CHECKS_MIN_S)
+    reg, _ = _recording(providers.with_deadline(end), stats)
+
+    def one(v: dict) -> None:
+        rep0: Optional[AuditReport] = v.get("audit")
+        if rep0 is None:
+            return
+        tc = time.time()
+        imgs = {k: Path(p) for k, p in enumerate(v.get("images") or [], 1)}
+        try:
+            rep = run_audit(v["vdir"] / "deck.pptx", manifest, v["outline"], ws, providers=reg, skills=skills, use_vlm=use_vlm and bool(imgs), use_llm=use_llm,
+                            render=False, existing_images=imgs, strategy=v["name"], brief_text=brief.text if brief else None, writer=writer_audit)
+        except Exception as e:  # noqa: BLE001 - the deterministic report stands
+            log.warning("content checks failed on %s", v["name"], exc_info=True)
+            v["warnings"].append(f"content checks failed: {str(e)[:160]}")
+            return
+        got = [i for i in rep.issues if i.kind == "model" and i.check_id in (SLIDE_CONTENT.id, DECK_COHERENCE.id)]
+        have = {i.id for i in rep0.issues}
+        for i in got:
+            if i.id in have:
+                i.id = f"{i.id}m"
+            rep0.issues.append(i)
+        ran = list(rep0.summary.checks_run)
+        rep0.summary.checks_run = ran + [c for c in ((SLIDE_CONTENT.id,) if use_vlm and imgs else ()) + ((DECK_COHERENCE.id,) if use_llm else ()) if c not in ran]
+        rep0.recompute()
+        v["timings"]["content_checks"] = round(time.time() - tc, 2)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(3, len(finished)))) as ex:
+        list(ex.map(one, finished))
+
+
+def answered_by(stats: list) -> dict[str, dict[str, int]]:
+    """role → the model that answered → calls: who really answered (a chain falls over to a backup model — VK
+    inference down, Polza answered — and the configured first link is not who wrote the deck)."""
+    out: dict[str, dict[str, int]] = {}
+    for r in list(stats):
+        if r.get("ok") and r.get("role") and r.get("model"):
+            d = out.setdefault(str(r["role"]), {})
+            d[str(r["model"])] = d.get(str(r["model"]), 0) + 1
+    return out
 
 
 def _usage_of(stats: list) -> dict:

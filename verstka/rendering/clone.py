@@ -5780,6 +5780,38 @@ def _text_over_pictures(ctx: _SlideCtx) -> None:
         ctx.warnings.append(f"{moved} text block(s) brought in front of the pictures that covered them")
 
 
+def _cover_into_free_room(ctx: _SlideCtx, t_el: etree._Element, t_box0: tuple, cleared: list[Bbox], text: str, title) -> Optional[tuple[int, int, int, int]]:
+    """A cover sample whose heading stands in a narrow top band over an empty body area (a template's first slide that
+    is a «title and content» layout — LibreOffice Sunset: a 3.6-inch title between two rules, the body below empty): a
+    deck title longer than two lines of the band at the sample's size goes down into the freed body area, centred at
+    its optical middle (a little above the geometric one), where it is set large — not 14 pt in three lines at the top
+    of an empty slide (the pictures' agent's QA, 20.10). Returns the heading's new box, None — the sample's own place."""
+    W, H = ctx.W, ctx.H
+    x, y, w, h = t_box0
+    if w >= int(0.55 * W) or not text:
+        return None
+    size0 = title.style.size_pt or (int(_eff_rpr(ctx, t_el, "sz") or 0) / 100) or ctx.typo.size_for("display", 40.0)
+    family = title.style.font_family or ctx.typo.primary_family
+    bold = (_eff_rpr(ctx, t_el, "b") or "0") in ("1", "true") or bool(title.style.bold)
+    need = text_width_pt(text, family, size0, bold) * EMU_PER_PT
+    if need <= 2 * 0.9 * w:
+        return None  # two lines at the sample's size: the heading keeps its band
+    rooms = [b for b in cleared if b.y >= y + h // 2 and b.w >= int(0.6 * W) and b.h >= int(0.3 * H) and b.x <= x + w // 2 <= b.x2]
+    if not rooms:
+        return None
+    room = max(rooms, key=lambda b: b.area)
+    # the optical middle: the block centred a tenth above the room's centre
+    hh = int(room.h * 0.8)
+    new = (room.x, room.y, room.w, hh)
+    set_element_pos(t_el, x=new[0], y=new[1], w=new[2], h=new[3])
+    body = t_el.find(q("p:txBody"))
+    bp = body.find(q("a:bodyPr")) if body is not None else None
+    if bp is not None:
+        bp.set("anchor", "ctr")
+    ctx.warnings.append("заголовок обложки перенесён из узкой полосы образца в пустую область под ней — крупно, по оптическому центру")
+    return new
+
+
 def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     """Cover, divider, closing slide: the heading set large on the sample's own ground and art — up to three
     balanced lines at no less than 0.85 of the sample size where the room allows, never under a logo or a picture;
@@ -5818,6 +5850,10 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     if frame_el is not None:
         kicker_text, footer_text = None, None
     dot_rows = _pagination(ctx, oslide)
+    if kind == PatternKind.title:
+        moved = _cover_into_free_room(ctx, t_el, t_box0, cleared, bind_short_words(head), title)
+        if moved is not None:
+            t_box0 = moved
     tb = Bbox(x=t_box0[0], y=t_box0[1], w=t_box0[2], h=t_box0[3])
     size0 = title.style.size_pt or (int(_eff_rpr(ctx, t_el, "sz") or 0) / 100) or typo.size_for("display", 40.0)
     family = title.style.font_family or typo.primary_family

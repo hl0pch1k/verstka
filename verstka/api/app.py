@@ -277,7 +277,9 @@ class GenerateRequest(BaseModel):
     extra_instructions: Optional[str] = None
     strategies: list[str] = Field(default_factory=lambda: list(STRATEGY_NAMES))
     use_models: bool = True
-    audit_models: bool = False
+    # «проверка содержания моделью» (audit/model_checks.py: the 11 questions of the ТЗ's appendix 1 by each slide's
+    # picture, the deck's coherence) on the finished decks; None — with the text model (use_models), as «Взгляд дизайнера»
+    audit_models: Optional[bool] = None
     autofix: bool = True
     exports: list[str] = Field(default_factory=lambda: ["pdf", "html"])
     # «Генерировать изображения»: the places the author described get pictures (verstka/images); None — the config
@@ -847,7 +849,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
     # «Модель пишет тексты слайдов» off: the user's own text, laid out as written (planning/faithful.py) — no model
     # plans or rewrites it; «Модель проверяет слайды по картинке» is a switch of its own
     use_models = req.use_models and models_configured()
-    audit_models = req.audit_models and models_configured()
+    audit_models = _content_checks_on(req) and models_configured()
     eyes = bool(req.use_models if req.eyes is None else req.eyes) and models_configured()
     described = data.describe()
     story = None
@@ -1034,9 +1036,14 @@ def _brand_line(stage: Any) -> str:
     return f"Брендбук: {s[:1].lower() + s[1:]}"
 
 
+def _content_checks_on(req: GenerateRequest) -> bool:
+    """The model's content checks of the request: as asked, else with the text model (on by default)."""
+    return bool(req.use_models if req.audit_models is None else req.audit_models)
+
+
 def _request_options(req: GenerateRequest) -> dict:
     """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
-    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from,
+    return {"audit_models": _content_checks_on(req), "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from,
             "dataset_ids": list(req.dataset_ids), "brandbook_id": req.brandbook_id, "brand_priority": req.brand_priority,
             "knowledge_id": req.knowledge_id, "pick_fonts": req.pick_fonts}
 

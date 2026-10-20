@@ -253,8 +253,11 @@ def test_the_audit_tells_a_designed_photo_place_from_a_grey_stub():
     assert [i.severity for i in designed] == ["info"]
     stub = photo_place_empty(ctx("EEEEEE", None, True))
     assert [i.severity for i in stub] == ["warn"]
+    # a place the person asked a picture for (described in the text, «добавь картинку») and the picture did not come:
+    # it stays as asked, a note with its reason, not a fault (the owner's rule of 20.10); a place Verstka added itself
+    # never reaches a finished deck empty (pipeline/generate.relay_without_pictures) — the audit still warns of one
     missing = photo_place_empty(ctx("FFE9D6", "FFB27A", False))
-    assert [i.severity for i in missing] == ["warn"] and "картинки нет" in missing[0].message
+    assert [i.severity for i in missing] == ["info"] and "картинки нет" in missing[0].message
 
 
 # ---------------------------------------------------------------------------------------------------------- tables
@@ -304,3 +307,18 @@ def test_a_change_to_nothing_is_said_as_the_change_not_as_minus_hundred_percent(
     got = {lab: v for v, lab, _span in table_deltas(t)}
     assert got["Поддержка"] == "−38" and got["Облако"] == "+26" and got["Команда"] == "−43%"
     assert not any("100%" in v for v in got.values())
+
+
+def test_an_empty_place_verstka_added_itself_is_a_warning():
+    from verstka.audit.checks.integrity import photo_place_empty
+    from verstka.audit.registry import AuditContext
+    from verstka.planning.pictures import AUTO_LABEL
+    from verstka.schemas.common import BboxFrac
+    from verstka.schemas.deck_ir import DeckIR, IRElement, IRSlide
+    from verstka.schemas.template import SlideSize, TemplateManifest, Tokens
+
+    place = IRElement(id="ph", type="shape", name=PHOTO_PLACE_NAME, fill_hex="FFE9D6", line_hex="FFB27A", bbox=Bbox(x=0, y=0, w=1000, h=1000), bbox_frac=BboxFrac(x=0.5, y=0.2, w=0.4, h=0.6))
+    o = DeckOutline(title="T", slides=[OutlineSlide(id="a", kind=PatternKind.bullets, headline="Склад", content=SlideContent(bullets=["Зал: 100 м²"], photo_slot=AUTO_LABEL, photo_hint="Склад"))])
+    man = TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=12192000, h=6858000), tokens=Tokens(), patterns=[], n_slides=1)
+    got = photo_place_empty(AuditContext(ir=DeckIR(source="x.pptx", slide_w=12192000, slide_h=6858000, slides=[IRSlide(index=1, elements=[place], outline_id="a")]), manifest=man, outline=o))
+    assert [i.severity for i in got] == ["warn"] and "картинки нет" in got[0].message

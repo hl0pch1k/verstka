@@ -31,6 +31,32 @@ def _image_provider(models: Path):
     return load_image_provider(models)
 
 
+def _say_free_places(vdir: Path) -> None:
+    """The picture places left free in the finished deck and why (a place the person asked for stays: the owner's rule)."""
+    try:
+        from verstka.images.fill import read_records
+
+        for r in read_records(vdir):
+            if r.get("status") != "generated" and r.get("why"):
+                console.print(f"  [yellow]слайд {r.get('slide')}: место под изображение оставлено — {r.get('why')}[/yellow]")
+    except Exception:  # noqa: BLE001 - a line of the report, never the build
+        pass
+
+
+def _pictures_switch(models: Optional[Path], no_models: bool, asked: Optional[bool] = None) -> Optional[bool]:
+    """The pictures of a CLI build, as in the interface: on when the models config has a text-to-image model (None —
+    the config's own switch, configs/images.yaml), off without models, off when --models names a config without a
+    t2i role (the jury of 20.10: such a config still drew pictures with the default profile's Z-Image), `asked` (run.yaml
+    «pictures») wins when given."""
+    if no_models:
+        return False
+    if asked is not None:
+        return bool(asked) and (models is None or _image_provider(models) is not None)
+    if models is not None and _image_provider(models) is None:
+        return False
+    return None
+
+
 def _providers(models: Optional[Path], need: bool) -> Optional[ProviderRegistry]:
     if not need:
         return None
@@ -112,7 +138,7 @@ def generate(
     no_vlm: bool = typer.Option(False, "--no-vlm"),
     no_audit: bool = typer.Option(False, "--no-audit"),
     no_autofix: bool = typer.Option(False, "--no-autofix"),
-    audit_models: bool = typer.Option(False, "--audit-models", help="Run VLM/LLM content checks in the audit"),
+    audit_models: Optional[bool] = typer.Option(None, "--audit-models/--no-audit-models", help="The model's content checks of the finished decks (the 11 questions of the ТЗ's appendix 1, the deck's coherence); default: on with models"),
     no_eyes: bool = typer.Option(False, "--no-eyes", help="Skip «Взгляд дизайнера»: the vision model's look at the finished slides"),
     export: str = typer.Option("pptx", "--export", help="pptx | pdf | html | all (comma separated)"),
     render: bool = typer.Option(False, "--render", help="Render slide images even without audit"),
@@ -141,7 +167,8 @@ def generate(
     no_vlm = no_vlm or bool(cfg.get("no_vlm", False))
     no_audit = no_audit or bool(cfg.get("no_audit", False))
     no_autofix = no_autofix or bool(cfg.get("no_autofix", False))
-    audit_models = audit_models or bool(cfg.get("audit_models", False))
+    if audit_models is None:
+        audit_models = bool(cfg["audit_models"]) if "audit_models" in cfg else not (no_llm or no_vlm)
     no_eyes = no_eyes or bool(cfg.get("no_eyes", False))
     data = list(data or []) or [str(x) for x in (cfg.get("data") or [])]
     brand = brand or cfg.get("brand")
@@ -232,8 +259,9 @@ def generate(
             audit_models=audit_models,
             eyes=False if no_eyes else None,
             exports=exports,
-            # «without models» means no model at all: the pictures are off too; --models drives the pictures as well
-            pictures=False if (no_llm and no_vlm) else None,
+            # «without models» means no model at all: the pictures are off too; --models drives the pictures as well — a
+            # config without a t2i role switches them off (never the default profile's model behind its back)
+            pictures=_pictures_switch(models, no_llm and no_vlm, cfg.get("pictures")),
             image_provider=_image_provider(models) if models and not (no_llm and no_vlm) else None,
             progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"),
             knowledge_id=_knowledge_base(list(kb or []) or ([] if story is not None else [str(x) for x in (cfg.get("kb") or [])]), workspace),
@@ -271,6 +299,7 @@ def generate(
             osl = next((o for o in v.outline.slides if o.id == s.outline_id), None)
             tbl.add_row(str(s.index), osl.kind.value if osl else "", (osl.headline[:48] if osl else ""), s.mode, s.pattern_id or s.composition or "", str(len(per_slide.get(s.index, []))))
         console.print(tbl)
+        _say_free_places(v.out_dir)
         console.print("  " + " · ".join(f"{k}: {p}" for k, p in v.exports.items()))
     console.print(f"Готово: {out.resolve()}")
 

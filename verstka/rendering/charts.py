@@ -3045,6 +3045,15 @@ def _style_bars(k: _Kit) -> None:
     direct = horizontal and multi and not stacked and ns <= 4 and widest_name <= W * 0.3
     if horizontal and multi and not direct:
         _legend(k, [s.name for s in series], side=False)
+    # the row whose labels name the series: the first one every series has a bar on — a series without a bar on the
+    # first row lost its name and the chart its legend (R09 2026/2027, jury 20.10); without such a row, each series'
+    # own first bar
+    shared_row = next((j for j in range(n) if all(j < len(vs) and vs[j] not in (None, 0) for vs in values)), None)
+
+    def name_row(i: int) -> int:
+        if shared_row is not None:
+            return shared_row
+        return next((j for j, v in enumerate(values[i]) if v not in (None, 0)), 0)
 
     fs_val0 = k.fs_value if (not multi and n <= 8) else fs
     ratio = k.fs_hl / k.fs_value if k.fs_value else 1.0
@@ -3063,7 +3072,7 @@ def _style_bars(k: _Kit) -> None:
                     t, size, b = k.emph(v), fsv, False
                 else:
                     t, size, b = k.plain(v), fsv, False
-                if direct and j == 0:
+                if direct and j == name_row(i):
                     t = f"{series[i].name}{LABEL_SEP}{t}"
                 out.append((t, size, b))
         return out
@@ -3352,12 +3361,13 @@ def _style_bars(k: _Kit) -> None:
                 pts[hl] = k.hl_label(fs_val / k.fs_value if k.fs_value else 1.0)
             elif not multi and emph is not None and emph not in pts:
                 pts[emph] = {"fmt": k.fmt_emph}
-            if direct and (0 not in pts or (cat_hl is not None and set(pts[0]) == {"color"})):
+            r0 = name_row(i) if direct else 0
+            if direct and (r0 not in pts or (cat_hl is not None and set(pts[r0]) == {"color"})):
                 fill = st.get("fill") or st.get("line") or lab
                 color = fill if contrast_ratio(fill, k.ground) >= 3.0 else lab
-                if cat_hl is not None and cat_hl != 0:
-                    color = k.muted  # (the first row is not the highlighted category: its names step back with it)
-                pts[0] = {"sername": True, "color": color}
+                if cat_hl is not None and cat_hl != r0:
+                    color = k.muted  # (the naming row is not the highlighted category: its names step back with it)
+                pts[r0] = {"sername": True, "color": color}
             _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, lab, family, pos, pts))
 
     # axes: columns stand on one hairline baseline; horizontal bars start at a common edge and need none (unless < 0)

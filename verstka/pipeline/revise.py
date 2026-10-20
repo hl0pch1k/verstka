@@ -909,6 +909,8 @@ def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int, *,
             return None
         pend = plan_pictures(deck, outline, maker, enabled=maker is not None, reuse=mine, folder=vdir.parent / "images", slides={n})
         if not pend:
+            if mine and osl is not None and not osl.content.photo_slot:
+                return merged(old, [], {n})  # the slide lost its place (laid out without it): its records go too
             return None  # fixed in place: the picture never left
         try:
             got = apply_pictures(deck, pend, wait_s=120.0 if maker is not None else 0)
@@ -960,7 +962,20 @@ def picture_why(records: list[dict]) -> str:
             if "text" in err or "надпис" in err:
                 return "все варианты картинки отбракованы: на них были надписи"
             return f"модель изображений ответила ошибкой ({err[:80]})"
+    if _t2i_off():
+        return "генерация изображений выключена: модели изображений нет в настройках"
     return "модель изображений не ответила"
+
+
+def _t2i_off() -> bool:
+    """No text-to-image model is configured (the models profile has no t2i role, or every link of it is off)."""
+    try:
+        from verstka.images.providers import load_image_provider
+
+        chain = load_image_provider()
+        return chain is None or bool(getattr(chain, "off", False))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 _WORD_RE = re.compile(r"[\w\d][\w\d\-]{2,}", re.U)
@@ -1160,6 +1175,32 @@ def fix_slide(
                     recipe = True
         if recipe:
             rep = run_audit(work, manifest, outline, ws, **audit_kw)
+        # A0. an empty picture place («Место под изображение»: the picture did not come, or was never made): its recipe —
+        # the place goes and the slide is laid out again without it (another sample or the composer), fixed in place
+        # (never the person's own photo: that place is theirs to fill)
+        place_fix = not frame and not outline.slides[n - 1].content.photo_own and any(r.kind != "model" and r.check_id == "photo_place_empty" for r in remarks)
+        if place_fix and (outline.slides[n - 1].content.photo_slot or outline.slides[n - 1].content.photo_hint):
+            try:
+                o = outline.model_copy(deep=True)
+                c = o.slides[n - 1].content
+                c.photo_slot, c.photo_hint, c.photo_own = None, None, False
+                strategy_obj = load_strategies().get(strategy) or next(iter(load_strategies().values()))
+                pl = _with_entry(plan, match_outline(o.model_copy(deep=True), manifest, strategy_obj).for_outline(oid), oid)
+                voice.plain(f"Убираю пустое место под картинку на слайде {n}", 0.08)
+                render_deck(o, pl, manifest, ws, work)  # the whole scratch deck; only slide n is used
+                rep = run_audit(work, manifest, o, ws, **audit_kw)
+                ids_now = fixable(rep, xml_only=True)
+                if ids_now:
+                    rep, o, pl = inplace(rep, o, pl, ids_now)
+                outline, plan = o, pl
+                rerendered = True
+                how, what = "relayout", "пустое место под картинку убрано, слайд сверстан заново без него"
+                rec = {"iteration": 0, "action": "drop_photo_place", "outline_id": oid, "slide": n, "result": "место под картинку убрано, слайд переложен"}
+                records.append(rec)
+                kept.append(rec)
+                voice.agent("designer", f"Дизайнер: слайд {n} — картинки нет, место под неё убираю и собираю слайд без него.", 0.12)
+            except Exception:  # noqa: BLE001 - the ladder below still runs
+                log.warning("slide fix: the empty picture place was not taken away on slide %d", n, exc_info=True)
         # A'. what «Взгляд дизайнера» saw, fixed in place by measuring (audit/seen_fix.py): the text's colour or a plate
         # where it does not read on the ground the slide shows, a larger size, a box cut short of what it runs into, no
         # letter-spacing, a smaller size — on a cover too (the designer never lays a frame out again)

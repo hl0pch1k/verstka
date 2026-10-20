@@ -1233,3 +1233,91 @@ def bottom_empty(ctx: AuditContext) -> list[Issue]:
                                      details={"used": round((bottom - head) / region, 2), "empty_below": round(below / region, 2)},
                                      suggestion="Крупнее текст или другой макет: блок должен занимать 55–80% области под заголовком."))
     return out
+
+
+TEXT_UNDER_PICTURE = CheckSpec(
+    id="text_under_picture",
+    title="Текст уходит под картинку слайда",
+    severity="error",
+    category="layout",
+    description=(
+        "Строки текстового блока (по ширине, которую они занимают при своём кегле и выравнивании) заходят на картинку "
+        "слайда или на место под неё больше чем на 0,5% ширины слайда: картинка закрывает часть текста («Скринкаст до 5 "
+        "минут показывает выбо…»). Подпись внутри места под картинку и текст, который целиком стоит на картинке, не "
+        "считаются."
+    ),
+)
+
+
+def _picture_like(e) -> bool:
+    from verstka.schemas.outline import PHOTO_PLACE_NAME
+
+    name = e.name or ""
+    return name == PHOTO_PLACE_NAME or (e.type == "picture" and name.startswith("Изображение"))
+
+
+def _ink_span(e) -> Optional[tuple[int, int]]:
+    """The horizontal span (EMU) the lines of a text box take at their own size and alignment."""
+    from verstka.rendering.fonts import wrap_lines
+
+    usable = (e.bbox.w - e.insets_emu[0] - e.insets_emu[2]) / EMU_PER_PT
+    if usable <= 0:
+        return None
+    x0 = e.bbox.x + e.insets_emu[0]
+    lo, hi = None, None
+    for p in e.paragraphs:
+        text = (p.text or "").strip()
+        if not text:
+            continue
+        r0 = next((r for r in p.runs if r.text and r.text.strip()), None)
+        size = (r0.size_pt if r0 is not None and r0.size_pt else None) or e.dominant_size or 14.0
+        font = r0.font if r0 is not None else None
+        bold = bool(r0.bold) if r0 is not None else False
+        lines = wrap_lines(text.upper() if e.caps else text, font, size, bold, usable) if e.wrap else [text]
+        w = max(text_width_pt(ln, font, size, bold) for ln in lines) * EMU_PER_PT
+        w = min(w, usable * EMU_PER_PT) if e.wrap else w
+        align = p.align or "l"
+        if align == "ctr":
+            a = x0 + (usable * EMU_PER_PT - w) / 2
+        elif align == "r":
+            a = x0 + usable * EMU_PER_PT - w
+        else:
+            a = x0
+        lo = a if lo is None else min(lo, a)
+        hi = a + w if hi is None else max(hi, a + w)
+    if lo is None:
+        return None
+    return int(lo), int(hi)
+
+
+@check(TEXT_UNDER_PICTURE)
+def text_under_picture(ctx: AuditContext) -> list[Issue]:
+    from verstka.images.places import CAPTION_PREFIX
+
+    out: list[Issue] = []
+    W = ctx.ir.slide_w
+    for s in ctx.ir.slides:
+        pics = [e for e in s.elements if _picture_like(e) and e.bbox.area > 0]
+        if not pics:
+            continue
+        for e in text_elements(s):
+            if (e.name or "").startswith(CAPTION_PREFIX) or e.rotation or is_chrome_like(e, ctx.ir, ctx.manifest):
+                continue
+            span = _ink_span(e)
+            if span is None:
+                continue
+            band = _occupied(e, 1.2)
+            for pic in pics:
+                pb = pic.bbox
+                if contains(pb, e.bbox):
+                    continue  # set on the picture as designed (a caption, a cover's title over its photo)
+                over = min(span[1], pb.x2) - max(span[0], pb.x)
+                if over <= 0.005 * W or min(band.y2, pb.y2) <= max(band.y, pb.y):
+                    continue
+                out.append(ctx.new_issue(
+                    TEXT_UNDER_PICTURE, s.index, f"текст «{e.text[:40]}» заходит под картинку слайда",
+                    bboxes=[e.bbox_frac, pic.bbox_frac], element_ids=[e.id, pic.id],
+                    autofix=fix("rematch", "перевыбрать макет слайда: текст рядом с картинкой, а не под ней", outline_id=s.outline_id),
+                ))
+                break
+    return out
