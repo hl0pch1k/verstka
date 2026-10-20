@@ -48,8 +48,19 @@ class Applied:
     warnings: list[str] = field(default_factory=list)
 
 
-def ask_of(place: Place, deck_title: str, wish: Optional[str] = None, frame: str = "") -> ImageAsk:
-    return ImageAsk(hint=place.hint or "", headline=place.headline, deck=deck_title, label=place.label, wish=wish, frame=frame)
+def slide_points(outline, outline_id: Optional[str], limit: int = 500) -> str:
+    """The slide's own points in a line (the vision model judges a picture against the slide's meaning)."""
+    s = next((x for x in (getattr(outline, "slides", None) or []) if x.id == outline_id), None) if outline_id else None
+    if s is None:
+        return ""
+    c = s.content
+    parts = [s.subtitle or "", *c.bullets, *c.paragraphs, *(f"{it.title} {it.text}".strip() for it in c.items),
+             *(f"{n.value} {n.label}".strip() for n in c.numbers), s.takeaway or ""]
+    return "; ".join(" ".join(p.split()) for p in parts if p and p.strip())[:limit]
+
+
+def ask_of(place: Place, deck_title: str, wish: Optional[str] = None, frame: str = "", points: str = "") -> ImageAsk:
+    return ImageAsk(hint=place.hint or "", headline=place.headline, deck=deck_title, label=place.label, wish=wish, frame=frame, slide_text=points)
 
 
 def frames_for(prs, places: list[Place], cfg: Optional[dict] = None) -> dict:
@@ -167,7 +178,7 @@ def plan_pictures(deck: Path, outline, maker, *, enabled: bool = True, reuse: Op
         if not enabled or maker is None:
             out.append(Pending(place, None, aspect, None, why=WHY_OFF, frame=frame))
             continue
-        ask = ask_of(place, title, frame=comp)
+        ask = ask_of(place, title, frame=comp, points=slide_points(outline, place.outline_id))
         out.append(Pending(place, ask, aspect, maker.submit(ask, aspect), frame=frame))
     return out
 

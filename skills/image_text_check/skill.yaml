@@ -1,5 +1,5 @@
 name: image_text_check
-version: 2.0.0
+version: 2.1.0
 role: vlm
 description: >
   Looks at one picture the text-to-image model made for a slide and says whether it carries any writing — words,
@@ -15,3 +15,4 @@ params:
 changelog:
   - "1.0.0: the owner (2026-10-08): «модель рисует текст и числа на картинках очень криво» — every picture is checked before it goes on a slide"
   - "2.0.0: pictures to the ideal (20.10): the vision model also grades how well the picture fits its slide (0–10: the asked subject, clear, natural; deformed hands, faces, symbols instead of the thing, collages score low) — a picture under configs/images.yaml quality.min_fit is drawn again"
+  - "2.1.0: the jury of 20.10, round 4 (a sail and a palm for «касательная» went on the slide): the grade is against the slide's own headline and points, strictly; a picture under min_fit is described again and drawn again once, then left out"

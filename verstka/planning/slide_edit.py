@@ -779,6 +779,7 @@ def redesign_slide(
     proposed: Optional[OutlineSlide] = None  # a data slide's words as the model proposed them (before the number rule)
     refused_first: list[str] = []
     style_lost: list[str] = []  # the conclusions a look-only redesign would have lost (it is refused then)
+    only_picture = False  # only a picture asked: the slide stays as it is, no model is needed for it
     if emphasis is not None:
         new = old.model_copy(deep=True)
         getattr(new.content, emphasis[0]).highlight_index = emphasis[1]
@@ -787,6 +788,7 @@ def redesign_slide(
         # only a picture asked: the slide's content and form stay as they are (no redesign), the picture goes beside
         new = old.model_copy(deep=True)
         how = "rules"
+        only_picture = True  # by design, not for want of a model: the reply never says «модель текста не ответила» (jury 4)
     elif agent.models:
         tracker.emit("designer", f"Дизайнер: слайд {index} — {start_line if start_line is not None else '«' + request[:140] + '»'}.", slide=index)
         if note is None:
@@ -988,6 +990,8 @@ def redesign_slide(
     reply = f"Слайд {index} переделан: {what}."
     if emphasis is not None:
         reply = f"Слайд {index}: выделил «{getattr(result.content, emphasis[0]).categories[emphasis[1]]}» цветом на диаграмме."
+    elif only_picture:
+        reply = f"Слайд {index}: текст и форма слайда прежние, рядом — место под картинку по смыслу слайда."
     elif how == "rules" and (redo or picture or shorter):
         did = [x for x, on in (("другая форма и раскладка", redo and result.kind != old.kind), ("строки сокращены до главного", shorter),
                                ("место под картинку", picture)) if on]

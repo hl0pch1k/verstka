@@ -45,6 +45,7 @@ class ImageAsk:
     subject_en: Optional[str] = None  # the model's English subject, when it wrote one
     frame: str = ""  # the composition of its frame on the slide: tall | wide | square | circle | background
     template_style: str = ""  # the style the template's own pictures are in (photo | illustration), when they say
+    slide_text: str = ""  # the slide's own points (the vision model judges the picture against the slide's meaning)
 
     @property
     def what(self) -> str:
@@ -207,3 +208,23 @@ def english_subjects(asks: list[ImageAsk], deck: str, skills, providers, others:
         if p.id in keys and 3 <= len(s) <= 400 and not re.search(r"[а-яё]{4,}", s, re.I):
             out[p.id] = s
     return out
+
+
+_STOP = {"with", "showing", "shows", "held", "holding", "seen", "from", "inside", "into", "front", "behind", "their", "there", "where",
+         "which", "while", "simple", "rounded", "tiles", "tile", "small", "large", "short", "progress", "bars", "pictograms", "pictogram",
+         "medium", "shot", "view", "frame", "middle", "third", "light", "soft", "bright", "modern", "clean", "calm", "background", "setting",
+         "standing", "upright", "level", "filling", "along", "across", "under", "above", "beside", "around", "single", "clear", "image"}
+
+
+def _main_words(subject: str, n: int = 14) -> set[str]:
+    """The words that name what a description shows: its first `n` words, without the framing ones."""
+    words = re.findall(r"[a-z]{4,}", (subject or "").lower())[:n]
+    return {w[:-1] if w.endswith("s") and len(w) > 4 else w for w in words if w not in _STOP}
+
+
+def too_close(a: str, b: str) -> bool:
+    """Two descriptions of one deck show the same thing (two phones with app tiles — the jury of 20.10, round 4)."""
+    x, y = _main_words(a), _main_words(b)
+    if not x or not y:
+        return False
+    return len(x & y) / min(len(x), len(y)) >= 0.5

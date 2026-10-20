@@ -486,3 +486,34 @@ def test_a_tall_frames_picture_is_asked_squarer():
     assert _aspect_of(None, F("tall", (0, 0, 560, 1000)), {"squarer_tall": True}) == "3:4"
     assert _aspect_of(None, F("tall", (0, 0, 750, 1000)), {"squarer_tall": False}) == "3:4"
     assert _aspect_of(None, F("wide", (0, 0, 1600, 900)), {}) == "16:9"
+
+
+def test_an_asked_picture_never_says_the_text_model_failed():
+    """The jury of 20.10, round 4: «добавь картинку» answered «Модель текста не ответила — сделал по правилам», though
+    the model answered — a picture alone is added by the rules by design, and the reply says what was done."""
+    from verstka.planning.slide_edit import ASKED_PICTURE, redesign_slide
+    from verstka.schemas.common import PatternKind as K
+
+    o = DeckOutline(title="Отчёт", slides=[OutlineSlide(id="c", kind=K.title, headline="Отчёт"),
+                                          OutlineSlide(id="b", kind=K.bullets, headline="Склад принимает 3 000 заказов", content=SlideContent(bullets=["Две смены.", "Сорок человек."]))])
+    r = redesign_slide(o, 2, None, None, request="добавь картинку на слайд 2")
+    assert r.outline.slides[1].content.photo_slot == ASKED_PICTURE
+    assert "не ответила" not in r.reply and "по правилам" not in r.reply and "картинк" in r.reply
+
+
+def test_text_beside_a_picture_never_shrinks_under_the_body_size():
+    """Cards at 6 pt after «добавь картинку» (jury 20.10, round 4): `tiny_text` sees running text under the template's
+    body size (a short label under the small size), and `narrow_strip` gives the slide a narrower strip to try."""
+    prs, s = _deck()
+    assert PL.tiny_text(s, 12, 9) is None  # (the deck's texts carry no size of their own)
+    t = s.shapes.add_textbox(Inches(0.6), Inches(5.6), Inches(4), Inches(1))
+    t.text_frame.text = "Карточка с длинным текстом про обучение новичков"
+    t.text_frame.paragraphs[0].runs[0].font.size = Pt(6)
+    assert "6 pt" in PL.tiny_text(s, 12, 9)
+    t.text_frame.paragraphs[0].runs[0].font.size = Pt(12)
+    assert PL.tiny_text(s, 12, 9) is None
+    sw = int(PL.STRIP_SHARE * W)
+    assert PL.picture_strip(s, W, H)[2] == sw
+    with PL.narrow_strip():
+        assert PL.picture_strip(s, W, H)[2] == int(PL.STRIP_NARROW * W)
+    assert PL.picture_strip(s, W, H)[2] == sw

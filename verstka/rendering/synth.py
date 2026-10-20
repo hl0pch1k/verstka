@@ -1055,29 +1055,53 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     if comp in _COVER_COMPS:
         return put_back_brand_logos(*_render_cover(builder, plan_slide, oslide, manifest, ws, outline), corner=False)
     auto = _auto_picture(oslide)
-    before = (len(builder.created), {sld.get("id") for sld in builder.prs.slides._sldIdLst}) if auto else None
+    pic = auto or _asked_picture(oslide)
+    before = (len(builder.created), {sld.get("id") for sld in builder.prs.slides._sldIdLst}) if pic else None
     slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
     strip = slide.__dict__.get("_photo_frame_box")
-    if auto and strip is not None and slide.__dict__.get("_photo_frame") is None:
-        # a picture Verstka added itself (planning/pictures.py) stays only where the text beside it reads in its own
-        # size: a word broken in the narrowed column or a heading under the strip — the slide is laid out again, whole,
-        # without the picture (the jury of 20.10: «генерац/ии», a heading cut by the picture)
-        from verstka.rendering.picture_layouts import crowded_beside
+    if pic and strip is not None and slide.__dict__.get("_photo_frame") is None:
+        # a picture beside the text stays only where the text reads in its own size: a word broken in the narrowed
+        # column, a heading under the strip (the jury of 20.10: «генерац/ии», a heading cut by the picture) or the
+        # text shrunk under the template's body size (round 4: cards at 6 pt after «добавь картинку») — the slide is
+        # laid out again with a narrower strip, then (a picture Verstka added itself) without the picture
+        from verstka.rendering import picture_layouts as PL
+        from verstka.rendering.clone_check import body_floor, small_floor
         from verstka.rendering.renderer import _rollback
 
-        why = crowded_beside(slide, (strip.x, strip.y, strip.w, strip.h), builder.slide_w, builder.slide_h)
-        if why:
-            from verstka.planning.pictures import pass_picture_on
+        W_, H_ = builder.slide_w, builder.slide_h
 
+        def trouble(sl) -> Optional[str]:
+            st = sl.__dict__.get("_photo_frame_box")
+            if st is None:
+                return None
+            return PL.crowded_beside(sl, (st.x, st.y, st.w, st.h), W_, H_) or PL.tiny_text(sl, body_floor(manifest), small_floor(manifest))
+
+        why = trouble(slide)
+        if why:
             _rollback(builder, before)
-            hint = oslide.content.photo_hint
-            oslide.content.photo_slot = None
-            oslide.content.photo_hint = None
-            slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
-            # pictures on: the picture goes to the next short slide of the deck instead (it is laid out after this one)
-            nxt = pass_picture_on(outline, oslide, hint)
-            warns = [*warns, f"the added picture left out: {why}" + (f"; it goes to slide {nxt.id}" if nxt is not None else "")]
+            with PL.narrow_strip():
+                slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
+            why2 = trouble(slide)
+            warns = [*warns, f"the picture's strip narrowed: {why}"]
+            if why2 and auto:
+                from verstka.planning.pictures import pass_picture_on
+
+                _rollback(builder, before)
+                hint = oslide.content.photo_hint
+                oslide.content.photo_slot = None
+                oslide.content.photo_hint = None
+                slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
+                # pictures on: the picture goes to the next short slide of the deck instead (it is laid out after this one)
+                nxt = pass_picture_on(outline, oslide, hint)
+                warns = [*warns, f"the added picture left out: {why2}" + (f"; it goes to slide {nxt.id}" if nxt is not None else "")]
     return put_back_brand_logos(slide, warns)
+
+
+def _asked_picture(oslide: OutlineSlide) -> bool:
+    from verstka.planning.slide_edit import ASKED_PICTURE
+
+    c = oslide.content
+    return bool(c is not None and c.photo_slot == ASKED_PICTURE and not c.photo_own)
 
 
 def _auto_picture(oslide: OutlineSlide) -> bool:

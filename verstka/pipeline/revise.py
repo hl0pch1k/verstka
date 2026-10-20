@@ -1315,7 +1315,10 @@ def fix_slide(
                         shutil.copy2(first_deck, work)
                 r, o, pl, rp = got
                 how, redesigned, rerendered = r.how, True, True
-                if r.how == "rules" and wishes:
+                from verstka.planning.slide_edit import picture_only
+
+                if r.how == "rules" and wishes and not picture_only(wishes):
+                    # (a picture alone is added by the rules by design: never «модель недоступна» for it — jury 4)
                     notes.append("Модель текста недоступна — слайд переделан по правилам, без неё")
                 what = describe_change(osl0, o.slides[n - 1])
                 outline, plan, rep = o, pl, rp

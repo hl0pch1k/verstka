@@ -164,10 +164,12 @@ def change_picture(
             if provider is None or getattr(provider, "off", False):
                 raise ValueError("модель изображений не подключена")
             comp = frame.composition if frame is not None else str(rec.get("composition") or "")
+            from verstka.images.fill import _aspect_of, slide_points
+
             ask = ImageAsk(hint=str(rec.get("hint") or ""), headline=str(rec.get("headline") or (oslide.headline if oslide else "")), deck=outline.title or "",
-                           label=str(rec.get("label") or ""), wish=wish, frame=comp)
+                           label=str(rec.get("label") or ""), wish=wish, frame=comp, slide_text=slide_points(outline, oslide.id if oslide else None))
             box = list(frame.box) if frame is not None else rec.get("box") or (list(place.box) if place is not None else None)
-            aspect = nearest_aspect(box[2], box[3]) if frame is not None else str(rec.get("aspect") or (nearest_aspect(box[2], box[3]) if box else "4:3"))
+            aspect = _aspect_of(place, frame, cfg) if frame is not None else str(rec.get("aspect") or (nearest_aspect(box[2], box[3]) if box else "4:3"))
             deadline = time.monotonic() + float(cfg.get("timeout_s", 90)) * 2 + 15
             maker = ImageMaker(provider, manifest, vdir.parent / "images", cfg=cfg, skills=skills, providers=providers, deadline=deadline, deck_title=outline.title or "")
             _say(progress, "Рисую изображение", 0.1)

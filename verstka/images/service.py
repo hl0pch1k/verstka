@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from verstka.images import palette as P
-from verstka.images.prompt import ImageAsk, build_prompt, english_subjects, load_config, template_style
+from verstka.images.prompt import ImageAsk, build_prompt, english_subjects, load_config, template_style, too_close
 from verstka.images.providers import ImageError
-from verstka.images.text_check import PictureHasText, check_text
+from verstka.images.text_check import PictureHasText, PictureNotFitting, check_text
 
 log = logging.getLogger(__name__)
 
@@ -114,9 +114,26 @@ class ImageMaker:
         with self._subject_lock:
             others = [v for v in self._subjects.values() if v]  # the deck's pictures described so far: never the same again
         got = english_subjects([ask], self.deck_title or ask.deck, self.skills, self.providers, others=others).get(k)
+        twin = next((o for o in others if got and too_close(got, o)), None)
+        if twin is not None:
+            # the deck already has that picture (two phones with app tiles in one deck — jury 20.10, round 4): asked
+            # once more for another main object
+            log.info("picture %s repeats another of the deck: described again", k)
+            wish = f"Another main object than this picture the deck already has: {twin[:200]}"
+            again = english_subjects([ImageAsk(**{**asdict(ask), "wish": wish})], self.deck_title or ask.deck, self.skills, self.providers, others=others)
+            got = next(iter(again.values()), None) or got
         with self._subject_lock:
             self._subjects[k] = got
         return got
+
+    def _refined(self, ask: ImageAsk, subject: Optional[str], flaws: str) -> Optional[str]:
+        """The description written again after a picture that did not fit its slide (the vision model's flaws)."""
+        with self._subject_lock:
+            others = [v for v in self._subjects.values() if v and v != subject]
+        wish = (f"The picture drawn from «{(subject or '')[:200]}» came out wrong: {flaws or 'it does not show the slide'}. "
+                "Describe the same meaning more simply and concretely: one clear object or scene a viewer recognises at once")
+        got = english_subjects([ImageAsk(**{**asdict(ask), "wish": wish})], self.deck_title or ask.deck, self.skills, self.providers, others=others)
+        return next(iter(got.values()), None)
 
     def _make(self, ask: ImageAsk, aspect: str, seed: Optional[int]) -> Made:
         if self.deadline is not None and self.deadline - time.monotonic() < 5:
@@ -144,6 +161,8 @@ class ImageMaker:
         seen: list[dict] = []
         best: Optional[tuple[int, Path, str, str, float, str, Any]] = None  # (fits, path, prompt, style, match, name, res)
         strict = 0
+        misfits = 0
+        max_misfits = max(1, int(qc.get("max_misfits", 2)))
         for k in range(attempts):
             # a picture with writing on it is drawn again from a stricter prompt; a clean one that fits its slide badly
             # (the vision model's grade under quality.min_fit: another subject, deformed hands, a symbol) is drawn again
@@ -157,7 +176,7 @@ class ImageMaker:
             name = f"{ask.key()}-{aspect.replace(':', 'x')}-{seed}" + (f"-{k + 1}" if k else "")
             path = self.folder / f"{name}.jpg"
             path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
-            verdict = check_text(path, self.skills, self.providers, headline=ask.headline, subject=subject or ask.what) if attempts > 1 else None
+            verdict = check_text(path, self.skills, self.providers, headline=ask.headline, subject=subject or ask.what, points=ask.slide_text) if attempts > 1 else None
             seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None else verdict.text, "what": None if verdict is None else verdict.what,
                          "fits": None if verdict is None else verdict.fits, "flaws": None if verdict is None else verdict.flaws})
             if verdict is None or verdict.clean:
@@ -170,7 +189,15 @@ class ImageMaker:
                     path.unlink(missing_ok=True)
                 if fits >= min_fit:
                     break
-                log.info("picture %s fits its slide %d/10 (%s): drawn again", name, fits, verdict.flaws if verdict else "")
+                misfits += 1
+                if misfits >= max_misfits:
+                    break  # two pictures that miss the slide's meaning: no picture rather than a wrong one
+                log.info("picture %s fits its slide %d/10 (%s): described again and drawn again", name, fits, verdict.flaws if verdict else "")
+                if subject is not None and self.skills is not None:
+                    better = self._refined(ask, subject, verdict.flaws if verdict else "")
+                    if better:
+                        subject = better
+                        ask2 = ImageAsk(**{**asdict(ask2), "subject_en": better})
             else:
                 log.info("picture %s has writing (%s): drawn again", name, verdict.what or "text")
                 path.unlink(missing_ok=True)
@@ -180,6 +207,15 @@ class ImageMaker:
         if best is None:
             self._log_attempts(ask, aspect, seed, seen)
             raise PictureHasText(f"writing on every picture ({seen[-1]['what'] or 'text'}), {len(seen)} attempts")
+        if min_fit and best[0] < min_fit:
+            # the vision model saw the slide's meaning in none of them (a sail and a palm for «касательная» — jury 20.10,
+            # round 4): the place goes, the slide is laid out without it
+            try:
+                best[1].replace(best[1].with_name(best[1].stem + "-rejected.jpg"))  # kept for a look, never placed
+            except OSError:
+                best[1].unlink(missing_ok=True)
+            self._log_attempts(ask, aspect, seed, seen)
+            raise PictureNotFitting(f"no picture fits the slide ({best[0]}/10: {seen[-1].get('flaws') or 'another subject'}), {len(seen)} attempts")
         fits, path, prompt, style, match, name, res = best
         made = Made(
             key=ask.key(), aspect=aspect, path=str(path), prompt=prompt, style=style, subject_by="model" if subject else "author",

@@ -18,6 +18,8 @@ same for every template (no template is tuned for). The picture itself is croppe
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import re
 from dataclasses import dataclass, field
@@ -335,13 +337,26 @@ def _free(region: tuple[int, int, int, int], things: list[_Thing], pad: int) -> 
 # the owner (18.10, after 88ef1e9): «если на слайде картинка — она от самого верха до самого низа, а с другой стороны
 # от неё текст». A content slide with a picture is laid out around a full-height strip at one edge of the slide:
 STRIP_SHARE = 0.44  # the strip's width, a share of the slide's
+STRIP_NARROW = 0.30  # … when the text beside the usual strip would break its words or shrink (`narrow_strip`)
 STRIP_GUTTER = 0.04  # between the strip and the text, a share of the slide's width
+_SHARE: contextvars.ContextVar[float] = contextvars.ContextVar("strip_share", default=STRIP_SHARE)
+
+
+@contextlib.contextmanager
+def narrow_strip(share: float = STRIP_NARROW):
+    """Slides laid out inside it get a narrower picture strip (rendering/synth.py: the cards beside the usual strip
+    shrank to 6 pt after «добавь картинку» — the jury of 20.10, round 4)."""
+    token = _SHARE.set(share)
+    try:
+        yield
+    finally:
+        _SHARE.reset(token)
 
 
 def picture_strip(slide, W: int, H: int, left: bool = False) -> tuple[int, int, int, int]:
     """The full-height strip at the slide's right edge (`left`: the left one first — the compact variant mirrors the
     others) where the layout and the master draw no logo, text or picture; the side with fewer of them otherwise."""
-    sw = int(STRIP_SHARE * W)
+    sw = int(_SHARE.get() * W)
     boxes = {"right": (W - sw, 0, sw, H), "left": (0, 0, sw, H)}
     under = [t for t in _things(slide, W, H, set()) if t.el_id is None and t.kind in ("text", "solid")]
     order = ["left", "right"] if left else ["right", "left"]
@@ -395,6 +410,28 @@ def _broken_word(el) -> Optional[str]:
                 word = word.strip()
                 if word and text_width_pt(word, family, size, rpr.get("b") == "1", caps=caps) > line * WORD_ROOM:
                     return word
+    return None
+
+
+def tiny_text(slide, floor_pt: float, small_pt: float) -> Optional[str]:
+    """A text of the slide set under its size: running text (over 25 characters) under the template's body size
+    `floor_pt`, a short label under `small_pt` — the cards beside a picture squeezed to 6 pt (jury 20.10, round 4)."""
+    tree = slide._element.cSld.find(q("p:spTree"))
+    if tree is None:
+        return None
+    for el in tree.iter(q("p:sp")):
+        if _ours(el) or _ph_type(el) in MINOR_PH:
+            continue
+        for p in el.iter(q("a:p")):
+            text = "".join(r.findtext(q("a:t")) or "" for r in p.iter(q("a:r"))).strip()
+            if not text:
+                continue
+            sizes = [int(r.find(q("a:rPr")).get("sz")) / 100 for r in p.iter(q("a:r")) if r.find(q("a:rPr")) is not None and r.find(q("a:rPr")).get("sz")]
+            if not sizes:
+                continue
+            need = floor_pt if len(text) > 25 else small_pt
+            if min(sizes) < need - 0.3:
+                return f"the text «{text[:40]}» is set at {min(sizes):g} pt beside the picture (under {need:g} pt)"
     return None
 
 

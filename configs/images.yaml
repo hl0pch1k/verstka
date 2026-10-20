@@ -30,7 +30,11 @@ palette:
 styles:
   - match: "экран|интерфейс|скриншот|приложени|дашборд|панел[ьи]\\s+управлен|сайт|ui\\b|screen|interface|dashboard|app\\b"
     style: screen
-  - match: "схем|диаграмм|инфографик|иллюстрац|рисун|иконк|абстракт|концепт|diagram|illustration|icon|abstract"
+  # a graph or a scheme of a slide's idea (a tangent to a parabola): a bare diagram on a plain ground — drawn as a
+  # «scene» it came back as a sail and a palm (jury 20.10, round 4)
+  - match: "график|кривая|кривой|парабол|касательн|производн|интеграл|схем[аы]|диаграмм|graph|curve|parabola|tangent|diagram"
+    style: diagram
+  - match: "инфографик|иллюстрац|рисун|иконк|абстракт|концепт|illustration|icon|abstract"
     style: illustration
   - match: "фото|снимок|снимк|вид\\b|помещени|здани|люди|человек|команд|photo|picture|view"
     style: photo
@@ -51,6 +55,7 @@ prompt:
   styles:
     photo: "Professional editorial photograph, natural soft light, clean uncluttered composition, realistic detail, sharp focus on the main subject"
     illustration: "Clean modern digital illustration, simple smooth forms, soft gradients and soft light, the setting drawn around the subject to every edge of the picture, no plain sky or empty wall behind it"
+    diagram: "Minimal flat vector diagram on a plain light background: smooth bold curves, straight lines and dots only, like a clean textbook figure, no axes labels, no numbers, no letters, no grid, no scenery"
     # a screen invites pseudo-text and digits: pictograms and progress bars stand for every value, a chart is one curve
     screen: "Clean modern flat vector illustration of a software interface on a laptop screen: pictograms and progress bars instead of any text, every chart is a single smooth curve without axes, ticks, numbers or gridlines; minimalist, soft shadows, generous negative space"
   # the composition of the picture's frame on the slide (images/fill.py: the frame is read before the picture is asked)
@@ -89,3 +94,6 @@ text_check:
 quality:
   enabled: true
   min_fit: 7
+  # pictures that miss the slide's meaning before it is left without one (the second is drawn from a description
+  # written again with the vision model's flaws — a sail and a palm for «касательная», jury 20.10, round 4)
+  max_misfits: 2

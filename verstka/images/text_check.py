@@ -24,6 +24,15 @@ class PictureHasText(Exception):
     why = WHY_TEXT
 
 
+WHY_MISFIT = "картинка не подошла к смыслу слайда — слайд оставлен без неё"
+
+
+class PictureNotFitting(Exception):
+    """No attempt showed what the slide means (the vision model's grade under quality.min_fit): no picture."""
+
+    why = WHY_MISFIT
+
+
 class TextCheck(BaseModel):
     """Output of the `image_text_check` skill: whether the picture has any writing on it and where, and how well it
     fits its slide (0–10: the asked subject, clear and natural; defects and symbols score low) with its main flaws."""
@@ -64,7 +73,7 @@ class TextCheck(BaseModel):
         return self.text == "none"
 
 
-def check_text(path: Path, skills: Any, providers: Any, *, headline: str = "", subject: str = "") -> Optional[TextCheck]:
+def check_text(path: Path, skills: Any, providers: Any, *, headline: str = "", subject: str = "", points: str = "") -> Optional[TextCheck]:
     """The vision model's look at one picture (for the slide `headline`, asked to show `subject`); None when there is
     no vision model or it does not answer (the picture is then taken as it is — the prompt's own rules stay its
     guard)."""
@@ -73,7 +82,8 @@ def check_text(path: Path, skills: Any, providers: Any, *, headline: str = "", s
     try:
         from verstka.analysis.classify import image_bytes_for_vlm
 
-        ctx = {"headline": " ".join((headline or "").split())[:160], "subject": " ".join((subject or "").split())[:400]}
+        ctx = {"headline": " ".join((headline or "").split())[:160], "subject": " ".join((subject or "").split())[:400],
+               "points": " ".join((points or "").split())[:500]}
         res = skills.run("image_text_check", providers, ctx, images=[image_bytes_for_vlm(Path(path), max_w=768)])
         return res.parsed
     except Exception as e:  # noqa: BLE001 - one unchecked picture never stops the deck

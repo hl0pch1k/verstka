@@ -93,24 +93,40 @@ def _grader(fits: list[int], calls: list, seen_ctx: list):
     return ProviderRegistry(roles={"vlm": MockProvider(answer, model="qwen/qwen3.8-27b")})
 
 
-def test_a_picture_that_fits_its_slide_badly_is_drawn_again_and_the_best_is_kept(tmp_path):
-    """Pictures to the ideal (20.10): the vision model also grades how well a picture fits its slide (0–10); one under
-    quality.min_fit is drawn again from the same prompt (no stricter rules: it had no writing), and the best clean
-    picture is kept — the others are not left in the folder."""
+def test_a_picture_that_misses_the_slide_is_drawn_again_then_left_out(tmp_path):
+    """The jury of 20.10, round 4: a sail and a palm for «касательная» went on the slide (graded 2, 0, 0 and kept as the
+    best). The vision model grades a picture against the slide's headline and points; under quality.min_fit it is
+    drawn again once, and two misses leave the slide without a picture (PictureNotFitting, the place goes)."""
+    import pytest
+
+    from verstka.images.text_check import PictureNotFitting
+
     mock = IP.MockImages()
     calls: list = []
     ctx: list = []
-    maker = ImageMaker(IP.ImageChain([mock]), None, tmp_path / "pics", deck_title="Пекарня", skills=SKILLS, providers=_grader([4, 6, 5], calls, ctx))
-    made = maker.make(ImageAsk(hint="Витрина пекарни с хлебом", headline="40 магазинов", deck="Пекарня"), "1:1")
+    maker = ImageMaker(IP.ImageChain([mock]), None, tmp_path / "pics", deck_title="Производная", skills=SKILLS, providers=_grader([2, 0], calls, ctx))
+    with pytest.raises(PictureNotFitting):
+        maker.make(ImageAsk(hint="График параболы с касательной", headline="Касательная — предел секущей", deck="Производная",
+                            slide_text="Секущая стремится к касательной при Δx → 0"), "1:1")
     maker.close()
-    assert len(mock.calls) == 3 and made.attempts == 3 and made.fits == 6
-    assert not any(c["prompt"].startswith("A wordless image") for c in mock.calls)
-    assert len(list((tmp_path / "pics").glob("*.jpg"))) == 1
-    assert any("40 магазинов" in str(c) for c in ctx)  # the vision model is told the slide and the subject
-    mock2, calls2 = IP.MockImages(), []
-    maker = ImageMaker(IP.ImageChain([mock2]), None, tmp_path / "p2", deck_title="Пекарня", skills=SKILLS, providers=_grader([9], calls2, []))
-    assert maker.make(ImageAsk(hint="Витрина", headline="h", deck="d"), "1:1").fits == 9 and len(mock2.calls) == 1
+    assert len(mock.calls) == 2 and [f.name.endswith("-rejected.jpg") for f in (tmp_path / "pics").glob("*.jpg")] == [True]
+    assert any("Касательная" in str(c) and "Секущая стремится" in str(c) for c in ctx)  # the slide's headline and points
+    # a second picture that fits is kept
+    mock2 = IP.MockImages()
+    maker = ImageMaker(IP.ImageChain([mock2]), None, tmp_path / "p2", deck_title="d", skills=SKILLS, providers=_grader([4, 8], [], []))
+    made = maker.make(ImageAsk(hint="Витрина пекарни", headline="40 магазинов", deck="d"), "1:1")
     maker.close()
+    assert made.fits == 8 and len(mock2.calls) == 2 and len([f for f in (tmp_path / "p2").glob("*.jpg") if "rejected" not in f.name]) == 1
+    assert "diagram" in build_prompt(ImageAsk(hint="График параболы с касательной"), None)[1]
+
+
+def test_two_descriptions_of_one_thing_are_told_apart():
+    from verstka.images.prompt import too_close
+
+    a = "A smartphone held upright, its screen showing a mobile app interface with rounded tiles containing a star and a gear"
+    b = "A smartphone held upright, its screen showing a mobile app interface with rounded tiles with a mail envelope and a bell"
+    c = "A barista preparing coffee behind the counter of a small kiosk at a metro station entrance"
+    assert too_close(a, b) and not too_close(a, c)
 
 
 def test_the_grade_is_read_leniently():
