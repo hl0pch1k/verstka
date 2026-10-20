@@ -9,9 +9,9 @@
 // несвежая (изменение сохранено, а перечитать её не вышло) — перечитывается.
 // Пока презентация грузится, на её обложке — дуга загрузки; неудача — красной строкой в шапке слоя; слой закрыли —
 // начатое открытие отменяется.
-// Помощник сужает колоду — четыре колонки сужаются вместе с ней (V2 версии 100), название карточки — стопка из двух
-// копий (kit/Tx, `h-ttl`): не переносится заново посреди хода.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+// Помощник сужает колоду — четыре колонки сужаются вместе с ней (V2 версии 100): обложки — сдвигом и масштабом, подписи —
+// двумя копиями (`Caption`) сдвигом (helperMotion): ничего не переносится заново посреди хода и не перескакивает.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "../../api";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -26,12 +26,15 @@ import { Spinner } from "../kit/Spinner";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
 import { useRise } from "../result/useRise";
 import { useNarrow } from "../create/useNarrow";
-import { onDeckMove, Tx, TxNarrow } from "../kit/Tx";
+import { onDeckMove, TxNarrow } from "../kit/Tx";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
 import { Layer, lsDelay, useLayerPresence } from "./Layer";
+import { useWarm } from "./warm";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
+/** Список, обновлённый при прогреве, при открытии не обновляется заново, если он не старше этого. */
+const REFRESH_FRESH = 10_000;
 /** Карточек, которые снова рисуются за кадр, когда ход помощника кончился. */
 const GH_CHUNK = 16;
 const OPEN_FAILED = "Не удалось открыть презентацию";
@@ -56,14 +59,24 @@ export function HistoryLayer() {
   // презентация, которую ход сейчас грузит (store `loadGeneration`): закрытый слой её загрузку отменяет
   const loading = useRef<string | null>(null);
 
-  // слой открылся: список свежий (статусы сборок могли смениться), прежняя дуга и строка ушли вместе со слоем
+  // слой открылся: список свежий (статусы сборок могли смениться), прежняя дуга и строка ушли вместе со слоем. Список
+  // обновляется уже при прогреве (наведение на пункт шапки): ответ приходит до нажатия, и сетка не перерисовывается
+  // посреди подъёма; при открытии — заново, только если с того прошло больше REFRESH_FRESH
+  const refreshedAt = useRef(-Infinity);
+  const warmNow = useWarm("hist");
+  useEffect(() => {
+    if (!warmNow || open) return;
+    refreshedAt.current = performance.now();
+    void refreshGenerations();
+  }, [warmNow, open, refreshGenerations]);
   useEffect(() => {
     if (!open) return;
     seq.current++;
     setWait(null);
     setErr(null);
     askAt.current = null;
-    void refreshGenerations();
+    if (performance.now() - refreshedAt.current > REFRESH_FRESH) void refreshGenerations();
+    refreshedAt.current = -Infinity;
   }, [open, refreshGenerations]);
 
   // слой закрыли (Esc, ✕, полоса колоды, логотип, переход) — начатый ход больше не в силе: он не уводит с экрана, а
@@ -89,7 +102,8 @@ export function HistoryLayer() {
   // список не обновился (при открытии слоя, после сборки, при загрузке страницы): строка в шапке слоя — показанный список
   // мог отстать; пустой список при этом — не «появятся здесь», а неизвестность
   const listErr = notices.history?.kind === "error" ? humanError(notices.history.text, LIST_FAILED) : null;
-  const presence = useLayerPresence(open);
+  // прогрет наведением на пункт шапки — смонтирован закрытым, подъём в кадре нажатия
+  const presence = useLayerPresence(open, warmNow);
   const narrow = useNarrow();
   // на ходу помощника карточки вне окна списка не рисуются (`gh-moving`, layers.css: content-visibility: auto) — ход не
   // перестраивает сотню карточек в каждом кадре; в покое рисуются все: поиск по странице, прокрутка рывком, тень
@@ -262,8 +276,8 @@ export function HistoryLayer() {
           {headErr && <span key={headErr} className="p2-in" style={{ display: "flex", minWidth: 0 }}><ErrorLine text={headErr} lines={1} /></span>}
         </span>
         {/* список не загрузился ни разу — «0 презентаций» было бы неправдой */}
-        <span className="gh-cnt" style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{listErr && !generations.length ? null : view?.total}</span>
-        <button type="button" className="p2-rbl" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
+        <span className="gh-cnt" data-hpm="" style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{listErr && !generations.length ? null : view?.total}</span>
+        <button type="button" className="p2-rbl" data-hpm="" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 
       <div ref={listRef} className="gh-list p2-fade">
@@ -274,7 +288,7 @@ export function HistoryLayer() {
         )}
         {view?.groups.map((gr) => (
           <section key={gr.key} className="gh-group" aria-label={gr.day}>
-            <h3 className="gh-day">{gr.day}<span className="gh-dayn">{gr.count}</span></h3>
+            <h3 className="gh-day" data-hpm="">{gr.day}<span className="gh-dayn">{gr.count}</span></h3>
             <ul className="gh-grid">
               {gr.items.map((d) => {
                 const g = byId.get(d.id);
@@ -300,20 +314,36 @@ function DeckCard({ d, wait, onPick }: { d: HistItem; wait: boolean | null; onPi
   return (
     <button type="button" className="p2-card gh-card" onClick={onPick} aria-current={d.current || undefined} aria-label={d.aria}
       aria-busy={wait || undefined}>
-      <span className={cls("p2-cover gh-cover", d.current && "p2-sel")}>
+      {/* помощник сужает сетку: обложка — сдвигом и масштабом, подписи — сдвигом (helperMotion `data-hpz` / `data-hpm`) */}
+      <span className={cls("p2-cover gh-cover", d.current && "p2-sel")} data-hpz="">
         {d.state === "done" && <CoverImg key={d.cover ?? ""} src={d.cover} alt={`Обложка презентации «${d.title}»`} />}
         {d.state === "run" && <span className="gh-ph"><span className="gh-ic gh-ic-run"><Spinner size={20} /></span></span>}
         {d.state === "fail" && <span className="gh-ph"><span className="gh-ic gh-ic-fail"><Icon name="alert" size={20} /></span></span>}
         {wait !== null && <span className={cls("gh-wait", wait && "gh-wait-on")} aria-hidden="true"><Spinner size={20} /></span>}
       </span>
-      <span className="gh-row">
-        <Tx tx="h-ttl" as="span" wrap="span" f className="gh-title">{d.title}</Tx>
-        {d.score !== null && <span className="gh-score" title="Лучшая оценка качества среди вариантов">{d.score}</span>}
-        {d.state === "run" && <span className="gh-badge gh-badge-run"><span className="gh-bdot" aria-hidden="true" /><span>собирается</span></span>}
-        {d.state === "fail" && <span className="gh-badge gh-badge-fail"><Icon name="alert" size={12} /><span>не удалось</span></span>}
-      </span>
-      <span className="gh-meta">{d.meta}</span>
+      <Caption>
+        <span className="gh-row">
+          <span className="gh-title">{d.title}</span>
+          {d.score !== null && <span className="gh-score" title="Лучшая оценка качества среди вариантов">{d.score}</span>}
+          {d.state === "run" && <span className="gh-badge gh-badge-run"><span className="gh-bdot" aria-hidden="true" /><span>собирается</span></span>}
+          {d.state === "fail" && <span className="gh-badge gh-badge-fail"><Icon name="alert" size={12} /><span>не удалось</span></span>}
+        </span>
+        <span className="gh-meta">{d.meta}</span>
+      </Caption>
     </button>
+  );
+}
+
+/** Подпись карточки — две копии (create.css `.hpc`): широкая держит раскладку и видна при закрытом помощнике, узкая —
+ *  поверх, шириной узкой раскладки (`--hpw`, helperMotion `measure`), видна при открытом. Сама подпись едет сдвигом к
+ *  месту в узкой сетке (`data-hpm`), обложка над ней — сдвигом и масштабом: подпись не переносится заново посреди хода и
+ *  не перескакивает, когда раскладка встаёт. */
+export function Caption({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <span className={cls("hpc", className)} data-hpm="" data-hpw="">
+      <span className="hpc-w hp-wo">{children}</span>
+      <span className="hpc-n hp-no" aria-hidden="true">{children}</span>
+    </span>
   );
 }
 

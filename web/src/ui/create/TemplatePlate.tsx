@@ -261,7 +261,14 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
               <div className={cls("bb-tpl", bbHas && "bb-tpl-n")} data-hpm="" style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
                 <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
                 <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplLabel(t)}</span>
+                  {/* название — две копии: широкая (закрыт помощник) и узкая, обрезанная по ширине узкой раскладки (`--hpw`,
+                      helperMotion `measure`): в широкой раскладке при открытом помощнике (закрытие готово при наведении на ✕)
+                      видна узкая — с тем же многоточием, на наведении ничего не меняется */}
+                  <span className="hpw" data-hpw="" style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220" }}>
+                    <span className="p2-sr">{tplLabel(t)}</span>
+                    <span className="hpw-w hp-wo" aria-hidden="true">{tplLabel(t)}</span>
+                    <span className="hpw-n hp-no" aria-hidden="true">{tplLabel(t)}</span>
+                  </span>
                   <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplMeta(t)}</span>
                 </div>
               </div>

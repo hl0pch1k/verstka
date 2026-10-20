@@ -126,10 +126,10 @@ export function useHelperWant(): boolean {
 // ── ход
 
 interface Dom { root: HTMLElement; wrap: HTMLElement; band: HTMLElement }
-interface Item { el: HTMLElement; scale: boolean; erase: boolean; stretch: boolean }
+interface Item { el: HTMLElement; scale: boolean; self: boolean; erase: boolean; stretch: boolean }
 /** Стиль, нужный ходу (замерен заранее): фон, скругление и обводка коробки, стоит ли она в потоке, фон её плиты. */
 interface Look { fill: string; radius: number; line: string | null; flow: boolean; plate: string }
-interface Geo { items: Item[]; wide: Box[]; narrow: Box[]; wrapW: Box[]; plate: Box[]; look: Look[]; legacy: boolean; same: boolean; probeN: number }
+interface Geo { items: Item[]; wide: Box[]; narrow: Box[]; wrapW: Box[]; plate: Box[]; look: Look[]; legacy: boolean; same: boolean | null; probeN: number }
 
 let dom: Dom | null = null;
 let commit: ((open: boolean) => void) | null = null;
@@ -158,14 +158,19 @@ function speed(): number {
 
 const visible = (el: Element) => el.getClientRects().length > 0;
 
-/** Помеченное в шагах и слоях, что сейчас на экране (скрытое — `p2-off` — не едет); без чтения раскладки. */
+/** Помеченное в шагах и слоях, что сейчас на экране (скрытое — `p2-off` — не едет); без чтения раскладки. `data-hpm` —
+ *  едет сдвигом; `data-hps` — сцена: сдвиг и масштаб обёртки по месту её первого ребёнка; `data-hpz` — сам элемент
+ *  сдвигом и масштабом (обложки карточек в «Моих презентациях» и «Шаблонах»: сетка у́же — карточки у́же); `data-hpk` —
+ *  коробка «растяжкой». */
+const MARKS = "[data-hpm],[data-hps],[data-hpz],[data-hpk]";
+
 function marked(wrap: HTMLElement): HTMLElement[] {
-  return Array.from(wrap.querySelectorAll<HTMLElement>("[data-hpm],[data-hps],[data-hpk]")).filter((el) => !el.closest(".p2-off"));
+  return Array.from(wrap.querySelectorAll<HTMLElement>(MARKS)).filter((el) => !el.closest(".p2-off"));
 }
 
 function items(wrap: HTMLElement): Item[] {
   return marked(wrap).filter(visible)
-    .map((el) => ({ el, scale: el.hasAttribute("data-hps"), erase: el.hasAttribute("data-hpe"), stretch: el.hasAttribute("data-hpk") }));
+    .map((el) => ({ el, scale: el.hasAttribute("data-hps") || el.hasAttribute("data-hpz"), self: el.hasAttribute("data-hpz"), erase: el.hasAttribute("data-hpe"), stretch: el.hasAttribute("data-hpk") }));
 }
 
 function boxOf(el: Element, o: { left: number; top: number }): Box {
@@ -177,7 +182,7 @@ function boxOf(el: Element, o: { left: number; top: number }): Box {
 function read(wrap: HTMLElement, its: Item[]): { at: Box[]; wrapAt: Box[]; plate: Box[] } {
   const o = layoutRect(wrap);
   return {
-    at: its.map((it) => boxOf(it.scale ? (it.el.firstElementChild ?? it.el) : it.el, o)),
+    at: its.map((it) => boxOf(it.scale && !it.self ? (it.el.firstElementChild ?? it.el) : it.el, o)),
     wrapAt: its.map((it) => boxOf(it.el, o)),
     plate: its.map((it) => boxOf(it.el.closest(".p2-plate") ?? wrap, o)),
   };
@@ -216,31 +221,46 @@ function lookOf(it: Item): Look {
 }
 
 /** Непомеченное содержимое колоды (текст, кнопки, картинки) — то, что при смене раскладки не едет с помеченным: если
- *  оно стоит в обеих раскладках на тех же местах, смену раскладки не видно, и её можно делать заранее (до нажатия) и
- *  после хода (`same`). Иначе («Все параметры», «Подробнее», история, сборка) раскладка меняется только в ходе.
- *  Не в счёт: помеченное и его содержимое, скрытое, гаснущее при открытом помощнике, компактный вид. */
+ *  при открытом помощнике оно стоит в узкой раскладке и в широкой (как её ставит подготовка закрытия) на тех же местах
+ *  и так же видно, смену раскладки не видно — её можно делать заранее (при наведении на ✕) и после хода (`same`).
+ *  Иначе (замечания, исправление слайда, «Все параметры», «Подробнее», история, сборка) раскладка меняется только в
+ *  ходе. Не в счёт: помеченное и его содержимое, скрытые экраны, куски хода, компактный вид. */
 const PROBE = "p, span, a, button, img, svg, input, textarea, h1, h2, h3, h4, li, label";
-const NOT_PROBE = "[data-hpm],[data-hps],[data-hpk],[data-hpr],.p2-off,.hp-wo,.hp-txw,.ra-note,.tx-fmtw,.pp-ctag,.ra-two > aside,.hp-kp,.hp-erase,.hp-in";
+const NOT_PROBE = "[data-hpm],[data-hps],[data-hpz],[data-hpk],[data-hpr],.p2-off,.hp-kp,.hp-erase,.hp-in";
 
 function probes(wrap: HTMLElement): HTMLElement[] {
   const deck = wrap.querySelector(".p2-deck");
   if (!deck) return [];
   // обёртки помеченного (его ход и есть их видимое содержимое) — не в счёт
   return Array.from(deck.querySelectorAll<HTMLElement>(PROBE)).filter((el) => !el.closest(NOT_PROBE)
-    && !el.querySelector("[data-hpm],[data-hps],[data-hpk]")
-    && (!el.checkVisibility || el.checkVisibility({ opacityProperty: true, visibilityProperty: true })));
+    && !el.querySelector(MARKS));
 }
+
+const hpwNarrow = new Map<HTMLElement, number>();
+
+const seen = (el: HTMLElement) => !el.checkVisibility || el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
 
 /** Сколько всего кандидатов в колоде — подпись экрана для `fresh` (сменился экран — замер заново). */
 const probeCount = (wrap: HTMLElement) => wrap.querySelector(".p2-deck")?.querySelectorAll(PROBE).length ?? 0;
 
 /** Стоит ли непомеченное там же: левый верхний угол и высота (ширина блока меняется невидимо); пустое — не в счёт, и то,
- *  что в обеих раскладках правее `hidden` (под полосой края и занавесом открытого помощника). */
-export function sameSpots(a: Box[], b: Box[], hidden = Infinity): boolean {
-  return a.length === b.length && a.every((x, i) => (x.w * x.h === 0 && b[i].w * b[i].h === 0)
-    || (x.x >= hidden && b[i].x >= hidden)
-    || (Math.abs(x.x - b[i].x) < 0.5 && Math.abs(x.y - b[i].y) < 0.5 && Math.abs(x.h - b[i].h) < 0.5));
+ *  что в обеих раскладках правее `hidden` (под полосой края и занавесом открытого помощника). `va`/`vb` — видно ли
+ *  (невидимое в обеих — не в счёт; видимое только в одной — не то же самое). */
+export function sameSpots(a: Box[], b: Box[], hidden = Infinity, va?: boolean[], vb?: boolean[]): boolean {
+  return a.length === b.length && a.every((x, i) => {
+    const sa = va ? va[i] : true;
+    const sb = vb ? vb[i] : true;
+    if (!sa && !sb) return true;
+    if (x.w * x.h === 0 && b[i].w * b[i].h === 0) return true;
+    if (x.x >= hidden && b[i].x >= hidden) return true;
+    if (sa !== sb) return false;
+    return Math.abs(x.x - b[i].x) < 0.5 && Math.abs(x.y - b[i].y) < 0.5 && Math.abs(x.h - b[i].h) < 0.5;
+  });
 }
+
+/** Невидима ли смена раскладки на этом экране (по замерам при открытом помощнике): подпись экрана → `same`. */
+const sameMemo = new Map<string, boolean>();
+const screenSig = (wrap: HTMLElement) => `${probeCount(wrap)}:${marked(wrap).length}`;
 
 /** Замер обеих раскладок: другая ставится на один пересчёт (её переходы снимаются) и снимается; прокрутка лент — на
  *  месте. Заодно — стиль коробок (ходу в кадре нажатия ничего не нужно читать) и запускает ли смена раскладки переходы
@@ -252,24 +272,44 @@ function measure(): Geo | null {
   const { wrap } = dom;
   const its = items(wrap);
   const nar = wrap.classList.contains("hp-nar");
-  const films = Array.from(wrap.querySelectorAll<HTMLElement>(".p2-film")).map((el) => [el, el.scrollLeft] as const);
+  // прокрутка лент и списков слоёв — на месте (другая раскладка на пересчёт могла её обрезать)
+  const films = Array.from(wrap.querySelectorAll<HTMLElement>(".p2-film, .gh-list, .ga-scroll")).map((el) => [el, el.scrollLeft, el.scrollTop] as const);
   const look = its.map(lookOf);
   const keep = goingNow();
-  const pr = probes(wrap);
+  // помощник открыт — сравнить узкую с широкой так, как её ставит подготовка закрытия (с `hp-run`); закрыт — `same`
+  // не считается (у закрытого другие правила видимости)
+  const open = wrap.classList.contains("hp-v") && nar;
+  const addRun = open && !wrap.classList.contains("hp-run");
+  const pr = open ? probes(wrap) : [];
+  const hpw = Array.from(wrap.querySelectorAll<HTMLElement>("[data-hpw]")).filter(visible);
+  if (nar) hpw.forEach((el) => hpwNarrow.set(el, r2(layoutRect(el).width)));
   const o = layoutRect(wrap);
   const a = read(wrap, its);
   const pa = pr.map((el) => boxOf(el, o));
+  const va = pr.map(seen);
   wrap.classList.toggle("hp-nar");
+  if (addRun) wrap.classList.add("hp-run");
   let legacy = settle(keep) > 0;
   const b = read(wrap, its);
   const pb = pr.map((el) => boxOf(el, o));
+  const vb = pr.map(seen);
+  if (!nar) hpw.forEach((el) => hpwNarrow.set(el, r2(layoutRect(el).width)));
   wrap.classList.toggle("hp-nar");
+  if (addRun) wrap.classList.remove("hp-run");
   legacy = settle(keep) > 0 || legacy;
   // правее края содержимого узкой раскладки (там полоса края и занавес открытого помощника) ничего не видно
-  const same = sameSpots(pa, pb, o.width - CUT - 48);
+  // обложки сеток (`data-hpz`, «Мои презентации», «Шаблоны»), удержанные масштабом, рисовались бы при наведении иначе,
+  // чем на своём месте в узкой сетке, — там раскладка меняется только в ходе
+  const same = open ? sameSpots(pa, pb, o.width - CUT - 48, va, vb) && !its.some((it) => it.self) : null;
+  // ширина узкой раскладки — узким копиям текста (`data-hpw`, название шаблона): в широкой раскладке при открытом
+  // помощнике они обрезаны так же, как в узкой
+  hpwNarrow.forEach((wN, el) => el.style.setProperty("--hpw", `${wN}px`));
+  hpwNarrow.clear();
+  if (same !== null) sameMemo.set(screenSig(wrap), same);
   wrap.dataset.hpSame = String(same);
-  films.forEach(([el, s]) => {
-    if (el.scrollLeft !== s) el.scrollLeft = s;
+  films.forEach(([el, sl, st]) => {
+    if (el.scrollLeft !== sl) el.scrollLeft = sl;
+    if (el.scrollTop !== st) el.scrollTop = st;
   });
   const w = nar ? b : a;
   const n = nar ? a : b;
@@ -409,11 +449,11 @@ function place(g: Geo, ms: number, toNarrow: boolean, paused: boolean) {
       origin = s?.origin ?? origin;
     } else transform = moveCss(shiftOf(g.wide[i], g.narrow[i], base));
     if (transform) {
-      el.style.willChange = "transform";
       el.style.transformOrigin = origin;
       moves.push(el.animate(kf(transform), timing));
     }
-    if (it.stretch) moves.push(...stretch(el, g.wide[i], g.narrow[i], g.look[i], kf, timing));
+    // заготовка открытия (наведение): куски — невидимы, коробка — как есть; покажутся в кадре нажатия (`revealPieces`)
+    if (it.stretch) moves.push(...stretch(el, g.wide[i], g.narrow[i], g.look[i], kf, timing, paused && toNarrow));
     if (it.erase) {
       const plateEl = el.closest<HTMLElement>(".p2-plate");
       const e = eraserOf(g.wide[i], g.narrow[i], g.plate[i]);
@@ -438,26 +478,39 @@ function place(g: Geo, ms: number, toNarrow: boolean, paused: boolean) {
   done0();
 }
 
+/** Коробки, чьи куски заготовлены невидимыми (наведение): их слои уже есть, видимыми они станут в кадре нажатия — до
+ *  нажатия коробка выглядит как всегда (своим слоем на дробном месте обводка куска в Safari чуть тусклее). */
+let hiddenPieces: HTMLElement[] = [];
+
+function revealPieces() {
+  for (const el of hiddenPieces) {
+    el.classList.add("hp-k");
+    el.querySelectorAll(":scope > .hp-kh").forEach((x) => x.classList.remove("hp-kh"));
+  }
+  hiddenPieces = [];
+}
+
 /** Коробка, которая в узкой раскладке у́же (поле текста, карточки вариантов, степпер): её фон и обводка на время хода —
  *  три куска постоянного размера (`stretchOf`): левый край стоит, середина сжимается scaleX, правый край едет. Сама
  *  коробка — без фона (`hp-k`), её содержимое — над кусками. */
-function stretch(el: HTMLElement, a: Box, b: Box, look: Look, kf: (t: string) => Keyframe[], timing: KeyframeAnimationOptions): Animation[] {
+function stretch(el: HTMLElement, a: Box, b: Box, look: Look, kf: (t: string) => Keyframe[], timing: KeyframeAnimationOptions, hidden = false): Animation[] {
   const out: Animation[] = [];
   const k = stretchOf(a.w, b.w, look.radius);
   if (!k) return out;
-  // куски непрозрачны: цвет коробки поверх плиты, обводка — поверх него (на стыках куски лежат друг на друге)
+  // куски непрозрачны: цвет коробки поверх плиты (на стыках куски лежат друг на друге); обводка — та же, что у коробки
+  // (inset-тень своего цвета поверх фона куска: рамка border в Safari при дробном масштабе тоньше и тусклее)
   const fill = opaque(look.fill, look.plate);
-  const line = look.line ? opaque(look.line, fill) : null;
+  const line = look.line;
   stretched.push({ el, pos: el.style.position });
   if (look.flow) el.style.position = "relative";
-  el.classList.add("hp-k");
+  if (hidden) hiddenPieces.push(el);
+  else el.classList.add("hp-k");
   const mk = (cls: string, css: string) => {
     const x = document.createElement("i");
-    x.className = `hp-kp ${cls}`;
+    x.className = `hp-kp ${cls}${hidden ? " hp-kh" : ""}`;
     x.setAttribute("aria-hidden", "true");
-    // сначала фон и обводка, затем свои правила куска (`border-left:0` на стыке): наоборот сокращённое `border`
-    // возвращало обводку на стыки — светлые вертикальные линии через карточки
-    x.style.cssText = `background:${fill}${line ? `;border:1px solid ${line}` : ""};${css}`;
+    // обводка — inset-тенью по всей коробке куска; на стыках она срезана (`clip-path`): кусок на 2 px шире видимого
+    x.style.cssText = `background:${fill}${line ? `;box-shadow:inset 0 0 0 1px ${line}` : ""};${css}`;
     el.insertBefore(x, el.firstChild);
     return x;
   };
@@ -471,9 +524,9 @@ function stretch(el: HTMLElement, a: Box, b: Box, look: Look, kf: (t: string) =>
     ext.style.border = "0";
     out.push(ext.animate(kf(`translateX(${-k.cut}px)`), timing));
   }
-  const right = mk("hp-kr", `left:${k.right}px;width:${r}px;border-radius:0 ${r}px ${r}px 0${line ? ";border-left:0" : ""}${cover ? ";z-index:1" : ""}`);
-  const mid = mk("hp-km", `left:${r - 1}px;width:${k.mid}px;transform-origin:0 0${line ? ";border-left:0;border-right:0" : ""}`);
-  mk("hp-kl", `left:0;width:${r}px;border-radius:${r}px 0 0 ${r}px${line ? ";border-right:0" : ""}`);
+  const right = mk("hp-kr", `left:${k.right - 2}px;width:${r + 2}px;border-radius:0 ${r}px ${r}px 0;clip-path:inset(0 0 0 2px)${cover ? ";z-index:1" : ""}`);
+  const mid = mk("hp-km", `left:${r - 3}px;width:${k.mid + 4}px;transform-origin:2px 0;clip-path:inset(0 2px)`);
+  mk("hp-kl", `left:0;width:${r + 2}px;border-radius:${r}px 0 0 ${r}px;clip-path:inset(0 2px 0 0)`);
   out.push(mid.animate(kf(`scaleX(${k.scale})`), timing));
   out.push(right.animate(kf(`translateX(${-k.cut}px)`), timing));
   return out;
@@ -482,7 +535,7 @@ function stretch(el: HTMLElement, a: Box, b: Box, look: Look, kf: (t: string) =>
 /** Ход кончился: ход помеченного снимается (раскладка уже та же, что его конечные места); куски «растяжек» и ластики
  *  стоят на тех же конечных местах — их можно снять и кадром позже (`later`: кадр смены раскладки легче). */
 function clearPlaced(later = false) {
-  const els = Array.from(dom?.wrap.querySelectorAll<HTMLElement>("[data-hpm],[data-hps],[data-hpk]") ?? []);
+  const els = Array.from(dom?.wrap.querySelectorAll<HTMLElement>(MARKS) ?? []);
   const kept = moves.filter((a) => {
     const t = (a.effect as KeyframeEffect | null)?.target as HTMLElement | null;
     const piece = !!t && (t.classList.contains("hp-kp") || t.classList.contains("hp-erase"));
@@ -491,6 +544,7 @@ function clearPlaced(later = false) {
   });
   const ers = erasers;
   const sts = stretched;
+  hiddenPieces = [];
   moves = [];
   erasers = [];
   stretched = [];
@@ -572,7 +626,10 @@ function open() {
   const pre = preopened;
   preopened = null;
   let g = fresh();
-  if (pre && g && pre.geo === g && pre.ms === ms) for (const m of moves) m.play();
+  if (pre && g && pre.geo === g && pre.ms === ms) {
+    for (const m of moves) m.play();
+    revealPieces();
+  }
   else {
     // заготовки нет или она устарела: снять её, замерить (без неё) и завести ход сейчас
     clearPlaced();
@@ -580,7 +637,8 @@ function open() {
     if (g) place(g, ms, true, false);
   }
   geo = g;
-  wrap.classList.add("hp-run", "hp-v");
+  // `hp-go` — ход идёт: на это время у едущего свои слои (до нажатия и в покое — рисуется в плиту, как стоит)
+  wrap.classList.add("hp-run", "hp-v", "hp-go");
   // кадром позже — гаснущее и названия шагов (hp-vd), ещё кадром позже — проявляющееся (hp-v2)
   const run = { dir: "open" as const, step2: 0, timer: 0 };
   run.step2 = nextFrame(() => {
@@ -595,10 +653,13 @@ function open() {
     if (!dom) return;
     const w = dom.wrap;
     w.classList.add("hp-vd", "hp-v2");
+    w.classList.remove("hp-go");
     // ход доиграл: на экране всё на местах узкой раскладки (помеченное держат анимации), сама раскладка встанет, когда
     // экран неподвижен (`narrowNow`). Если смена раскладки видна (`same` нет: непомеченное в широкой стоит иначе и
     // срезано краем) — сразу, как доиграет каскад помощника
-    const same = !!geo?.same;
+    // невидима ли смена раскладки на этом экране — по прошлым замерам при открытом помощнике (не знаем — считаем, что
+    // видна)
+    const same = sameMemo.get(screenSig(w)) === true;
     lazy = { timer: window.setTimeout(same ? settleLazy : narrowNow, same ? SETTLE_MS : Math.round(CASCADE_TAIL_MS * speed())) };
     // курсор — в поле помощника, когда доиграл и каскад его содержимого (не в кадрах хода)
     window.setTimeout(() => {
@@ -635,11 +696,21 @@ function narrowNow() {
   const keep = !geo || geo.legacy ? goingNow() : null;
   ownSwitch = performance.now() + 250;
   w.classList.add("hp-nar");
-  w.classList.remove("hp-run");
+  w.classList.remove("hp-run", "hp-go");
   clearPlaced(true);
   lazyBack = 0;
   if (keep) settle(keep);
   commitLater(true, 120);
+  // невидима ли здесь смена раскладки — узнать сейчас, пока экран неподвижен: ею решается, готовить ли закрытие при
+  // наведении и держать ли раскладку широкой после следующего открытия
+  if (sameMemo.get(screenSig(w)) === undefined) {
+    window.setTimeout(() => {
+      if (!dom || running || lazy || preclosed || !want || !dom.wrap.classList.contains("hp-nar")) return;
+      geo = measure();
+      // указатель так и стоит на «Помощнике» или ✕ — закрытие готовится сейчас (наведения заново не будет)
+      if (document.querySelector("#hp-nav:hover, #hp-help .gh-x:hover")) prepareHelper();
+    }, 400);
+  }
 }
 
 /** Обратный ход из «ленивого» состояния: те же элементы и куски — новые анимации от нынешних (узких) мест к исходным,
@@ -708,8 +779,11 @@ function closeStep0(ms: number): Geo | null {
 /** Наведение у открытого помощника: шаг 0 закрытия — заранее (он невидим), в кадре нажатия остаётся только ход. */
 function preClose() {
   if (!dom || running || preclosed || !dom.wrap.classList.contains("hp-nar")) return;
-  // смена раскладки видна (непомеченное встаёт иначе) — не заранее, а в ходе
-  if (!(fresh() ?? (geo = measure()))?.same) return;
+  // смена раскладки видна (непомеченное встаёт иначе или гаснет) — не заранее, а в ходе; `same` — по замеру при
+  // открытом помощнике
+  let g = fresh();
+  if (!g || g.same === null) g = geo = measure();
+  if (!g?.same) return;
   const ms = Math.round(CLOSE_MS * speed());
   preclosed = { geo: closeStep0(ms), ms };
 }
@@ -747,6 +821,7 @@ function close() {
   const go = () => {
     if (!dom || running !== run) return;
     for (const m of moves) m.play();
+    dom.wrap.classList.add("hp-go");
     dom.wrap.classList.remove("hp-v", "hp-v2");
     run.timer = window.setTimeout(endClose, ms + TAIL_MS);
     run.step2 = requestAnimationFrame(() => {
@@ -763,7 +838,7 @@ function close() {
 
 function endClose() {
   if (!dom) return;
-  dom.wrap.classList.remove("hp-run", "hp-vd");
+  dom.wrap.classList.remove("hp-run", "hp-vd", "hp-go");
   clearPlaced();
   done(false);
 }

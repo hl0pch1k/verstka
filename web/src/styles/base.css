@@ -43,7 +43,10 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
 /* заголовок плиты */
 .p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
 .p2-head:active{transform:scale(.98)}
-.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+/* коробка цифры — во весь кегль (88), раскладке — те же 64 (поля −12): с полупрозрачностью и сжатием кнопки (scale .98)
+   цифра рисуется отдельным слоем по своей коробке, и при коробке 64 верх и низ глифов, вылезающие за неё, рисовались
+   иначе — тёмные полосы по краям «01» (Safari, владелец 19.10) */
+.p2-num{display:block;width:160px;flex:none;height:88px;margin:-12px 0;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:88px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
 .p2-head:hover .p2-num{opacity:.3}
 .p2-p2 .p2-num{opacity:.3}
 .p2-p2 .p2-head:hover .p2-num{opacity:.46}
@@ -217,7 +220,8 @@ body{background:#F3F4F1;color:#0B1220;font-family:'Manrope',system-ui,-apple-sys
 .p2-off .gh-spin{animation-play-state:paused}
 /* наведение нигде не двигает и не сдвигает элементы — только цвет, тень и прозрачность (решение владельца 18.10):
    подъём на 2 px в уменьшенной сцене (stage.ts) — дробный, Safari округляет его по-разному в каждом кадре, и
-   карточки, кнопки и миниатюры дрожат. Нажатие (scale .98) остаётся */
+   карточки, кнопки и миниатюры дрожат. Нажатие (scale .98) остаётся. Исключение — полоски логотипа (холст: 2 и 4 px):
+   они свои слои (`.p2-lbar`, will-change), их сдвиг идёт на видеокарте без округления и не дрожит (владелец 19.10) */
 .p2-root .an-tile:hover .an-eye,
 .p2-root .an-tile:hover .p2-card,
 .p2-root .bb-chip:hover,
@@ -237,8 +241,6 @@ body{background:#F3F4F1;color:#0B1220;font-family:'Manrope',system-ui,-apple-sys
 .p2-root .gh-send:hover,
 .p2-root .hp-chkb:hover,
 .p2-root .kb-chip:hover,
-.p2-root .p2-brand:hover .p2-lbar2,
-.p2-root .p2-brand:hover .p2-lbar3,
 .p2-root .p2-card:hover,
 .p2-root .p2-card:hover .p2-lic-b,
 .p2-root .p2-card:hover .p2-lic-f,

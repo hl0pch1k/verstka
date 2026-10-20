@@ -395,6 +395,15 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
    налезал на обложку шаблона (замечание владельца 18.10, скрин 30) */
 .hp-nar .bb-btn{width:40px;height:40px;padding:0;justify-content:center;gap:0;border-radius:999px;background:#F3F4F1}
 .hp-nar .bb-btn > span.hp-wo{display:none}
+/* название шаблона — две копии (TemplatePlate): широкая держит раскладку, узкая — поверх, по ширине узкой раскладки */
+.hpw{position:relative;display:block;min-width:0}
+.hpw > .hpw-w,.hpw > .hpw-n{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hpw > .hpw-n{position:absolute;left:0;top:0;width:100%;max-width:var(--hpw,100%)}
+/* подпись карточки «Моих презентаций» и «Шаблонов» — две копии (HistoryLayer `Caption`): узкая поверх, шириной узкой
+   раскладки */
+.hpc{position:relative;display:block;min-width:0}
+.hpc > .hpc-w,.hpc > .hpc-n{display:flex;flex-direction:column;min-width:0}
+.hpc > .hpc-n{position:absolute;left:0;top:0;width:var(--hpw,100%)}
 .bb-bi{display:flex;flex:none}
 /* круг под книжкой проявляется вместе с открытием помощника (как hp-no) — с ним круглая кнопка встаёт без вспышки фона */
 .bb-btn{position:relative;isolation:isolate}

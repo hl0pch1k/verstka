@@ -10,6 +10,7 @@ import { Icon } from "../kit/Icon";
 import { usePop } from "../kit/usePop";
 import { usePhone } from "./tier";
 import { prepareHelper, releaseHelper, toggleHelper, useHelperWant } from "./helperMotion";
+import { coolSect, warmSect } from "../layers/warm";
 
 export function Nav() {
   const { ui, dispatch } = useApp();
@@ -20,6 +21,7 @@ export function Nav() {
   const pop = usePop<HTMLButtonElement, HTMLElement>(phone);
   const open = pop.open;
   const pick = pop.pick;
+  // «Мои презентации» и «Шаблоны»: наведение прогревает слой (layers/warm.ts) — подъём начинается в кадре нажатия.
   // «Помощник»: таблетка и раскрытие — по ходу (helperMotion), в кадре нажатия; наведение готовит ход заранее
   const helper = useHelperWant();
   return (
@@ -31,8 +33,10 @@ export function Nav() {
       <nav ref={pop.box} id="p2-navmenu" className={cls("p2-navs", open && "p2-navs-on")} aria-label="Разделы" onKeyDown={pop.onKey} onBlur={pop.onBlur}
         style={{ display: "flex", alignItems: "center", gap: 8, marginRight: -16 }}>
         <button type="button" className={cls("p2-nav", hist && "p2-nav-on")} aria-expanded={hist} aria-controls="p2-lay-h"
+          onPointerEnter={() => warmSect("hist")} onPointerLeave={() => coolSect("hist")} onFocus={() => warmSect("hist")} onBlur={() => coolSect("hist")}
           onClick={() => pick(() => dispatch({ type: "sect", sect: hist ? null : "hist" }))}>{phone && <Icon name="history" size={20} />}Мои презентации</button>
         <button type="button" className={cls("p2-nav", tpls && "p2-nav-on")} aria-expanded={tpls} aria-controls="p2-lay-t"
+          onPointerEnter={() => warmSect("tpls")} onPointerLeave={() => coolSect("tpls")} onFocus={() => warmSect("tpls")} onBlur={() => coolSect("tpls")}
           onClick={() => pick(() => dispatch({ type: "sect", sect: tpls ? null : "tpls" }))}>{phone && <Icon name="layout" size={20} />}Шаблоны</button>
         <button type="button" id="hp-nav" className={cls("p2-nav", helper && "p2-nav-on")} aria-expanded={helper} aria-controls="hp-help"
           title={helper ? "Закрыть помощника" : "Открыть помощника"}

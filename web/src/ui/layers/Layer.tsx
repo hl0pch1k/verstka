@@ -51,6 +51,8 @@ export interface LayerProps {
   /** Присутствие слоя, уже заведённое снаружи (`useLayerPresence`: по нему считается содержимое, пока слой на экране) —
    *  своё слой тогда не заводит. */
   presence?: Presence;
+  /** Прогрет (layers/warm.ts): смонтирован закрытым заранее — подъём начнётся в кадре нажатия. */
+  warm?: boolean;
 }
 
 export function Layer(props: LayerProps) {
@@ -59,7 +61,7 @@ export function Layer(props: LayerProps) {
 
 /** Слой со своим присутствием (уход держит содержимое LAYER_MS). */
 function OwnLayer(props: LayerProps) {
-  return <LayerSlot {...props} p={usePresence(props.open, LAYER_MS)} />;
+  return <LayerSlot {...props} p={usePresence(props.open, LAYER_MS, props.warm)} />;
 }
 
 function LayerSlot({ open, top, z, height = 812, label, children, onClose, id, role = "region", tone = "light", bare, plateStyle, p }: LayerProps & { p: Presence }) {
@@ -105,6 +107,6 @@ export const lsDelay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 
 /** Присутствие слоя (смонтирован, пока открыт и пока доигрывает уход) — для того, что считается только на экране;
  *  отдаётся слою (`<Layer presence>`). */
-export function useLayerPresence(open: boolean): Presence {
-  return usePresence(open, LAYER_MS);
+export function useLayerPresence(open: boolean, warm = false): Presence {
+  return usePresence(open, LAYER_MS, warm);
 }

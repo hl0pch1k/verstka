@@ -9,7 +9,9 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Cover, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { orderTemplates, tplMeta } from "../create/ribbon";
+import { Caption } from "./HistoryLayer";
 import { Layer, lsDelay } from "./Layer";
+import { useWarm } from "./warm";
 
 export function TemplatesLayer({ fresh, onUpload, busy }: {
   /** Только что загруженный шаблон — первым, как в ленте. */
@@ -22,11 +24,13 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
   const { ui, dispatch, templates, templateId } = useApp();
   const pick = usePickTemplate();
   const open = ui.sect === "tpls";
+  // прогрет наведением на пункт шапки — смонтирован закрытым, подъём в кадре нажатия
+  const warm = useWarm("tpls");
   const list = orderTemplates(templates, fresh);
   const close = () => dispatch({ type: "sect", sect: null });
   // помощник сужает колоду: те же четыре колонки сужаются вместе с ней (V2 версии 100), подписи — в строку с многоточием
   return (
-    <Layer id="p2-lay-t" open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
+    <Layer id="p2-lay-t" open={open} warm={warm} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
       <div className="ly-hd" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
         <div className="ly-hc" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <h2 id="ga-ttl" className="ly-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap" }}>Шаблоны</h2>
@@ -34,7 +38,7 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
             {plural(list.length, "шаблон", "шаблона", "шаблонов")}. Выберите оформление или загрузите своё.
           </p>
         </div>
-        <button type="button" className="p2-rbl ga-rbw" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
+        <button type="button" className="p2-rbl ga-rbw" data-hpm="" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 
       <div className="ga-box">
@@ -43,13 +47,14 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
             <div className="p2-ls" style={lsDelay(160)}>
               <button type="button" className="p2-card" onClick={busy ? undefined : onUpload} aria-disabled={busy ? true : undefined}
                 title={busy ?? undefined}>
-                <span className="p2-cover ga-act" style={{ height: "auto", aspectRatio: "16 / 9" }}>
+                {/* помощник сужает сетку: обложка — сдвигом и масштабом, подпись — сдвигом (helperMotion) */}
+                <span className="p2-cover ga-act" data-hpz="" style={{ height: "auto", aspectRatio: "16 / 9" }}>
                   <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name="upload" size={22} /></span></span>
                 </span>
-                <span className="ga-cap">
+                <Caption className="ga-cap">
                   <span className="ga-name">Загрузить свой</span>
                   <span className="ga-meta">.pptx, .potx, .ppt или .odp</span>
-                </span>
+                </Caption>
               </button>
             </div>
 
@@ -61,16 +66,16 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
                 <div key={t.template_id} className="p2-ls" style={lsDelay(200 + i * 40)}>
                   <div className="ga-tile">
                     <button type="button" className="p2-card" onClick={() => pick(t.template_id)} aria-pressed={sel} title={[name, meta].filter(Boolean).join(" · ")}>
-                      <span className={cls("p2-cover", sel && "p2-sel")} style={{ height: "auto", aspectRatio: "16 / 9" }}>
+                      <span className={cls("p2-cover", sel && "p2-sel")} data-hpz="" style={{ height: "auto", aspectRatio: "16 / 9" }}>
                         <Cover src={t.cover_url} kind="r" ink={inkOf(t)} label={`Обложка шаблона ${name}`} />
                         <span className={cls("p2-chk", !sel && "p2-chk-off")} aria-hidden="true"><Icon name="check" size={14} /></span>
                       </span>
-                      <span className="ga-cap">
+                      <Caption className="ga-cap">
                         <span className="ga-name">{name}</span>
                         <span className="ga-meta">{meta}</span>
-                      </span>
+                      </Caption>
                     </button>
-                    <button type="button" className="ga-eye" onClick={() => dispatch({ type: "set", patch: { tplPreview: t.template_id, tplDelete: null } })}
+                    <button type="button" className="ga-eye" data-hpm="" onClick={() => dispatch({ type: "set", patch: { tplPreview: t.template_id, tplDelete: null } })}
                       aria-label={`Слайды шаблона «${name}»`}>
                       <Icon name="eye" size={16} />
                       <span>Слайды</span>
