@@ -204,8 +204,8 @@
 </picture>
 
 <p align="center">
-  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage2-dark.svg"><img src="docs/readme/svg/video-stage2-light.svg" width="49%" alt="Актуальная версия, вторая ступень: текущее решение, 20.10, интерфейс «Слои», 9 минут 44 секунды — смотреть в браузере"></picture></a>
-  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage1-dark.svg"><img src="docs/readme/svg/video-stage1-light.svg" width="49%" alt="Архив, первая ступень: прошлая версия, 29.09, прежний интерфейс, 8 минут 54 секунды"></picture></a>
+  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage2-dark.svg"><img src="docs/readme/svg/video-stage2-light.svg" width="49%" alt="Вторая ступень — текущее решение: 20.10, 9 минут 44 секунды — смотреть"></picture></a>
+  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage1-dark.svg"><img src="docs/readme/svg/video-stage1-light.svg" width="49%" alt="Первая ступень — прошлая версия: 29.09, 8 минут 54 секунды — смотреть"></picture></a>
 </p>
 
 - **Актуальная версия** — скринкаст второй ступени, это текущее решение: шаблон VK Tech с брендбуком, данными и базой знаний, «Почему так», правки Помощником, сторонний шаблон. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4) · [что в видео по минутам](docs/video/README.md#вторая-ступень)
