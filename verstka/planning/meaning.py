@@ -893,7 +893,7 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
                  lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
-                 lambda: lead_figure(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
+                 lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: keep_author_points(o, brief_text), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
         try:
             said.extend(step())
         except Exception:  # noqa: BLE001 - one pass failing leaves the others
@@ -1209,4 +1209,114 @@ def diversify_variants(outlines: dict, limit: Optional[int] = None) -> dict[str,
                 k += 1
         if out:
             said[name] = out
+    return said
+
+
+
+# ------------------------------------------------------------------ what a key figure's label says
+
+
+_MONTHS = r"(?:январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-яё]*"
+_COMPARE_LABEL_RE = re.compile(r"^(?:на\s+)?(?:больше|меньше|выше|ниже|дороже|дешевле|быстрее|медленнее|рост|снижение|прирост)$", re.I)
+_UNIT_NOUNS = {"строк", "слайдов", "слайда", "минут", "минуты", "секунд", "часов", "часа", "дней", "дня", "раз", "раза", "шагов", "пунктов",
+               "вариантов", "символов", "страниц", "штук", "единиц", "позиций"}
+
+
+def _source_of(s: OutlineSlide, brief_text: str) -> str:
+    return " ".join(x for x in (s.headline, s.subtitle or "", s.takeaway or "", s.notes or "", brief_text or "") if x)
+
+
+def _value_re(value: str) -> str:
+    return re.escape(" ".join(value.split())).replace(r"\ ", r"[\s\u00a0\u202f]?")
+
+
+def sensible_labels(o: DeckOutline, brief_text: str) -> list[str]:
+    """Every key figure says what it is (jury 20.10, round 2): a day of a date is no figure («15 · Кампания» of «по 15
+    октября»); a bare comparison word is no label — the words that finish it are («12% · Больше» → «Больше, чем в
+    августе»); a share labelled by a lone noun takes the slide's subject («0,8% · Заказов» → «Ошибки комплектации»); a
+    count of a unit noun beside other content is a requirement, not a result («200 · Строк»)."""
+    said: list[str] = []
+    for s in o.slides:
+        c = s.content
+        if not c.numbers:
+            continue
+        src = _source_of(s, brief_text)
+        keep: list[NumberCallout] = []
+        for n in c.numbers:
+            v = " ".join((n.value or "").split())
+            lab = H.strip_end(n.label or "").strip()
+            low = lab.lower()
+            if re.match(r"^слайд", low) or re.search(r"слайд(?:ов|а)?$", f"{v} {low}"):
+                said.append(f"slide {s.id}: «{v} · {lab}» is the deck's size said to the planner — dropped")
+                continue
+            if re.fullmatch(r"\d{1,2}", v) and re.search(rf"(?<![\d,.]){re.escape(v)}\s+{_MONTHS}\b", src, re.I):
+                said.append(f"slide {s.id}: «{v} · {lab}» is a day of a date, not a figure — dropped")
+                continue
+            if _COMPARE_LABEL_RE.match(low):
+                m = re.search(rf"{_value_re(v)}\s+(?P<t>(?:больше|меньше|выше|ниже|дороже|дешевле|быстрее|медленнее)[^.;:]{{0,40}})", src, re.I)
+                if m:
+                    t = H.strip_end(m.group("t").strip(" ,"))
+                    n.label = H.cap_first(t)
+                    said.append(f"slide {s.id}: the label of {v} says what it compares: «{n.label}»")
+                else:
+                    n.label = ""
+            elif len(lab.split()) == 1 and "%" in v and s.section and not _QUESTION_HEAD_RE.match(s.section) and len(s.section.split()) <= 5:
+                n.label = H.cap_first(H.strip_end(s.section))
+                said.append(f"slide {s.id}: the share {v} labelled by the slide's subject «{n.label}»")
+            elif low in _UNIT_NOUNS and (len(c.numbers) > 1 or c.bullets or c.paragraphs or c.items):
+                said.append(f"slide {s.id}: «{v} · {lab}» counts a unit, it is no key figure — dropped")
+                continue
+            if not (n.label or "").strip() and len(c.numbers) > 1:
+                said.append(f"slide {s.id}: the figure {v} says nothing of what it is — dropped")
+                continue
+            keep.append(n)
+        if keep or not (c.bullets or c.paragraphs or c.items or c.chart or c.table):
+            c.numbers = keep or c.numbers
+        else:
+            c.numbers = []
+            if s.kind in (PatternKind.big_number, PatternKind.stat_row):
+                s.kind = PatternKind.bullets
+    return said
+
+
+
+_STEM5_RE = re.compile(r"[а-яёa-z]{5,}", re.I)
+
+
+def _stems5(text: str) -> set[str]:
+    return {w.lower()[:5] for w in _STEM5_RE.findall(text or "")}
+
+
+def keep_author_points(o: DeckOutline, brief_text: str) -> list[str]:
+    """A slide the author dictated keeps the author's points (jury 20.10, round 2: with the model down, «Что дальше» became
+    a large «×2» over «В ноябре ускорить синхронизацию в 2 раза» — the dark theme and the family plan were gone): a
+    sentence of the author's slide whose words the slide does not show comes back as a line of it."""
+    if not brief_text or not any(x.spec_ref is not None for x in o.slides):
+        return []
+    from verstka.planning.brief_structure import is_photo_instruction, read_structure
+    from verstka.planning.directives import split_directive
+    from verstka.planning.agent import adds_nothing
+    from verstka.planning.faithful import designer_ask, sentences
+
+    try:
+        specs = {sp.number: sp for sp in read_structure(brief_text).specs}
+    except Exception:  # noqa: BLE001 - the slides as made
+        return []
+    said: list[str] = []
+    for s in o.slides:
+        sp = specs.get(s.spec_ref) if s.spec_ref is not None else None
+        c = s.content
+        if sp is None or s.kind in _FRAME or c.table is not None or c.code is not None or c.chart is not None or c.chart2 is not None:
+            continue
+        text = "\n".join(ln for ln in (getattr(sp, "text", "") or "").splitlines() if not ln.lstrip().startswith("|"))
+        text = re.sub(r"\[[^\[\]]{3,}\]", " ", text)
+        own = [x for x in (sentences(text) or []) if split_directive(x)[0] is None and len(x.split()) >= 4
+               and designer_ask(x) is None and not is_photo_instruction(x)
+               and not any(adds_nothing(x, ref) or adds_nothing(ref, x) for ref in (s.takeaway, s.subtitle, s.footnote) if ref)]
+        shown = _stems5(_slide_text(s) + " " + " ".join(f"{n.value} {n.label}" for n in c.numbers))
+        lost = [x for x in own if len(_stems5(x) - shown) >= 2 and len(_stems5(x) - shown) >= 0.4 * max(1, len(_stems5(x)))]
+        if not lost or len(_slide_text(s).split()) > 60:
+            continue
+        c.bullets = [*c.bullets, *(H.strip_end(x) + "." for x in lost)][:6]
+        said.append(f"slide {s.id}: the author's points back on the slide: " + "; ".join(f"«{x[:40]}»" for x in lost))
     return said

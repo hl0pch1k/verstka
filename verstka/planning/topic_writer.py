@@ -1179,6 +1179,49 @@ def kb_sources(slides: list[TopicSlide], kb: Any) -> list[dict]:
     return out
 
 
+def _rules_text(brief: Brief, mode: WriterMode, kb: Any, subject: str, plan_items: list[str], reference: Any, res: WriterResult,
+                emit: Callable[[str], None], cfg: dict, cache_dir: Any) -> bool:
+    """The deck's text without the model (it failed): the knowledge base's own sentences (knowledge/compose.py), else the
+    topic's Wikipedia article digested by the rules (planning/digest.py). True when a text was made (`res` filled)."""
+    from verstka.planning import digest as DG
+
+    n = int(brief.slide_count or DG.DEFAULT_SLIDES)
+    try:
+        if kb is not None:
+            from verstka.knowledge.compose import compose_text, request_subject
+
+            text, sources = compose_text(kb, request_subject(mode.topic) or subject, plan=plan_items or None, slides=n)
+            if not text:
+                return False
+            res.text, res.sources = text, sources
+            used = list(dict.fromkeys(x["doc"] for x in sources))
+            res.pages_used = [{"title": kb.title_of(d), "url": (kb.docs.get(d) or {}).get("url") or ""} for d in used]
+            res.checked = "knowledge"
+            how = f"из предложений базы знаний «{kb.name}»"
+        else:
+            page = reference.main if reference is not None and getattr(reference, "pages", None) else None
+            d = DG.page_digest(page, n, H.cap_first(H.strip_end(subject))) if page is not None else DG.reference_digest(
+                mode.topic, n, lang=mode.language, cache_dir=cache_dir, config=cfg)
+            if d is None:
+                return False
+            res.text = d.text()
+            if d.source:
+                res.source = dict(d.source)
+                res.pages_used = [dict(d.source)]
+            res.checked = "reference"
+            how = f"из статьи «{(d.source or {}).get('title', '')}» Википедии"
+    except Exception:  # noqa: BLE001 - nothing then
+        log.warning("the writer's text without the model failed", exc_info=True)
+        return False
+    res.slides = res.text.count("\nСлайд ")
+    res.brief = Brief(text=with_rules(res.text), slide_count=res.slides + 1, audience=brief.audience, purpose=brief.purpose, language=brief.language,
+                      tone=brief.tone, extra_instructions=brief.extra_instructions)
+    res.warnings.append("writer: the model did not answer — the text is made by the rules of the source's own sentences")
+    emit(f"модель не ответила — собрал текст без модели {how}: {ru_count(res.slides + 1, 'слайд', 'слайда', 'слайдов')}, "
+         "на каждом — предложения источника с его фактами.")
+    return True
+
+
 def write_topic_deck(
     brief: Brief,
     mode: WriterMode,
@@ -1365,6 +1408,11 @@ def write_topic_deck(
             break
     res.seconds["plan"] = round(time.monotonic() - tp, 2)
     if plan is None:
+        # the model did not answer: the deck is still made of the source the rules can read — the knowledge base's own
+        # sentences, else the topic's Wikipedia article (jury 20.10, round 2: VK 500 and Polza 402 left a cover of the
+        # request over five empty sections)
+        if _rules_text(brief, mode, kb, subject, plan_items, reference, res, emit, cfg, cache_dir):
+            return finish("written")
         emit("не получилось составить план — соберу каркас по теме.")
         return finish("failed", "plan")
     plan.title = plan.title or _subject_title(subject)

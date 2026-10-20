@@ -305,3 +305,122 @@ def test_a_point_of_the_plan_with_its_content_is_no_section():
     o = res.outlines["structured"]
     hit = [x for x in o.slides if "узкое место" in x.headline.lower() or "вторая линия" in _all_text(DeckOutline(title="", slides=[x])).lower()]
     assert hit and all(x.kind != K.section for x in hit)
+
+
+# ------------------------------------------------------------------ round 2: without any model
+
+
+ARTICLE = """Байка́л (бур. Байгал далай) — озеро тектонического происхождения в южной части Восточной Сибири площадью 31 722 км². Самое глубокое озеро на планете, крупнейший природный резервуар пресной воды.
+
+== Название ==
+Название озера объясняется обычно через тюркское baiköl «богатое озеро», и это слово встречается в разных языках региона.
+
+== География ==
+Максимальная глубина Байкала — 1642 м, средняя — 744,4 м. В озеро впадают 336 рек, вытекает одна — Ангара. Байкал замерзает целиком с января по май, толщина льда достигает 1 м. Площадь водосборного бассейна составляет 571 тысячу км², и он лежит на территории двух стран.
+
+== Растительный и животный мир ==
+В Байкале обитают 2600 видов животных, больше половины из них эндемики. Самый известный эндемик — байкальская нерпа, единственный пресноводный тюлень. Здесь живут голомянки и омуль, которых нет больше нигде на Земле в таком числе.
+
+== Экология ==
+В 1996 году Байкал включён в список Всемирного наследия ЮНЕСКО. В 2013 году закрыт Байкальский целлюлозно-бумажный комбинат, главный источник загрязнения. Закон об охране озера Байкал принят 1 мая 1999 года и действует до сих пор.
+
+== Примечания ==
+1. Ссылка на источник один и ещё много слов, которые не нужны на слайдах никогда вообще.
+"""
+
+
+def test_a_topic_article_is_digested_by_its_sections_with_the_topic_on_the_cover():
+    page = SimpleNamespace(title="Байкал", url="https://ru.wikipedia.org/wiki/Байкал", text=ARTICLE)
+    d = DG.page_digest(page, 6, "Озеро Байкал")
+    assert d is not None and d.title == "Озеро Байкал" and d.source["title"] == "Байкал"
+    text = d.text()
+    assert "Подзаголовок: По статье «Байкал» из Википедии" in text
+    assert "1642 м" in text and "2600 видов" in text and "Примечани" not in text and "Ссылка на источник" not in text
+    assert "бур." not in text and "Озеро тектонического происхождения" in text
+    assert 4 <= d.size <= 6
+
+
+def test_a_topic_without_a_model_and_without_an_article_says_so_and_never_shows_the_request():
+    st = load_strategies()
+    res = run_agent(parse_brief_text("Сделай презентацию про озеро Байкал"), None, [st["structured"]])  # (tests have no network)
+    o = res.outlines["structured"]
+    text = _all_text(o)
+    assert "Сделай презентацию" not in text
+    assert o.slides[0].headline == "Озеро Байкал"
+    assert "модель недоступна" in text.lower() and all(s.kind != K.section for s in o.slides)
+
+
+def test_a_page_long_document_without_a_model_is_a_deck_of_all_its_parts():
+    parts = [f"{k}. {h}: {t}" for k, (h, t) in enumerate([
+        ("Профилирование данных", "типы колонок, временная ось, количество измерений и метрик, пропуски и выбросы."),
+        ("Аналитическая задача", "динамика, сравнение категорий, структура долей, распределение, взаимосвязь величин."),
+        ("Выбор визуализации", "ранжированный список из 2–3 вариантов с объяснением, основанным на свойствах данных."),
+        ("Дизайн-система", "палитра, шрифты, сетка, стиль осей и легенды берутся из разобранного шаблона."),
+        ("Вёрстка слайда", "заголовок-вывод, подписи осей, единицы измерения и источник данных на каждом слайде."),
+        ("Сложные случаи", "при избыточном объёме данных — разбиение на несколько слайдов или агрегация данных."),
+        ("Брендбук", "при конфликте шаблона и брендбука приоритет у брендбука, если пользователь не указал иное."),
+        ("Ограничения", "жёсткое соответствие формата файла и типа графика не допускается в решении."),
+        ("Результат", "презентация в PPTX, PDF или HTML, которая открывается без ручных правок."),
+        ("Скринкаст", "до 5 минут: загрузка шаблона, запуск генерации, пояснение по двум-трём слайдам."),
+    ], 1)]
+    text = "Вторая ступень хакатона: интерпретация данных\n\n" + "\n\n".join(p + " Это требование обязательно для сервиса и проверяется экспертами на защите решения." for p in parts)
+    assert DG.is_document(text) and not DG.is_long_document(text)
+    st = load_strategies()
+    res = run_agent(Brief(text=text), None, [st["structured"]])
+    o = res.outlines["structured"]
+    assert 8 <= len(o.slides) <= 15, len(o.slides)
+    shown = _all_text(o)
+    for word in ("Профилирование", "Брендбук", "Скринкаст"):
+        assert word.lower() in shown.lower(), word
+
+
+def test_a_slide_count_is_never_a_line_or_a_figure():
+    from verstka.planning.directives import clean_text
+    from verstka.planning.writer import writer_mode
+
+    assert clean_text("Коротко для команды. 6–8 слайдов.") == "Коротко для команды."
+    assert writer_mode("Коротко для руководителей: что такое облачные вычисления. 7 слайдов.").kind == "topic"
+    o = DeckOutline(title="Т", slides=[OutlineSlide(id="a", kind=K.big_number, headline="Коротко для команды",
+                                                    content=SlideContent(numbers=[NumberCallout(value="6–8", label="слайдов")], bullets=["Требования второй ступени."]))])
+    from verstka.planning.meaning import sensible_labels
+
+    sensible_labels(o, "Коротко для команды. 6–8 слайдов.")
+    assert o.slides[0].content.numbers == []
+
+
+def test_the_request_s_subject_without_what_it_says_to_the_planner():
+    from verstka.knowledge.compose import request_subject
+
+    assert request_subject("Коротко для команды: что организаторы требуют на второй ступени хакатона. 6–8 слайдов.") == "что организаторы требуют на второй ступени хакатона"
+
+
+def test_key_figures_say_what_they_are():
+    from verstka.planning.meaning import sensible_labels
+
+    o = DeckOutline(title="t", slides=[
+        OutlineSlide(id="a", kind=K.stat_row, headline="48 200 заказов, на 12% больше, чем в августе",
+                     content=SlideContent(numbers=[NumberCallout(value="48 200", label="Заказов"), NumberCallout(value="12%", label="Больше")])),
+        OutlineSlide(id="b", kind=K.stat_row, headline="0,8% заказов, цель — не больше 0,5%", section="Ошибки комплектации",
+                     content=SlideContent(numbers=[NumberCallout(value="0,8%", label="Заказов"), NumberCallout(value="0,5%", label="Цель")])),
+        OutlineSlide(id="c", kind=K.stat_row, headline="Кампания шла с 1 сентября по 15 октября",
+                     content=SlideContent(numbers=[NumberCallout(value="15", label="Кампания"), NumberCallout(value="12 млн ₽", label="Бюджет")])),
+        OutlineSlide(id="d", kind=K.stat_row, headline="Что нужно сделать",
+                     content=SlideContent(numbers=[NumberCallout(value="5–7", label="Датасетов"), NumberCallout(value="200", label="Строк")])),
+    ])
+    sensible_labels(o, "")
+    got = [[(n.value, n.label) for n in s.content.numbers] for s in o.slides]
+    assert got[0][1] == ("12%", "Больше, чем в августе")
+    assert got[1][0] == ("0,8%", "Ошибки комплектации")
+    assert got[2] == [("12 млн ₽", "Бюджет")]
+    assert ("200", "Строк") not in got[3]
+
+
+def test_the_author_s_points_come_back_when_a_form_left_them_out():
+    from verstka.planning.meaning import keep_author_points
+
+    brief = ("Слайд 1: Деньги. Выручка от подписок за месяц — 18,6 млн рублей.\n\n"
+             "Слайд 2: Что дальше. В ноябре — ускорить синхронизацию в 2 раза и выпустить тёмную тему, в декабре — семейная подписка.")
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind=K.big_number, headline="Что дальше", spec_ref=2,
+                                                    content=SlideContent(numbers=[NumberCallout(value="×2", label="В ноябре ускорить синхронизацию")]))])
+    keep_author_points(o, brief)
+    assert any("тёмную тему" in b and "семейная подписка" in b for b in o.slides[0].content.bullets)

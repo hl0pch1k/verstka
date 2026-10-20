@@ -78,13 +78,30 @@ def _clean_item(item: str) -> str:
     return head.strip(" .:;").capitalize()[:120] if head else item[:120]
 
 
+_REQUEST_LEAD_RE = re.compile(r"^(?:коротко|кратко|вкратце|в\s+двух\s+словах)?\s*(?:для\s+[^:.,]{2,40})?\s*:\s*", re.I)
+
+
+def request_subject(request: str) -> str:
+    """What a short request is about, without what it says to the planner: «Коротко для команды: что организаторы
+    требуют на второй ступени хакатона. 6–8 слайдов.» → «что организаторы требуют на второй ступени хакатона»."""
+    from verstka.planning.directives import strip_count_phrase
+
+    t = " ".join((request or "").split())
+    t = strip_count_phrase(t) or t
+    t = _REQUEST_LEAD_RE.sub("", t)
+    sents = [x.strip() for x in re.split(r"(?<=[.!?])\s+", t) if len(x.strip().split()) >= 2]
+    return (sents[0] if sents else t).strip(" .")
+
+
 def compose_text(kb: KbReference, topic: str, plan: Optional[list[str]] = None, slides: int = 8,
                  slides_out: Optional[list] = None) -> tuple[str, list[dict]]:
     """(the «Слайд N» text, the sources of its sentences) — empty text when the base knows nothing of the request.
     `slides_out` gets each slide as data ({"n", "title", "points", "table": {"header", "rows"} | None}) — the
     knowledge base's slides of a data deck are made of these (verstka/knowledge/with_data.py)."""
     used: set[str] = set()
-    out = ["Слайд 1. Титульный", f"Название: «{topic.strip().rstrip('.')[:120]}»."]
+    topic = request_subject(topic) or topic  # (the deck's size and «Коротко для команды:» are no title and no query)
+    deck_title = topic.strip().rstrip(".")[:120]
+    out = ["Слайд 1. Титульный", f"Название: «{deck_title[:1].upper() + deck_title[1:]}»."]
     sources: list[dict] = []
     n = 2
     if plan:
@@ -127,7 +144,42 @@ def compose_text(kb: KbReference, topic: str, plan: Optional[list[str]] = None, 
         n += 1
     if n == 2:
         return "", []
+    if not plan and n - 2 < max(3, slides - 2):
+        # a bare request the base answers with few sections: the base's best fragments, in the documents' order, as one
+        # document digested by the rules (planning/digest.py) — a slide per part, its best sentence its title
+        got = _digest_text(kb, topic, deck_title, slides)
+        if got is not None and got[0].count("\nСлайд ") > n - 2:
+            return got
     return "\n".join(out) + "\n", sources
 
 
-__all__ = ["compose_text"]
+def _digest_text(kb: KbReference, topic: str, title: str, slides: int) -> Optional[tuple[str, list[dict]]]:
+    from verstka.planning import digest as DG
+
+    hits = [f for f, _ in kb.search.top(topic, 40, min_score=MIN_SCORE) if not f.table]
+    if not hits:
+        return None
+    hits.sort(key=lambda f: (f.doc, f.n))
+    parts: list[str] = [f"# {title}"]
+    last = None
+    for f in hits:
+        sec = f.section[-1] if f.section else kb.title_of(f.doc)
+        if sec != last:
+            parts += ["", f"## {sec}"]
+            last = sec
+        parts += ["", " ".join(_sentences(f.text))]
+    d = DG.digest_by_rules("\n".join(parts), slides, title_hint=title[:1].upper() + title[1:])
+    if d is None:
+        return None
+    text = d.text()
+    sources: list[dict] = []
+    for k, s in enumerate(d.slides, 2):
+        for p in s.points:
+            src = kb.source_of(p)
+            if src is not None:
+                sources.append({"slide": k, "id": f"s{k}", "text": p, "page": src.title, "url": src.url or "", "sentence": f"{src.place}: {src.text[:400]}",
+                                "doc": src.doc, "place": src.place, "fragment": src.fragment})
+    return text, sources
+
+
+__all__ = ["compose_text", "request_subject"]

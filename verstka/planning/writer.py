@@ -159,7 +159,10 @@ def writer_mode(brief: Brief | str) -> WriterMode:
         return WriterMode("off", topic=body, reason="table", language=language, private_hint=private)
     if list_lines >= 3:
         return WriterMode("off", topic=body, reason="list", language=language, private_hint=private)
-    sents = [s for s in sentences_of(body) if not _is_rule(s)]
+    from verstka.planning.directives import strip_count_phrase
+
+    # («6–8 слайдов.» is the deck's size said to the planner: no thesis of the topic)
+    sents = [s for s in sentences_of(body) if not _is_rule(s) and (strip_count_phrase(s) or "").strip(" .!")]
     content = " ".join(sents)
     figs = numbers_of(_COUNT_RE.sub(" ", _YEAR_RE.sub(" ", content)))
     words = len(re.findall(r"[\wё]+", content))

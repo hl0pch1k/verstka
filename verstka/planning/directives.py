@@ -160,6 +160,9 @@ def clean_text(text: Optional[str], shown: Optional[set] = None) -> Optional[str
     out: list[str] = []
     changed = False
     for sent in sentences(text) or [text]:
+        if re.search(r"слайд", sent, re.I) and not (strip_count_phrase(sent) or "").strip(" .!"):
+            changed = True  # «6–8 слайдов.» — the deck's size, said to the planner, never a line of a slide
+            continue
         ask, rest = split_directive(sent)
         if ask is None and re.search(r"[:—–]\s+\S", sent):
             # «Как менялось число обращений за год: Покажи рост.» — the ask joined to the line it is about

@@ -41,7 +41,8 @@ MIN_SLIDES = 5
 HEAD_WORDS = 12  # a slide's title: a conclusion of at most this many words
 POINT_WORDS = 26
 POINTS = 3  # lines under a title
-DOC_CHARS = 60000  # what the model reads of a document (a 1.5-hour transcript is ~40 000 characters)
+DOC_CHARS = 60000
+LEAD_HEAD = "Общие сведения"  # what the model reads of a document (a 1.5-hour transcript is ~40 000 characters)
 
 _SLIDE_RE = re.compile(r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*\d{1,3}\b", re.I | re.M)
 _FRONT_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
@@ -54,12 +55,12 @@ _FILE_NAME_RE = re.compile(r"\.(?:mp4|mp3|m4a|wav|mov|avi|docx?|pdf|pptx?|txt|md
 
 # speech: what a talk says about itself and the words it fills pauses with
 _FILLER_RE = re.compile(
-    r"\b(?:блин|господи|короче|типа|как\s+бы|это\s+самое|так\s+сказать|скажем\s+так|в\s+общем(?:-то)?|ну\s+вот|вот\s+это|"
+    r"(?<![\wё])(?:блин|господи|короче|типа|как\s+бы|это\s+самое|так\s+сказать|скажем\s+так|в\s+общем(?:-то)?|ну\s+вот|вот\s+это|"
     r"на\s+самом\s+деле|если\s+честно|честно\s+говоря|я\s+думаю|мне\s+кажется|я\s+так\s+понимаю|понимаете|знаете|"
     r"слышно|видно\s+(?:меня|экран)|меня\s+слышно|секундочку|минуточку|извините|простите|кстати|ой|эм+|ээ+|ага|угу|"
     r"окей|ок\b|ладно|хорошо,|отлично,|супер|спасибо|благодарю|пожалуйста|до\s+свидания|всем\s+привет|значит|собственно|"
     r"видимо|конечно|то\s+есть|наверное|вообще(?:-то)?|получается|грубо\s+говоря|ну\s+и|ну,|да,|вот,|"
-    r"you\s+know|i\s+mean|kind\s+of|sort\s+of|okay|thank\s+you|thanks)\b",
+    r"you\s+know|i\s+mean|kind\s+of|sort\s+of|okay|thank\s+you|thanks)(?![\wё])",
     re.I,
 )
 _OPENER_RE = re.compile(
@@ -132,12 +133,27 @@ def is_long_document(text: str, plan_items: int = 0) -> bool:
     return words >= LONG_WORDS or len(paras) >= LONG_PARAGRAPHS
 
 
-def deck_size(asked: Optional[int]) -> int:
-    """The digest's slides with the cover: the person's count, else DEFAULT_SLIDES; never above MAX_SLIDES unless the
-    person asked for more."""
+def deck_size(asked: Optional[int], words: int = 0) -> int:
+    """The digest's slides with the cover: the person's count, else DEFAULT_SLIDES (a shorter document — a slide per
+    ~40 of its words, 8 at least)."""
     if asked:
         return max(3, int(asked))
+    if words and words < DEFAULT_SLIDES * 40:
+        return max(10 if words >= 350 else 8, words // 40)
     return DEFAULT_SLIDES
+
+
+SHORT_DOC_WORDS = 250  # without a model, a document of its own this long is digested too (a model would plan it)
+
+
+def is_document(text: str) -> bool:
+    """A text of its own worth a deck of several slides that dictates none (no «Слайд N.»): SHORT_DOC_WORDS words or
+    more in six paragraphs or more. Without a model such a text is digested by the rules; with one, the planner reads it."""
+    body = _body(text)
+    if not body.strip() or _SLIDE_RE.search(body):
+        return False
+    lines = [ln for ln in body.splitlines() if ln.strip() and not _TABLE_RE.match(ln)]
+    return sum(_words(ln) for ln in lines) >= SHORT_DOC_WORDS and sum(1 for ln in lines if _words(ln) >= 8) >= 6
 
 
 # ------------------------------------------------------------------ reading the document
@@ -174,6 +190,7 @@ def _clean_sentence(s: str) -> str:
 
 
 _QUESTION_RE = re.compile(r"^(?:\S+\s+)?(?:\S+\s+)?ли\b|^(?:как|что|почему|зачем|когда|где|кто|какой|какая|какие|сколько|можно\s+ли|нужно\s+ли)\b[^.!]*$", re.I)
+_RELATIVE_RE = re.compile(r"\b(?:котор\w+|чей|чья|чьё|чьи)\b", re.I)
 _FRAGMENT_RE = re.compile(r"^(?:котор\w+|что|чтобы|если|потому|поэтому|так\s+как|именно|это|то\s+есть|и|а|но|или|ли|как|где|когда)\b", re.I)
 
 
@@ -240,11 +257,15 @@ def _read(text: str) -> _Doc:
         raw = _plain(im.group("t") if im else s)
         doc.words += _words(raw)
         prev_line = raw
-        for sent in H.split_sentences(raw) or [raw]:
+        for k, sent in enumerate(H.split_sentences(raw) or [raw]):
             c = _clean_sentence(sent)
             if not c:
                 continue
-            doc.sentences.append(_Sent(text=c, pos=pos, para=para, score=score_sentence(c), words=_words(c)))
+            sc = score_sentence(c) - (2.0 if sent.strip()[:1].islower() else 0.0)  # (a piece of a sentence cut by speech)
+            if sc > -2:
+                # a paragraph's first sentence says what it is about; the lead of an article («Общие сведения») most of all
+                sc += (1.0 if k == 0 else 0.0) + (2.0 if head == LEAD_HEAD else 0.0)
+            doc.sentences.append(_Sent(text=c, pos=pos, para=para, score=sc, words=_words(c)))
             pos += 1
         para += 1
     return doc
@@ -257,11 +278,22 @@ def headline_of(sentence: str, max_words: int = HEAD_WORDS) -> str:
     """A slide's title made of a sentence: the sentence itself when short, else its clause that carries the figure or the
     decision, at most `max_words` words, cut where a phrase ends."""
     s = H.strip_end(sentence)
-    if _words(s) <= max_words:
+    if _words(s) <= max_words or (_words(s) <= max_words + 4 and not re.search(r"[,;:—–]", s)):
         return s
-    parts = [p.strip(" ,;:—–-") for p in re.split(r"\s*[;:]\s+|\s+[—–]\s+|,\s+", s) if p.strip()]
+    lab = re.match(r"^(?P<l>[^:«»]{3,40}):\s+(?P<r>\S.+)$", s)
+    if lab and _words(lab.group("l")) <= 4 and max_words - _words(lab.group("l")) >= 5:
+        # «Выбор визуализации: ранжированный список из 2–3 вариантов …» — the label and the head of what it says
+        rest = headline_of(lab.group("r"), max_words - _words(lab.group("l")))
+        return H.cap_first(lab.group("l").strip()) + ": " + (rest[:1].lower() + rest[1:] if rest[1:2].islower() else rest)
+    parts: list[str] = []
+    for p in re.split(r"\s*[;:]\s+|\s+[—–]\s+|,\s+", s):
+        if parts and (parts[-1].count("«") > parts[-1].count("»") or parts[-1].count("(") > parts[-1].count(")")):
+            parts[-1] += ", " + p  # never cut inside a quotation
+        else:
+            parts.append(p)
+    parts = [p.strip(" ,;:—–-") for p in parts if p.strip()]
     best = None
-    whole = [p for p in parts if 4 <= _words(p) <= max_words and not _FRAGMENT_RE.match(p)]
+    whole = [p for p in parts if 4 <= _words(p) <= max_words and not _FRAGMENT_RE.match(p) and not _RELATIVE_RE.search(" ".join(p.split()[:3]))]
     best = next((p for p in whole if _FIG_RE.search(p) or _DECISION_RE.search(p)), None) or next(iter(whole), None)
     if best is None:
         best = clip_words(s, max_words)
@@ -319,12 +351,15 @@ class Digest:
     by: str = "rules"  # "rules" | "model"
     words: int = 0  # the document's words
     dropped: int = 0  # the document's sentences that reached no slide
+    subtitle: str = ""
+    source: Optional[dict] = None  # {"title", "url"}: the article the deck is made of (a topic without a model)
 
     def text(self) -> str:
-        out = ["Слайд 1. Обложка", f"Название: {self.title}"]
+        out = ["Слайд 1. Обложка", f"Название: {self.title}"] + ([f"Подзаголовок: {self.subtitle}"] if self.subtitle else [])
         for n, s in enumerate(self.slides, 2):
             out += ["", f"Слайд {n}. {s.title}"]
-            out += [f"- {H.strip_end(p)}." if not p.rstrip().endswith(("!", "?", "…")) and not H.ABBR_END_RE.search(p.strip()) else f"- {p}" for p in s.points]
+            mark = "- " if len(s.points) > 1 else ""  # (a lone line is the slide's text, not a list of one)
+            out += [f"{mark}{H.strip_end(p)}." if not p.rstrip().endswith(("!", "?", "…")) and not H.ABBR_END_RE.search(p.strip()) else f"{mark}{p}" for p in s.points]
             if s.table:
                 out += [""] + s.table
         return "\n".join(out).strip() + "\n"
@@ -356,6 +391,12 @@ def _buckets(doc: _Doc, n: int) -> list[list[_Sent]]:
         if cur:
             out.append(cur)
         return out
+    if doc.words < 1000:
+        # a short document: its sentences of substance shared out evenly, in order (its few words would leave word-sized
+        # parts empty)
+        real = [s for s in sents if s.words >= 6]
+        k = max(1, -(-len(real) // max(1, n)))
+        return [real[i:i + k] for i in range(0, len(real), k)]
     total = sum(s.words for s in sents)
     per = total / max(1, n)
     out = []
@@ -378,8 +419,9 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
     doc = _read(text)
     if not doc.sentences:
         return None
-    size = deck_size(slides)
+    size = deck_size(slides, doc.words)
     n_content = max(1, size - 2)  # cover and the closing
+    per = 2 if doc.words < 1000 else POINTS  # a short document: fewer lines a slide, more slides of its parts
     used: list[str] = []
 
     def fresh(s: _Sent) -> bool:
@@ -388,7 +430,7 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
     out: list[DigestSlide] = []
     tables = list(doc.tables[:2])
     n_text = max(1, n_content - len(tables))
-    for floor in (2.0, 1.0):
+    for floor in ((0.0,) if doc.words < 1000 else (2.0, 1.0, 0.0)):  # (a short document is all material)
         out, used = [], []
         carry: list[_Sent] = []
         for part in _buckets(doc, n_text):
@@ -398,22 +440,26 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
             for s in good:
                 if fresh(s) and not any(_similar(s.text, p.text) for p in pick):
                     pick.append(s)
-                if len(pick) >= POINTS + 1:
+                if len(pick) >= per + 1:
                     break
             if not pick:
                 continue
-            lead = max(pick[:3], key=lambda s: s.score - max(0, s.words - 16) * 0.25 - 4 * bool(_FRAGMENT_RE.match(s.text)))
+            lead = max(pick[:3], key=lambda s: s.score - max(0, s.words - HEAD_WORDS - 2) * 0.5 - 4 * bool(_FRAGMENT_RE.match(s.text)))
             title = headline_of(lead.text)
             rest = sorted((s for s in pick if s is not lead), key=lambda s: s.pos)
-            points = [point_of(s.text) for s in rest][:POINTS]
+            points = [point_of(s.text) for s in rest][:per]
             if _words(H.strip_end(lead.text)) - _words(title) >= 3:
-                points = [point_of(lead.text), *points][:POINTS]
+                points = [point_of(lead.text), *points][:per]
+            lab = re.match(r"^(?P<l>[^:«»()]{3,50}):\s+(?P<r>\S.+)$", H.strip_end(lead.text))
+            if not points and lab and _words(lab.group("l")) <= 6:
+                # «Профилирование данных: типы колонок, временная ось, …» — its label heads it, what it says is its line
+                title, points = H.cap_first(lab.group("l").strip()), [point_of(H.cap_first(lab.group("r")))]
             if not points:
                 carry = pick  # a title alone is no slide (it would be laid out as a section): it joins the next part
                 continue
             used.extend(s.text for s in pick)
             out.append(DigestSlide(title=title, points=points))
-        if len(out) >= min(MIN_SLIDES, n_text):
+        if len(out) >= max(min(MIN_SLIDES, n_text), n_text - 1):
             break
     if not out:
         return None
@@ -552,3 +598,94 @@ def note(d: Digest) -> str:
            else "взял из него содержательные предложения — цифры, решения, требования; разговорную речь и организационные реплики оставил за кадром")
     return (f"Аналитик: длинный документ ({ru_count(d.words, 'слово', 'слова', 'слов')}) — это материал, а не план слайдов: "
             f"{how}; колода — {ru_count(d.size, 'слайд', 'слайда', 'слайдов')}, заголовок каждого — вывод.")
+
+
+# ------------------------------------------------------------------ a topic without a model
+
+
+_SKIP_SECTION_RE = re.compile(
+    r"^(?:примечани|литератур|ссылки|см\.?\s*также|источник|галере|библиограф|комментари|фильмограф|дискограф|награды и звания|"
+    r"высказывани|цитат|миф|легенд|фильм|песн|коллекционир|в\s+культуре|в\s+искусстве|в\s+литературе|название|этимолог|"
+    r"notes|references|see also|external links|further reading|bibliography|gallery|in popular culture|etymology)",
+    re.I,
+)
+_WIKI_NOISE_RE = re.compile(r"\[\d{1,3}\]|\[источник не указан[^\]]*\]|\u0301")
+
+
+def article_document(text: str, title: str, max_sections: int) -> str:
+    """A Wikipedia article as a document with its sections as headings: the lead («Общие сведения») and its first
+    sections of substance, the reference lists left out."""
+    from verstka.planning.reference import sections
+
+    lead, secs = sections(_WIKI_NOISE_RE.sub("", text or ""))
+    # «Байкал (бур. Байгал далай) — озеро …»: the name in other languages is no part of the statement
+    lead = re.sub(r"\s*\((?:[^()]*?\b[а-яa-z]{2,5}\.\s[^()]*)\)", "", lead, count=2)
+    secs = [(h, b) for h, b in secs if not _SKIP_SECTION_RE.match(h.strip()) and _words(b) >= 25]
+    out = [f"# {title}", "", f"## {LEAD_HEAD}", lead.strip()]
+    keep = sorted(sorted(range(len(secs)), key=lambda i: -_words(secs[i][1]))[: max(2, max_sections - 1)])  # the richest, in order
+    for h, b in (secs[i] for i in keep):
+        out += ["", f"## {h.strip()}", b.strip()]
+    return "\n".join(out)
+
+
+def reference_digest(topic: str, slides: Optional[int] = None, *, lang: str = "ru", cache_dir: Any = None,
+                     config: Optional[dict] = None) -> Optional[Digest]:
+    """A topic («Сделай презентацию про озеро Байкал») without a model: its Wikipedia article, digested by the rules —
+    a slide per section of substance, its title the section's best sentence, its lines the sentences with its facts.
+    None when the article cannot be found or fetched (no network, Wikipedia off)."""
+    from verstka.planning.reference import fetch_reference
+    from verstka.planning.topic_writer import topic_subject
+    from verstka.planning.writer import load_config
+
+    cfg = config if config is not None else load_config()
+    rcfg = cfg.get("reference") or {}
+    if not rcfg.get("enabled", True):
+        return None
+    from verstka.knowledge.compose import request_subject
+
+    subject = topic_subject(request_subject(topic) or topic) or topic
+    # «что такое облачные вычисления и какие бывают модели обслуживания» → «облачные вычисления»: what the article is about
+    core = re.sub(r"^(?:что\s+так(?:ое|ие)|кто\s+так(?:ой|ая|ие)|о\s+том,?\s+(?:что|как)|как\s+устроен\w*|зачем\s+нужн\w*)\s+", "", subject.strip(), flags=re.I)
+    core = re.split(r",?\s+(?:и\s+)?(?:какие|какой|какая|как|зачем|почему|что|чем|где|когда)\s+", core, maxsplit=1)[0]
+    subject = core.strip(" ,.") or subject
+    from verstka.planning.brief_structure import _nominative
+
+    nom = _nominative(subject) or subject
+    nom = re.sub(r"^(\w+)ю(?=\s)", r"\1я", nom) if re.match(r"^\w+ию\s", nom) else nom  # «историю шоколада» → «история шоколада»
+    title = H.cap_first(H.strip_end(" ".join(nom.split())))
+    try:
+        ref = fetch_reference([title], subject, lang=lang, contact=str(rcfg.get("contact") or ""), timeout_s=float(rcfg.get("timeout_s", 6)),
+                              cache_dir=cache_dir, cache_days=float(rcfg.get("cache_days", 7)))
+    except Exception:  # noqa: BLE001 - no reference
+        log.warning("reference for a topic without a model failed", exc_info=True)
+        return None
+    page = ref.main if ref is not None else None
+    if page is not None and not ({w.lower()[:5] for w in _STEM_RE.findall(page.title)} & {w.lower()[:5] for w in _STEM_RE.findall(subject)}):
+        log.info("the article «%s» is not about «%s»", page.title, subject)
+        return None  # an article about something else is no source of the deck
+    return page_digest(page, slides, title if _words(title) <= 8 else None)
+
+
+def page_digest(page: Any, slides: Optional[int], title: Optional[str] = None) -> Optional[Digest]:
+    """The rules' digest of a fetched Wikipedia page (planning/reference.RefPage); None without its text."""
+    if page is None or not getattr(page, "text", ""):
+        return None
+    size = deck_size(slides)
+    d = digest_by_rules(article_document(page.text, page.title, max(3, size - 2)), slides, title_hint=title or page.title)
+    if d is None:
+        return None
+    d.subtitle = f"По статье «{page.title}» из Википедии"
+    d.source = {"title": page.title, "url": page.url}
+    return d
+
+
+def no_source_text(topic: str) -> str:
+    """The honest deck of a topic nobody could write: no model, no article — the cover and what to do."""
+    from verstka.planning.topic_writer import topic_subject
+
+    title = H.cap_first(H.strip_end(topic_subject(topic) or topic))[:120]
+    return (f"Слайд 1. Обложка\nНазвание: {title}\n\n"
+            "Слайд 2. Текст презентации не написан: модель недоступна, статья по теме не найдена\n"
+            "- Модель, которая пишет текст по теме, сейчас не отвечает.\n"
+            "- Статью по теме в Википедии найти не удалось.\n"
+            "- Добавьте свой текст, документ или базу знаний — колода соберётся из них.\n")

@@ -6288,6 +6288,38 @@ def _run_verbatim(brief: Brief, manifest: Optional[TemplateManifest], strategies
     )
 
 
+def _topic_without_writer(brief: Brief, progress: Optional[EventFn]) -> Optional[tuple[Brief, str]]:
+    """A bare topic («Сделай презентацию про озеро Байкал») whose text the writer did not write (no model, the model
+    failed, the writer off): the deck is made of the topic's Wikipedia article by the rules (planning/digest.py) — a
+    slide per section of substance, the topic on the cover, never the request itself and never empty sections; with
+    no article either, an honest deck that says so (jury 20.10, round 2: the cover «Сделай презентацию про озеро
+    Байкал» over five empty sections). None for anything but a bare topic."""
+    from verstka.planning import digest as DG
+    from verstka.planning.writer import writer_mode
+
+    try:
+        wm = writer_mode(brief)
+        if wm.kind != "topic" or wm.private_hint:
+            return None
+        dg = DG.reference_digest(wm.topic, brief.slide_count, lang=wm.language)
+    except Exception:  # noqa: BLE001 - the brief as it is
+        log.warning("topic without the writer failed", exc_info=True)
+        return None
+    if dg is not None:
+        text, size = dg.text(), dg.size
+        note = (f"Аналитик: текст по теме модель не написала — собрал колоду без модели из статьи «{(dg.source or {}).get('title', '')}» "
+                f"Википедии: {ru_count(size, 'слайд', 'слайда', 'слайдов')}, на каждом — предложения статьи с её фактами, заголовок — её вывод.")
+    else:
+        text, size = DG.no_source_text(wm.topic), 2
+        note = "Аналитик: текст по теме не написан — модель недоступна, статья по теме не найдена; колода говорит об этом прямо."
+    if progress is not None:
+        try:
+            progress({"type": "agent", "step": "analyst", "message": note, "slide": None, "variant": None})
+        except Exception:  # noqa: BLE001 - the event is a courtesy
+            pass
+    return brief.model_copy(update={"text": text, "slide_count": brief.slide_count or size}), note
+
+
 def run_agent(
     brief: Brief,
     manifest: Optional[TemplateManifest],
@@ -6314,9 +6346,22 @@ def run_agent(
 
         from verstka.planning import digest as DG
 
-        plan = as_slides(brief.text) if not DG.is_long_document(brief.text) else None
-        # (a letter of more parts than a deck has slides is prose, not a plan: its paragraphs are no slides)
-        if plan is None and DG.is_long_document(brief.text) or (plan is not None and plan.form == "letter" and DG.is_long_document(brief.text, len(plan.items))):
+        prov = kw.get("providers")
+        no_model = kw.get("skills") is None or prov is None or not getattr(prov, "has", lambda _r: False)("llm")
+        # (with a model the writer writes the topic, and falls back to the same rules when the model fails)
+        topic_note = _topic_without_writer(brief, progress) if no_model else None
+        if topic_note is not None:
+            brief, plan_note = topic_note
+        # (without a model a document of its own of a page or more is digested too: no planner reads it — jury 20.10,
+        # round 2: a PDF brief became 3 slides of its first section)
+        plan = as_slides(brief.text) if topic_note is None else None
+        if plan is not None:
+            # the author's plan stays a plan — unless the text is a long document, or a letter of more parts than a deck
+            # has slides (prose, not a plan: its paragraphs are no slides)
+            long_doc = DG.is_long_document(brief.text, len(plan.items) if plan.form == "letter" else 0)
+        else:
+            long_doc = topic_note is None and (DG.is_long_document(brief.text) or (no_model and DG.is_document(brief.text)))
+        if long_doc:
             plan = None
             # a long document (a transcript, a report) is material, not a plan: a deck of 10–15 slides of its meaning
             # (or the person's count), never one slide per paragraph (jury 20.10, R13: 159 slides of raw speech)
