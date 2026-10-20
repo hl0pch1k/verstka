@@ -1561,6 +1561,11 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
         items = items[:capacity]
     else:
         n_items0 = len(items)
+        if n_items0 > len(cells) and not text_only:
+            # two items in one card read as one: the reader counts four scenarios where there are five (VK Education
+            # p26, coordinator 20.10) — the sample whose row cannot hold every item gives way to another one, or the
+            # slide is composed
+            raise SampleRefused(f"в ряду образца {len(cells)} мест на {n_items0} пунктов: пункты слились бы в одной карточке")
         items = _merge_items(items, len(cells))
         if len(items) < n_items0:
             ctx.warnings.append(f"items merged: {n_items0} into {len(items)} cells")

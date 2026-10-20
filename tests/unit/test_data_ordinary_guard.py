@@ -117,3 +117,34 @@ def test_every_card_of_an_icon_row_has_its_icon(analysed):
         boxes = [element_bbox(e) for e in shapes]
         tiles = {round(b[0] / 1e5) for b in boxes if b and 0.3 * H < b[1] < 0.55 * H and 0.1 * H < b[3] < 0.2 * H}
         assert len(tiles) == 4, (pid, sorted(tiles))
+
+
+def test_five_items_on_a_row_of_three_are_five_cards(analysed):
+    """VK Education p26: five scenarios on a sample of three icon cards were four cards, the last two items in one —
+    the row closes its gaps and narrows its cards to hold five; a row that cannot hold them refuses the sample."""
+    from verstka.ingest.workspace import TemplateWorkspace
+    from verstka.rendering.clone import SampleRefused, render_clone
+    from verstka.rendering.deck import DeckBuilder
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.layout import LayoutSlide
+    from verstka.schemas.outline import OutlineSlide, SlideContent, SlideItem
+    from verstka.schemas.template import TemplateManifest
+
+    root, tids = analysed
+    if "education" not in tids:
+        pytest.skip("the VK Education template is not available (VERSTKA_FIXTURES_DIR)")
+    ws = TemplateWorkspace.open(tids["education"], root)
+    m = TemplateManifest.model_validate_json((root / "templates" / tids["education"] / "manifest.json").read_text(encoding="utf-8"))
+    names = ["Напоминание", "Срок", "Эскалация", "Дайджест", "Отчёт", "Поиск", "Архив"]
+    p = next(x for x in m.patterns if x.id == "p26")
+    for n in (5, 7):
+        o = OutlineSlide(id="s", kind=PatternKind.cards, headline="Сценарии", content=SlideContent(items=[SlideItem(title=t, text="Коротко о сценарии") for t in names[:n]]))
+        try:
+            slide, warns = render_clone(DeckBuilder(root / "templates" / tids["education"] / "source.pptx"), LayoutSlide(outline_id="s", mode="clone", pattern_id="p26"), o, p, m, ws, DeckOutline(title="T", slides=[o]))
+        except SampleRefused:
+            assert n == 7  # seven do not fit the row: another sample takes them
+            continue
+        assert not [w for w in warns if "merged" in w], warns
+        texts = [sh.text_frame.text for sh in slide.shapes if sh.has_text_frame]
+        assert all(any(t in x for x in texts) for t in names[:n])
+        assert sum(1 for x in texts if any(x.startswith(t) for t in names[:n])) == n  # one card an item

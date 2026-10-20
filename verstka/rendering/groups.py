@@ -448,6 +448,16 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
                 room_end = min(room_end, max(span_end0, o_start - gap))
         cards = any(_is_card_cell(c, b) for c, b in zip(cells, boxes0))
         n_fit = max(1, int((room_end - starts[0] + gap) // max(0.6 * size0 + gap, 1)))
+        if row and n_needed > max(n_fit, n_orig):
+            # a row of cards that holds every item rather than one card with two of them (VK Education p26: three
+            # icon cards, five scenarios — the fourth and the fifth read as one): the gaps close to half and the cards
+            # narrow to 45 % of the sample's, never under an eighth of the slide (a line still at the readable size;
+            # the renderer refuses the sample when its text would not read)
+            gap2 = max(int(0.5 * gap), int(0.015 * slide_w))
+            min_w = max(0.45 * size0, slide_w / 8)
+            n_fit2 = int((room_end - starts[0] + gap2) // max(min_w + gap2, 1))
+            if n_fit2 > n_fit:
+                n_fit, gap = n_fit2, gap2
         n = max(1, min(n_needed, max(n_fit, n_orig)))
     closing: list[tuple[etree._Element, int]] = []
     if n < n_orig:
