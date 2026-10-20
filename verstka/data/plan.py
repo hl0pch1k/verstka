@@ -27,7 +27,8 @@ from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
 from verstka.data.parse import split_unit
 from verstka.data.profile import profile_table
-from verstka.data.task import FEASIBLE, _infeasible_reason, decide_task, task_scores
+from verstka.data.derive import metric_goals
+from verstka.data.task import FEASIBLE, _infeasible_reason, ask_feasible, decide_task, task_scores
 from verstka.data.verify import numbers_ok, verify
 from verstka.data.viz import find_candidate, rank_options
 from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_signed, fmt_value, phrase, upper_first
@@ -548,7 +549,7 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
         gd = [goal_data(d.table, d.profile, g.phrase, goal=g) if g.subject or g.given else d for d in datas]
         scores = [task_scores(x) for x in gd]
         # величина цели («по прибыли», «по среднему баллу») должна быть в данных — иначе цель не об этом датасете
-        ok = [_metric_ok(g, x) for x in gd]
+        ok = [_metric_ok(g, x) and ask_feasible(g, x) for x in gd]
         named = [k for k, d in enumerate(datas)
                  if ok[k] and scores[k].get(g.task, 0.0) >= FEASIBLE and _file_match(g, d)]
         if named:
@@ -619,7 +620,14 @@ def plan_datasets(tables: Sequence[Table], brief_text: str = "",
         goals = goals_of(brief_text)
     datas = [Data(t, p) for t, p in zip(tables, profs)]
     per = assign_goals(goals, datas)
-    return [_two_period_fastest(plan_dataset(p, t, g, assigned=True), p, t, g) for t, p, g in zip(tables, profs, per)]
+    out = []
+    for t, p, g in zip(tables, profs, per):
+        # вопрос плана, которому отвечает производная мера (конверсия этапов воронки, затраты на клиента): колонка-
+        # отношение добавляется к таблице, цель — к ней (`derive.metric_goals`); `data_of` добавит её снова по `spec`
+        t2, g2, mq = metric_goals(t, list(g))
+        p2 = profile_table(t2) if mq is not None else p
+        out.append(_two_period_fastest(plan_dataset(p2, t2, g2, assigned=True), p2, t2, g2))
+    return out
 
 
 def _two_period_fastest(plan: DatasetPlan, profile: DatasetProfile, table: Table, goals: Sequence[Goal]) -> DatasetPlan:
@@ -993,7 +1001,13 @@ def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:
     # ось значений — по величине («Приём», единицу «чел.» дописывает движок); группа частей из шапки («Форма
     # обучения») — заголовок легенды, а не оси
     title = _series_title(d)
-    if title == "Значение" or any(same_stem(a, b) for a in stems_of(title) for b in stems_of(cv.dim or "")):
+    from verstka.data.units import period_tag
+
+    tags = [period_tag(x.name) for x in g]
+    if all(t is not None and t[2] for t in tags) and len({t[2].lower() for t in tags}) == 1:  # type: ignore[union-attr]
+        # срезы одной величины («Учеников на 30.06 · на 30.09»): ось — сама величина, а не файл
+        title = upper_first(tags[0][2])  # type: ignore[index]
+    elif title == "Значение" or any(same_stem(a, b) for a in stems_of(title) for b in stems_of(cv.dim or "")):
         # «Сегменты.csv» с колонками-годами: «Сегменты» — это категории, а не величина на оси (жюри R25: ошибка
         # аудита «ось названа как категории») — ось называет единица
         title = unit or "Значение"

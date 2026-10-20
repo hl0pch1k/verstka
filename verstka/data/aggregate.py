@@ -413,6 +413,27 @@ class Data:
 
     @cached_property
     def main(self) -> Optional[Measure]:
+        """Главная метрика (`_main_of`); колонка-срез одной величины («Клиентов на 30.06» рядом с «на 30.09», «Время
+        ответа Q2» рядом с «Q3») — последний срез: он «сейчас», прошлый — база сравнения. Срез, названный целью точно
+        (колонка модели, период цели), остаётся."""
+        m = self._main_of
+        if m is None or self.column or self.period or self.ask_periods:
+            return m
+        from verstka.data.units import period_siblings
+
+        ms = [x for x in self.measures if not x.change and not x.mixed]
+        for grp in period_siblings([x.name for x in ms]):
+            if m in [ms[k] for k in grp] and len({(ms[k].unit or "") for k in grp}) == 1:
+                return ms[grp[-1]]
+        if self.ask in ("fastest", "fastest_down") and m is not None and m is not self.total_metric:
+            # «где растём быстрее всего»: величина — та, у которой есть срезы, а не соседняя («Школ»)
+            for grp in period_siblings([x.name for x in ms]):
+                if len({(ms[k].unit or "") for k in grp}) == 1:
+                    return ms[grp[-1]]
+        return m
+
+    @cached_property
+    def _main_of(self) -> Optional[Measure]:
         """Главная метрика: названная целью (больше всего совпавших основ слов); для сравнения — колонка-итог; иначе
         поток денег (выручка, а не цена или минимум); оценка (балл); центральная статистика (медиана, среднее); деньги-
         уровень; не счётчик; первая не-изменение."""

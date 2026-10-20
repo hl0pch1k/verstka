@@ -1081,10 +1081,90 @@ def technical_name(file: Optional[str]) -> bool:
     return bool(s) and bool(_TECH_STEM.match(s))
 
 
+# транслит имени файла обратно в кириллицу: «vyruchka_po_mesyacam» → «выручка по месяцам», «Zayavki» → «Заявки»
+_TR_MULTI = [("shch", "щ"), ("sch", "щ"), ("yo", "ё"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"), ("ch", "ч"),
+             ("sh", "ш"), ("yu", "ю"), ("ya", "я"), ("ye", "е"), ("ia", "ия"), ("iu", "ию")]
+_TR_ONE = {"a": "а", "b": "б", "v": "в", "g": "г", "d": "д", "e": "е", "z": "з", "i": "и", "j": "й", "k": "к",
+           "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "r": "р", "s": "с", "t": "т", "u": "у", "f": "ф",
+           "h": "х", "c": "ц", "y": "ы", "x": "кс", "w": "в", "q": "к"}
+# латинские сокращения — не транслит («CSAT», «NPS», «MRR»)
+_LATIN_ABBR = {"csat", "nps", "mrr", "arr", "sla", "kpi", "crm", "erp", "it", "ml", "ai", "api", "b2b", "b2c", "hr",
+               "seo", "smm", "cac", "ltv", "roi", "gmv", "dau", "mau", "ux", "ui", "ceo", "cfo", "vk", "q1", "q2", "q3",
+               "q4", "paas", "saas", "iaas", "cdn", "gpu", "cpu", "fcr", "aht", "ebitda", "capex", "opex", "sku", "pos"}
+_TR_WORD = re.compile(r"^[a-z]+$")
+_EN_HINT = re.compile(r"(?:th|ee|oo|wh|ck|ph|qu|w|q|x|ing$|tion$|ness$|ment$|ful$|ous$|ly$|ers?$|ed$|ue$|et$|es$)")
+# признаки русского слова транслитом: «ya», «zh», «kh», «iya», согласная + y + согласная («vyr»), «-ty», «-ov», «-ost»
+_RU_HINT = re.compile(r"ya|yu|yo|zh|kh|shch|iy|yy|ykh|ikh|[bcdfgklmnprstvz]y[bcdfgklmnprstvz]|[bcdfgklmnprstvz]y$|"
+                      r"[bcdfgklmnprstvz]ye$|ost$|iya$|nie$|niya$|ami$|akh$|ov$|ev$|ogo$|ego$|ki$|ka$")
+_RU_SHORT = {"v", "s", "k", "i", "po", "na", "za", "ot", "iz", "dlya", "pro", "bez"}
+_CONS = "бвгджзйклмнпрстфхцчшщ"
+
+
+def _tr(lw: str) -> str:
+    r, k = "", 0
+    while k < len(lw):
+        prev_cons = bool(r) and r[-1] in _CONS
+        if lw.startswith("ye", k) and prev_cons:
+            r, k = r + "ые", k + 2
+            continue
+        if lw.startswith("yy", k) and prev_cons:
+            r, k = r + "ый", k + 2
+            continue
+        if lw.startswith("iya", k):
+            r, k = r + "ия", k + 3
+            continue
+        if lw.startswith("iy", k):
+            r, k = r + "ий", k + 2
+            continue
+        if lw.startswith("ost", k) and k + 3 == len(lw) and k > 0:
+            r, k = r + "ость", k + 3  # «stoimost» — «стоимость»: мягкий знак транслит теряет
+            continue
+        for a, b in _TR_MULTI:
+            if lw.startswith(a, k):
+                r, k = r + b, k + len(a)
+                break
+        else:
+            r, k = r + _TR_ONE[lw[k]], k + 1
+    return re.sub(r"(?<=[аеёиоуыэюя])ы(?=$|[^аеёиоуыэюя])", "й", r)
+
+
+def detranslit(name: str) -> Optional[str]:
+    """Имя файла транслитом («vyruchka_po_mesyacam», «Klienty_po_otraslyam», «Zayavki») — по-русски («Выручка по
+    месяцам»); английское или служебное имя («sales_2025», «data1», «revenue») — None. Сокращения и английские слова
+    среди русских («workspace_prodazhi_q3») остаются латиницей: «Workspace продажи Q3»."""
+    words = [w for w in re.split(r"[_\-\s.]+|(?<=[a-zA-Z]{3})(?=\d)|(?<=\d)(?=[a-zA-Z]{3})", (name or "").strip()) if w]
+    if not words:
+        return None
+    lows = [w.lower() for w in words]
+    latin = [w for w in lows if _TR_WORD.match(w) and w not in _LATIN_ABBR]
+    ru = [w for w in latin if len(w) >= 3 and (_RU_HINT.search(w) or (len(w) >= 5 and re.search(r"[bcdfgklmnprstvz]i$", w)))
+          and not _EN_HINT.search(w)]
+    en = [w for w in latin if _EN_HINT.search(w) and not _RU_HINT.search(w)]
+    short = [w for w in latin if w in _RU_SHORT]
+    if not ((ru and len(ru) >= len(en)) or (short and not en and len(latin) >= 3)):
+        return None
+    out = []
+    for w, lw in zip(words, lows):
+        if lw in _LATIN_ABBR:
+            out.append(w.upper() if lw not in ("paas", "saas", "iaas") else ("PaaS" if lw == "paas" else w))
+        elif not _TR_WORD.match(lw):
+            out.append(w)
+        elif _EN_HINT.search(lw) and not _RU_HINT.search(lw):
+            out.append(w)  # английское слово среди русских («Workspace»)
+        else:
+            out.append(_tr(lw))
+    return upper_first(" ".join(out))
+
+
 def file_title(file: Optional[str], sheet: Optional[str] = None) -> str:
     """Название датасета по файлу: «Выручка по месяцам.csv» → «Выручка по месяцам» (лист XLSX — через «·»); у служебного
-    имени файла («d06_multisheet.xlsx») с листом — только лист («Выручка»)."""
+    имени файла («d06_multisheet.xlsx») с листом — только лист («Выручка»); имя транслитом («vyruchka_po_mesyacam.csv»)
+    — по-русски («Выручка по месяцам»): транслит подписью не бывает."""
     s = re.sub(r"\.[A-Za-z0-9]+$", "", file or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_\-. ]+", s):
+        ru = detranslit(s)
+        if ru:
+            s = ru
     # номер файла в начале («01 Заказы…», «3_Продажи», «12a Выручка») — не часть названия; год («2025 Выручка») — часть
     s = re.sub(r"^(?:\d{1,3}[a-zа-я]?)[\s._\-–)]+(?=[A-ZА-ЯЁ])", "", s).strip() or s
     if sheet and technical_name(file):

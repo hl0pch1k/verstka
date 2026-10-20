@@ -101,17 +101,100 @@ _FACT = re.compile(r"(?:^|[^а-яёa-z])(?:факт\w*|fact|actual|исполн�
                    r"потрачен\w*|кассов\w*)(?:[^а-яёa-z]|$)", re.I)
 
 
+_MONTH_TAG = ("январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр")
+_MONTH_TAG_RX = (r"(январ\w*|янв\.?|феврал\w*|фев\.?|март\w*|мар\.?|апрел\w*|апр\.?|ма[йя]|июн[ьяе]?|июл[ьяе]?|"
+                 r"август\w*|авг\.?|сентябр\w*|сент?\.?|октябр\w*|окт\.?|ноябр\w*|ноя\.?|декабр\w*|дек\.?)")
+_ROMAN_Q = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "1": 1, "2": 2, "3": 3, "4": 4}
+_YEAR_TAIL = r"(?:\s*[-–,]?\s*((?:19|20)\d\d)(?:\s*г(?:\.|ода?)?)?)?"
+_TAG_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    # «Время ответа Q3», «Клиентов, 3 кв.», «Выручка III квартал 2026», «Q2 2026»
+    ("quarter", re.compile(r"(?:^|[\s(,])(?:q\s?([1-4])|([1-4]|iv|i{1,3})\s*(?:-?(?:й|ый|ий)\s*)?(?:кв\.?|квартал\w*))"
+                           + _YEAR_TAIL + r"\s*\)?$", re.I)),
+    # «Клиентов на 30.06», «Учеников на 30.09.2026», «Остаток к 01.07»
+    ("day", re.compile(r"(?:^|\s)(?:на|к|по\s+состоянию\s+на)\s+(\d{1,2})[./](\d{1,2})(?:[./]((?:19|20)?\d\d))?\s*\)?$",
+                       re.I)),
+    # «Выручка H1», «1-е полугодие 2026»
+    ("half", re.compile(r"(?:^|[\s(,])(?:h([12])|([12])\s*(?:-?е\s*)?полугоди\w*)" + _YEAR_TAIL + r"\s*\)?$", re.I)),
+    # «Продажи, июнь», «MRR сентябрь 2026», «Выручка (янв)»
+    ("month", re.compile(r"(?:^|[\s(,])(?:за\s+)?" + _MONTH_TAG_RX + _YEAR_TAIL + r"\s*\)?$", re.I)),
+    # «Выручка 2026», «Клиентов, 2025 г.»
+    ("year", re.compile(r"(?:^|[\s(,])((?:19|20)\d\d)(?:\s*г(?:\.|од)?)?\s*\)?$", re.I)),
+]
+
+
+def period_tag(name: Optional[str]) -> Optional[tuple[str, tuple[int, int], str]]:
+    """Период в названии колонки — (зернистость, ключ порядка, имя без периода): «Время первого ответа Q3» →
+    («quarter», (0, 3), «Время первого ответа»), «Клиентов на 30.09» → («day», (0, 930), «Клиентов»), «MRR сентябрь
+    2026» → («month», (2026, 9), «MRR»). Колонки одного имени без периода и одной зернистости — срезы одной величины во
+    времени: последний — «сейчас», предыдущий — база сравнения. None — периода в названии нет."""
+    s = " ".join(str(name or "").replace("ё", "е").split())
+    if not s:
+        return None
+    for gran, rx in _TAG_PATTERNS:
+        m = rx.search(s)
+        if not m:
+            continue
+        g = [x for x in m.groups()]
+        if gran == "quarter":
+            q = _ROMAN_Q.get((g[0] or g[1] or "").lower())
+            if q is None:
+                continue
+            key = (int(g[2]) if g[2] else 0, q)
+        elif gran == "day":
+            dd, mm = int(g[0]), int(g[1])
+            if not (1 <= dd <= 31 and 1 <= mm <= 12):
+                continue
+            y = g[2]
+            key = ((int(y) + (2000 if len(y) == 2 else 0)) if y else 0, mm * 100 + dd)
+        elif gran == "half":
+            key = (int(g[2]) if g[2] else 0, int(g[0] or g[1]))
+        elif gran == "month":
+            w = g[0].lower().rstrip(".")
+            k = next((i for i, st in enumerate(_MONTH_TAG) if w.startswith(st) or (len(w) >= 3 and st.startswith(w))),
+                     None)
+            if k is None or (w.startswith("ма") and not re.fullmatch(r"ма[йя]", w)):
+                if not (w.startswith("мар")):
+                    continue
+                k = 2
+            key = (int(g[1]) if g[1] else 0, k + 1)
+        else:
+            key = (int(g[0]), 0)
+        base = s[:m.start()].strip(" ,-–—(:")
+        base = re.sub(r"(?i)\s+(?:на|за|к|в)$", "", base).strip(" ,-–—(:")
+        return gran, key, base
+    return None
+
+
+def period_siblings(names: Sequence[str]) -> list[list[int]]:
+    """Группы колонок-срезов одной величины («Клиентов на 30.06 · Клиентов на 30.09», «Время ответа Q2 · Q3»): номера
+    колонок по порядку периодов (от старого к новому); группа — от двух колонок одного имени без периода и одной
+    зернистости."""
+    groups: dict[tuple[str, str], list[tuple[tuple[int, int], int]]] = {}
+    for j, nm in enumerate(names):
+        t = period_tag(nm)
+        if t is None:
+            continue
+        groups.setdefault((t[0], t[2].lower()), []).append((t[1], j))
+    return [[j for _, j in sorted(v)] for v in groups.values() if len(v) >= 2 and len({k for k, _ in v}) == len(v)]
+
+
 def _period_name(name: str) -> bool:
-    """Колонка названа периодом («2025», «Выручка 2026», «III кв. 2026», «Январь»)."""
-    return bool(re.search(r"(?:^|\D)(?:19|20)\d\d(?:\D|$)", name)) or period_parts(name.strip()) is not None
+    """Колонка названа периодом («2025», «Выручка 2026», «III кв. 2026», «Январь», «Клиентов на 30.09», «Время
+    ответа Q3»)."""
+    return bool(re.search(r"(?:^|\D)(?:19|20)\d\d(?:\D|$)", name)) or period_parts(name.strip()) is not None \
+        or period_tag(name) is not None
 
 
 def _period_key(name: str) -> tuple[int, int]:
-    """Порядок колонок-периодов: год и номер внутри года из названия («Выручка 2026» → (2026, 0))."""
+    """Порядок колонок-периодов: год и номер внутри года из названия («Выручка 2026» → (2026, 0), «Время ответа Q3» →
+    (0, 3))."""
     y = re.search(r"(?:19|20)\d\d", name)
     pp = period_parts(name.strip())
     if pp is not None:
         return pp[1], 0
+    t = period_tag(name)
+    if t is not None:
+        return t[1]
     return (int(y.group(0)) if y else 0), 0
 
 
@@ -219,7 +302,12 @@ PER_ENTITY = re.compile(r"(?:^|[\s(/])(?:в\s+расч[её]те\s+)?на\s+(?:�
                         r"сотрудника|работника|ученика|студента|пациента|клиента|абонента|пользователя|посетител[яь]|"
                         r"читател[яь]|член[аов]*\b|участника|жител[яь]|душу|место\b|мест\b|сеанс\b|магазин\b|точку|"
                         r"смену|койку|голову|семью|квартиру|автомобиль|машину|рейс|заказ\b|чек\b|визит\b)|"
-                        r"(?:^|\s)за\s+(?:один\s+|1\s+)?(?:сеанс|визит|смену|рейс)\b", re.I)
+                        r"(?:^|\s)за\s+(?:один\s+|1\s+)?(?:сеанс|визит|смену|рейс)\b|"
+                        # цена за единицу: «Стоимость за врача в месяц», «Цена за место», «Плата за лицензию»
+                        r"(?:^|\s)за\s+(?:одн(?:ого|у|о)\s+|1\s+)?(?:врача|сотрудника|работника|ученика|студента|"
+                        r"пациента|клиента|абонента|пользователя|посетител[яь]|место\b|лицензию|подписку|штуку|"
+                        r"единицу|человека|кг\b|тонну|литр|км\b|м²|м2)|"
+                        r"(?:^|\s)(?:тариф\w*|абонентск\w*\s+плат\w*)(?:\s|$)|^(?:тариф\w*|абонентская\s+плата)$", re.I)
 
 
 # «Посещений в смену», «Заказов в день» — за единицу времени; «Пробег за месяц» — итог месяца, он складывается
@@ -283,6 +371,43 @@ _FRACTION_NAME = re.compile(r"конверси|(?:^|[^а-яё])дол[яи](?:[^
                             r"(?:[^a-z]|$)|удержани|retention|отток|открываем|кликабельн|вовлечённ|вовлеченн", re.I)
 
 
+_MULT = {"тыс": 1e3, "млн": 1e6, "млрд": 1e9, "трлн": 1e12}
+
+
+def _mult_of(unit: Optional[str]) -> tuple[float, str]:
+    """(множитель, основа): «тыс. ₽» → (1000, «₽»), «млн ₽» → (1e6, «₽»), «₽» → (1, «₽»)."""
+    u = " ".join((unit or "").replace(".", ". ").split())
+    m = re.match(r"(?i)^(тыс|млн|млрд|трлн)\.?\s*(.*)$", u)
+    if m:
+        return _MULT[m.group(1).lower()], m.group(2).strip()
+    return 1.0, u.strip()
+
+
+def _multiplier_twin(d: "Data", c: ColumnProfile, unit: Optional[str]) -> Optional[tuple[float, str]]:
+    """(множитель, единица), к которым привести колонку `c`: у её пары («План» ↔ «Факт», «Бюджет» ↔ «Исполнено» или срез
+    той же величины другого периода) та же основа единицы («₽») и больший множитель («млн» против «тыс.»). None — пары
+    нет или множители равны."""
+    k0, base0 = _mult_of(unit)
+    if not base0 or not unit:
+        return None
+    name = c.name
+    is_plan, is_fact = bool(_PLAN.search(name)), bool(_FACT.search(name))
+    tag = period_tag(name)
+    for o in d.profile.columns:
+        if o.name == name or o.role != "metric" or not o.unit:
+            continue
+        k1, base1 = _mult_of(o.unit)
+        if base1 != base0 or k1 <= k0:
+            continue
+        pair = (is_plan and _FACT.search(o.name)) or (is_fact and _PLAN.search(o.name))
+        if not pair and tag is not None:
+            ot = period_tag(o.name)
+            pair = ot is not None and ot[0] == tag[0] and ot[2].lower() == tag[2].lower()
+        if pair:
+            return k1 / k0, o.unit
+    return None
+
+
 def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     cells = [d.cell(i, j) for i in range(len(d.table.rows))]
     units = set()
@@ -333,6 +458,13 @@ def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     if unit in ("₽", "$", "€") and present and max(abs(v) for v in present) >= 1e9:
         scale = 1e12 if max(abs(v) for v in present) >= 1e12 else 1e9
         unit = f"{'трлн' if scale == 1e12 else 'млрд'} {unit}"
+        vals = [None if v is None else v / scale for v in vals]
+        raw = [None if v is None else v / scale for v in raw]
+    # пара «план — факт» (или срезы одной величины) в разных множителях одной валюты («План, млн ₽» и «Факт, тыс. ₽»):
+    # меньший множитель приводится к большему — 17 400 тыс. ₽ → 17,4 млн ₽; проверка делит ячейку на тот же множитель
+    twin = None if scale != 1.0 else _multiplier_twin(d, c, unit)
+    if twin is not None:
+        scale, unit = twin
         vals = [None if v is None else v / scale for v in vals]
         raw = [None if v is None else v / scale for v in raw]
     # доля в долях единицы (конверсия 0,058, CTR 0.031, отток 0.04) — в процентах: «5,8%», а не «0,058»; проверка

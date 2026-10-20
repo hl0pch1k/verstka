@@ -155,6 +155,37 @@ def _f(fs: FactSet, fid: str) -> Optional[HeadlineFact]:
     return next((f for f in fs.facts if f.id == fid), None)
 
 
+def cols_span(p0: Optional[str], p1: Optional[str]) -> Optional[str]:
+    """Срок между колонками-срезами словами: «Клиентов на 30.06 → на 30.09» — «за квартал», «Время ответа Q2 → Q3» —
+    «за квартал», «Q1 → Q3» — «за 2 квартала», «июнь → сентябрь» — «за 3 месяца». Цифры дат в заголовке читались бы
+    как числа вывода (и проверка их не нашла бы среди фактов). None — срок словами не сказать."""
+    from verstka.data.units import period_tag
+    from verstka.data.words import count_words
+
+    a, b = period_tag(p0), period_tag(p1)
+    if a is None or b is None or a[0] != b[0] or a[2].lower() != b[2].lower():
+        return None
+    (y0, k0), (y1, k1) = a[1], b[1]
+    if a[0] == "day":
+        months = (y1 - y0) * 12 * (1 if y0 and y1 else 0) + (k1 // 100 - k0 // 100)
+        if (k1 % 100) != (k0 % 100) and not ({k0 % 100, k1 % 100} <= {28, 29, 30, 31}):
+            return None
+        n, unit = months, ("месяц", "месяца", "месяцев")
+        if months > 0 and months % 3 == 0:
+            n, unit = months // 3, ("квартал", "квартала", "кварталов")
+    elif a[0] == "quarter":
+        n, unit = (y1 - y0) * 4 * (1 if y0 and y1 else 0) + (k1 - k0), ("квартал", "квартала", "кварталов")
+    elif a[0] == "month":
+        n, unit = (y1 - y0) * 12 * (1 if y0 and y1 else 0) + (k1 - k0), ("месяц", "месяца", "месяцев")
+    elif a[0] == "half":
+        n, unit = (y1 - y0) * 2 * (1 if y0 and y1 else 0) + (k1 - k0), ("полугодие", "полугодия", "полугодий")
+    else:
+        n, unit = y1 - y0, ("год", "года", "лет")
+    if n <= 0:
+        return None
+    return f"за {unit[0]}" if n == 1 else f"за {count_words(n, *unit)}"
+
+
 def _fastest_head(fs: FactSet) -> Optional[str]:
     """Темп по колонкам-периодам: «GPU-инстансы растут быстрее всех: в 3,1 раза — июль → сентябрь», «Сильнее всех
     снижение — Строительство: −20% — 2024 → 2025»."""
@@ -170,6 +201,10 @@ def _fastest_head(fs: FactSet) -> Optional[str]:
         lab, p0, p1, kind = c["fastest_cols"]
         v = f"в {fmt_num(fg.value, 1)} {times_word(fg.value)}" if kind == "times" else fmt_signed(fg.value, "%")
         gpl = "pl" if is_plural_value(lab) else "m"
+        span = cols_span(p0, p1)
+        if span and re.search(r"\d", re.sub(r"(?:19|20)\d\d", "", f"{p0} {p1}")):
+            # срезы с датами и номерами кварталов («на 30.06 → на 30.09»): срок словами, без цифр дат
+            return f"{lab} {verb('grow', gpl, past=False)} быстрее всех: {v} {span}"
         return f"{lab} {verb('grow', gpl, past=False)} быстрее всех: {v} — {lower_first(p0)} → {lower_first(p1)}"
     return None
 
@@ -464,6 +499,8 @@ def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
                 parts.append(f"{name} {verb('grow' if up else 'fall', p0_.gender)} {how} {when}".strip())
                 continue
             parts.append(f"{name if k == 0 else _mid(name)}: {_signed_move(kind, v, unit)} {when}".strip())
+        if c.get("fastest_series") == "fastest" and parts:
+            parts[0] += " — быстрее всех"  # «кто тянет рост»: первый ряд — самый быстрый
         return ", ".join(p_.strip() for p_ in parts), c.get("caption")
     for k, name in enumerate(names[:2]):
         kind, v = c[f"s{k}"]
@@ -479,6 +516,8 @@ def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
             parts.append(f"{_mid(name)} — {how} {w_}".strip())
         else:
             parts.append(f"а {_mid(name)} {verb('grow' if up else 'fall', g)} {how} {w_}".strip())
+    if c.get("fastest_series") == "fastest" and parts:
+        parts[0] += " — быстрее всех"
     return ", ".join(parts), c.get("caption")
 
 

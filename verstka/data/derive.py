@@ -17,7 +17,7 @@ from verstka.data.parse import quantity
 from verstka.data.words import stem, stems_of
 from verstka.schemas.data import Table
 
-__all__ = ["ratio_spec", "apply", "MARK"]
+__all__ = ["ratio_spec", "apply", "MARK", "funnel_columns", "metric_question", "metric_goals"]
 
 MARK = "ratio"
 _SCALE = {"тыс": 1e3, "тыс.": 1e3, "млн": 1e6, "млн.": 1e6, "млрд": 1e9, "млрд.": 1e9, "трлн": 1e12}
@@ -127,6 +127,8 @@ def apply(t: Table, spec: Optional[dict]) -> Table:
         a = _num(r[jn]) if jn < len(r) else None
         b = _num(r[jd]) if jd < len(r) else None
         v = None if a is None or b is None or b <= 0 else a / b * scale
+        if v is not None and spec.get("zero_none") and a == 0:
+            v = None  # бесплатный канал: «0 ₽ на клиента» — не самый дешёвый, а без затрат (сказано отдельно)
         rows.append(list(r) + [None if v is None else round(v, 6)])
     units = list(t.units) + [None] * (len(t.columns) - len(t.units))
     raw = list(t.raw_header) + [""] * (len(t.columns) - len(t.raw_header))
@@ -191,3 +193,221 @@ def merge_label_typos(t: Table) -> tuple[Table, list[str]]:
     if not changed:
         return t, []
     return t.model_copy(update={"rows": rows}), notes
+
+
+
+# ── вопрос плана → производная мера (жюри 5): конверсия этапов воронки и стоимость единицы результата ────────────────
+# «Где теряем?» над колонками «Лиды · Пилоты · Контракты» — конверсия каждого этапа и худший этап сегмента, а не «у кого
+# больше пилотов»; «какой канал самый дешёвый» над «Новых клиентов · Затраты» — затраты на одного клиента (ноль затрат —
+# не «самый дешёвый», а отдельная строка), а не «у кого меньше затрат». Колонка-отношение добавляется к таблице (`apply`),
+# проверка (`verify`) пересчитывает вывод по ней; вопрос отвечает её крайним значением.
+_LOSS_Q = re.compile(r"теря\w*|потер[ия]\w*|узк\w*\s+мест|застрева\w*|отвалива\w*|отсева\w*|"
+                     r"доход(?:ит|ят)\s+до|где\s+(?:провал|просед|буксу)\w*", re.I)
+_COST_Q = re.compile(r"дешев\w*|дешёв\w*|дорог\w*|обходит\w*|окупа\w*|эффективн\w*|стоимост\w*\s+(?:привлечен|клиент|лид)|"
+                     r"(?:^|[^a-z])cac(?:[^a-z]|$)|цен\w*\s+(?:клиента|лида|заявки)|отказаться|в\s+расч[её]те\s+на|"
+                     r"(?:на|за)\s+одного\s+(?:клиента|лида|покупател|пользовател|ученика|участника)", re.I)
+_COST_COL = re.compile(r"затрат|расход|бюджет|стоимост|издерж|потрачен|вложен|инвестиц|маркетинг", re.I)
+_COUNT_COL = re.compile(r"клиент|лид|заяв|покупател|пользовател|подписчик|контракт|сделк|заказ|установ|регистрац|"
+                        r"абонент|ученик|студент|участник|пациент|продаж|конверси|подключен", re.I)
+_PER_NAME = {"клиент": "клиента", "лид": "лид", "заяв": "заявку", "покупател": "покупателя", "пользовател": "пользователя",
+             "подписчик": "подписчика", "контракт": "контракт", "сделк": "сделку", "заказ": "заказ",
+             "установ": "установку", "регистрац": "регистрацию", "абонент": "абонента", "ученик": "ученика",
+             "студент": "студента", "участник": "участника", "пациент": "пациента", "продаж": "продажу",
+             "подключен": "подключение"}
+
+
+def _numeric_cols(t: Table) -> list[int]:
+    body = [r for i, r in enumerate(t.rows) if i not in set(t.totals)]
+    out = []
+    for j in range(len(t.columns)):
+        vals = [_num(r[j]) if j < len(r) else None for r in body]
+        if body and sum(v is not None for v in vals) >= max(2, int(0.8 * len(body))):
+            out.append(j)
+    return out
+
+
+def funnel_columns(t: Table) -> list[int]:
+    """Колонки-этапы воронки по порядку: от двух колонок-счётчиков (без единицы или «шт.», целые, ≥ 0), где в каждой
+    строке каждый следующий этап не больше предыдущего, а хоть где-то меньше («Лиды ≥ Пилоты ≥ Контракты»). Самая
+    длинная такая цепочка соседних колонок; [] — воронки нет."""
+    body = [r for i, r in enumerate(t.rows) if i not in set(t.totals)]
+    if len(body) < 2:
+        return []
+    cand = []
+    for j in _numeric_cols(t):
+        u = (t.units[j] if j < len(t.units) else None) or ""
+        if u and u.strip(". ") not in ("шт", "чел", "ед"):
+            continue
+        vals = [_num(r[j]) if j < len(r) else None for r in body]
+        if all(v is None or (v >= 0 and float(v).is_integer()) for v in vals):
+            cand.append(j)
+    best: list[int] = []
+    k = 0
+    while k < len(cand):
+        run = [cand[k]]
+        for j in cand[k + 1:]:
+            prev = run[-1]
+            ok, strict = True, False
+            for r in body:
+                a = _num(r[prev]) if prev < len(r) else None
+                b = _num(r[j]) if j < len(r) else None
+                if a is None or b is None:
+                    continue
+                if b > a:
+                    ok = False
+                    break
+                strict = strict or b < a
+            if not ok or not strict or j != prev + 1:
+                break
+            run.append(j)
+        if len(run) > len(best):
+            best = run
+        k += 1
+    return best if len(best) >= 2 else []
+
+
+def _stage(name: str) -> str:
+    return re.sub(r"\s*,.*$", "", name).strip()
+
+
+def _conversion_spec(t: Table, a: int, b: int) -> Optional[dict]:
+    spec = ratio_spec(t, t.columns[b], t.columns[a])
+    if spec is None:
+        return None
+    name = f"Конверсия «{_stage(t.columns[a])}» → «{_stage(t.columns[b])}»"
+    return {**spec, "name": name, "unit": "%", "scale": 100.0, "part": True, "funnel": True}
+
+
+def _funnel_pick(t: Table, cols: list[int], words: str = "") -> Optional[tuple[int, int]]:
+    """Этап, где теряют: у какого сегмента конверсия этапа дальше всего ниже конверсии этапа по всем строкам (20% у
+    госсектора при 39% в целом); этап, который называет вопрос («застревает на пилоте»), — первым."""
+    body = [r for i, r in enumerate(t.rows) if i not in set(t.totals)]
+    best = None
+    named = [k for k in range(len(cols) - 1) if any(
+        w and len(w) >= 4 and (w in stem(_stage(t.columns[cols[k]])) or stem(_stage(t.columns[cols[k]])).startswith(w[:5]))
+        for w in stems_of(words))]
+    for k in range(len(cols) - 1):
+        a, b = cols[k], cols[k + 1]
+        pairs = [(_num(r[a]), _num(r[b])) for r in body]
+        pairs = [(x, y) for x, y in pairs if x and y is not None and x > 0]
+        if len(pairs) < 2:
+            continue
+        overall = sum(y for _, y in pairs) / sum(x for x, _ in pairs)
+        worst = min(y / x for x, y in pairs)
+        gap = worst / overall if overall > 0 else 1.0
+        key = (0 if k in named else 1, gap)
+        if best is None or key < best[0]:
+            best = (key, (a, b))
+    return best[1] if best is not None else None
+
+
+def _cost_pair(t: Table) -> Optional[tuple[int, int]]:
+    """(затраты, счёт результата): денежная колонка расходов и колонка-счётчик в одной строке («Затраты, тыс. ₽» и «Новых
+    клиентов»)."""
+    nums = _numeric_cols(t)
+    cost = [j for j in nums if _COST_COL.search(t.columns[j]) and (
+        (t.units[j] if j < len(t.units) else "") or "").strip().endswith(("₽", "$", "€", "руб", "руб."))]
+    cnt = [j for j in nums if j not in cost and _COUNT_COL.search(t.columns[j]) and not (
+        (t.units[j] if j < len(t.units) else "") or "").strip().endswith(("₽", "$", "€", "%"))]
+    if len(cost) != 1 or not cnt:
+        return None
+    return cost[0], cnt[0]
+
+
+def _cost_spec(t: Table, num: int, den: int) -> Optional[dict]:
+    body = [r for i, r in enumerate(t.rows) if i not in set(t.totals)]
+    if any((_num(r[den]) or 0) <= 0 for r in body if den < len(r)):
+        return None
+    spec = ratio_spec(t, t.columns[num], t.columns[den], "")
+    if spec is None or spec.get("part"):
+        return None
+    un = (t.units[num] if num < len(t.units) else None) or ""
+    ud = (t.units[den] if den < len(t.units) else None) or ""
+    if un and (not ud or ud.strip(". ") in ("шт", "чел", "ед")):
+        # затраты в «тыс. ₽» на одного клиента — тоже в «тыс. ₽» (40 тыс. ₽, а не 40 000 ₽): единица числителя
+        spec = {**spec, "scale": 1.0, "unit": un}
+    dn = t.columns[den].lower()
+    per = next((v for k_, v in _PER_NAME.items() if k_ in dn), None)
+    nb = _stage(t.columns[num])
+    name = f"{nb} на одного {per}" if per and per.endswith(("а", "я")) and not per.endswith(("ку", "ю")) else (
+        f"{nb} на {per}" if per else spec["name"])
+    zero = any(_num(r[num]) == 0 for r in body if num < len(r))
+    return {**spec, "name": name[:120], "zero_none": zero}
+
+
+def _per_unit(text: str, t: Table) -> Optional[dict]:
+    """«Выручка на одно место падает?»: величина «на одного X» — колонка-отношение числителя (слово до «на») к колонке
+    X (слово после «на одного»), если обе есть в таблице и такой колонки-отношения ещё нет."""
+    m = re.search(r"([а-яё]{4,})\s+(?:в\s+расч[её]те\s+)?(?:на|за)\s+(?:одн(?:ого|у|о)\s+|1\s+)([а-яё]{3,})", text)
+    if not m:
+        return None
+    a, b = stem(m.group(1)), stem(m.group(2))
+    nums = _numeric_cols(t)
+
+    def hit(w: str) -> list[int]:
+        return [j for j in nums if any(x.startswith(w[:5]) or w.startswith(x[:5]) for x in stems_of(t.columns[j])
+                                       if len(x) >= 3)]
+    na, nb = hit(a), hit(b)
+    if len(na) != 1 or not nb or na[0] in nb:
+        return None
+    spec = ratio_spec(t, t.columns[na[0]], t.columns[nb[0]], text)
+    if spec is None:
+        return None
+    return {"spec": spec, "ask": None, "kind": "per_unit"}
+
+
+def metric_question(phrase: Optional[str], t: Table) -> Optional[dict]:
+    """Производная мера, которой отвечают на вопрос `phrase` (None — вопроса нет: мера по профилю таблицы): {"spec":
+    колонка-отношение, "ask": "min" | "max", "kind": "funnel" | "cost", "note": что сказано про нули}. None — этот
+    вопрос (или таблица) производной меры не требует."""
+    text = " ".join((phrase or "").lower().split())
+    if not text:
+        return None  # мера — только по вопросу: без вопроса таблица отвечает своим обычным выводом
+    cols = funnel_columns(t)
+    if cols and _LOSS_Q.search(text):
+        pick = _funnel_pick(t, cols, text)
+        spec = _conversion_spec(t, *pick) if pick else None
+        if spec is not None:
+            return {"spec": spec, "ask": "min", "kind": "funnel"}
+    per = _per_unit(text, t) if text else None
+    if per is not None:
+        return per
+    pair = _cost_pair(t)
+    if pair is not None and _COST_Q.search(text):
+        spec = _cost_spec(t, *pair)
+        if spec is not None:
+            # «от какого отказаться», «какой дороже всех» — самый дорогой; иначе — самый дешёвый
+            dear = bool(re.search(r"дорож\w*|дороже|отказа\w*|убыточ\w*|неэффективн\w*", text)) and not re.search(
+                r"дешев|дешёв", text)
+            return {"spec": spec, "ask": "max" if dear else "min", "kind": "cost"}
+    return None
+
+
+def metric_goals(table: Table, goals: list, *, default: bool = False) -> tuple[Table, list, Optional[dict]]:
+    """Цели датасета глазами производной меры: цель-вопрос «где теряем», «какой канал дешевле» (или, без целей, сама
+    таблица-воронка и таблица «затраты и результат») — цель, понятая точно: колонка-отношение, вопрос «min»/«max».
+    (таблица с колонкой-отношением, цели, мера) — или исходные, если мера не нужна. Цели модели с колонкой не трогаются."""
+    from verstka.data.goals import Goal
+
+    out = list(goals)
+    for k, g in enumerate(goals):
+        if getattr(g, "given", False) and (g.column or g.derive):
+            continue
+        mq = metric_question(g.phrase, table)
+        if mq is None:
+            continue
+        spec = mq["spec"]
+        task = g.task if mq["kind"] == "per_unit" else "comparison"
+        mg = Goal(phrase=g.phrase, task=task, viz="line" if task == "dynamics" else "bar",
+                  to="линейный график" if task == "dynamics" else "столбцы", subject=list(g.subject), at=g.at,
+                  given=True, column=spec["name"], ask=mq["ask"], derive=spec)
+        # вопрос, которому отвечает мера, — главный у этого датасета: первым (задачу решает первая осуществимая цель)
+        return apply(table, spec), [mg] + [x for i, x in enumerate(out) if i != k], mq
+    if default and not [g for g in goals if not g.unmet]:
+        mq = metric_question(None, table)
+        if mq is not None:
+            spec = mq["spec"]
+            g = Goal(phrase="", task="comparison", viz="bar", to="столбцы", given=True, column=spec["name"],
+                     ask=mq["ask"], derive=spec)
+            return apply(table, spec), [*out, g], mq
+    return table, out, None

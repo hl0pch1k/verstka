@@ -712,7 +712,8 @@ def _dynamics(d: Data) -> FactSet:
         return fs  # цель сравнивает два периода («после замены шин», «к прошлому году»): A против B
     if tv.dim and m is not None and (d.subject or d.categories) and _dynamics_named_cat(d, tv, m, fs):
         return fs  # «правда ли тариф «Базовый» теряет абонентов»: ряд названной категории, а не всех
-    part = _goal_part(d, tv)
+    # «какие сервисы тянут рост — по-моему PaaS быстрее всех»: названная часть — гипотеза, отвечают темпы всех рядов
+    part = _goal_part(d, tv) if d.ask not in ("fastest", "fastest_down") else None
     if part is not None:
         # цель называет одну часть («покажите снижение критичных инцидентов» → ряд «Критичные (P1)»): вывод — о ней
         tv1 = d.time_view(part)
@@ -1597,7 +1598,15 @@ def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
     """Несколько рядов одного рода (Scopus и РИНЦ): у каждого — изменение за весь период; заголовок — оба ряда."""
     pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
     items = []
-    for k, sv in enumerate(tv.series[:3]):
+    series = list(tv.series)
+    if d.ask in ("fastest", "fastest_down") and not tv.from_columns:
+        # «кто тянет рост»: ряды по темпу (последнее значение к первому), первым — самый быстрый
+        def _rate(sv: Any) -> float:
+            ch_ = _series_change(sv.values)
+            return ch_[3] / ch_[2] if ch_ is not None and ch_[2] > 0 else float("-inf")
+        series.sort(key=_rate, reverse=d.ask == "fastest")
+        fs.ctx["fastest_series"] = d.ask
+    for k, sv in enumerate(series[:3]):
         ch = _series_change(sv.values)
         if ch is None:
             continue
@@ -1771,6 +1780,49 @@ def _fastest_cols(d: Data, cv: CatView, real: list[int], fs: FactSet, down: bool
     fs.ctx["caption"] = None
     fs.ctx["fastest_caption"] = (f"{lab}: {fmt_value(a_, u)} ({lower_first(m0.name)}) → {fmt_value(b_, u)} "
                                  f"({lower_first(m1.name)}).")
+    _cols_context(d, cv, real, dj, m0, m1, lab, pf, fs)
+
+
+def _cols_context(d: Data, cv: CatView, real: list[int], dj: int, m0: Measure, m1: Measure, lab: str, pf: dict,
+                  fs: FactSet) -> None:
+    """К лидеру темпа по колонкам-срезам — кто медленнее всех («где буксуем») и итог всех строк: «в целом 9 400 →
+    12 000 (+28%)» (только у величины, которую складывают: ученики, клиенты, выручка — не цена и не время)."""
+    u = m0.unit_text
+    pool = []
+    for k in real:
+        rows = [i for i in d.rows_idx if d.text(i, dj) == cv.labels[k]]
+        if len(rows) != 1:
+            return
+        a_, b_ = m0.values[rows[0]], m1.values[rows[0]]
+        if a_ is not None and b_ is not None and a_ > 0:
+            pool.append((float(b_) / float(a_), cv.labels[k]))
+    extra = []
+    if len(pool) >= 3:
+        r_lo, lo = min(pool)
+        if lo != lab:
+            pct = (r_lo - 1) * 100
+            fs.add("growth_min", round_pct(pct), "min", f"{lo}: {fmt_signed(round_pct(pct), '%')}", "%",
+                   f"{lo}: медленнее всех — {fmt_signed(round_pct(pct), '%')}.",
+                   prov={**pf, "keys": [lo], "down": True, "kind": "pct", "tol": 0.51})
+            fs.ctx.setdefault("labels", []).append(lo)
+            fs.ctx["slowest"] = lo
+            extra.append(f"Медленнее всех — {lo}: {fmt_signed(round_pct(pct), '%')}.")
+    if (m0.additive or m0.stock) and not m0.mixed and m0.nonneg:
+        # итог — по всем строкам файла (и «Прочее» тоже), как его пересчитает проверка; пустая ячейка — итога нет
+        rows = [i for i in d.rows_idx if m0.values[i] is not None and m1.values[i] is not None]
+        ta, tb = sum(float(m0.values[i]) for i in rows), sum(float(m1.values[i]) for i in rows)  # type: ignore[arg-type]
+        if rows and ta > 0 and len(rows) == len(d.rows_idx) and d.total_metric is None:
+            pa = {"op": "colsum", "col": m0.j, "skip": _skip(d), "scale": m0.scale}
+            pb = {"op": "colsum", "col": m1.j, "skip": _skip(d), "scale": m1.scale}
+            pct = (tb / ta - 1) * 100
+            fs.add("cols_total_from", ta, "total", fmt_value(ta, u), u, f"Сумма колонки «{m0.name}».", prov=pa)
+            fs.add("cols_total_to", tb, "total", fmt_value(tb, u), u, f"Сумма колонки «{m1.name}».", prov=pb)
+            fs.add("cols_total_change", round_pct(pct), "change", fmt_signed(round_pct(pct), "%"), "%",
+                   f"Все строки: {fmt_value(ta, u)} → {fmt_value(tb, u)}.",
+                   prov={"op": "change2", "base": pa, "cur": pb, "kind": "pct", "tol": 0.51})
+            extra.insert(0, f"В целом: {fmt_value(ta, u)} → {fmt_value(tb, u)} ({fmt_signed(round_pct(pct), '%')}).")
+    if extra:
+        fs.ctx["fastest_caption"] = " ".join([fs.ctx.get("fastest_caption") or "", *extra]).strip()
 
 
 def _growth_measure(cv: CatView) -> Optional[Measure]:
@@ -1902,6 +1954,8 @@ def _plan_fact(d: Data, cv: CatView) -> FactSet:
     fs.ctx.update(plan_fact=True, unit_short=unit, labels=[lab for lab, _, _ in pairs], plan_word=pw)
     ev = round(ex, 1) if 99 <= ex <= 101 else round_pct(ex)  # около 100% — с десятыми: 100,4% — не «ровно 100»
     ex_p = {"op": "exec", "plan": pl.j, "fact": fa.j, "skip": _skip(d), "scale": fa.scale}
+    if pl.scale != fa.scale:
+        ex_p.update(plan_scale=pl.scale, fact_scale=fa.scale)  # «План, млн ₽» и «Факт, тыс. ₽» — каждая своим множителем
     fs.add("execution", ev, "share", f"Исполнение плана — {fmt_num(ev)}%", "%",
            f"Факт {fmt_value(ftot, unit)} из плана {fmt_value(ptot, unit)}.", prov=ex_p)
     fs.add("fact_total", ftot, "total", f"Факт — {fmt_value(ftot, unit)}", unit, f"Сумма колонки «{fa.name}».",

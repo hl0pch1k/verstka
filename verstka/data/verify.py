@@ -678,8 +678,8 @@ def _compute(t: Table, p: dict) -> tuple[float, list[float]]:
             raise _Fail("база не положительная")
         return _change(a, b, p["kind"]), [a, b]
     if op == "exec":
-        rows = [(raw.text(i, p["by"]) if p.get("by") is not None else str(i), raw.num(i, p["plan"], scale),
-                 raw.num(i, p["fact"], scale)) for i in raw.rows]
+        rows = [(raw.text(i, p["by"]) if p.get("by") is not None else str(i), raw.num(i, p["plan"], p.get("plan_scale", scale)),
+                 raw.num(i, p["fact"], p.get("fact_scale", scale))) for i in raw.rows]
         grp: dict[str, list[float]] = {}
         for k, a, b in rows:
             if a is not None and b is not None and k:

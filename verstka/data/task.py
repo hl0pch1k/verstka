@@ -21,7 +21,7 @@ from verstka.data.words import (
 )
 from verstka.schemas.data import TASK_TITLES, TaskDecision, TaskKind
 
-__all__ = ["task_scores", "decide_task", "covers", "GOAL_BONUS", "FEASIBLE"]
+__all__ = ["task_scores", "decide_task", "covers", "ask_feasible", "GOAL_BONUS", "FEASIBLE"]
 
 GOAL_BONUS = 0.5
 FEASIBLE = 0.25  # ниже — задача для этих данных не годится (цель её не поднимет)
@@ -98,6 +98,18 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
             s["comparison"] = base
     elif not ms and d.dims and any(d.cols[j].distinct < n for j in d.dims):
         s["comparison"] = 0.6 if d.label is None else 0.55  # список с подписью строк — скорее справочник
+
+    # план и факт по категориям — исполнение, а не доли плана; срезы одной величины («на 30.06 · на 30.09», «Q2 · Q3») —
+    # изменение по категориям, а не структура одного среза
+    if cats is not None and not d.mixed_units and ms:
+        from verstka.data.units import period_siblings
+
+        if d.plan_fact is not None:
+            s["comparison"] = max(s["comparison"], 0.93)
+            s["shares"] = min(s["shares"], 0.5)
+        elif d.total_metric is None and period_siblings([x.name for x in ms if not x.change and not x.mixed]):
+            s["comparison"] = max(s["comparison"], 0.9 if not has_time else s["comparison"])
+            s["shares"] = min(s["shares"], 0.5)
 
     # распределение
     if d.freq_table is not None:
@@ -289,6 +301,35 @@ def _directory_answers(d: Data, g: Goal, data_task: TaskKind) -> bool:
     return bool(ent) and any(same_stem(a, b) for a in stems_of(g.phrase or "") for b in ent)
 
 
+# вопросы, у которых свой ответ (темп, худший, итог, порог, план): они точнее общей цели той же задачи
+_SPECIFIC_ASKS = ("fastest", "fastest_down", "worst", "min", "meet", "miss", "total", "mean", "margin")
+
+
+def _goal_weight(g: Goal, d: Data) -> float:
+    """Насколько цель говорит именно об этом датасете и спрашивает своё: «клиенты по отраслям — госсектор выстрелил»
+    (предмет — файл и колонки, вопрос — темп) весомее общей «сравни Q3 с Q2» той же задачи."""
+    from verstka.data.goals import goal_ask, goal_match
+
+    ask = g.ask if g.given else goal_ask(g.phrase)
+    return (1.0 if ask in _SPECIFIC_ASKS or (ask or "").startswith(("above:", "below:")) else 0.0) + \
+        min(goal_match(g, d.profile), 2.0)
+
+
+def ask_feasible(g: Goal, d: Data) -> bool:
+    """Вопрос цели осуществим на этих данных: темп («кто растёт быстрее всех») — только там, где есть ось времени или
+    колонки-срезы одной величины («на 30.06 · на 30.09», «Q2 · Q3»); иначе цель — не об этом датасете."""
+    from verstka.data.goals import goal_ask
+    from verstka.data.units import period_siblings, _period_name
+
+    ask = g.ask if g.given else goal_ask(g.phrase)
+    if ask not in ("fastest", "fastest_down"):
+        return True
+    if d.profile.time_axis is not None:
+        return True
+    names = [m.name for m in d.measures]
+    return bool(period_siblings(names)) or sum(1 for n in names if _period_name(n)) >= 2
+
+
 def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
     """Задача: лучший балл по данным, цель из текста (о датасете, осуществимая) — +0,5."""
     base = task_scores(d)
@@ -303,7 +344,9 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
         if g.unmet:
             notes.append(f"Цель «{g.phrase}» здесь не подходит: {g.unmet}.")
         elif base.get(g.task, 0.0) >= FEASIBLE:
-            if used is None or (base[g.task] > base[used.task] and not (g.given and used.given)):
+            if used is None or (base[g.task] > base[used.task] and not (g.given and used.given)) or (
+                    not g.given and not used.given and base[g.task] == base[used.task]
+                    and _goal_weight(g, d) > _goal_weight(used, d)):
                 # цели, понятые моделью, — по порядку брифа (порог — первым): главная — первая осуществимая, а не та,
                 # чья задача сильнее по данным
                 used = g
