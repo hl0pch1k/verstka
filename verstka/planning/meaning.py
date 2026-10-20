@@ -1739,6 +1739,12 @@ def dictated_lines(o: DeckOutline) -> list[str]:
             lab = re.sub(r"^(?:на|в|до|с|из|около|более|менее|свыше)\s+", "", lab, flags=re.I)
             s.kind = PatternKind.big_number
             s.content.numbers = [NumberCallout(value=v, label=H.cap_first(lab) if lab else head)]
+            # the heading names what is counted, it never repeats the figure's own line («Участники» over «412 ·
+            # Участников из 37 городов»)
+            name = _counted_name(lab)
+            if name:
+                s.section = s.section or head
+                s.headline = name
             said.append(f"slide {s.id}: the author's line «{head[:50]}» — its figure large, not a divider")
         elif dash:
             s.kind = PatternKind.bullets
@@ -1747,9 +1753,33 @@ def dictated_lines(o: DeckOutline) -> list[str]:
             said.append(f"slide {s.id}: the author's line «{head[:50]}» — a statement, not a divider")
         else:
             prev = next((x for x in reversed(o.slides[:o.slides.index(s)]) if x.kind not in _FRAME or x.kind == PatternKind.big_number), None)
-            if prev is None or prev.kind == PatternKind.title:
-                continue
-            prev.content.bullets = [*prev.content.bullets, head + "."]
-            o.slides.remove(s)
-            said.append(f"slide {s.id}: the author's line «{head[:50]}» — a line of the slide before, not a divider")
+            same = prev is not None and prev.kind != PatternKind.title and bool(_stems5(head) & _stems5(_slide_text(prev)))
+            if same:
+                # the same subject as the slide before: one of its lines
+                prev.content.bullets = [*prev.content.bullets, head + "."]
+                o.slides.remove(s)
+                said.append(f"slide {s.id}: the author's line «{head[:50]}» — a line of the slide before (the same subject)")
+            else:
+                # a thought of its own: a short statement in large type, nothing added to it
+                s.kind = PatternKind.quote
+                s.content.quote = head
+                s.section = s.section or head
+                s.headline = ""  # (the statement itself is the slide's large text: never said twice)
+                said.append(f"slide {s.id}: the author's line «{head[:50]}» — a statement of its own, not a divider")
     return said
+
+
+
+def _counted_name(label: str) -> Optional[str]:
+    """What a count counts, as a heading: «участников из 37 городов» → «Участники», «заказов за сентябрь» → «Заказы»;
+    None when the label does not open with a counted noun."""
+    w = (label or "").split()
+    if not w:
+        return None
+    first = w[0].lower()
+    m = re.match(r"^([а-яё]{3,}?)(ов|ей)$", first)
+    if not m:
+        return None
+    base = m.group(1)
+    nom = base + ("и" if re.search(r"[кгхжшчщ]$", base) or m.group(2) == "ей" else "ы")
+    return H.cap_first(nom)

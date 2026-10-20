@@ -642,7 +642,9 @@ def test_a_one_line_point_of_the_author_s_plan_is_content_not_a_divider():
     assert o.slides[0].headline == "Итоги хакатона 2025"
     assert not any(s.kind == K.section for s in o.slides)
     big = next(s for s in o.slides if s.kind == K.big_number)
-    assert big.content.numbers[0].value == "412" and "Лучшие команды и их решения." in big.content.bullets
+    assert big.content.numbers[0].value == "412" and big.headline == "Участники" and not big.content.bullets
+    best = next(s for s in o.slides if s.content.quote)
+    assert best.kind == K.quote and best.content.quote == "Лучшие команды и их решения" and not best.headline
     nxt = o.slides[-1]
     assert nxt.headline == "Что дальше" and nxt.content.paragraphs == ["Акселератор весной."]
     from verstka.planning import faithful as F
