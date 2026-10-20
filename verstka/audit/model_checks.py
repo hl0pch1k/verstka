@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -55,6 +56,43 @@ def _frame_slide(ctx: AuditContext, idx: int) -> bool:
     if osl is None:
         return idx == 1
     return getattr(osl.kind, "value", osl.kind) in _FRAME_KINDS
+
+
+# what the model calls the template's own marks when it takes them for garbage (jury 20.10: the VK Tech logo «tech»
+# called «служебный мусор» — an error that sank a good deck to 62)
+_CHROME_WORDS_RE = re.compile(r"логотип|logo|колонтитул|номер слайда|нумераци|водян|эмблем|фирменн|декоративн|элемент оформления|рамк[аи] шаблона", re.I)
+
+
+def _chrome_texts(ctx: AuditContext) -> dict[int, list[str]]:
+    """Slide → the texts of the template's chrome on it (page number, footer, logo text, marks where the analysis found
+    chrome)."""
+    from verstka.audit.checks.common import is_chrome_like, is_template_chrome
+
+    out: dict[int, list[str]] = {}
+    for s in ctx.ir.slides:
+        for e in s.elements:
+            t = (getattr(e, "text", "") or "").strip()
+            if not t:
+                continue
+            try:
+                chrome = is_template_chrome(e, ctx.manifest) or is_chrome_like(e, ctx.ir, ctx.manifest)
+            except Exception:  # noqa: BLE001 - not known as chrome
+                chrome = False
+            if chrome:
+                out.setdefault(s.index, []).append(t)
+    return out
+
+
+def _about_chrome(evidence: str, chrome: list[str]) -> bool:
+    """The model's «no» speaks of the template's own marks: it names a logo, a footer, a page number — or quotes a text of
+    the slide's chrome («tech»)."""
+    ev = (evidence or "").strip()
+    if not ev:
+        return False
+    if _CHROME_WORDS_RE.search(ev):
+        return True
+    low = ev.lower()
+    return any(len(t) >= 2 and (f"«{t.lower()}»" in low or f'"{t.lower()}"' in low) for t in chrome)
 
 
 def model_check_specs() -> tuple[CheckSpec, ...]:
@@ -118,6 +156,7 @@ def run_model_checks(ctx: AuditContext, skills: SkillsRegistry, providers: Provi
             return s.index, None, str(e)[:160]
 
     figures_checked = bool(getattr(ctx, "figure_stats", None) and (ctx.figure_stats or {}).get("checked"))
+    chrome_texts = _chrome_texts(ctx)
     if use_vlm and providers.has("vlm"):
         with ThreadPoolExecutor(max_workers=min(max_workers, providers.limits.max_concurrency)) as ex:
             for idx, parsed, err in ex.map(slide_task, ctx.ir.slides):
@@ -130,6 +169,8 @@ def run_model_checks(ctx: AuditContext, skills: SkillsRegistry, providers: Provi
                         continue  # a cover, a divider, a closing slide names its topic and carries no content: by design
                     if a.question == 4 and figures_checked:
                         continue  # every figure of the deck was checked against the brief and the data by the rules
+                    if not a.ok and a.question in (7, 8) and _about_chrome(a.evidence, chrome_texts.get(idx, [])):
+                        continue  # the template's logo, page number, footer or ornament: its design, never garbage
                     if not a.ok and a.question in CONTENT_QUESTIONS:
                         sev = QUESTION_SEVERITY.get(a.question, "warn")
                         issues.append(ctx.new_issue(SLIDE_CONTENT, idx, f"{CONTENT_QUESTIONS[a.question]} — нет. {a.evidence}".strip(), severity=sev, details={"question": a.question}))

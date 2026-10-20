@@ -411,3 +411,82 @@ def test_a_figures_caption_is_short_text_never_running_text():
 
     assert _caption_like("Четыре занятия в месяц") and _caption_like("Восемь занятий")
     assert not _caption_like("Средняя месячная выручка на одного клиента")
+
+
+def test_a_picture_asked_alone_keeps_the_slides_table():
+    """«Добавь картинку на слайд 3» asks for a picture only: the slide keeps its table (no redesign into cards), the
+    picture's place is added beside it (jury 20.10, round 3)."""
+    from verstka.planning.slide_edit import ASKED_PICTURE, picture_only, redesign_slide
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, TableData
+
+    t = TableData(columns=["Этап", "Было", "Стало"], rows=[["Обработка обращений", "48 ч", "12 ч"], ["Согласование", "5 дней", "2 дня"]])
+    o = DeckOutline(title="Отчёт", slides=[OutlineSlide(id="c", kind="title", headline="Отчёт"),
+                                          OutlineSlide(id="t", kind="table", headline="Время сделки сократилось вчетверо", content=SlideContent(table=t))])
+    from verstka.planning.brief import parse_brief_text
+
+    brief = parse_brief_text("Слайд 1. Отчёт\n\nСлайд 2. Время сделки сократилось вчетверо\n\n| Этап | Было | Стало |\n|---|---|---|\n"
+                             "| Обработка обращений | 48 ч | 12 ч |\n| Согласование | 5 дней | 2 дня |\n")
+    r = redesign_slide(o, 2, brief, None, request="добавь картинку на слайд 2")
+    s = r.outline.slides[1]
+    assert s.content.table is not None and s.content.table.rows == t.rows and s.kind.value == "table"
+    assert s.content.photo_slot == ASKED_PICTURE and not s.content.items
+    assert picture_only("вставь иллюстрацию сюда") and not picture_only("добавь картинку и сделай таблицей")
+
+
+def test_a_heading_says_as_many_items_as_the_slide_shows():
+    from verstka.audit.autofix import recount
+
+    assert recount("Пять правил работы с данными", 5, 4) == "Четыре правила работы с данными"
+    assert recount("Три главных риска проекта", 3, 2) == "Два главных риска проекта"
+    assert recount("Четыре причины роста", 4, 5) == "Пять причин роста"
+    assert recount("4 шага к запуску", 4, 3) == "3 шага к запуску"
+    assert recount("Из пяти этапов", 5, 4) is None  # another case: not said as a subject
+    assert recount("Три задачи", 3, 2) == "Две задачи"  # «две» for a feminine noun
+
+
+def test_series_of_different_measures_on_one_axis_are_caught_and_split():
+    """Выручка (млн ₽) and клиенты one column chart (R29): chart_mixed_units with a «split_chart» fix — each series its
+    own small chart; «2025» and «2026» or «План» and «Факт» are one measure."""
+    from types import SimpleNamespace
+
+    from verstka.audit.autofix import _edit_plan
+    from verstka.audit.checks.writing import _series_mixed
+    from verstka.schemas.audit import FixAction
+    from verstka.schemas.outline import ChartSpec, DeckOutline, InlineSeries, OutlineSlide, SlideContent
+
+    def slide(names):
+        ch = ChartSpec(type="column", categories=["Q1", "Q2", "Q3"], series=[InlineSeries(name=n, values=[1, 2, 3]) for n in names])
+        return OutlineSlide(id="a", kind="chart", headline="Выручка выросла", content=SlideContent(chart=ch))
+
+    ctx = SimpleNamespace(outline=None)
+    assert _series_mixed(slide(["Выручка, млн ₽", "Клиенты"]), ctx) == [("Выручка, млн ₽", "деньги"), ("Клиенты", "количество")]
+    assert _series_mixed(slide(["2025", "2026"]), ctx) is None and _series_mixed(slide(["План, млн ₽", "Факт, млн ₽"]), ctx) is None
+    o = DeckOutline(title="t", slides=[slide(["Выручка, млн ₽", "Клиенты"])])
+    assert _edit_plan(o, "a", FixAction(action="split_chart")).startswith("split_chart") and o.slides[0].content.chart.split
+
+
+def test_the_content_check_never_calls_the_templates_logo_garbage():
+    from verstka.audit.model_checks import _about_chrome
+
+    assert _about_chrome("В левом нижнем углу виден служебный логотип «tech», который является мусором.", [])
+    assert _about_chrome("Внизу слова «tech» — лишний элемент", ["tech"])
+    assert not _about_chrome("Под таблицей дублируется строка «Результаты по каналам»", ["tech"])
+
+
+def test_formulas_count_as_the_items_a_heading_promises():
+    """«Три линейных правила» over three formulas in one field keeps its heading (R27): no promised_count_mismatch."""
+    from verstka.audit.checks.integrity import promised_count_mismatch
+    from verstka.audit.registry import AuditContext
+    from verstka.schemas.deck_ir import DeckIR, IRSlide
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+
+    f = "Сумма: $(f+g)' = f'+g'$ — …; Произведение: $(fg)' = f'g+fg'$ — …; Частное: $(f/g)' = (f'g-fg')/g^2$ — …"
+    o = DeckOutline(title="t", slides=[OutlineSlide(id="a", kind="bullets", headline="Три правила дифференцирования", content=SlideContent(bullets=["Правила для суммы, произведения и частного."], formula=f))])
+    ir = DeckIR(source="x.pptx", slide_w=12192000, slide_h=6858000, slides=[IRSlide(index=1, elements=[], outline_id="a")])
+    assert promised_count_mismatch(AuditContext(ir=ir, manifest=None, outline=o)) == []
+
+
+def test_a_wide_table_never_goes_into_a_narrow_sample_frame_and_its_caption_never_repeats_the_heading():
+    from verstka.rendering.compose import _same_text
+
+    assert _same_text("Результаты по каналам", "Результаты по каналам.") and not _same_text("Расход по каналам", "Итоги квартала")

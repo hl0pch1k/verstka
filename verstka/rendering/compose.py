@@ -923,6 +923,15 @@ def _emu(pt: float) -> int:
 ALOUD = "строки ушли в заметки: нет места на слайде"  # the warning of lines said aloud (`Composer._lines_to_notes`)
 
 
+def _same_text(a: str, b: str) -> bool:
+    """Two lines that say the same (case, punctuation and spacing aside; one the start of the other)."""
+    import re as _re
+
+    x = _re.sub(r"[^\w]+", " ", (a or "").lower()).strip()
+    y = _re.sub(r"[^\w]+", " ", (b or "").lower()).strip()
+    return bool(x) and bool(y) and (x == y or x.startswith(y) or y.startswith(x))
+
+
 def _caption_like(text: str) -> bool:
     """A figure's label short enough to read as a caption, not as running text: under 25 characters or four words (as
     the audit's `body_below_template` tells body text)."""
@@ -2762,7 +2771,10 @@ class Composer:
             # line between a caption and body text, `body_below_template`) — step down the template's sizes under its
             # body floor to the small size, so the figure still leads them 1.6× when the slide's running text and its
             # conclusion leave the row little height (a 4:3 template, three prices over their plans — 20.10)
-            cands += [x for x in reversed(k.sizes) if k.small - 0.05 <= x < k.text_floor - 0.05]
+            # (never under the template's small size, nor under 2.2 % of the slide's height: 12 pt on a 7.5-inch slide —
+            # a caption read from the back of the room)
+            least = max(k.small, 0.022 * k.H / 12700)
+            cands += [x for x in reversed(k.sizes) if least - 0.05 <= x < k.text_floor - 0.05]
         label_size = None
         for ls in cands:
             if fs < FIG_RATIO * ls - 0.3:
@@ -4709,7 +4721,10 @@ class Composer:
             accent_hex=k.colors.accent, muted_hex=k.colors.muted, ground_hex=k.colors.ground, header_bold=header_bold,
             accent_text_hex=k.colors.accent_text, highlight_col=emphasis_column(table),
         )
-        if table.caption and total_h + k.vgap + _emu(k.small * 2) <= area.h:
+        # (a caption that only repeats the slide's heading — «Результаты по каналам» under «Результаты по каналам» — says
+        # nothing: it is left off; jury 20.10, the third round in a row)
+        cap_same = bool(table.caption) and _same_text(table.caption, self.o.headline or "")
+        if table.caption and not cap_same and total_h + k.vgap + _emu(k.small * 2) <= area.h:
             self.cv.text(Bbox(x=area.x, y=area.y + total_h + int(k.vgap * 0.6), w=width, h=_emu(k.small * 1.6)), [self.P(table.caption, k.small, k.colors.muted)], name="Caption")
         if side:
             x = area.x + sum(widths) + k.gap * 2

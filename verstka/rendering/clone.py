@@ -3204,6 +3204,12 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
                 # (rows that do not fit the sample's frame are the sample's: another one, or the composer's table)
                 raise (SampleRefused if "не помещаются" in err else RuntimeError)(err)
         elif c.table is not None:
+            ncols = max(len(c.table.columns), max((len(r) for r in c.table.rows), default=0))
+            if ncols >= 3 and box.w < 0.45 * ctx.W:
+                # a table of three columns and more in a sample's narrow frame (a third of the slide beside the
+                # template's timeline dots) reads at a caption's size: another sample, or the composer's full-width
+                # table (owner's template, jury 20.10 — the third round in a row)
+                raise SampleRefused(f"таблице из {ncols} колонок нужна ширина от 45% слайда, в образце {box.w / ctx.W:.0%}: образец не подходит")
             before = set(ctx.slide._element.cSld.find(q("p:spTree")))
             comp.table(box, c.table)
             _table_to_width(ctx, before, box)

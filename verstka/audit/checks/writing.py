@@ -34,7 +34,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
-from verstka.audit.checks.common import title_element
+from verstka.audit.checks.common import fix, title_element
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.deck_ir import IRSlide
@@ -98,7 +98,8 @@ CHART_MIXED_UNITS = CheckSpec(
         "Значения одного ряда диаграммы в исходном тексте относятся к разным величинам: после числа стоят разные "
         "единицы или разные предметы счёта («36 энергоблоков» и «в 54 страны» — два столбца одной диаграммы). Число "
         "ищется в тексте слайда в заметках и в исходном тексте, в предложении со словами подписи категории; "
-        "проверяются ряды, у которых единица найдена хотя бы у двух значений."
+        "проверяются ряды, у которых единица найдена хотя бы у двух значений. Ряды одной диаграммы (не разбитой на малые "
+        "диаграммы) с разными величинами по своей единице или названию («Выручка, млн ₽» и «Клиенты») — тоже: у них одна ось."
     ),
 )
 WRITER_FAILED = CheckSpec(
@@ -766,12 +767,63 @@ def value_unit(category: str, value: float, sents: list[str], scale: float = 1.0
     return best[1], best[2]
 
 
+_MONEY_RE = re.compile(r"₽|руб|\$|€|долл|евро", re.I)
+_PCT_RE = re.compile(r"%|п\.\s?п\.|процент", re.I)
+_COUNT_RE = re.compile(r"\bшт\b|штук|\bчел\b|человек|клиент|пользовател|заказ|сотрудник|абонент|покупател|сделк|подписчик|магазин|офис|"
+                       r"точк[аиу]|участник|студент|звонк|обращени|проект|устройств", re.I)
+_TIME_RE = re.compile(r"\bч\b|час|мин\b|минут|\bдн|дней|день|сек", re.I)
+
+
+def _series_kind(name: str, unit: Optional[str]) -> Optional[str]:
+    """What a chart series measures, read off its unit or its name («Выручка, млн ₽» — money, «Клиенты» — a count):
+    None when neither says (a year, «План», «Факт»)."""
+    for text in (unit or "", name or ""):
+        if _MONEY_RE.search(text):
+            return "деньги"
+        if _PCT_RE.search(text):
+            return "доля"
+        if _TIME_RE.search(text):
+            return "время"
+        if _COUNT_RE.search(text):
+            return "количество"
+    return None
+
+
+def _series_mixed(osl: OutlineSlide, ctx: AuditContext) -> Optional[list[tuple[str, str]]]:
+    """The series of one chart (not split into small charts) that measure different things on one value axis: [(series
+    name, what it measures)] — выручка в млн ₽ и клиенты одними столбцами (jury 20.10, R29); None when they agree."""
+    for spec in (osl.content.chart, osl.content.chart2):
+        if spec is None or getattr(spec, "split", False):
+            continue
+        named: list[tuple[str, Optional[str]]] = [(x.name, x.unit or spec.unit) for x in (spec.series or [])]
+        if not named and ctx.outline is not None:
+            for sid in spec.series_ids or []:
+                ser = ctx.outline.series_by_id(sid)
+                if ser is not None:
+                    named.append((ser.name, ser.unit or spec.unit))
+        if len(named) < 2:
+            continue
+        kinds = [(n, _series_kind(n, u)) for n, u in named]
+        known = {k for _, k in kinds if k}
+        if len(known) >= 2:
+            return [(n, k) for n, k in kinds if k]
+    return None
+
+
 @check(CHART_MIXED_UNITS)
 def chart_mixed_units(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
         osl = _outline_slide(ctx, s)
         if osl is None:
+            continue
+        mixed = _series_mixed(osl, ctx)
+        if mixed:
+            chart = next((e for e in s.elements if e.type == "chart"), None)
+            shown = "; ".join(f"«{n[:30]}» — {k}" for n, k in mixed[:4])
+            out.append(ctx.new_issue(CHART_MIXED_UNITS, s.index, f"на одной оси ряды разных величин: {shown}", bboxes=[chart.bbox_frac] if chart is not None else [],
+                                     element_ids=[chart.id] if chart is not None else [], details={"units": {n: k for n, k in mixed}},
+                                     autofix=fix("split_chart", "каждый ряд — своя малая диаграмма со своей единицей", outline_id=s.outline_id)))
             continue
         sents = sentences(osl.notes or "") + (sentences(ctx.brief_text) if ctx.brief_text else [])
         if not sents:

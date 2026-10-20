@@ -520,7 +520,10 @@ def generate_variants(
     hints = [m.group(1) for m in re.finditer(r"\[Место под изображение:\s*([^\]]+)\]", (brief.text if brief is not None else "") or "")]
     hints += [s_.content.photo_hint for s_ in (outline.slides if outline is not None else []) if s_.content is not None and s_.content.photo_hint]
     # (`source_pictures`: the original deck's workspace when it is laid out in another template)
-    src_pictures = source_records(Path(source_pictures) if source_pictures else ws.dir, pic_dir) if any(is_source_hint(h) for h in hints) else []
+    src_pictures = []
+    if any(is_source_hint(h) for h in hints):
+        src_dir = source_folder([h for h in hints if is_source_hint(h)], [Path(source_pictures)] if source_pictures else [], ws.dir, workspace_root)
+        src_pictures = source_records(src_dir, pic_dir) if src_dir is not None else []
     if src_pictures:
         picture_reuse = {name: [*(picture_reuse or {}).get(name, []), *src_pictures] for name in strategies}
     maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, providers if models_on else None, brief, outline, planned)
@@ -946,6 +949,36 @@ def _audit_with_pictures(v: dict, manifest: TemplateManifest, ws: TemplateWorksp
     new.iterations = old.iterations
     new.recompute()
     return new
+
+
+def source_folder(hints: list[str], given: list[Path], own: Path, workspace_root) -> Optional[Path]:
+    """The workspace that keeps the original deck's pictures for «Улучшить готовую» (source_images.json naming these
+    places — each hint carries the deck's code): the one the request named, the template's own, else any template of the
+    workspace whose index names them — a deck improved again from a saved draft, laid out on a copy with picked fonts or a
+    brand, never loses its pictures to grey places (jury 20.10, round 3). None: no index names them."""
+    from verstka.ingest.deck_text import SOURCE_IMAGES
+    from verstka.ingest.workspace import default_workspace_root
+
+    want = {h.strip() for h in hints if h}
+
+    def names(folder: Path) -> bool:
+        try:
+            idx = json.loads((Path(folder) / SOURCE_IMAGES).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return isinstance(idx, dict) and bool(want & {str(k).strip() for k in idx})
+
+    for folder in [*given, own]:
+        if names(folder):
+            return Path(folder)
+    try:
+        root = Path(workspace_root) if workspace_root else default_workspace_root()
+        for idx in sorted((root / "templates").glob(f"*/{SOURCE_IMAGES}"), key=lambda p: p.stat().st_mtime, reverse=True):
+            if names(idx.parent):
+                return idx.parent
+    except OSError:
+        pass
+    return None
 
 
 TABLE_MAX_COLS = 5

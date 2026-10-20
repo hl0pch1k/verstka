@@ -1,5 +1,5 @@
 name: slide_content_audit
-version: 0.2.0
+version: 0.2.1
 role: vlm
 description: Answers the 11 yes/no content-validation questions from the ТЗ for one rendered slide, with evidence.
 prompt_files:
@@ -13,3 +13,4 @@ changelog:
   - "0.1.0: initial version"
   - "0.1.1: the free place for the author's own photo (photo_slot) is not a leftover placeholder"
   - "0.2.0: on by default (jury 20.10): question 3 is one idea, not one sentence of text; question 4 answers yes without a registry (data decks: the data checks verify figures); covers and dividers pass the content questions"
+  - "0.2.1: the template's logo, page number, footer and marks are never garbage (question 7) — jury 20.10, R01 «tech»"

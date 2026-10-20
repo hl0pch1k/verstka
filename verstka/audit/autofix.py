@@ -30,7 +30,8 @@ from verstka.skills_registry.registry import SkillsRegistry
 log = logging.getLogger(__name__)
 
 STRUCTURAL_ACTIONS = ("rematch", "synth")  # need a full re-render of the slide
-RERENDER_ACTIONS = STRUCTURAL_ACTIONS + ("condense_text",)
+OUTLINE_ACTIONS = ("recount", "split_chart")  # an edit of the slide's plan, then its re-render
+RERENDER_ACTIONS = STRUCTURAL_ACTIONS + ("condense_text",) + OUTLINE_ACTIONS
 MIN_FONT_PT = 8.0  # body text below this is unreadable on a projector; footnote sizes of the scale are not shrink targets
 
 
@@ -154,6 +155,87 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optiona
         ps.fit["tried"] = sorted(tried)
         ps.reasons.append(f"автофикс: синтез композиции {ps.composition}")
         return f"synth → {ps.composition}"
+    return "skip"
+
+
+# a count's three forms by its noun («одно правило, два правила, пять правил») and the gender of «два/две»
+_COUNTED: dict[str, tuple[str, str, str, str]] = {
+    "модул": ("модуль", "модуля", "модулей", "m"), "шаг": ("шаг", "шага", "шагов", "m"), "этап": ("этап", "этапа", "этапов", "m"),
+    "причин": ("причина", "причины", "причин", "f"), "принцип": ("принцип", "принципа", "принципов", "m"), "блок": ("блок", "блока", "блоков", "m"),
+    "ступен": ("ступень", "ступени", "ступеней", "f"), "пункт": ("пункт", "пункта", "пунктов", "m"), "урок": ("урок", "урока", "уроков", "m"),
+    "задач": ("задача", "задачи", "задач", "f"), "вопрос": ("вопрос", "вопроса", "вопросов", "m"), "фактор": ("фактор", "фактора", "факторов", "m"),
+    "преимуществ": ("преимущество", "преимущества", "преимуществ", "n"), "риск": ("риск", "риска", "рисков", "m"),
+    "правил": ("правило", "правила", "правил", "n"), "компонент": ("компонент", "компонента", "компонентов", "m"),
+    "раздел": ("раздел", "раздела", "разделов", "m"), "функци": ("функция", "функции", "функций", "f"),
+    "возможност": ("возможность", "возможности", "возможностей", "f"), "сценари": ("сценарий", "сценария", "сценариев", "m"),
+    "инструмент": ("инструмент", "инструмента", "инструментов", "m"), "метрик": ("метрика", "метрики", "метрик", "f"),
+    "критери": ("критерий", "критерия", "критериев", "m"), "вывод": ("вывод", "вывода", "выводов", "m"), "иде": ("идея", "идеи", "идей", "f"),
+    "совет": ("совет", "совета", "советов", "m"), "тренд": ("тренд", "тренда", "трендов", "m"),
+    "направлени": ("направление", "направления", "направлений", "n"), "продукт": ("продукт", "продукта", "продуктов", "m"),
+    "решени": ("решение", "решения", "решений", "n"), "кейс": ("кейс", "кейса", "кейсов", "m"), "трек": ("трек", "трека", "треков", "m"),
+    "рол": ("роль", "роли", "ролей", "f"), "отличи": ("отличие", "отличия", "отличий", "n"), "ошиб": ("ошибка", "ошибки", "ошибок", "f"),
+    "групп": ("группа", "группы", "групп", "f"), "формул": ("формула", "формулы", "формул", "f"), "показател": ("показатель", "показателя", "показателей", "m"),
+}
+_NUM_WORDS = {2: ("два", "две"), 3: ("три", "три"), 4: ("четыре", "четыре"), 5: ("пять", "пять"), 6: ("шесть", "шесть"), 7: ("семь", "семь"),
+              8: ("восемь", "восемь"), 9: ("девять", "девять"), 10: ("десять", "десять")}
+_NOM_NUM = {"два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10}
+
+
+def recount(headline: str, promised: int, shown: int) -> Optional[str]:
+    """The heading with its count said as the slide shows it («Пять правил работы» over four points — «Четыре правила
+    работы»): the number in its nominative form (a word stays a word, digits stay digits) and the counted noun in the
+    form the new number takes; an adjective between them keeps its form (genitive plural reads with any of 2–10).
+    None when the count is not one this can say (another case — «из пяти этапов» —, a noun it does not know)."""
+    import re
+
+    if not 2 <= shown <= 10 or shown == promised:
+        return None
+    rx = re.compile(r"(?<![\w,.])(\d{1,2}|" + "|".join(_NOM_NUM) + r")(\s+(?:[а-яё-]+(?:ых|их|ые|ие)\s+)?)([а-яё]+)", re.I)
+    for m in rx.finditer(headline or ""):
+        num, gap, noun = m.group(1), m.group(2), m.group(3)
+        n0 = int(num) if num.isdigit() else _NOM_NUM.get(num.lower())
+        if n0 != promised:
+            continue
+        before = (headline[: m.start()] or "").rstrip().lower()
+        if re.search(r"(?:^|\s)(?:из|о|об|в|на|для|по|с|со|у|от|до|при|к|ко)$", before):
+            return None  # another case («из пяти этапов»): the count is not said as a subject here
+        stem = next((k for k in sorted(_COUNTED, key=len, reverse=True) if noun.lower().startswith(k)), None)
+        if stem is None:
+            return None
+        one, few, many, gender = _COUNTED[stem]
+        form = few if 2 <= shown <= 4 else many
+        if num.isdigit():
+            new_num = str(shown)
+        else:
+            new_num = _NUM_WORDS[shown][1 if gender == "f" else 0]
+            if num[:1].isupper():
+                new_num = new_num[:1].upper() + new_num[1:]
+        new_noun = form[:1].upper() + form[1:] if noun[:1].isupper() else form
+        return headline[: m.start()] + new_num + gap + new_noun + headline[m.end():]
+    return None
+
+
+def _edit_plan(outline: DeckOutline, oid: str, act: FixAction) -> str:
+    """The plan edits of a remark: «recount» — the heading says as many items as the slide shows; «split_chart» — a
+    chart whose series measure different things becomes small charts, each with its own unit. Returns what was done,
+    «skip» when nothing could be."""
+    osl = next((s for s in outline.slides if s.id == oid), None)
+    if osl is None:
+        return "skip"
+    if act.action == "recount":
+        new = recount(osl.headline or "", int(act.params.get("promised") or 0), int(act.params.get("shown") or 0))
+        if not new or new == osl.headline:
+            return "skip"
+        was = osl.headline
+        osl.headline = new
+        return f"recount: «{was}» → «{new}»"
+    if act.action == "split_chart":
+        done = False
+        for spec in (osl.content.chart, osl.content.chart2):
+            if spec is not None and not spec.split and (len(spec.series) >= 2 or len(spec.series_ids) >= 2):
+                spec.split = True
+                done = True
+        return "split_chart: each series its own small chart" if done else "skip"
     return "skip"
 
 
@@ -652,6 +734,10 @@ def autofix_loop(
                         need_render = need_render or res != "skip"
                         if res != "skip":
                             moved[oid] = res
+                    elif act.action in OUTLINE_ACTIONS:
+                        res = _edit_plan(outline, oid, act)
+                        applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
+                        need_render = need_render or res != "skip"
                     elif act.action == "condense_text":
                         if oid in relaid:
                             continue  # the slide is laid out again this pass already

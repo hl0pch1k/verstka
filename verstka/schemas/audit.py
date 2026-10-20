@@ -10,7 +10,7 @@ from verstka.schemas.common import BboxFrac
 
 Severity = Literal["error", "warn", "info"]
 IssueKind = Literal["deterministic", "model"]
-FixKind = Literal["rematch", "synth", "shrink_text", "condense_text", "recolor", "refont", "move_inside", "drop_element", "none"]
+FixKind = Literal["rematch", "synth", "shrink_text", "condense_text", "recolor", "refont", "move_inside", "drop_element", "recount", "split_chart", "none"]
 
 
 class FixAction(BaseModel):

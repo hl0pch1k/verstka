@@ -498,12 +498,19 @@ def promised_count_mismatch(ctx: AuditContext) -> list[Issue]:
             continue
         c = osl.content
         counts = [len(x) for x in (c.items, c.bullets, c.numbers, c.columns, c.table.rows if c.table is not None else []) if x]
+        if c.formula:
+            # a field of formulas («Производная суммы: $…$ — …; Производная произведения: $…$ — …») shows one rule per
+            # formula: «Три правила» over three formulas keeps its word (R27, 20.10)
+            n_f = len(re.findall(r"\$[^$]+\$", c.formula)) or len([x for x in re.split(r";\s*(?![^$]*\$)", c.formula) if x.strip()])
+            if n_f:
+                counts.append(n_f)
         if not counts or n in counts:
             continue
         have = max(counts)
         out.append(ctx.new_issue(
             PROMISED_COUNT, s.index, f"Заголовок обещает {n}, а на слайде {have}: «{(osl.headline or '')[:60]}»",
             suggestion="Верните потерянный пункт на слайд или поправьте число в заголовке.", details={"promised": n, "shown": have},
+            autofix=fix("recount", "число в заголовке — сколько пунктов на слайде", outline_id=s.outline_id, promised=n, shown=have),
         ))
     return out
 

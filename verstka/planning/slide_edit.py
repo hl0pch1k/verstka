@@ -89,6 +89,22 @@ def picture_request(request: str) -> bool:
     return bool(_PICTURE_RE.search(request or ""))
 
 
+_PICTURE_ONLY_REST_RE = re.compile(r"\b(?:на|в|во|к|ко|для|этот|этом|эту|этой|текущ\w*|слайд\w*|сюда|туда|тут|здесь|номер|пожалуйста|please|"
+                                   r"одн[уаы]|какую-нибудь|какую|нибудь|картинк\w*|иллюстраци\w*|изображени\w*|рисун\w*|"
+                                   r"подходящ\w*|по\s+теме|тем[еуы]|красив\w*|нов\w*|\d+)\b", re.I)
+
+
+def picture_only(request: str) -> bool:
+    """The request asks for a picture and nothing else («добавь картинку на слайд 3», «вставь иллюстрацию сюда»): the
+    slide keeps its content and its form — a table stays a table — and gets the picture beside it (jury 20.10, round 3:
+    «добавь картинку» turned a table into cards)."""
+    if not picture_request(request):
+        return False
+    rest = re.sub(_PICTURE_RE.pattern + r"\w*", " ", request or "", flags=re.I)
+    rest = _PICTURE_ONLY_REST_RE.sub(" ", rest)
+    return not re.search(r"[а-яёa-z]{2,}", rest, re.I)
+
+
 def shorter_request(request: str) -> bool:
     return bool(_SHORTER_RE.search(request or ""))
 
@@ -766,6 +782,10 @@ def redesign_slide(
     if emphasis is not None:
         new = old.model_copy(deep=True)
         getattr(new.content, emphasis[0]).highlight_index = emphasis[1]
+        how = "rules"
+    elif picture and picture_only(request) and old.kind.value not in FRAME_KINDS:
+        # only a picture asked: the slide's content and form stay as they are (no redesign), the picture goes beside
+        new = old.model_copy(deep=True)
         how = "rules"
     elif agent.models:
         tracker.emit("designer", f"Дизайнер: слайд {index} — {start_line if start_line is not None else '«' + request[:140] + '»'}.", slide=index)
