@@ -48,6 +48,10 @@
    полосы переходит в плиту под ней плавно (тень у конца плиты гаснет шире полосы), без ступеньки и без шва */
 .hp-band{position:absolute;top:0;left:-48px;width:48px;height:812px;overflow:hidden;border-radius:0 40px 40px 0;pointer-events:none;-webkit-mask-image:linear-gradient(to right,transparent,#000 8px);mask-image:linear-gradient(to right,transparent,#000 8px)}
 .hp-bandin{position:absolute;top:0;right:0;height:812px}
+/* в покое (рельс скрыт: ни хода, ни подготовки, помощник закрыт) полосы края нет. Копии мест повторяют классы плит, а
+   `.p2-s4-on` (base.css) ставит копии плиты результата `visibility: visible` — она пробивала скрытый рельс, и поверх листа
+   «Подробнее» (и любого слоя над результатом) справа светился белый край плиты результата шириной 48 px */
+.hp-wrap:not(.hp-v):not(.hp-run):not(.hp-prep) .hp-band{display:none}
 /* тень края колоды на плиту помощника (холст: 24 0 48 −24, rgba(11,18,32,.28)): полоса постоянного размера едет с краем;
    видно = прозрачность полосы × прозрачность фигуры края — открытие: 0 → 1 за 240 мс, фигура 1 → 0 за 160 мс с 340;
    закрытие: фигура 0 → 1 за 160 мс, полоса 1 → 0 за 240 мс с 100 */
