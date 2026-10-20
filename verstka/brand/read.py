@@ -5,7 +5,8 @@
 - `.json` → токены (W3C, Tokens Studio, Style Dictionary, плоский, переменные Figma), см. `tokens.py`;
 - `.pdf` → гайдлайн по тексту, с `use_vlm` — ещё и моделью по картинкам страниц, см. `pdf.py`;
 - `.pptx` / `.potx`, `.svg` / `.png` / `.jpg` — как папка из одного файла (тема презентации, логотип);
-- `.fig` и прочее — понятная ошибка.
+- `.fig` (локальная копия Figma) → `fig.py`: переменные, стили, сетка, логотипы прямо из файла, без Figma и токена;
+- прочее — понятная ошибка.
 
 Ошибки — `BrandReadError` с текстом для человека. `on_step(что, итог)` получает шаги разбора для интерфейса
 («открыт файл: 12 страниц», «палитра: 6 цветов», «шрифты: VK Sans Display, VK Sans Text», «логотипы: 4», «правила: 13»)."""
@@ -17,13 +18,14 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from verstka.brand.common import STEP_KEYS, BrandReadError, StepReporter, step_partials, step_texts
-from verstka.brand.figma import FIG_FILE, normalize_url, read_figma_url
+from verstka.brand.fig import read_fig
+from verstka.brand.figma import normalize_url, read_figma_url
 from verstka.brand.folder import read_collection, read_folder, read_zip
 from verstka.brand.pdf import read_pdf
 from verstka.brand.tokens import read_tokens
 from verstka.schemas.brand import BrandSpec
 
-SUPPORTED = ".json, .pdf, .zip, .pptx, .potx, .svg, .png, .jpg, папка или ссылка на Figma"
+SUPPORTED = ".json, .pdf, .zip, .fig, .pptx, .potx, .svg, .png, .jpg, папка или ссылка на Figma"
 NO_LOGO_FILES = "Файлов логотипа в брендбуке нет — логотип останется из шаблона, а где его нет, логотипа не будет."
 _IMAGE_EXT = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 _SINGLE_FILE_EXT = {".pptx", ".potx", ".pptm"} | _IMAGE_EXT
@@ -75,14 +77,14 @@ def read_brandbook(source: Path | str, *, providers: Any = None, skills: Any = N
             spec = read_folder(path, on_progress=progress, **kw)
         else:
             ext = path.suffix.lower()
-            if ext == ".fig":
-                raise BrandReadError(FIG_FILE)
             if path.stat().st_size == 0:
                 raise BrandReadError(f"Файл «{path.name}» пустой.")
             if ext == ".json":
                 spec = read_tokens(path)
             elif ext == ".pdf":
                 spec = read_pdf(path, on_step=rep, **kw)
+            elif ext == ".fig":
+                spec = read_fig(path, assets_dir=assets_dir, on_progress=progress)
             elif ext == ".zip":
                 spec = read_zip(path, on_progress=progress, **kw)
             elif ext in _SINGLE_FILE_EXT:

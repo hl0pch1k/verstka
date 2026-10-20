@@ -301,10 +301,12 @@ export const brandTight = (wrap: number): boolean => (wrap > 0 ? wrap : 1392) - 
 export type BrandSource = "pdf" | "json" | "dir" | "figma";
 /** Что выбирают в меню «Брендбук»: файл (PDF, токены, архив), папку целиком или ссылку Figma. */
 export type BrandPick = "pdf" | "json" | "dir" | "zip" | "figma";
-export const BRAND_ACCEPT: Record<"pdf" | "json" | "zip", string> = {
+export const BRAND_ACCEPT: Record<"pdf" | "json" | "zip" | "fig", string> = {
   pdf: ".pdf,application/pdf",
   json: ".json,application/json",
   zip: ".zip,application/zip",
+  // локальная копия Figma (Файл → Сохранить локальную копию): сервер читает её сам, без токена (brand/fig.py)
+  fig: ".fig",
 };
 /** Пункты меню «Брендбук» (V2 `bbItems`; «Папка или архив» — двумя пунктами: окно выбора папки и файла разное);
  *  пример — отдельной строкой под чертой. */

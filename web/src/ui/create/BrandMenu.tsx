@@ -116,6 +116,14 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
     setMenu(false);
     el.click();
   };
+  // файл .fig из той же панели, что и ссылка Figma
+  const pickFig = () => {
+    const el = input.current;
+    if (!el) return;
+    el.accept = BRAND_ACCEPT.fig;
+    setMenu(false);
+    el.click();
+  };
   const sample = () => {
     setMenu(false);
     btn.current?.focus({ preventScroll: true });
@@ -181,9 +189,10 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
             <label className="tx-mcap" htmlFor="bb-figma">Ссылка на файл Figma</label>
             <input id="bb-figma" className={cls("bb-figin", linkBad && "bb-figbad")} type="url" inputMode="url" placeholder="https://www.figma.com/design/…"
               value={link} onChange={(e) => { setLink(e.target.value); setLinkBad(false); }} aria-invalid={linkBad || undefined} aria-describedby="bb-fighint" />
-            <p id="bb-fighint" className={cls("bb-fighint", linkBad && "bb-figbadt")} aria-live="polite">{linkBad ? "Это не ссылка на файл Figma" : "Стили и переменные файла — по ключу сервера"}</p>
+            <p id="bb-fighint" className={cls("bb-fighint", linkBad && "bb-figbadt")} aria-live="polite">{linkBad ? "Это не ссылка на файл Figma" : "Стили и переменные файла — по ключу сервера; без ключа — файл .fig"}</p>
             <div className="bb-figrow">
               <button type="button" className="p2-gb" onClick={() => setFigma(false)}>Назад</button>
+              <button type="button" className="p2-gb" onClick={pickFig} title="Файл → Сохранить локальную копию в Figma">Файл .fig</button>
               <button type="submit" className="p2-ob" style={{ height: 40 }} disabled={!link.trim()}>Разобрать</button>
             </div>
           </form>

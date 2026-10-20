@@ -118,7 +118,7 @@ _MAX_GENERATION_DATASETS = 30  # наборов в одной сборке
 _MAX_BRAND_FOLDER_FILES = 300  # файлов в папке брендбука
 _MAX_ZIP_ENTRIES = 1000
 _MAX_ZIP_UNPACKED = 200 * 1024 * 1024
-_BRAND_EXTS = {".json", ".pdf", ".zip", ".pptx", ".potx", ".pptm", ".svg", ".png", ".jpg", ".jpeg", ".webp"}
+_BRAND_EXTS = {".json", ".pdf", ".zip", ".fig", ".pptx", ".potx", ".pptm", ".svg", ".png", ".jpg", ".jpeg", ".webp"}
 # брендбук, чей разбор прервал перезапуск сервера (.parsing без brand.json), убирается при запуске, если он старше этого:
 # разбор с моделью идёт до 150 с, а рабочую папку может делить ещё один сервер со своим разбором
 _BRAND_SWEEP_AGE = 600.0
@@ -2015,7 +2015,7 @@ def folder_path(raw: Optional[str]) -> Optional[PurePosixPath]:
 
 def _brandbook_source(bdir: Path, file: Optional[UploadFile], files: list[UploadFile], figma_url: Optional[str]) -> Path | str:
     """Save the upload under brandbooks/<id>/source/ (or check the Figma link): what read_brandbook reads."""
-    from verstka.brand.figma import FIG_FILE, normalize_url
+    from verstka.brand.figma import normalize_url
     from verstka.brand.read import SUPPORTED
 
     limit = max_brandbook_bytes()
@@ -2029,8 +2029,6 @@ def _brandbook_source(bdir: Path, file: Optional[UploadFile], files: list[Upload
     if file is not None:
         name = safe_file_name(file.filename, "брендбук")
         ext = _ext_of(name)
-        if ext == ".fig":
-            raise HTTPException(400, FIG_FILE)
         if ext not in _BRAND_EXTS:
             raise HTTPException(400, f"Формат «{ext or name}» для брендбука не подходит. Подойдут: {SUPPORTED}.")
         path = src / name
@@ -2041,6 +2039,11 @@ def _brandbook_source(bdir: Path, file: Optional[UploadFile], files: list[Upload
             raise HTTPException(400, f"Файл «{name}» пустой — выберите брендбук ещё раз")
         if ext == ".zip":
             _check_zip(path, name)
+        if ext == ".fig":
+            with open(path, "rb") as fh:
+                head = fh.read(4)
+            if head[:2] != b"PK" and head != b"fig-":
+                raise HTTPException(400, f"«{name}» не похож на файл Figma — сохраните его в Figma заново (Файл → Сохранить локальную копию) или дайте ссылку на файл")
         return path
     # a folder: each part's name is its path inside the folder («Брендбук VK Cloud/logos/primary.svg»)
     if len(files) > _MAX_BRAND_FOLDER_FILES:

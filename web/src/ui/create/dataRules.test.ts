@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
+  BRAND_ACCEPT, BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
   brandSizeProblem, brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsLayout,
   fmtLabel, foldBrandEvent, goalChips, goalNoteLine, goalsKey, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelShort, panelStatus, parseManifest, runWord, sizeProblem, stillInText, type DataCard,
 } from "./dataRules";
@@ -128,6 +128,8 @@ test("брендбук: откуда, имя файла, ссылка Figma", ()
   const f = (name: string) => new File(["x"], name);
   assert.deepEqual([brandSourceOf(f("a.pdf")), brandSourceOf(f("t.json")), brandSourceOf(f("b.zip")), brandSourceOf([f("x.svg")]), brandSourceOf({ figmaUrl: "https://figma.com/file/abc" })],
     ["pdf", "json", "dir", "dir", "figma"]);
+  assert.equal(brandSourceOf(f("Бренд.fig")), "figma");
+  assert.equal(BRAND_ACCEPT.fig, ".fig");
   assert.equal(brandFileName(f("Брендбук VK Cloud.pdf")), "Брендбук VK Cloud.pdf");
   assert.equal(brandFileName({ figmaUrl: "x" }), "Файл Figma");
   // как у сервера (brand/figma.py): ключ от 10 знаков, без «https://» и в кавычках — тоже ссылка

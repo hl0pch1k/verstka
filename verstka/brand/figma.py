@@ -3,7 +3,7 @@
 По ссылке читаются переменные файла (`/v1/files/:key/variables/local` — цвета, шрифты, поля; доступны на тарифе Enterprise)
 и стили (`/v1/files/:key` → `/v1/files/:key/nodes`: стили заливки — цвета, стили текста — шрифты). Роли — по именам
 («Brand/Primary», «Text/Default», «Heading/H1»). Токен — `FIGMA_TOKEN` в `.env` (Figma → Settings → Security → Personal access
-tokens). Без токена, без доступа, с файлом `.fig` — понятная ошибка `BrandReadError`. Экспорт Tokens Studio читает
+tokens). Без токена и без доступа — понятная ошибка `BrandReadError`; файл `.fig` читает `fig.py` (без токена). Экспорт Tokens Studio читает
 `tokens.py`; сюда приходит экспорт переменных (форма ответа REST или список переменных)."""
 
 from __future__ import annotations
