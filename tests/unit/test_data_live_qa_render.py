@@ -13,6 +13,7 @@ import pytest
 from lxml import etree
 from PIL import Image, ImageDraw
 from pptx import Presentation
+from pptx.enum.text import MSO_ANCHOR
 from pptx.util import Emu
 
 from verstka.rendering.compose import _first_sentence, highlight_runs, label_without_figure
@@ -174,9 +175,19 @@ def test_tall_cards_two_thirds_empty_are_no_place_for_the_content():
         cells.append([tb._element])
     with pytest.raises(RuntimeError, match="почти пустыми"):
         _cards_not_empty(_fake_ctx(slide, W, H), cells)
-    for c in cells:  # a card filled with its text
+    for c in cells:  # seven lines at the top of a tall card over its bare lower half: half empty still (VK Education p8)
         tb = next(sh for sh in slide.shapes if sh._element is c[0])
         tb.text_frame.text = "\n".join(["Каждый модуль заканчивается проектом на реальных данных"] * 7)
+    with pytest.raises(RuntimeError, match="полупустыми"):
+        _cards_not_empty(_fake_ctx(slide, W, H), cells)
+    for c in cells:  # the same lines set in the card's middle read as a filled card
+        tb = next(sh for sh in slide.shapes if sh._element is c[0])
+        tb.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    _cards_not_empty(_fake_ctx(slide, W, H), cells)
+    for c in cells:  # a card filled with its text
+        tb = next(sh for sh in slide.shapes if sh._element is c[0])
+        tb.text_frame.vertical_anchor = MSO_ANCHOR.TOP
+        tb.text_frame.text = "\n".join(["Каждый модуль заканчивается проектом на реальных данных"] * 12)
     _cards_not_empty(_fake_ctx(slide, W, H), cells)
 
 

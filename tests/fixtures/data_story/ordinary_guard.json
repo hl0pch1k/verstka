@@ -1,5 +1,5 @@
 {
- "_note": "Ordinary (non-data) decks before the data stage's rendering rules (reviewer's shim run over the pre-09946b7 clone/synth/compose/charts/outline): kind, mode, pattern, composition per slide. Updated 2026-10-17 (live QA): key figures are never set in a card's small heading slot (VK Education p26–p28, WorkSpace p6) — those stat_row slides are composed, and the deck's variety gives their samples to other slides. Updated 2026-10-20 (bae9544): a list laid one line a card into a sample's tall cards is refused when the cards stay near empty, as item cards are (VK Tech «Риски») — VK Education p7 (three pale cards, text in 23% of their height) and WorkSpace p6 (three dark cards, small blue text at the top) give way to the icon row p26/p27 and a composed list; the deck's variety moves Education's process and cards samples (p22/p27, p26→p8) accordingly.",
+ "_note": "Ordinary (non-data) decks before the data stage's rendering rules (reviewer's shim run over the pre-09946b7 clone/synth/compose/charts/outline): kind, mode, pattern, composition per slide. Updated 2026-10-17 (live QA): key figures are never set in a card's small heading slot (VK Education p26–p28, WorkSpace p6) — those stat_row slides are composed, and the deck's variety gives their samples to other slides. Updated 2026-10-20 (bae9544): a list laid one line a card into a sample's tall cards is refused when the cards stay near empty, as item cards are (VK Tech «Риски») — VK Education p7 (three pale cards, text in 23% of their height) and WorkSpace p6 (three dark cards, small blue text at the top) give way to the icon row p26/p27 and a composed list; the deck's variety moves Education's process and cards samples (p22/p27, p26→p8) accordingly. Updated 2026-10-20 (2): four cards with a heading and a line at their top over a bare lower half (Education p7/p8, text on average under 40% of the card, at least half of it empty below) are refused as the list's cards are — «Четыре сценария» takes the icon or numbered row (p27/p26/p21); variety moves the neighbours' icon samples (s3, s8, s9). Cards with text set in their middle (Education «Идея проекта») stay.",
  "decks": {
   "workspace/charts": {
    "template_id": "1b8883114486c69d",
@@ -569,7 +569,7 @@
      [
       "cards",
       "clone",
-      "p7",
+      "p27",
       null
      ],
      [
@@ -587,7 +587,7 @@
      [
       "two_column",
       "clone",
-      "p27",
+      "p26",
       null
      ],
      [
@@ -643,7 +643,7 @@
      [
       "cards",
       "clone",
-      "p8",
+      "p26",
       null
      ],
      [
@@ -705,7 +705,7 @@
      [
       "bullets",
       "clone",
-      "p27",
+      "p26",
       null
      ],
      [
@@ -717,7 +717,7 @@
      [
       "cards",
       "clone",
-      "p8",
+      "p21",
       null
      ],
      [
@@ -735,13 +735,13 @@
      [
       "two_column",
       "clone",
-      "p28",
+      "p26",
       null
      ],
      [
       "process",
       "clone",
-      "p27",
+      "p28",
       null
      ],
      [

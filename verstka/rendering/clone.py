@@ -1795,7 +1795,7 @@ def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
         b = element_bbox(e)
         if b and b[2] > 0 and b[3] > 0 and b[2] * b[3] < 0.6 * ctx.W * ctx.H:
             panels.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
-    shares = []
+    shares, gaps = [], []
     for cell in cells:
         els = [e for e in (cell or []) if e.getparent() is not None and not is_nested(e)]
         texts = [element_bbox(e) for e in els if etree.QName(e).localname == "sp" and shape_text(e).strip()]
@@ -1821,8 +1821,16 @@ def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
             return
         top, bottom = min(b.y for b in inks), max(b.y2 for b in inks)
         shares.append((bottom - top) / card.h)
+        gaps.append((card.y2 - bottom) / card.h)
     if shares and len(shares) >= 2 and max(shares) < 0.36:  # (about a third: the ink measure runs a little tall)
         raise SampleRefused(f"карточки образца остались бы почти пустыми: текст занимает {max(shares):.0%} их высоты")
+    mean = sum(shares) / len(shares) if shares else 1.0
+    if len(shares) >= 2 and mean < 0.4 and sum(gaps) / len(gaps) >= 0.5:
+        # one card a little fuller than a third, the others at a third, the text at their top over a bare lower half
+        # (VK Education p8: four pale cards, a heading and a line at the top of each — the same half-empty cards as p7
+        # under a list, coordinator 20.10). Text set in the middle of its card (Education p8 with theses centred) reads
+        # as a filled card and stays
+        raise SampleRefused(f"карточки образца остались бы полупустыми: текст в среднем занимает {mean:.0%} их высоты, под ним пусто")
 
 
 def _top_align_rows(ctx: _SlideCtx, els: list[etree._Element]) -> None:
