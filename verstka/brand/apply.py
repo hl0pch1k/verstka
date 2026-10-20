@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "10"
+APPLY_VERSION = "11"  # 11: подложки шаблона — цветом фона бренда, логотип на подложке
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -211,6 +211,58 @@ def _recolor(root: etree._Element, plan: ColorPlan, counter: Counter, strict: bo
             el.set("val", nv)
             counter[(v, nv)] += 1
             changed = True
+    return changed
+
+
+_SHAPED_RE = re.compile(r"^ppt/(?:slides/slide\d+|slideLayouts/slideLayout\d+|slideMasters/slideMaster\d+)\.xml$")
+GROUND_SHARE = 0.6  # фигура без текста на 60 % слайда и больше — «фон» слайда (карточка-подложка Sunset — 82 %)
+
+
+def ground_shape(el: etree._Element, sw: float, sh: float) -> bool:
+    """Фигура-подложка: не заполнитель, без текста, залита, занимает `GROUND_SHARE` слайда и больше («Sunset»:
+    оранжевая карточка с градиентом во весь слайд почти, лучи поверх неё) — фон шаблона, а не его рисунок."""
+    from verstka.brand.package import shape_box
+
+    if etree.QName(el).localname != "sp" or el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph") is not None:
+        return False
+    if any((t.text or "").strip() for t in el.iter(f"{{{A}}}t")):
+        return False
+    sp = el.find(f"{{{P}}}spPr")
+    if sp is None or (sp.find(f"{{{A}}}solidFill") is None and sp.find(f"{{{A}}}gradFill") is None):
+        return False
+    b = shape_box(el)
+    return bool(b) and b[2] * b[3] >= GROUND_SHARE * sw * sh
+
+
+def _reground(root: etree._Element, plan: ColorPlan, size: tuple, counter: Counter) -> bool:
+    """Подложки шаблона (`ground_shape`) — цветом фона бренда: насыщенный цвет, которого нет в палитре разбора
+    (градиент #FFFF00→#FF8000 «Sunset»), иначе остаётся как был, и синий бренд лежит на оранжевом (жюри 20.10:
+    брендбук главнее шаблона). Только заливка фигуры — не её контур и не картинки; цвета, которые план уже сменил,
+    и нейтральные — как есть."""
+    from verstka.brand.palette import tone
+
+    bg = plan.background_pair
+    if not plan.enabled or bg is None or bg[0] == bg[1]:
+        return False  # фон бренда не принят (полярность, контраст): подложка остаётся своей
+    sw, sh = size
+    tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree")
+    if tree is None:
+        return False
+    changed = False
+    for el in tree:
+        if not ground_shape(el, sw, sh):
+            continue
+        spr = el.find(f"{{{P}}}spPr")
+        for fill in (spr.find(f"{{{A}}}solidFill"), spr.find(f"{{{A}}}gradFill")):
+            if fill is None:
+                continue
+            for c in fill.iter(SRGB):
+                v = (c.get("val") or "").upper()
+                if v == bg[1] or tone(v) not in ("chromatic", "tint"):
+                    continue
+                c.set("val", bg[1])
+                counter[(v, bg[1])] += 1
+                changed = True
     return changed
 
 
@@ -514,6 +566,8 @@ def apply_brand(
             if root is None:
                 continue
             a = _recolor(root, cp, colors, strict=name == "ppt/tableStyles.xml")
+            if _SHAPED_RE.match(name):
+                a = _reground(root, cp, pkg.slide_size(), colors) or a
             swapped: dict = {}
             b = _refont(root, fp, fonts, swapped)
             if swapped and _SLIDE_LIKE_RE.match(name):

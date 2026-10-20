@@ -212,3 +212,10 @@ def test_no_bare_count_as_a_key_figure():
     for s in st.outline.slides:
         for n in s.content.numbers:
             assert n.value.strip() not in ("3", "4", "1"), (s.id, n.value, n.label)
+
+
+def test_why_says_the_target_is_on_the_chart():
+    """«Почему так» (жюри, раунд 2): цель строки — второй ряд графика, а не «одна величина; «Цель SLA» — в таблице»."""
+    p = plan_datasets(_lines(), "")[0]
+    why = " ".join(p.options[p.chosen].reasons)
+    assert "Цель SLA" in why and "одна величина" not in why

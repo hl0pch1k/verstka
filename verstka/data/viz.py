@@ -166,6 +166,12 @@ def _comparison(d: Data) -> list[_Cand]:
     # колонка той же единицы, что не на графике (другая величина: прибыль рядом с выручкой) — названа
     dropped = [x.name for x in d.measures if m is not None and x is not m and not x.change and not x.mixed
                and x not in d.parallel and (x.unit or "") == (m.unit or "") and x is not d.total_metric]
+    rt = d.row_target
+    target = rt[1].name if rt is not None and rt[0] is m and not cv.others else None
+    if target in dropped:
+        # своя цель у каждой строки идёт на график вторым рядом рядом с фактом (`plan._spec_comparison`): сказано так
+        bar.reasons.append(f"Цель строки «{target}» — второй ряд возле факта: видно, кто не уложился в цель.")
+        dropped = [x for x in dropped if x != target]
     dropped_txt = (f"На графике — одна величина; {describe_dropped([f'«{x}»' for x in dropped])} — в таблице."
                    if dropped and not grouped else "")
     if dropped_txt:

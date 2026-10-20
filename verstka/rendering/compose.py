@@ -5094,7 +5094,11 @@ class Composer:
         k = self.kit
         bottom = full.y2 - ((foot_box[0].h + int(k.vgap * 0.8)) if foot_box else 0)
         room = Bbox(x=area.x, y=area.y, w=area.w, h=bottom - area.y)
-        if room.h <= area.h or (need and room.h < need):
+        # (the audit's own tolerance for bars' rows is 0.9 of the least height, `audit/checks/data.chart_rows_dont_fit`: a
+        # frame that short of it keeps the chart — the same data set is never a chart on one template and a table on
+        # another, ТЗ второй ступени)
+        near = 0.9
+        if room.h <= area.h or (need and room.h < near * need):
             return False
         c = self.o.content
         side = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
@@ -5104,10 +5108,12 @@ class Composer:
             self._undo(n0)
             self._notes = (foot_box, None, full)
             a = self._lead_line(room, take) if lead else room
-            if need and a.h < need:
+            if need and a.h < near * need:
                 continue
             with self._lines_under(a, side) as main:
                 err2 = self._chart_block(Bbox(x=main.x, y=main.y, w=main.w, h=main.h), c.chart, prominent=False, center=True)
+            if err2 is not None and err2.startswith("строки диаграммы") and need and main.h >= near * need:
+                err2 = None  # (within the tolerance: the row names stepped down, every row still has its name)
             if err2 is None:
                 if lead:
                     self.warnings.append("the conclusion leads the chart: its rows need the height of the conclusion's strip")

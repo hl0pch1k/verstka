@@ -1067,8 +1067,15 @@ def _ebox(e) -> Box:
     return float(e.bbox.x), float(e.bbox.y), float(e.bbox.w), float(e.bbox.h)
 
 
+GROUND_SHARE = 0.6  # залитая фигура без текста на 60 % слайда и больше — подложка (verstka/brand/apply.ground_shape)
+
+
 def _full(e, sw: float, sh: float) -> bool:
-    return e.bbox.w * e.bbox.h >= 0.85 * sw * sh
+    if e.bbox.w * e.bbox.h >= 0.85 * sw * sh:
+        return True
+    # подложка шаблона: залитая фигура без текста почти во весь слайд — фон, на котором стоит логотип
+    return e.type == "shape" and bool(e.fill_hex) and not any((getattr(p, "text", "") or "").strip() for p in e.paragraphs) \
+        and e.bbox.w * e.bbox.h >= GROUND_SHARE * sw * sh
 
 
 def _cells_under(e, box: Box) -> Optional[Spot]:
@@ -1486,6 +1493,9 @@ def _part_shapes(pkg: Package, part: Optional[str]) -> list[Box]:
                 continue
         if b[2] * b[3] >= 0.85 * sw * sh:
             continue
+        if tag == "sp" and b[2] * b[3] >= GROUND_SHARE * sw * sh and _filled(el) and \
+                not any((t.text or "").strip() for t in el.iter(f"{{{A}}}t")):
+            continue  # подложка во весь слайд почти («Sunset»: карточка на 82 %) — фон под логотипом, а не препятствие
         if b[2] < 1 or b[3] < 1:
             b = _thin(b, 0.004 * sw)
         out.append(b)
