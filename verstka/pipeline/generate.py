@@ -724,6 +724,7 @@ def generate_variants(
     # that got one audited again (the deterministic checks: the picture stands where its place stood)
     if any(v["pictures"] for v in pending):
         report("pictures: putting them in", 0.855)
+    second: dict = {}  # the slides that take rejected pictures' places, chosen once for every variant (planning/pictures.py)
     for v in pending:
         if not v["pictures"]:
             continue
@@ -749,6 +750,8 @@ def generate_variants(
                     applied.changed.extend(k for k in relaid if k not in applied.changed)
                     v["warnings"].append(f"pictures: slides {relaid} laid out again without the picture's place (no picture: {'; '.join(sorted(set(drop.values())))[:160]})")
                     _say_relaid(progress, v["name"], relaid, v["outline"], drop, said_pictures)
+                if maker is not None:
+                    records = _second_chance(v, records, drop, maker, icfg, manifest, ws, brief.text if brief else None, writer_audit, second, progress, said_pictures, applied.changed)
             write_records(v["vdir"], records)
         except Exception as e:  # noqa: BLE001
             log.warning("pictures not put in", exc_info=True)
@@ -947,6 +950,64 @@ def _say_pictures_made(progress: Optional[ProgressFn], name: str, records: list[
         sink({"type": "agent", "step": "compile", "message": text, "slide": r.get("slide"), "variant": name, "share": 0.855})
 
 
+def _second_chance(v: dict, records: list[dict], drop: dict[str, str], maker, icfg: dict, manifest: TemplateManifest, ws: TemplateWorkspace,
+                   brief_text: Optional[str], writer_audit, second: dict, progress: Optional[ProgressFn], said: set, changed: list[int]) -> list[dict]:
+    """The owner's minimum of pictures (1 up to 7 slides, 2 from 8) kept with the strict check of their meaning: when a
+    picture Verstka added was rejected (it missed its slide's meaning) and the variant has fewer than the minimum, its
+    place moves to the most concrete slide still without one (planning/pictures.py second_chance) — at most
+    SECOND_CHANCES slides per generation, the same slides (and pictures) for every variant —, drawn and checked the same
+    way; what still fails goes, and the warnings say plainly which slides' pictures were rejected."""
+    from verstka.images.fill import apply_pictures, merged, plan_pictures
+    from verstka.images.text_check import WHY_MISFIT
+    from verstka.planning.pictures import SECOND_CHANCES, min_pictures, second_chance
+
+    o: DeckOutline = v["outline"]
+    missed = [oid for oid, why in drop.items() if why == WHY_MISFIT]
+    have = sum(1 for r in records if r.get("status") == "generated")
+    need = min_pictures(len(o.slides))
+    if not missed or have >= need:
+        return records
+    tried: set = second.setdefault("tried", set())
+    tried.update(missed)
+    picks: list = second.setdefault("picks", [])  # (spec_ref, position, hint) chosen on the first variant that needed them
+    if not picks and not second.get("chosen"):
+        second["chosen"] = True
+        for k, hint in second_chance(o, tried, min(need - have, SECOND_CHANCES)):
+            picks.append((o.slides[k].spec_ref, k, hint))
+    add: dict[str, str] = {}
+    for ref, k, hint in picks:
+        host = next((s for s in o.slides if ref is not None and s.spec_ref == ref), None) if ref is not None else (o.slides[k] if k < len(o.slides) else None)
+        if host is not None and host.id not in tried and not host.content.photo_slot:
+            add[host.id] = hint
+    if not add:
+        v["warnings"].append(f"pictures: the pictures of slides {[k for k, s in enumerate(o.slides, 1) if s.id in missed]} were rejected by the check of their meaning; no other slide takes them")
+        return records
+    relaid = relay_without_pictures(v, {}, manifest, ws, brief_text, writer_audit, add=add)
+    if not relaid:
+        return records
+    left = (maker.deadline - time.monotonic()) if maker.deadline is not None else 60.0
+    pend = plan_pictures(v["vdir"] / "deck.pptx", v["outline"], maker, slides=set(relaid))
+    got = apply_pictures(v["vdir"] / "deck.pptx", pend, wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
+    records = merged(records, got.records, set(relaid))
+    changed.extend(k for k in relaid if k not in changed)
+    still = free_added_places(got.records, v["outline"])
+    if still:
+        back = relay_without_pictures(v, still, manifest, ws, brief_text, writer_audit)
+        records = [r for r in records if str(r.get("outline_id") or "") not in still]
+        _say_relaid(progress, v["name"], back, v["outline"], still, said)
+    made = [k for k in relaid if any(r.get("slide") == k and r.get("status") == "generated" for r in records)]
+    nums = ", ".join(str(k) for k, s in enumerate(o.slides, 1) if s.id in missed)
+    key = ("second", nums, tuple(made))
+    if key not in said:
+        said.add(key)
+        _event_sink(progress)({"type": "agent", "step": "compile", "variant": v["name"], "share": 0.855,
+                               "message": f"Изображения: картинки к слайдам {nums} отвергнуты проверкой соответствия смыслу — "
+                               + (f"картинка перенесена на слайд {', '.join(map(str, made))}." if made else "другой слайд подходящей картинки не получил.")})
+    v["warnings"].append(f"pictures: the pictures of slides {[k for k, s in enumerate(o.slides, 1) if s.id in missed]} were rejected by the check of their meaning; "
+                         + (f"slides {made} took their place" if made else "no other slide got a fitting picture"))
+    return records
+
+
 def _say_relaid(progress: Optional[ProgressFn], name: str, slides: list[int], outline: DeckOutline, why: dict[str, str], said: set) -> None:
     sink = _event_sink(progress)
     for k in slides:
@@ -1060,7 +1121,8 @@ def free_added_places(records: list[dict], outline: DeckOutline) -> dict[str, st
     return out
 
 
-def relay_without_pictures(v: dict, oids: dict[str, str], manifest: TemplateManifest, ws: TemplateWorkspace, brief_text: Optional[str], writer_audit) -> list[int]:
+def relay_without_pictures(v: dict, oids: dict[str, str], manifest: TemplateManifest, ws: TemplateWorkspace, brief_text: Optional[str], writer_audit,
+                           add: Optional[dict[str, str]] = None) -> list[int]:
     """The slides `oids` (outline id → why) laid out again without their picture's place: matched afresh (another
     sample or the composer — the place no longer asks for a picture slot), rendered in a scratch deck, fixed there by
     the autofix on those slides only, and spliced into the variant's deck — every other slide (its picture too) keeps
@@ -1073,12 +1135,18 @@ def relay_without_pictures(v: dict, oids: dict[str, str], manifest: TemplateMani
     vdir: Path = v["vdir"]
     o = v["outline"].model_copy(deep=True)
     pos = {s.id: k for k, s in enumerate(o.slides, 1)}
-    changed = sorted(pos[oid] for oid in oids if oid in pos)
+    add = add or {}
+    changed = sorted(pos[oid] for oid in {*oids, *add} if oid in pos)
     if not changed:
         return []
+    from verstka.planning.pictures import AUTO_LABEL
+
     for k in changed:
         c = o.slides[k - 1].content
-        c.photo_slot, c.photo_hint, c.photo_own = None, None, False
+        hint = add.get(o.slides[k - 1].id)
+        # `add`: a picture's place moved here from a slide whose picture missed its meaning (planning/pictures.py
+        # second_chance); the others lose theirs
+        c.photo_slot, c.photo_hint, c.photo_own = (AUTO_LABEL, hint, False) if hint else (None, None, False)
     strategy = load_strategies().get(v["name"]) or next(iter(load_strategies().values()))
     others = {k: set(x) for k, x in (v.get("others") or {}).items()}
     fresh = match_outline(o.model_copy(deep=True), manifest, strategy, ws=ws, taken={k: set(x) for k, x in others.items()})
@@ -1115,7 +1183,8 @@ def relay_without_pictures(v: dict, oids: dict[str, str], manifest: TemplateMani
     for j, s in enumerate(render.slides):
         if s.index in changed and s.index in fresh_slides:
             ns = fresh_slides[s.index]
-            ns.warnings = [*ns.warnings, f"laid out again without the picture's place: {oids.get(ns.outline_id, '')}".rstrip(": ")]
+            ns.warnings = [*ns.warnings, (f"laid out again with a picture's place: {add[ns.outline_id][:80]}" if ns.outline_id in add
+                                          else f"laid out again without the picture's place: {oids.get(ns.outline_id, '')}".rstrip(": "))]
             render.slides[j] = ns
     return changed
 

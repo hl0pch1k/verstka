@@ -409,3 +409,46 @@ def pass_picture_on(outline: Any, oslide: Any, hint: str | None) -> Any:
             s.content.photo_own = False
             return s
     return None
+
+
+# the owner's minimum and the strict check together (the coordinator, 20.10): a picture the vision model rejected twice
+# moves to another slide — the one whose meaning is most a thing one can see (an example, an application, a place, a
+# device; for a lecture on the derivative a speedometer for «мгновенная скорость») — at most this many more per deck
+SECOND_CHANCES = 2
+_CONCRETE_HINT_RE = re.compile(r"пример|применени|кейс|на практике|в жизни|скорост|движени|автомобил|машин[аы]\b|поезд|опыт|эксперимент|"
+                               r"измерени|наблюдени|клиент|покупател|пользовател|сотрудник|команд[аы]\b|город|завод|склад|магазин", re.I)
+_ABSTRACT_RE = re.compile(r"определени|формул|правил[оа]\b|правила|теорем|свойств|аксиом|лемм|доказательств|обозначени|термин", re.I)
+
+
+def concreteness(s: Any) -> int:
+    """How much a slide's meaning is a thing one can see: a thing named in its heading (3), in its text (2), an example,
+    an application or people at work (2); a definition, a formula, a rule last (−2)."""
+    head = s.headline or ""
+    text = _slide_text(s)
+    score = 3 if concrete_subject(head) else (2 if concrete_subject(text) else 0)
+    if _CONCRETE_HINT_RE.search(text):
+        score += 2
+    if _ABSTRACT_RE.search(head) or (getattr(s.content, "formula", None) or "").strip():
+        score -= 2
+    return score
+
+
+def second_chance(outline: Any, tried: set[str], want: int) -> list[tuple[int, str]]:
+    """Up to `want` (position, description) pairs for pictures that replace rejected ones: short content slides still
+    without a picture and not tried before, the most concrete first (`concreteness`), never next to a picture; each
+    described as a scene of what the slide says."""
+    slides = list(getattr(outline, "slides", None) or [])
+    taken = {k for k, s in enumerate(slides) if s.content.photo_slot}
+    cands = [(k, s) for k, s in enumerate(slides) if s.id not in tried and k not in taken and _fits_picture(s)]
+    cands.sort(key=lambda ks: (-concreteness(ks[1]), ks[0]))
+    out: list[tuple[int, str]] = []
+    apart = [ks for ks in cands if all(abs(ks[0] - t) > 1 for t in taken)]
+    for k, s in apart + [ks for ks in cands if ks not in apart]:
+        if len(out) >= want:
+            break
+        if any(abs(k - j) <= 1 for j, _ in out):
+            continue
+        head = H.strip_end(s.headline or "")
+        more = _first_words(s, head)
+        out.append((k, _scene_hint(0, f"{head}. {more}" if more else head)))
+    return out

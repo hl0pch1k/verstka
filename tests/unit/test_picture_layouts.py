@@ -517,3 +517,74 @@ def test_text_beside_a_picture_never_shrinks_under_the_body_size():
     with PL.narrow_strip():
         assert PL.picture_strip(s, W, H)[2] == int(PL.STRIP_NARROW * W)
     assert PL.picture_strip(s, W, H)[2] == sw
+
+
+def test_a_rejected_picture_moves_to_the_most_concrete_slide():
+    """The owner's minimum with the strict check (coordinator, 20.10): a picture rejected twice moves to another slide —
+    a thing one can see, an example or an application first (a speedometer for «мгновенная скорость»), a definition or
+    a formula last; never a slide tried before or next to another picture."""
+    from verstka.planning.pictures import concreteness, second_chance
+    from verstka.schemas.common import PatternKind as K
+
+    def sl(i, head, bullets):
+        return OutlineSlide(id=f"s{i}", kind=K.bullets, headline=head, content=SlideContent(bullets=bullets))
+
+    o = DeckOutline(title="Производная", slides=[
+        OutlineSlide(id="t", kind=K.title, headline="Производная"),
+        sl(1, "Определение производной", ["Предел отношения приращений."]),
+        sl(2, "Касательная — предел секущей", ["Секущая стремится к касательной."]),
+        sl(3, "Правила дифференцирования", ["Производная суммы равна сумме производных."]),
+        sl(4, "Пример: мгновенная скорость автомобиля", ["Спидометр показывает производную пути по времени."]),
+        sl(5, "Итоги", ["Производная — скорость изменения."]),
+    ])
+    assert concreteness(o.slides[4]) > concreteness(o.slides[1]) and concreteness(o.slides[3]) < concreteness(o.slides[5])
+    got = second_chance(o, {"s2"}, 1)
+    assert [k for k, _ in got] == [4] and got[0][1].startswith("Сцена по смыслу слайда — Пример: мгновенная скорость автомобиля")
+    o.slides[4].content.photo_slot = "Иллюстрация"
+    assert [k for k, _ in second_chance(o, {"s2"}, 1)] == [1]  # never beside the picture when it can be helped
+
+
+def test_a_build_moves_a_rejected_picture_to_another_slide(tmp_path, monkeypatch):
+    """In a build: the picture of the slide the check rejected goes, its slide is laid out without it, and the most
+    concrete slide still without a picture gets one (drawn and checked the same way) — the deck keeps its minimum."""
+    from pathlib import Path as _P
+
+    import json
+
+    from verstka.images import providers as IP
+    from verstka.images.fill import read_records
+    from verstka.images.service import ImageMaker, Made
+    from verstka.images.text_check import PictureNotFitting
+    from verstka.pipeline.generate import generate_variants
+    from verstka.planning.brief import load_brief
+    from verstka.planning.pictures import AUTO_LABEL
+
+    tried: list = []
+
+    def fake(self, ask, aspect, seed):
+        tried.append(ask.hint)
+        if len(tried) == 1:
+            raise PictureNotFitting("no picture fits the slide (2/10)")
+        self.folder.mkdir(parents=True, exist_ok=True)
+        path = self.folder / f"{ask.key()}-{aspect.replace(':', 'x')}.jpg"
+        Image.new("RGB", (300, 300), (90, 140, 200)).save(path)
+        return Made(key=ask.key(), aspect=aspect, path=str(path), prompt="p", style="illustration", subject_by="model", model="mock", model_label="Mock",
+                    seed=1, palette_match=1.0, seconds=0.0, fits=9)
+
+    monkeypatch.setattr(ImageMaker, "_make", fake)
+    tpl = _P(__file__).resolve().parents[1] / "fixtures" / "tpl_audit" / "templates" / "lo_focus.pptx"
+    p = tmp_path / "brief.md"
+    p.write_text("Слайд 1. Склад в Казани\n\nОбзор склада.\n\nСлайд 2. Итоги квартала\n\nВыручка выросла.\n\nСлайд 3. План\n\nДве смены.\n\n"
+                 "Слайд 4. Новые сканеры у кладовщиков\n\nСканеры ускоряют сборку.\n\nСлайд 5. Риски\n\nСроки поставки.\n\nСлайд 6. Что просим\n\nУтвердить бюджет.\n",
+                 encoding="utf-8")
+    g = generate_variants(tpl, brief=load_brief(p), strategies=["structured"], out_dir=tmp_path / "run", workspace_root=tmp_path / "ws",
+                          use_llm=False, use_vlm=False, audit=True, exports=[], image_provider=IP.ImageChain([IP.MockImages()]))
+    v = g.variants[0]
+    assert len(tried) >= 2 and tried[1] != tried[0]
+    recs = [r for r in read_records(v.out_dir) if r.get("status") == "generated"]
+    assert len(recs) >= 1
+    first = next(s for s in v.outline.slides if s.content.photo_hint == tried[0]) if any(s.content.photo_hint == tried[0] for s in v.outline.slides) else None
+    assert first is None  # the rejected slide lost its place
+    assert any(s.content.photo_slot == AUTO_LABEL for s in v.outline.slides)
+    rm = json.loads((v.out_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert any("rejected by the check of their meaning" in w for w in rm.get("warnings", []))
