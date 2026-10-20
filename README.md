@@ -135,7 +135,7 @@ VK_PROJECT_ID=...
 POLZA_API_KEY=...            # Polza.ai: картинки Z-Image и запасной путь, если VK не отвечает; без ключей VK — все модели
 ```
 
-Ключ Polza — в консоли [polza.ai](https://polza.ai) → «API-ключи» (баланс в рублях: по оценке 3–5 ₽ за три варианта, около 3 ₽ за «Взгляд дизайнера», 1,40 ₽ за картинку). `.env` не попадает в git. Проверка, что модель отвечает:
+Ключ Polza — в консоли [polza.ai](https://polza.ai) → «API-ключи» (баланс в рублях: по замерам 20.10 — 4–11 ₽ за три варианта вместе с проверками моделью и «Взглядом дизайнера», плюс 1,40 ₽ за картинку). `.env` не попадает в git. Проверка, что модель отвечает:
 
 ```bash
 verstka generate -t tests/fixtures/tpl_audit/templates/lo_focus.pptx -b examples/briefs/fitness_studio.md -o out/model_check
