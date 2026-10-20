@@ -216,10 +216,10 @@
 <a id="presentation"></a>
 
 <p align="center">
-  <a href="docs/presentation/verstka-pitch-stage2.pdf"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/pitch-dark.svg"><img src="docs/readme/svg/pitch-light.svg" width="99%" alt="Презентация решения: 20.10, 19 слайдов на шаблоне ЛЦТ — смотреть"></picture></a>
+  <a href="docs/presentation/verstka-pitch.pdf"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/pitch-dark.svg"><img src="docs/readme/svg/pitch-light.svg" width="99%" alt="Презентация решения: 20.10, 19 слайдов на шаблоне ЛЦТ — смотреть"></picture></a>
 </p>
 
-**Презентация решения** — 19 слайдов на шаблоне ЛЦТ: команда, проблема, как работает Verstka, данные и графики, брендбук, правки, качество, планы. [PDF](docs/presentation/verstka-pitch-stage2.pdf) · [PPTX](docs/presentation/verstka-pitch-stage2.pptx)
+**Презентация решения** — 19 слайдов на шаблоне ЛЦТ: команда, проблема, как работает Verstka, данные и графики, брендбук, правки, качество, планы. [PDF](docs/presentation/verstka-pitch.pdf) · [PPTX](docs/presentation/verstka-pitch.pptx)
 
 <br>
 
@@ -500,7 +500,7 @@ cd web && npm test           # интерфейс
   <img src="docs/readme/svg/section-10-docs-light.svg" width="100%" alt="10 · Документация и ограничения">
 </picture>
 
-Подробно: [ARCHITECTURE.md](ARCHITECTURE.md) — устройство · [MODELS.md](MODELS.md) — модели и расход · [AUDIT.md](AUDIT.md) — проверки и тесты · [видео первой ступени](docs/video/README.md) · [питч первой ступени](docs/presentation/verstka-pitch.pdf) · [исходники графики README](docs/readme/source).
+Подробно: [ARCHITECTURE.md](ARCHITECTURE.md) — устройство · [MODELS.md](MODELS.md) — модели и расход · [AUDIT.md](AUDIT.md) — проверки и тесты · [видео первой ступени](docs/video/README.md) · [питч первой ступени](docs/presentation/verstka-pitch-stage1.pdf) · [исходники графики README](docs/readme/source).
 
 Чего пока нет:
 
