@@ -274,10 +274,14 @@ function ParamsLine({ pp }: { pp: ParamsPlate }) {
   const shown = useHeld(pp.line);
   return (
     <div id="pp-err" className={cls("pp-err", show(on))}>
-      {shown?.kind === "busy" ? <BusyLine onBack={pp.goBuild} />
-        : shown?.kind === "ended" ? <EndedLine line={shown} busy={pp.opening} onOpen={pp.openEnded} />
-        : shown?.kind === "model" ? <ModelLine line={shown} />
-        : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
+      {/* строка прижата вправо: помощник сужает колоду — она едет к краю узкой раскладки сдвигом (helperMotion
+          `data-hpm`), а не перескакивает, и смена раскладки при наведении на ✕ остаётся невидимой */}
+      <span data-hpm="" style={{ display: "flex", justifyContent: "flex-end", minWidth: 0, maxWidth: "100%" }}>
+        {shown?.kind === "busy" ? <BusyLine onBack={pp.goBuild} />
+          : shown?.kind === "ended" ? <EndedLine line={shown} busy={pp.opening} onOpen={pp.openEnded} />
+          : shown?.kind === "model" ? <ModelLine line={shown} />
+          : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
+      </span>
     </div>
   );
 }
