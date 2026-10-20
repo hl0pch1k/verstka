@@ -13,7 +13,8 @@ import re
 from typing import Optional, Sequence
 
 from verstka.data.facts import FactSet
-from verstka.data.words import (
+from verstka.data.words import (  # noqa: I001
+    is_participle,
     period_acc, PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_pct_any, fmt_signed, fmt_value,
     fraction_words, is_event_name, is_period_name, is_plural_value, join_and, lower_first, number_word, phrase, plural, round_pct,
     times_word,
@@ -320,6 +321,9 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
         else:
             v = verb("grow" if delta > 0 else "fall", g)
             head = f"{subj} {v} до {fmt_value(last.value, c.get('unit_short'))}"
+            if is_participle(subj):
+                # «Решено в первый день снизился» — с кратким причастием не согласовать: вывод через двоеточие
+                head = f"{subj}: {'рост' if delta > 0 else 'снижение'} до {fmt_value(last.value, c.get('unit_short'))}"
         return head + gap_txt, c.get("caption")
     if change is None and last is not None:
         return f"{subj} — {fmt_value(last.value, c.get('unit_short'))}" + gap_txt, c.get("caption")

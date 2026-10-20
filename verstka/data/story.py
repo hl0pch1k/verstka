@@ -1354,11 +1354,157 @@ def build_data_story(
         outline = story.outline
     except Exception:  # noqa: BLE001 - the story's own order stays
         log.warning("the plan's order not applied to the data story", exc_info=True)
+    # the person's slide count both ways: «слайдов 8–10» is at least 8 as well as at most 10 (жюри 20.10: 7 slides)
+    try:
+        lo, hi = _count_bounds(brief, slide_count, limit)
+        for line in fit_count(story, tables, lo, hi):
+            voice.say(line, 0.15)
+        outline = story.outline
+    except Exception:  # noqa: BLE001 - the deck keeps the slides it has
+        log.warning("the data story's slide count not fitted", exc_info=True)
     _say_designs(voice, outline)
     outline.agent_log = list(voice.lines) + list(outline.agent_log)
     story.log = list(voice.lines)
     story.seconds = time.monotonic() - t0
     return story
+
+
+_AT_MOST_RE = re.compile(r"(?i)не\s+(?:более|больше)\s+\d+\s+слайд|до\s+\d+\s+слайд|максимум\s+\d+\s+слайд|\d+\s+слайд\w*\s+максимум")
+
+
+def _count_bounds(brief: Optional[Brief], slide_count: Optional[int], limit: Optional[int]) -> tuple[Optional[int], Optional[int]]:
+    """(at least, at most) slides: the interface's number is the deck's size; the brief's range «8–10» both bounds; the
+    brief's «12 слайдов» — that size, «не более 10 слайдов» — only the upper one."""
+    from verstka.planning.brief import slide_range
+
+    if slide_count is not None and slide_count > 0:
+        return slide_count, slide_count
+    text = (brief.text if brief is not None else "") or ""
+    r = slide_range(text)
+    if r is not None:
+        return r
+    if limit and not _AT_MOST_RE.search(text):
+        return limit, limit
+    return None, limit
+
+
+_NOT_A_MEASURE = re.compile(r"(?i)(?:^|[^а-яё])(?:цел[ьи]|план\w*|норматив\w*|target|прогноз\w*)(?:[^а-яё]|$)")
+
+
+def _more_views(story: "DataStory", tables: Sequence[Table]) -> list[tuple[int, OutlineSlide]]:
+    """The data slides the deck can still say, by meaning (not a second form of the same figures): another measure of a
+    file the deck shows — «Решено в первый день» beside «Обращения» by month, «Обращений в день на человека» beside
+    the time to resolve — each with its own checked conclusion. (index of the dataset, slide), in the story's order."""
+    from verstka.data.goals import Goal
+
+    o = story.outline
+    shown_ids = {s.data.dataset_id for s in o.slides if s.data is not None}
+    heads = {(s.headline or "").strip().lower() for s in o.slides}
+    out: list[tuple[int, OutlineSlide]] = []
+    for k, p in enumerate(story.plans):
+        if k >= len(tables) or p.slides <= 0 or p.profile.table_id not in shown_ids or p.task.task not in ("dynamics", "comparison"):
+            continue
+        mine = [s for s in o.slides if s.data is not None and s.data.dataset_id == p.profile.table_id]
+        used: set[str] = set()
+        for s in mine:
+            ch = s.content.chart
+            if ch is not None:
+                used |= {x.name for x in ch.series if x.name}
+            if s.content.table is not None:
+                used |= set(s.content.table.columns)
+        from verstka.data.units import _CHANGE
+
+        cols = [c for c in p.profile.columns if c.role == "metric" and c.name not in used
+                and not any(c.name in u or u.startswith(c.name) for u in used) and not _NOT_A_MEASURE.search(c.name)
+                and not _CHANGE.search(c.name)]  # (изменение уже сказано выводом слайда: «Казань растёт быстрее всех»)
+        # (the deck's headlines and key figures: «Число клиентов +18%» beside the key figures' «Клиенты, +18%» is a repeat)
+        said = " ".join([s.headline or "" for s in o.slides] + [f"{n.value} {n.label}" for s in o.slides for n in s.content.numbers])
+        for j, c in enumerate(cols[:2]):
+            g = Goal(phrase=c.name.lower(), task=p.task.task, viz="line" if p.task.task == "dynamics" else "bar",
+                     to="", given=True, column=c.name)
+            try:
+                q = plan_datasets([tables[k]], "", goals=[g])[0]
+            except Exception:  # noqa: BLE001 - no second view of this file
+                continue
+            if q.slides <= 0 or q.task.task != p.task.task or not q.headline or q.headline == q.plain_headline \
+                    or topic_only(q.headline) or q.headline.strip().lower() in heads:
+                continue
+            fig = key_figure(q.headline)
+            if fig and fig.replace("\u00a0", " ") in said.replace("\u00a0", " "):
+                continue  # its key figure is said on the deck already: a repeat, not a new view
+            sl = slide_for(q, tables[k], 1, slide_id=f"data-{k + 1}-m{j + 1}")
+            if not isinstance(sl, OutlineSlide) or sl.content.chart is None:
+                continue
+            series = [x.name for x in sl.content.chart.series]
+            if not series or not series[0].startswith(c.name.split(",")[0]):
+                continue
+            heads.add(q.headline.strip().lower())
+            out.append((k, sl))
+    # a measure over time first (a second trend of the same months says most), then the others, in the story's order
+    return sorted(out, key=lambda x: (story.plans[x[0]].task.task != "dynamics", out.index(x)))
+
+
+def fit_count(story: "DataStory", tables: Sequence[Table], lo: Optional[int], hi: Optional[int]) -> list[str]:
+    """The data deck to the person's slide count. Too few: only slides with something of their own to say — another
+    measure of a shown file with its checked conclusion (`_more_views`), then the key figures of the files (three or
+    more, when no slide says them yet); never an empty or repeated slide, so the deck may stay short and says so. Too
+    many: the least needed go first — context, key figures, appendix tables, continuation parts, the summary."""
+    o = story.outline
+    said: list[str] = []
+    if lo and len(o.slides) < lo:
+        added = []
+        for k, sl in _more_views(story, tables):
+            if len(o.slides) >= lo:
+                break
+            pid = story.plans[k].profile.table_id
+            at = max(i for i, s in enumerate(o.slides) if s.data is not None and s.data.dataset_id == pid)
+            o.slides.insert(at + 1, sl)
+            added.append(sl.headline)
+        kpi_shown = any(s.id == "key-figures" or (s.data is not None and s.data.task is not None and s.data.task.task == "kpi")
+                        for s in o.slides)
+        if len(o.slides) < lo and not kpi_shown:
+            order = [k for k in range(len(story.plans))]
+            cards = _fact_cards(story.plans, order)
+            shown = " ".join(s.headline or "" for s in o.slides if s.id == "summary")
+            if len(cards) >= 3 and not all(c.value in shown for c in cards):
+                head = "; ".join(f"{c.label.split(' · ')[0]} — {c.value}" for c in cards[:2])
+                at = 1 + len([s for s in o.slides[1:] if s.id.startswith("context")])
+                o.slides.insert(at, OutlineSlide(id="key-figures", kind=PatternKind.stat_row, headline=head,
+                                                 content=SlideContent(numbers=cards),
+                                                 rationale="Главные числа выводов колоды — по одному из каждого файла."))
+                added.append(head)
+        if added:
+            said.append(f"Слайдов просили не меньше {lo}: добавлено {count_words(len(added), 'слайд', 'слайда', 'слайдов')} "
+                        f"со своим выводом — " + ", ".join(f"«{h}»" for h in added[:3]))
+        if len(o.slides) < lo:
+            said.append(f"Слайдов {len(o.slides)} при просьбе от {lo}: больше осмысленных слайдов данные не дают — пустых и "
+                        "повторных слайдов колода не добавляет")
+    if hi and len(o.slides) > hi:
+        gone = []
+
+        def rank(s: OutlineSlide) -> Optional[int]:
+            if s.id.startswith("context"):
+                return 0
+            if s.id == "key-figures":
+                return 1
+            if s.data is not None and s.data.part[0] > 1:
+                return 2
+            if re.search(r"-m\d+$", s.id):
+                return 3
+            if s.id == "summary":
+                return 4
+            return None
+
+        while len(o.slides) > hi:
+            cands = [(rank(s), -i, s) for i, s in enumerate(o.slides) if rank(s) is not None]
+            if not cands:
+                break
+            s = min(cands, key=lambda x: (x[0], x[1]))[2]
+            o.slides.remove(s)
+            gone.append(s.headline)
+        if gone:
+            said.append(f"Слайдов просили не больше {hi}: без " + ", ".join(f"«{h}»" for h in gone[:3]))
+    return said
 
 
 def _cover_agrees(outline: DeckOutline, det_cover: Optional[tuple], voice: "_Voice") -> None:

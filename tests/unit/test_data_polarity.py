@@ -154,7 +154,7 @@ def _files(folder: Path) -> list[Table]:
 
 
 def test_plan_cover_is_the_topic_with_whom_it_is_for():
-    st = build_data_story((SLA / "plan.md").read_text(encoding="utf-8"), _files(SLA))
+    st = build_data_story((ROOT / "tests" / "fixtures" / "support_sla_plan.md").read_text(encoding="utf-8"), _files(SLA))
     o = st.outline
     cover = o.slides[0]
     assert (o.title, cover.headline) == ("Закрытие 3 квартала по службе поддержки",) * 2
@@ -208,7 +208,7 @@ def test_a_unit_cut_off_by_a_comma_in_the_header_is_glued_back():
 
 
 def test_no_bare_count_as_a_key_figure():
-    st = build_data_story((SLA / "plan.md").read_text(encoding="utf-8"), _files(SLA))
+    st = build_data_story((ROOT / "tests" / "fixtures" / "support_sla_plan.md").read_text(encoding="utf-8"), _files(SLA))
     for s in st.outline.slides:
         for n in s.content.numbers:
             assert n.value.strip() not in ("3", "4", "1"), (s.id, n.value, n.label)

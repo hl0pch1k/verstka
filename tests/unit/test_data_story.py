@@ -47,7 +47,12 @@ def sales_story(sales):
 
 
 def _by_file(o) -> dict:
-    return {s.data.file: s for s in o.slides if s.data is not None and s.data.part[0] == 1}
+    # the file's own slide — not a slide of another of its measures the slide count added («data-1-m1»)
+    out: dict = {}
+    for s in o.slides:
+        if s.data is not None and s.data.part[0] == 1:
+            out.setdefault(s.data.file, s)
+    return out
 
 
 # ── the deterministic story ──────────────────────────────────────────────────────────────────────────────────────
