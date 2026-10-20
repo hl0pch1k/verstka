@@ -1417,6 +1417,36 @@ def _csv_rows(name: str, text: str, delim: Optional[str]) -> list[list[str]]:
     return rows
 
 
+# ячейка шапки — одна единица («%», «млн ₽», «ч»): кусок имени предыдущей колонки, разрезанный запятой без кавычек
+_UNIT_CELL = re.compile(r"^\s*(?:%|‰|₽|\$|€|руб\.?|р\.|шт\.?|чел\.?|ч\.?|час(?:ов|а)?|мин\.?|сек\.?|дн\.?|дней|кг|т|км|л|"
+                        r"п\.\s?п\.|п\.|(?:тыс\.|млн|млрд)\s*(?:₽|руб\.?|\$|€|шт\.?|чел\.?)?)\s*$", re.I)
+
+
+def _glue_unit_cells(rows: list[list[str]]) -> list[list[str]]:
+    """«Канал,Доля обращений Q3 2026, %» — в шапке CSV через запятую единица отрезана от имени запятой без кавычек:
+    шапка на ячейку шире строк, а лишняя ячейка — одна единица. Единица приклеивается к имени («Доля обращений Q3 2026,
+    %»), иначе она — пустая колонка, а «44» теряет свой «%» (жюри 20.10: «Чат на сайте — 44»)."""
+    body = [r for r in rows if any((c or "").strip() for c in r)]
+    if len(body) < 2:
+        return rows
+    head = body[0]
+    width = max((len([c for c in r]) for r in body[1:]), default=0)
+    filled = max((max((k + 1 for k, c in enumerate(r) if (c or "").strip()), default=0) for r in body[1:]), default=0)
+    if len(head) <= max(width, filled) and len(head) <= filled:
+        return rows
+    units = [k for k, c in enumerate(head) if k > 0 and _UNIT_CELL.match(c or "") and k >= filled]
+    if not units or len(head) - len(units) != filled:
+        return rows
+    new_head: list[str] = []
+    for k, c in enumerate(head):
+        if k in units and new_head:
+            new_head[-1] = f"{new_head[-1].rstrip()}, {c.strip()}"
+        else:
+            new_head.append(c)
+    k0 = rows.index(head)
+    return rows[:k0] + [new_head] + rows[k0 + 1:]
+
+
 def _strip_pipes(r: list[str]) -> list[str]:
     if r and not r[0].strip():
         r = r[1:]
@@ -1434,6 +1464,8 @@ def _read_delimited(name: str, text: str, kind: SourceKind, digest: str, delim: 
     if delim == "auto":
         delim = "\t" if kind == "tsv" else _sniff_delimiter(lines)
     rows = _csv_rows(name, text, delim)
+    if delim == ",":
+        rows = _glue_unit_cells(rows)
     file_dec = "." if delim == "," else None  # в CSV через запятую дробь пишут точкой
     chunks = _split_stacked(rows)
     tables: list[Table] = []

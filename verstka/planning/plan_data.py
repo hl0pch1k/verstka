@@ -96,6 +96,55 @@ def _own_words(it) -> bool:
     return len(extra) >= 4
 
 
+def _thought_slide(s: OutlineSlide, it, slides: list[OutlineSlide]) -> OutlineSlide:
+    """An item that is one thought of the author («Главное узкое место — вторая линия, нагрузка растёт, а людей столько
+    же») is no section divider with the line set small under its title (жюри 20.10): the thought is the heading, its
+    rest a point, and the checked figures the data slides already say about the rows it names («Вторая линия — 9,6 ч
+    (цель — 6 ч)») stand beside it — no figure of its own."""
+    from verstka.schemas.outline import SlideContent
+
+    lone = s.kind == PatternKind.bullets and len(s.content.bullets) <= 1 and not s.content.items and \
+        s.content.table is None and s.content.chart is None
+    if s.kind != PatternKind.section and not lone:
+        return s
+    text = H.strip_end(" ".join(ln for ln in it.lines if not ln.strip().startswith("|")) or it.title)
+    if not text or H.strip_end(text).lower() == H.strip_end(it.title).lower():
+        return s
+    head, rest = text, ""
+    m = re.match(r"^(.{8,70}?\s+[—–]\s+[^,;:]{2,40}?)(?:,\s+|;\s+|:\s+)(.+)$", text)
+    if m:
+        head, rest = m.group(1), m.group(2)
+    elif len(text) > 90:
+        cut = re.match(r"^(.{20,80}?)(?:,\s+|;\s+|:\s+)(.+)$", text)
+        if cut:
+            head, rest = cut.group(1), cut.group(2)
+    bullets = [H.cap_first(H.strip_end(rest))] if rest else []
+    low = text.lower()
+    seen: set[str] = set()
+    for d_s in slides:
+        if d_s.data is None:
+            continue
+        facts = {f.id: f for f in d_s.data.headline_facts}
+        for f in d_s.data.headline_facts:
+            name = f.text.split(" — ", 1)[0].strip() if " — " in f.text else ""
+            if not name or len(name) < 4 or name.lower() not in low or not re.search(r"\d", f.text) or name in seen:
+                continue
+            line = f.text
+            tq = facts.get(f.id.replace("miss_", "miss_target_")) if f.id.startswith("miss_") else None
+            if tq is not None and tq.id != f.id:
+                line = f"{line} ({tq.text})"
+            seen.add(name)
+            bullets.append(line)
+            if len(bullets) >= 3:
+                break
+    if not bullets:
+        return s
+    return s.model_copy(update={"kind": PatternKind.bullets, "headline": H.cap_first(head), "subtitle": None,
+                                "content": SlideContent(bullets=bullets),
+                                "rationale": "Мысль автора из плана — заголовком, её продолжение и проверенные числа "
+                                             "данных о том, что она называет, — пунктами."})
+
+
 def _text_slides(plan, brief_language: str = "ru") -> dict[int, list[OutlineSlide]]:
     """The plan's items laid out as written by the rules (planning/agent.py with no model): item index → its slides."""
     from verstka.planning.agent import run_agent
@@ -175,6 +224,27 @@ def close_with_ask(outline: DeckOutline, brief_text: str, notes: Optional[list[s
     return [f"финал — что просит вход, его словами: «{asks[0][:80]}»"]
 
 
+def _plan_cover(plan, brief_text: str, story_subtitle: Optional[str]) -> tuple[str, Optional[str]]:
+    """(title, subtitle) of a plan deck's cover: the plan's title as a topic — without the slide count, the request to
+    make a deck and the audience (жюри 20.10: «Закрытие 3 квартала по службе поддержки — , слайдов 8–10 · Доля
+    обращений…» on the cover, the browser tab and «Мои презентации»); the subtitle is the plan's own, or whom the deck
+    is for («Для операционного директора»), never the data story's list of files."""
+    from verstka.data.story import clean_deck_title
+
+    t, aud = clean_deck_title(plan.title or "")
+    if not aud:
+        first = next((ln.strip() for ln in (brief_text or "").splitlines() if ln.strip()), "")
+        _, aud = clean_deck_title(re.sub(r"^#+\s*", "", first))
+    if plan.subtitle:
+        sub, _ = clean_deck_title(plan.subtitle)
+        sub = sub or None
+    elif aud:
+        sub = f"Для {aud}"
+    else:
+        sub = story_subtitle if (story_subtitle or "").startswith("Для ") else None
+    return t, sub
+
+
 def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[int] = None, notes: Optional[list[str]] = None) -> list[str]:
     """Puts the data story's slides in the order of the author's plan (see the module); what it did, in Russian (the
     build's log). Leaves the outline as it is when the text is no plan or the plan does not speak of the data."""
@@ -238,7 +308,7 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
             for j, s in enumerate(text_slides[k]):
                 s.id = f"data-plan-{k + 1}" + (f"-{j + 1}" if j else "")
                 s.continues = None
-                part.append(s)
+                part.append(_thought_slide(s, it, slides))
             said.append(f"пункт плана «{it.title}» — слайд из текста автора: данных о нём в файлах нет")
         elif mine:
             said.append(f"пункт плана «{it.title}» — " + ", ".join(f"«{groups[g][0].data.file}»" for g in mine))
@@ -287,13 +357,14 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
                 if len(new) <= slide_count:
                     break
                 new.remove(s)
-    if title is not None and plan.title:
-        title.headline = plan.title
-        if plan.subtitle:
-            title.subtitle = plan.subtitle
+    deck_title, sub = _plan_cover(plan, brief_text, title.subtitle if title is not None else outline.subtitle)
+    if title is not None and deck_title:
+        title.headline = deck_title
+        title.subtitle = sub
     outline.slides = new
-    if plan.title:
-        outline.title = plan.title
+    if deck_title:
+        outline.title = deck_title
+        outline.subtitle = sub
     head = (f"План автора — {len(plan.items)} пунктов: слайды данных стоят на пунктах, о которых говорят, в его порядке"
             + ("; просьба — последней" if closing is not None and tail else "") + ".")
     return [head, *said]

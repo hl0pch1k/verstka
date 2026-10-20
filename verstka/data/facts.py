@@ -2251,7 +2251,30 @@ def _comparison(d: Data) -> FactSet:
         if th_txt:
             caption.insert(0, th_txt)
     pg = {"op": "count", "what": "groups", "by": _col_of(d, cv.dim), "skip": _skip(d)}
-    if cv.others:
+    if cv.others and tail_apart(cv):
+        # хвост несоизмерим с топом (229 клиентов — 2 113 млн ₽ при лидере 212): не полоса той же шкалы, а подпись
+        # «Остальные 229 клиентов — 2 113 млн ₽, 62%» — топ на графике в полный рост
+        tail_keys = _tail_keys(d, cv)
+        rest_v = float(cv.values[-1])
+        ent = _entity_phrase(cv.dim)
+        forms = (ent.low.nom, ent.low.gen, ent.low.gen_pl) if ent is not None and ent.sure else \
+            ("категория", "категории", "категорий")
+        fs.add("others", cv.others, "count", f"Остальные {cv.others}", None, "Категории вне топа — в подписи, не на графике.",
+               prov={**pg, "minus": cv.n - 1})
+        rv_ = round(rest_v, 1) if abs(rest_v) < 100 else round(rest_v)
+        fs.add("rest_value", rv_, "total", f"Остальные {cv.others} — {fmt_value(rest_v, unit)}", unit,
+               "Сумма категорий вне топа.", prov={"op": "add", "parts": [{**_pcat(d, m, cv.dim, [k]), "rank": None}
+                                                                    for k in tail_keys],
+                                                  "tol": 0.051 if abs(rest_v) < 100 else 0.51})
+        txt = f"Остальные {count_words(cv.others, *forms)} — {fmt_value(rest_v, unit)}"
+        if cv.total:
+            sh = rest_v / float(cv.total) * 100
+            fs.add("rest_share", round_pct(sh), "share", f"Остальные {cv.others} — {fmt_pct(sh)}%", "%",
+                   "Доля категорий вне топа.", prov={**_as_share(_pcat(d, m, cv.dim, tail_keys)), "tol": 0.51})
+            txt += f", {fmt_pct(sh)}%"
+        caption.append(txt + " — на графике их нет.")
+        fs.ctx["tail_apart"] = True
+    elif cv.others:
         fs.add("others", cv.others, "count", f"Остальные {cv.others}", None, "Категории, собранные в одну строку.",
                prov={**pg, "minus": cv.n - 1})
         caption.append(f"Остальные {count_words(cv.others, 'категория', 'категории', 'категорий')} собраны в одну "
@@ -2274,13 +2297,29 @@ def _comparison(d: Data) -> FactSet:
     return fs
 
 
-_TARGET_GEN = {"цель": "цели", "целевой": "целевого", "целевое": "целевого", "целевая": "целевой", "норматив": "норматива",
+def tail_apart(cv: CatView) -> bool:
+    """«Остальные N» несоизмеримы с топом: их сумма больше двух лидеров — полоса той же шкалы сжала бы топ (жюри 20.10:
+    «Остальные 229 = 2 113» рядом с лидером 212). Такой хвост — подпись, а не полоса (`verstka/data/plan.py`)."""
+    if not cv.others or cv.n < 3:
+        return False
+    head = [v for v in cv.values[:-1] if v is not None]
+    return bool(head) and cv.values[-1] is not None and float(cv.values[-1]) > 2 * max(float(v) for v in head)
+
+
+def _tail_keys(d: Data, cv: CatView) -> list[str]:
+    """Категории, собранные в «Остальные N»: все, кроме показанных на графике."""
+    full = d.cat_view(cv.measure, top=10**6, dim=_col_of(d, cv.dim))
+    shown = set(cv.labels[:-1])
+    return [lab for lab in (full.labels if full is not None else []) if lab not in shown]
+
+
+_TARGET_GEN = {"цель": "цели", "план": "плана", "лимит": "лимита", "целевой": "целевого", "целевое": "целевого", "целевая": "целевой", "норматив": "норматива",
                "норма": "нормы", "target": "цели", "таргет": "таргета", "kpi": "KPI", "ориентир": "ориентира"}
 
 
 def _target_gen(name: str) -> str:
     """«Цель SLA» → «цели SLA», «Норматив, мин» → «норматива»: после «ниже» / «выше»."""
-    base = re.sub(r"\s*,.*$", "", name).strip()
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", re.sub(r"\s*,.*$", "", name)).strip()
     w = base.split(" ", 1)
     first = _TARGET_GEN.get(w[0].lower())
     return (first + (" " + w[1] if len(w) > 1 else "")) if first else "цели"
@@ -2299,14 +2338,19 @@ def _row_targets(d: Data, cv: CatView, m: Optional[Measure], unit: Optional[str]
     labs = [d.text(i, dj) for i in rows]
     if len(rows) < 2 or len(set(labs)) != len(labs):
         return None  # по строке на категорию — иначе цель строки не цель категории
-    lower = _wording(d, cv, m) in ("slow", "long", "delay", "most")
+    from verstka.data.polarity import lower_better
+
+    lw, src = lower_better(m.name, unit, target_name=t_.name, text=getattr(d, "goal_text", None), time_unit=m.time_unit)
+    # слова автора («не более 6 часов») и имя цели («Максимум, ч») решают сами; иначе — смысл величины
+    lower = lw if src in ("brief", "target") else (_wording(d, cv, m) in ("slow", "long", "delay", "most") or lw)
     miss = [lab for i, lab in zip(rows, labs)
             if (m.values[i] > t_.values[i] if lower else m.values[i] < t_.values[i])]  # type: ignore[operator]
     n, k = len(rows), len(miss)
     side = "Выше" if lower else "Ниже"
     tg = _target_gen(t_.name)
+    met_p = {"fact": m.j, "target": t_.j, "lower": lower, "src": src if src in ("brief", "target") or lw == lower else "data"}
     pt = {"op": "rows_gt", "a": m.j if lower else t_.j, "b": t_.j if lower else m.j, "skip": _skip(d),
-          "keys": miss, "by": dj}
+          "keys": miss, "by": dj, "met": {**met_p, "miss": True}}
     fs.add("below_target", k, "count", f"{side} {tg} — {k} из {n}", None,
            f"Категорий, где «{m.name}» {'выше' if lower else 'ниже'} своей «{t_.name}»: {', '.join(miss) or 'нет'}.",
            prov=pt)
@@ -2321,7 +2365,7 @@ def _row_targets(d: Data, cv: CatView, m: Optional[Measure], unit: Optional[str]
                f"Категорий, где «{m.name}» {'не выше' if lower else 'не ниже'} своей «{t_.name}»: "
                f"{', '.join(met) or 'нет'}.",
                prov={"op": "rows_gt", "a": t_.j if lower else m.j, "b": m.j if lower else t_.j, "ge": True,
-                     "skip": _skip(d), "keys": met, "by": dj})
+                     "skip": _skip(d), "keys": met, "by": dj, "met": met_p})
         fs.ctx["met"] = (lower, tg, met)
         fs.ctx["labels"].extend(met)
     if not k:
@@ -3114,6 +3158,9 @@ def _kpi_prov(it: KpiItem) -> Optional[dict]:
 _KPI_TARGET = re.compile(r"^(?:цель|целевое значение|целевой уровень|план|норматив|target)(?:\s+по)?\s+(?P<x>.+)$", re.I)
 
 
+from verstka.data.polarity import name_direction  # noqa: E402
+
+
 def _kpi_targets(d: Data, items: list, names: list[str], fs: FactSet) -> bool:
     """Показатели и их цели в одной строке («MAU · Цель MAU · Выручка · Цель по выручке…»): вывод — сколько целей
     выполнено и какие нет; у «меньше — лучше» (отток, ошибки, время) цель выполнена, когда значение не выше неё."""
@@ -3132,7 +3179,8 @@ def _kpi_targets(d: Data, items: list, names: list[str], fs: FactSet) -> bool:
     rows = []
     for kv_, kt in pairs:
         v, t_ = items[kv_], items[kt]
-        lower = bool(_WORSE.search(names[kv_]) or _LOWER_KPI.search(names[kv_]))
+        lower = bool(_WORSE.search(names[kv_]) or _LOWER_KPI.search(names[kv_])
+                     or name_direction(names[kv_], items[kv_].unit if hasattr(items[kv_], "unit") else None))
         ok = v.value <= t_.value if lower else v.value >= t_.value
         rows.append((kv_, kt, lower, ok))
     met = [names[kv_] for kv_, _, _, ok in rows if ok]

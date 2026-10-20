@@ -269,6 +269,26 @@ def _why(task: TaskKind, d: Data) -> str:
     return f"Задача — {TASK_TITLES[task].lower()}."
 
 
+_FORM_ASKED = re.compile(r"(?i)график|столб|диаграм|кругов|кольцев|полос|гистограм")
+
+
+def _directory_answers(d: Data, g: Goal, data_task: TaskKind) -> bool:
+    """Цель сравнения над справочником — «кто главные клиенты», «крупнейшие поставщики»: список длиннее графика
+    (больше 30 строк, своя подпись у каждой), цель не называет ни разреза, ни строк, ни формы. Ответ на неё — таблица
+    крупнейших строк справочника, а не полосы «топ-11 и Остальные 229»: один набор данных — один вид в любом режиме."""
+    if data_task != "reference" or g.task != "comparison" or d.n <= 30 or d.entity is None:
+        return False
+    if g.categories or (g.ask not in (None, "max", "total")) or _FORM_ASKED.search(g.phrase or ""):
+        return False
+    if g.dimension:
+        return g.dimension == d.entity
+    # без разреза — только когда цель называет сами строки справочника («кто главные клиенты» — «Клиент»)
+    from verstka.data.words import same_stem, stems_of
+
+    ent = stems_of(d.entity)
+    return bool(ent) and any(same_stem(a, b) for a in stems_of(g.phrase or "") for b in ent)
+
+
 def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
     """Задача: лучший балл по данным, цель из текста (о датасете, осуществимая) — +0,5."""
     base = task_scores(d)
@@ -291,13 +311,20 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
             # одна фраза — несколько прочтений («какой регион растёт быстрее»: динамика и сравнение): пометка — только
             # если не подошло ни одно
             notes.append(f"Цель «{g.phrase}» здесь не подходит: {_infeasible_reason(g.task, d)}.")
-    if used is not None:
+    data_task = _best(base)
+    directory = used is not None and _directory_answers(d, used, data_task)
+    if used is not None and not directory:
         scores[used.task] = round(scores[used.task] + GOAL_BONUS, 3)
     task = _best(scores, used.task if used is not None else None)
-    data_task = _best(base)
     reasons = [_why(task, d)]
     goal_phrase = None
-    if used is not None and used.task == task:
+    if directory:
+        # «кто главные клиенты» над списком из 240 клиентов: ответ — таблица крупнейших с их колонками, тот же вид,
+        # что без модели и на любом шаблоне (жюри 20.10: с моделью — полосы с «Остальные 229», без — таблица)
+        goal_phrase = used.phrase
+        reasons.append(f"Цель «{used.phrase}» — ответ таблицей крупнейших строк: у каждой свои колонки, остальные — "
+                       "итогом в подписи.")
+    elif used is not None and used.task == task:
         goal_phrase = used.phrase
         if data_task != task:
             reasons.append(f"Цель «{used.phrase}» подняла эту задачу: без неё по данным задача была бы "

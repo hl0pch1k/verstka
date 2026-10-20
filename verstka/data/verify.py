@@ -821,6 +821,34 @@ def _stem_eq(a: str, b: str) -> bool:
 
 
 # ── проверка плана ────────────────────────────────────────────────────────────────────────────────────────────────
+def _met_direction_problem(table: Table, p: dict) -> Optional[str]:
+    """«Кто выполнил цель» посчитан в ту сторону, где лучше (жюри 20.10: у времени решения «план выполнили 3 из 4» —
+    наоборот). Направление пересчитывается заново по имени и единице колонок (`verstka/data/polarity.py`); слова автора
+    («не более 6 часов») — его право, им верим (и смыслу файла целиком — «data»: «Брак по сменам»). Проверяется и сама пара колонок счёта: у «меньше — лучше» выполнено,
+    когда цель не ниже факта."""
+    met = p.get("met") if isinstance(p, dict) else None
+    if not isinstance(met, dict) or p.get("op") != "rows_gt":
+        return None
+    from verstka.data.polarity import lower_better
+
+    jf, jt = met.get("fact"), met.get("target")
+    if not isinstance(jf, int) or not isinstance(jt, int) or max(jf, jt) >= len(table.columns):
+        return "нечем проверить направление: нет колонок факта и цели"
+    unit = table.units[jf] if jf < len(table.units) else None
+    name, target = table.columns[jf], table.columns[jt]
+    declared = bool(met.get("lower"))
+    if met.get("src") not in ("brief", "data"):
+        lower, _ = lower_better(name, unit, target_name=target)
+        if lower != declared:
+            side = "меньше" if lower else "больше"
+            return f"направление «лучше» перепутано: у «{name}» {side} — лучше, а цель посчитана наоборот"
+    lower = declared
+    want = (jt, jf) if lower != bool(met.get("miss")) else (jf, jt)
+    if (p.get("a"), p.get("b")) != want:
+        return f"счёт «{'не выполнили' if met.get('miss') else 'выполнили'}» — не в ту сторону для «{name}»"
+    return None
+
+
 def recompute(table: Table, prov: dict) -> Optional[float]:
     """Значение по происхождению — тем же счётом, что и проверка (None — не считается)."""
     try:
@@ -851,6 +879,10 @@ def verify(table: Table, facts: Sequence[HeadlineFact], prov: dict[str, dict], h
             continue
         if not _agrees(f.value, true, tol=p.get("tol")):
             v.failed[f.id] = f"{f.text}: по строкам файла — {fmt_num(true)}"
+            continue
+        why_dir = _met_direction_problem(table, p)
+        if why_dir:
+            v.failed[f.id] = why_dir
             continue
         if p.get("named") and p.get("col_name") and not _named_ok(p["named"], p["col_name"], title):
             v.failed[f.id] = f"«{p['named']}» — не колонка «{p['col_name']}», по которой посчитано"

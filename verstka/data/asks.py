@@ -54,7 +54,8 @@ def _new(fs: FactSet) -> FactSet:
 
 
 def _metric_name(m: Any) -> str:
-    return re.sub(r"\s*,.*$", "", m.name).strip()
+    # «Выручка, млн ₽» → «Выручка», «Среднее время решения (ч)» → «Среднее время решения»
+    return re.sub(r"\s*\([^)]{1,10}\)\s*$", "", re.sub(r"\s*,.*$", "", m.name)).strip()
 
 
 def _top_n(goal: Any, d: Data, fs: FactSet) -> Optional[tuple[str, Optional[str], FactSet]]:
@@ -262,15 +263,14 @@ def _versus(goal: Any, d: Data, fs: FactSet, ask: str) -> Optional[tuple[str, Op
     names = [d.text(i, lab).strip() for i in rows]
     if len(rows) < 2 or len(set(names)) != len(names):
         return None  # одна категория — несколько строк: сравнение по строкам — не о категориях
+    if ask == "met":
+        return _met(goal, d, fs, ma, mb, lab, rows)
     if ask == "versus_lt":
         hit = [i for i in rows if ma.values[i] < mb.values[i]]
         prov = {"op": "rows_gt", "a": mb.j, "b": ma.j, "skip": _skip(d)}
-    elif ask == "versus_gt":
+    else:
         hit = [i for i in rows if ma.values[i] > mb.values[i]]
         prov = {"op": "rows_gt", "a": ma.j, "b": mb.j, "skip": _skip(d)}
-    else:
-        hit = [i for i in rows if ma.values[i] >= mb.values[i]]
-        prov = {"op": "rows_gt", "a": ma.j, "b": mb.j, "skip": _skip(d), "ge": True}
     out = _new(fs)
     k, n = len(hit), len(rows)
     out.add("rows_hit", k, "count", f"{k} из {n}", None, f"Строк, где «{ma.name}» и «{mb.name}» — так, как спросил бриф.",
@@ -282,21 +282,85 @@ def _versus(goal: Any, d: Data, fs: FactSet, ask: str) -> Optional[tuple[str, Op
     out.ctx["labels"] = list(out.ctx.get("labels", [])) + who + rest
     a_n, b_n = _metric_name(ma), _metric_name(mb)
     listed = (", ".join(who[:4]) + " и другие") if k > 4 else join_and(who)
-    if ask == "met":
-        plan_word = "План выполнили" if _PLAN.search(mb.name) else f"«{a_n}» не ниже «{b_n}» —"
-        if not k:
-            head = f"{plan_word} ни одна строка из {n}" if not _PLAN.search(mb.name) else f"План не выполнил никто из {n}"
-        else:
-            head = f"{plan_word} {k} из {n}: {listed}"
-        cap = (f"Не выполнили — {join_and(rest[:4])}{' и другие' if len(rest) > 4 else ''}." if rest and _PLAN.search(mb.name)
-               else (f"Ниже — {join_and(rest[:4])}." if rest else None))
-        return head, cap, out
     word = "меньше" if ask == "versus_lt" else "больше"
     if not k:
         head = f"«{a_n}» {word}, чем «{b_n}», — ни у одной строки из {n}"
     else:
         head = f"«{a_n}» {word}, чем «{b_n}», — у {k} из {n}: {listed}"
     return head, None, out
+
+
+def _met(goal: Any, d: Data, fs: FactSet, ma: Any, mb: Any, lab: int, rows: list[int]) -> tuple[str, Optional[str], FactSet]:
+    """«Какие линии уложились в SLA», «кто выполнил план»: факт против своей цели по строкам. Направление «лучше» —
+    по смыслу величины и словам автора (`verstka/data/polarity.py`): у времени решения, затрат, ошибок цель выполнена,
+    когда факт НЕ ВЫШЕ цели, у выручки — когда не ниже. Факты держат обе стороны — кто уложился и кто нет — с именами
+    (их сверяет самопроверка и правка словами, `verstka/data/story.met_claim_problem`)."""
+    from verstka.data.facts import _target_gen
+    from verstka.data.polarity import lower_better
+
+    lower, src = lower_better(ma.name, ma.unit_text, target_name=mb.name, text=getattr(goal, "phrase", None),
+                              time_unit=getattr(ma, "time_unit", None))
+    if lower:
+        hit = [i for i in rows if ma.values[i] <= mb.values[i]]
+        prov = {"op": "rows_gt", "a": mb.j, "b": ma.j, "skip": _skip(d), "ge": True}
+    else:
+        hit = [i for i in rows if ma.values[i] >= mb.values[i]]
+        prov = {"op": "rows_gt", "a": ma.j, "b": mb.j, "skip": _skip(d), "ge": True}
+    prov["met"] = {"fact": ma.j, "target": mb.j, "lower": lower, "src": src}
+    miss_prov = {"op": "rows_gt", "a": ma.j if lower else mb.j, "b": mb.j if lower else ma.j, "skip": _skip(d),
+                 "met": {**prov["met"], "miss": True}}
+    out = _new(fs)
+    k, n = len(hit), len(rows)
+    who = [d.text(i, lab).strip() for i in hit]
+    rest = [d.text(i, lab).strip() for i in rows if i not in hit]
+    plan = bool(_PLAN.search(mb.name))
+    tg = _target_gen(mb.name) if plan else f"«{_metric_name(mb)}»"
+    if plan and re.search(r"\d", tg):
+        tg = tg.split(" ", 1)[0]  # «плана янв–сен 2026» → «плана»: период — не число вывода
+    ok_word = f"не выше {tg}" if lower else f"не ниже {tg}"
+    out.add("rows_hit", k, "count", f"{k} из {n}", None,
+            f"Строк, где «{ma.name}» {ok_word} — цель выполнена: {', '.join(who) or 'нет'}.", prov=prov)
+    out.add("rows_of", n, "count", f"из {n}", None, "Строк с обеими колонками.",
+            prov={"op": "count", "what": "value", "value": n})
+    out.add("rows_miss", n - k, "count", f"{n - k} из {n}", None,
+            f"Строк, где «{ma.name}» {'выше' if lower else 'ниже'} {tg} — цель не выполнена: {', '.join(rest) or 'нет'}.",
+            prov=miss_prov)
+    out.ctx["labels"] = list(out.ctx.get("labels", [])) + who + rest
+    a_n, b_n = _metric_name(ma), _metric_name(mb)
+    # промахи — с числами: «Вторая линия — 9,6 ч при цели 6 ч»
+    u = ma.unit_text
+    gap = {i: abs(float(ma.values[i]) - float(mb.values[i])) / max(abs(float(mb.values[i])), 1e-9)
+           for i in rows if i not in hit}
+    worst = sorted(gap, key=lambda i: -gap[i])[:2]
+    for q, i in enumerate(worst):
+        nm = d.text(i, lab).strip()
+        out.add(f"miss_{q}", float(ma.values[i]), "total", f"{nm} — {fmt_value(float(ma.values[i]), u)}", u,
+                f"«{ma.name}» у «{nm}».", prov={"op": "cell", "row": i, "col": ma.j, "scale": ma.scale})
+        out.add(f"miss_target_{q}", float(mb.values[i]), "total", f"цель — {fmt_value(float(mb.values[i]), u)}", u,
+                f"«{mb.name}» у «{nm}».", prov={"op": "cell", "row": i, "col": mb.j, "scale": mb.scale})
+    listed = lambda xs: (", ".join(xs[:4]) + " и другие") if len(xs) > 4 else join_and(xs)  # noqa: E731
+    side = "выше" if lower else "ниже"
+    if plan and lower:
+        # «В пределах цели SLA — 1 из 4: Первая линия» (у времени и затрат «выполнили план» звучит как «больше»)
+        head = (f"{upper_first(side)} {tg} — все {n}" if not k else f"В пределах {tg} — все {n}" if k == n
+                else f"В пределах {tg} — {k} из {n}: {listed(who)}")
+    elif plan:
+        head = (f"План не выполнил никто из {n}" if not k else f"План выполнили все {n}" if k == n
+                else f"План выполнили {k} из {n}: {listed(who)}")
+    else:
+        word = "не выше" if lower else "не ниже"
+        head = (f"«{a_n}» {word} «{b_n}» — ни у одной строки из {n}" if not k
+                else f"«{a_n}» {word} «{b_n}» — {k} из {n}: {listed(who)}")
+    cap = None
+    w0 = (_metric_name(mb).split(" ", 1)[0] or "").lower()
+    noun = w0 if w0 in ("цель", "план", "норматив", "норма", "лимит") else "цель"
+    if rest:
+        parts = []
+        for i in worst:
+            nm = d.text(i, lab).strip()
+            parts.append(f"{nm} — {fmt_value(float(ma.values[i]), u)} ({noun} — {fmt_value(float(mb.values[i]), u)})")
+        cap = f"{upper_first(side)} {tg} — {listed(rest)}" + (f": {'; '.join(parts)}." if parts else ".")
+    return head, cap, out
 
 
 def _period_extreme(d: Data, fs: FactSet, low: bool) -> Optional[tuple[str, Optional[str], FactSet]]:

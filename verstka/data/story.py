@@ -37,7 +37,7 @@ from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
 from verstka.data.profile import profile_table
-from verstka.data.words import count_words, file_title, fmt_signed, fmt_value, stems_of, upper_first
+from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, stems_of, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
 from verstka.schemas.outline import (
@@ -488,8 +488,48 @@ def slide_values(s: OutlineSlide) -> list[float]:
 
 def data_text_ok(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None, years: Sequence[str] = ()) -> bool:
     """Every number of `text` on data slide `s` is one of its facts (`values`: or one of these), not counting the digits
-    of the data's names («1 курс», «Филиал 1») and the years the data names («бюджета 2026»)."""
-    return not bad_numbers(text, s, values=values, years=years)
+    of the data's names («1 курс», «Филиал 1») and the years the data names («бюджета 2026»); and who met the target
+    and who did not is said as the checked facts say it (`met_claim_problem`)."""
+    return not bad_numbers(text, s, values=values, years=years) and met_claim_problem(text, s) is None
+
+
+_MET_IDS = {"rows_hit": True, "met_target": True, "rows_miss": False, "below_target": False}
+_MISS_VERB = re.compile(r"(?<![а-яё])не\s+(?:выполн\w*|уложи\w*|укладыва\w*|достиг\w*|дотяну\w*)|провали\w*|промах\w*", re.I)
+_HIT_VERB = re.compile(r"(?<![а-яё])(?:выполн\w*|уложи\w*|укладыва\w*|достиг\w*|дотяну\w*|в\s+пределах)", re.I)
+
+
+def met_claim_problem(text: str, s: OutlineSlide) -> Optional[str]:
+    """Who met the target and who did not, as the text says it, against the slide's checked facts (their explain lists
+    the rows after «: »): «План выполнили 3 из 4: Вторая линия…» over a slide whose facts say only Первая линия met it
+    (жюри 20.10 — and the model's «Первая линия не выполнила план» on «переделай полностью») is no data text. None —
+    nothing about meeting a target, or said as the facts say."""
+    if s.data is None or not text:
+        return None
+    sides: dict[bool, tuple[float, list[str]]] = {}
+    for f in s.data.headline_facts:
+        if f.id in _MET_IDS and ": " in (f.explain or ""):
+            names = [x.strip() for x in f.explain.rsplit(": ", 1)[1].rstrip(".").split(", ") if x.strip() and x.strip() != "нет"]
+            sides[_MET_IDS[f.id]] = (f.value, names)
+    if not sides:
+        return None
+    for clause in re.split(r"[.;!?]\s+|[.;!?]$|,\s+(?:а|но)\s+", " ".join(text.replace("\u00a0", " ").split())):
+        if not clause.strip():
+            continue
+        miss = bool(_MISS_VERB.search(clause))
+        hit = not miss and bool(_HIT_VERB.search(clause))
+        if not (miss or hit):
+            continue
+        said = not miss
+        other = sides.get(not said)
+        if other is not None:
+            wrong = [nm for nm in other[1] if nm and nm.lower() in clause.lower()]
+            if wrong:
+                return f"«{clause.strip()}»: по данным {'не выполнили' if said else 'выполнили'} — {wrong[0]}"
+        own = sides.get(said)
+        m = re.search(r"(?<![\d,])(\d+)\s+из\s+(\d+)", clause)
+        if own is not None and m is not None and abs(float(m.group(1)) - own[0]) > 1e-9:
+            return f"«{clause.strip()}»: по данным {'выполнили' if said else 'не выполнили'} {fmt_num(own[0])} из {m.group(2)}"
+    return None
 
 
 def bad_numbers(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None, years: Sequence[str] = ()) -> list[float]:
@@ -542,22 +582,28 @@ def _numbers_from(text: str, allowed: Sequence[float], labels: Sequence[str] = (
     return headline_ok(text, facts, labels)
 
 
-def _title(brief: Optional[Brief], plans: Sequence[DatasetPlan]) -> tuple[str, Optional[str], Optional[str]]:
-    """(title, subtitle, None) — the brief's own title when the person gave one; else a neutral title of the data's
+def _title(brief: Optional[Brief], plans: Sequence[DatasetPlan], tables: Sequence[Table] = ()) -> tuple[str, Optional[str], Optional[str]]:
+    """(title, subtitle, None) — the brief's own title when the person gave one; else the data's own title (the heading
+    line of a text file: «Итоги 2026 года — университет, для учёного совета»), else a neutral title of the data's
     topics («Пассажиропоток по маршрутам»), never the brief's first sentence (F11: an opinion «HR-директор считает…»,
-    «Мэрия хочет закрыть один филиал», or a sentence cut mid-phrase). The answer to the brief's main goal replaces it
-    once the slides are built (`_main_answer`)."""
+    «Мэрия хочет закрыть один филиал», or a sentence cut mid-phrase) and never a list of the files (жюри 20.10:
+    «Бюджет НИОКР и ещё 5 тем / Бюджет НИОКР, Итоги года, Приём по направлениям и ещё 3»). The subtitle is whom the
+    deck is for, or nothing. The answer to the brief's main goal replaces the title once the slides are built
+    (`_main_answer`)."""
     if brief is not None and brief.title_hint:
-        return _cut(upper_first(brief.title_hint.strip()), MAX_TITLE), (f"Для {brief.audience}" if brief.audience else None), None
+        t, aud = clean_deck_title(brief.title_hint)
+        if t:
+            aud = brief.audience or aud
+            return _cut(upper_first(t), MAX_TITLE), (f"Для {aud}" if aud else None), None
     names = [p.plain_headline for p in plans if p.slides > 0 and p.plain_headline]
     files = [file_title(p.profile.file, p.profile.sheet) for p in plans if p.slides > 0]
     topics = list(dict.fromkeys(x for x in (files or names) if x))
-    title = _topic_title(topics)
-    rest = len(names) - 3
-    sub = (", ".join(names[:3]) + (f" и ещё {rest}" if rest > 0 else "")) if names else None
+    own, own_aud = data_own_title(tables, plans)
+    title = own or _topic_title(topics)
+    sub = f"Для {own_aud}" if own_aud else None
     if brief is not None and brief.audience:
         sub = f"Для {brief.audience}"
-    else:
+    elif not own_aud:
         # «Итоги продаж … для правления»: кому колода — подзаголовок (не утверждение о данных)
         first = next(iter(_sentences((brief.text if brief is not None else "") or "")), "")
         m = re.search(r"\s+(для\s+[^,;:.!?]{2,60})[.!?…]?$", first, re.I)
@@ -566,18 +612,82 @@ def _title(brief: Optional[Brief], plans: Sequence[DatasetPlan]) -> tuple[str, O
     return title, sub, None
 
 
+# служебное в названии колоды: число слайдов, просьба сделать, форма и шаблон — не тема
+_SLIDES_PART = re.compile(r"(?i)^(?:на\s+|не\s+более\s+|до\s+|около\s+)?(?:\d+\s*(?:[–—-]\s*\d+\s*)?слайд\w*|слайд\w*\s*[:\-–—]?\s*\d+(?:\s*[–—-]\s*\d+)?)\.?$")
+_ASK_PART = re.compile(r"(?i)^(?:нуж(?:ен|на|ны|но)|сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|сверстай(?:те)?)\s+"
+                       r"(?:(?:короткую|краткую|небольшую|новую)\s+)?(?:презентаци\w*|колод\w*|слайд\w*|дек\w*)\b\s*")
+_FORM_PART = re.compile(r"(?i)^(?:в\s+стиле|по\s+шаблону|на\s+шаблоне|без\s+(?:картин|изображ|фото)|с\s+(?:картин|изображ|графиками)|"
+                        r"кратко|коротко|подробно|на\s+русском|по-русски)\b")
+_FOR_PART = re.compile(r"(?i)^для\s+(.{2,60})$")
+_TITLE_SEP = re.compile(r"(\s+[—–]\s+|\s*[—–]\s*(?=,)|,\s*|;\s*|:\s+)")
+
+
+def clean_deck_title(text: Optional[str]) -> tuple[str, Optional[str]]:
+    """(тема колоды, кому) из строки-названия автора: без числа слайдов, просьбы сделать и указаний о форме, «для
+    операционного директора» — в подзаголовок (жюри 20.10: обложка «Закрытие 3 квартала … — , слайдов 8–10»).
+    «Закрытие 3 квартала по службе поддержки — для операционного директора, слайдов 8–10» → («Закрытие 3 квартала по
+    службе поддержки», «операционного директора»)."""
+    t = " ".join((text or "").replace("\u00a0", " ").split()).strip(" .")
+    if not t:
+        return "", None
+    t = _ASK_PART.sub("", t).strip()
+    t = re.sub(r"(?i)^(?:о|об|про|по\s+теме|на\s+тему)\s+", "", t) if t != (text or "").strip() else t
+    parts = _TITLE_SEP.split(t)
+    keep: list[str] = []
+    audience = None
+    for k in range(0, len(parts), 2):
+        seg = parts[k].strip(" ,;:—–-.")
+        sep = parts[k - 1] if k else ""
+        if not seg or _SLIDES_PART.match(seg) or _FORM_PART.match(seg):
+            continue
+        fm = _FOR_PART.match(seg)
+        if fm and len(fm.group(1).split()) <= 6 and keep:
+            audience = audience or fm.group(1).strip()
+            continue
+        # «… для правления, 10 слайдов» без запятой перед «для»: хвост «для …» — тоже кому
+        tail = re.search(r"(?i)\s+для\s+([^,;:]{2,60})$", seg)
+        if tail and len(tail.group(1).split()) <= 5 and keep == [] and len(seg.split()) - len(tail.group(1).split()) >= 2:
+            audience = audience or tail.group(1).strip()
+            seg = seg[: tail.start()].strip()
+        seg = re.sub(r"(?i)[,\s]*(?:на\s+)?\d+\s*(?:[–—-]\s*\d+\s*)?слайд\w*$", "", seg).strip()
+        if seg:
+            keep.append((sep if keep else "") + seg)
+    out = "".join(keep).strip(" ,;:—–-")
+    return (upper_first(out) if out else ""), audience
+
+
+def data_own_title(tables: Sequence[Table], plans: Sequence[DatasetPlan] = ()) -> tuple[Optional[str], Optional[str]]:
+    """(название, кому) — заголовок, который сами данные дали себе: первая строка текстового файла, если это
+    заголовок («Итоги 2026 года — университет, для учёного совета»), а не фраза (без точки в конце, не длиннее
+    названия). None — такого нет."""
+    used = {p.profile.file for p in plans if p.slides > 0} if plans else None
+    for t in tables:
+        if t.kind != "text" or not (t.notes or "").strip() or (used is not None and t.file not in used):
+            continue
+        first = next((ln.strip() for ln in t.notes.splitlines() if ln.strip()), "")
+        first = re.sub(r"^#+\s*", "", first).strip()
+        if not first or len(first) > MAX_TITLE + 30 or first.endswith((".", "!", "?", ":", "…")) or "|" in first:
+            continue
+        if len(first.split()) < 2 or re.match(r"^[\d\W]", first):
+            continue
+        title, aud = clean_deck_title(first)
+        if title and len(title) <= MAX_TITLE:
+            return title, aud
+    return None, None
+
+
 def _topic_title(topics: Sequence[str]) -> str:
-    """«Пассажиропоток по маршрутам», «Воронка B2B-продаж Q4 и подписочная выручка по месяцам» — темы файлов (до двух),
-    «Данные: N файлов» — когда тем больше или их нет."""
+    """«Пассажиропоток по маршрутам», «Воронка B2B-продаж Q4 и подписочная выручка по месяцам» — темы файлов (до двух);
+    у трёх и больше — две первые, а не «X и ещё 5 тем» (перечень файлов — не название, жюри 20.10)."""
     ts = [upper_first(" ".join(t.split())) for t in topics if t and t.strip()]
     if not ts:
         return "Данные колоды"
     if len(ts) == 1:
         return _cut(ts[0], MAX_TITLE)
     two = f"{ts[0]} и {lower_first_soft(ts[1])}"
-    if len(ts) == 2 and len(two) <= MAX_TITLE:
+    if len(two) <= MAX_TITLE:
         return two
-    return _cut(f"{ts[0]} и ещё {count_words(len(ts) - 1, 'тема', 'темы', 'тем')}", MAX_TITLE)
+    return _cut(ts[0], MAX_TITLE)
 
 
 def lower_first_soft(text: str) -> str:
@@ -706,6 +816,9 @@ def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[Numb
             continue
         nums = numbers_in(p.headline)
         cands = [f for n in nums for f in p.headline_facts if abs(abs(f.value) - n) < 0.5 or abs(round(f.value) - n) < 1e-9]
+        # a count alone says nothing large on a card (жюри 20.10: «3 · Среднее время решения по линиям» — 3 of what?):
+        # «3 из 4 выше цели» is the slide's sentence, not a key figure
+        cands = [f for f in cands if f.kind != "count"]
         # the headline's strongest figure: a change, a share, the leader — the smallest only when nothing else
         rank = {"change": 0, "share": 1, "leader": 2, "max": 3, "total": 4, "last": 5, "median": 6, "count": 7, "min": 9}
         f = min(cands, key=lambda x: (rank.get(x.kind, 8), cands.index(x)), default=None)
@@ -1065,7 +1178,7 @@ def build_data_story(
         voice.say(f"«{name}» — {TASK_TITLES.get(p.task.task, p.task.task).lower()}, {what}: {why}.{goal}", 0.04)
 
     entries: list[_Entry] = []
-    title, subtitle, title_sentence = _title(brief, plans)
+    title, subtitle, title_sentence = _title(brief, plans, tables)
     entries.append(_Entry(OutlineSlide(id="title", kind=PatternKind.title, headline=title, subtitle=subtitle), "title", keep=100))
 
     # цель текста, о которой нет ни одного файла, не теряется: строка в контексте колоды
@@ -1409,6 +1522,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
         ok, why = framed(st)
         if ok:
             ok, why = true_to(st, [], deck_pool)
+        if ok:
+            ok, why = _subtitle_ok(st, o.title or "", story)
         if ok and noted:
             ok, why = False, "под темой обложки — пометка о вопросе без ответа"
         if ok and asked:
@@ -1433,6 +1548,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
         why = ""
         if not ok:
             why = "число " + ", ".join(_num(n) for n in bad[:3]) + " не из фактов данных"
+        elif met_claim_problem(new, s):
+            ok, why = False, f"кто выполнил цель — не так, как в данных: {met_claim_problem(new, s)}"
         elif new.lower() == (s.data.plain_headline or "").lower() or (topic_only(new) and not topic_only(s.headline)):
             ok, why = False, "это тема, а не вывод"
         elif source.lists(new, s):
@@ -1570,6 +1687,21 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     if refused:
         line += f"; не принято {count_words(len(refused), 'формулировка', 'формулировки', 'формулировок')}: " + "; ".join(f"«{r['to'][:60]}» — {r['why']}" for r in refused[:3])
     voice.say(line, 0.14)
+
+
+def _subtitle_ok(sub: str, title: str, story: "DataStory") -> tuple[bool, str]:
+    """The model's subtitle says something the title does not: not the title again («Итоги 2026 года для учёного
+    совета» under «Итоги 2026 года — университет»), not a list of the files (жюри 20.10)."""
+    from verstka.data.words import same_stem
+
+    sw = [x for x in stems_of(sub) if len(x) >= 3]
+    tw = stems_of(title)
+    if sw and sum(1 for x in sw if any(same_stem(x, y) for y in tw)) >= 0.5 * len(sw):
+        return False, "подзаголовок повторяет название"
+    files = [file_title(f.get("file") or "", f.get("sheet")) for f in story.files]
+    if sum(1 for f in files if f and f.lower() in sub.lower()) >= 2:
+        return False, "перечень файлов, а не подзаголовок"
+    return True, ""
 
 
 def _truth_pools(story: DataStory, slides: Sequence[OutlineSlide], source: "_Attribution", tables: Optional[Sequence[Table]]):

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 import re
 from typing import Optional, Sequence, Union
 
@@ -172,7 +173,7 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
         return Data(table, profile, subject=tuple(stems_of(phrase or "")), compare=compare, head=head,
                     negate=tuple(negate), qualifiers=tuple(x for x in metric if x != head), ask=ask,
                     ask_unit=unit, ask_periods=tuple(dict.fromkeys(months)), column=goal.column,
-                    dimension=goal.dimension, categories=cats, weight=goal.weight, period=period)
+                    dimension=goal.dimension, categories=cats, weight=goal.weight, period=period, goal_text=phrase)
     if not phrase:
         return Data(table, profile, compare=compare)
     metric, head, negate = goal_focus(phrase)
@@ -184,7 +185,7 @@ def goal_data(table: Table, profile: DatasetProfile, phrase: Optional[str], comp
     months = tuple(_MONTH_STEMS.index(mm.group(1)) + 1 for mm in _MONTH_RX.finditer(phrase.lower()))
     return Data(table, profile, subject=tuple(stems_of(phrase)), compare=compare, head=head, negate=tuple(negate),
                 qualifiers=tuple(x for x in metric if x != head), ask=ask, ask_unit="%" if pct else None,
-                pre_qualifiers=pre, ask_periods=tuple(dict.fromkeys(months)))
+                pre_qualifiers=pre, ask_periods=tuple(dict.fromkeys(months)), goal_text=phrase)
 
 
 def _other_mean(rel: Sequence[Goal], goal_phrase: Optional[str], table: Table, profile: DatasetProfile, d: Data,
@@ -907,6 +908,22 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
         same = [x for x in cv.extra_measures if not x.change][:1]  # взаимосвязь по строкам — обе метрики
         return _cats_spec(cv, opt.kind, src, unit=unit, extra=[(x.name, cv.extra[x.name]) for x in same])
     kind = opt.kind if opt.kind in ("bar", "column") else "bar"
+    from verstka.data.facts import tail_apart
+
+    if tail_apart(cv):
+        # «Остальные N» больше лидера: не полоса той же шкалы — их сумма и доля в подписи (facts.tail_apart)
+        cv = replace(cv, labels=list(cv.labels[:-1]), values=list(cv.values[:-1]),
+                     extra={k: list(v[:-1]) for k, v in cv.extra.items()}, others=0)
+    rt = d.row_target
+    if rt is not None and rt[0] is cv.measure and rt[1].name in cv.extra and not cv.others:
+        # своя цель у каждой строки («Цель SLA»): цель — рядом с фактом, вторым рядом, иначе «выше цели» не видно
+        # на графике (жюри 20.10)
+        spec = _cats_spec(cv, "grouped_bar" if kind == "bar" else "grouped_column", src, unit=unit,
+                          extra=[(rt[1].name, cv.extra[rt[1].name])])
+        miss = _worst_miss(d, cv, plan)
+        if miss is not None and miss in cv.labels:
+            spec.highlight_index = cv.labels.index(miss)  # самый далёкий от своей цели — акцент
+        return spec
     spec = _cats_spec(cv, kind, src, unit=unit)
     focus = _headline_focus(plan) or _worst_miss(d, cv, plan)
     if focus is not None and focus in cv.labels and spec.highlight_index is not None:

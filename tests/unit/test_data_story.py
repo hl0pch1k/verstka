@@ -169,7 +169,10 @@ def test_a_big_reference_table_goes_to_the_appendix_and_the_count_drops_it_first
 
 def test_without_text_the_deck_is_titled_by_its_data(sales):
     o = build_data_outline("", sales)
-    assert o.title == "NPS по кварталам и ещё 6 тем" and o.subtitle  # the files' topics, not «Что показывают данные»
+    # the data's own title (the heading line of «Итоги квартала.txt»), never «NPS по кварталам и ещё 6 тем» over a
+    # list of the files (жюри 20.10), nor «Что показывают данные»
+    assert o.title == "Итоги III квартала 2026 года — VK Cloud, коммерческий блок", o.title
+    assert "ещё" not in o.title and "," not in (o.subtitle or "")
     assert not any(s.id.startswith("context") for s in o.slides)
 
 

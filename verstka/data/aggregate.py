@@ -168,8 +168,11 @@ class Data:
                  ask: Optional[str] = None, ask_unit: Optional[str] = None,
                  pre_qualifiers: Optional[tuple[str, ...]] = None, ask_periods: tuple[int, ...] = (),
                  column: Optional[str] = None, dimension: Optional[str] = None, categories: tuple[str, ...] = (),
-                 weight: Optional[str] = None, period: Optional[dict] = None):
+                 weight: Optional[str] = None, period: Optional[dict] = None, goal_text: Optional[str] = None):
         self.table = table
+        # слова цели как в тексте автора («сравни линии с целью SLA — не более 6 часов»): направление «лучше»
+        # (`verstka/data/polarity.py`) берётся из них раньше, чем из имени колонки
+        self.goal_text = goal_text
         self.profile = profile
         self.subject = subject
         # величина цели: главное слово («мест»), уточнения («свободн»), отрицания («без НДС» → «ндс»)
