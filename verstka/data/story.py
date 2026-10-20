@@ -37,7 +37,7 @@ from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
 from verstka.data.profile import profile_table
-from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, stems_of, upper_first
+from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, stems_of, times_word, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
 from verstka.schemas.outline import (
@@ -693,8 +693,10 @@ def _topic_title(topics: Sequence[str]) -> str:
 def lower_first_soft(text: str) -> str:
     """Тема внутри фразы: первое слово строчное, если это не аббревиатура или имя («MRR», «ЕГЭ»)."""
     w = text.split(" ", 1)[0]
-    if re.fullmatch(r"[A-ZА-ЯЁ0-9\-]{2,}", w) or not w[:1].isupper():
-        return text
+    if re.fullmatch(r"[A-ZА-ЯЁ0-9\-]{2,}", w) or not w[:1].isupper() or any(ch.isupper() for ch in w[1:]):
+        return text  # («PaaS», «iOS», «VK» — имя, а не начало фразы)
+    if re.match(r"^\S+\s+(?:[A-ZА-ЯЁ]|\d+)(?:[\s:,;.—–]|$)", text):
+        return text  # «Провайдер А», «Линия 2» — имя строки данных
     return text[:1].lower() + text[1:]
 
 
@@ -778,15 +780,19 @@ def _meaningful(words: str) -> bool:
 
 def _card_label(fact_text: str, value: str, topic: str, headline: str = "") -> str:
     lab = _card_label0(fact_text, value, topic)
-    if lab != topic and not _meaningful(lab.split(" · ")[0]):
+    # (a bare figure fact — «+41%» of the fastest growth — has no words of its own: the headline around the figure says
+    # what it is, «PaaS растёт быстрее всех», not the file's topic «Сегменты», жюри R25)
+    if lab == topic or not _meaningful(lab.split(" · ")[0]):
         # «80% — не больше …»: the headline's words around the figure say what it is («обращений получают ответ за 2 часа»)
         digits = re.sub(r"\D", "", value or "")
-        m = re.search(r"[+\-−–]?\d[\d\u00a0\u202f ]*(?:[.,]\d+)?\s*%?", headline or "")
+        m = re.search(r"(?:(?<![а-яё])в\s+)?[+\-−–]?\d[\d\u00a0\u202f ]*(?:[.,]\d+)?\s*(?:%|раза?(?![а-яё]))?", headline or "")
         if m and digits and re.sub(r"\D", "", m.group(0)) == digits:
+            # («в 5 раз» уходит целиком: «Объём рынка вырос в раз за 6 лет» — сломанная фраза, жюри R25)
             rest = " ".join((headline[: m.start()] + " " + headline[m.end():]).split()).strip(" ,—–:")
+            rest = re.sub(r"\s*[:—–]\s*[:—–]\s*", " — ", rest)
             if _meaningful(rest) and len(rest.split()) <= 8:
                 return rest
-        return topic
+        return topic if lab == topic or not _meaningful(lab.split(" · ")[0]) else lab
     return lab
 
 
@@ -804,6 +810,22 @@ def _card_label0(fact_text: str, value: str, topic: str) -> str:
     if low and not set(re.findall(r"[а-яё]{4,}", words.lower())) & set(re.findall(r"[а-яё]{4,}", low.lower())):
         return f"{words} · {low}"
     return words
+
+
+def _cards_head(plans: Sequence[DatasetPlan], cards: Sequence[NumberCallout]) -> str:
+    """The heading of the key figures: the two first conclusions they come from («Объём рынка вырос в 5 раз за 6 лет;
+    PaaS растёт быстрее всех: +41%»), not «label — figure» glued from a cut label («… вырос в раз за 6 лет — +5», жюри
+    R25); a trailing span of periods («— 2024 → 2025») goes."""
+    heads: list[str] = []
+    for c in cards[:2]:
+        p = next((p for p in plans if any(f.id == c.fact_id for f in p.headline_facts) and p.headline
+                  and re.sub(r"\D", "", c.value) in re.sub(r"\D", "", p.headline)), None)
+        h = re.sub(r"\s+[—–]\s+[\d\s→–.,'’-]+$", "", p.headline).strip() if p is not None else ""
+        if not h:
+            return "; ".join(f"{x.label.split(' · ')[0]} — {x.value}" for x in cards[:2])
+        heads.append(h if not heads else lower_first_soft(h))
+    head = "; ".join(heads)
+    return head if len(head) <= MAX_HEADLINE else heads[0]
 
 
 def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[NumberCallout]:
@@ -826,6 +848,8 @@ def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[Numb
             continue
         unit = f.unit if f.unit not in ("раз",) else None
         value = fmt_signed(f.value, unit or "") if f.kind == "change" else fmt_value(f.value, unit)
+        if f.unit == "раз":
+            value = f"в {fmt_num(f.value)} {times_word(f.value)}"  # кратность — «в 5 раз», а не «+5»
         if any(c.value == value for c in out):
             continue  # one figure once (two files said the same +23%)
         out.append(NumberCallout(value=value, label=_card_label(f.text, value, p.plain_headline, p.headline), fact_id=f.id))
@@ -1241,7 +1265,7 @@ def build_data_story(
         cards = _fact_cards(plans, order)
         if len(cards) >= 3:
             # the heading says the two first figures (never the topic «Главное в цифрах»)
-            head = "; ".join(f"{c.label.split(' · ')[0]} — {c.value}" for c in cards[:2])
+            head = _cards_head(plans, cards)
             entries.append(_Entry(OutlineSlide(id="key-figures", kind=PatternKind.stat_row, headline=head or "Главное в цифрах", content=SlideContent(numbers=cards), rationale="Главные числа выводов колоды — по одному из каждого файла."), "facts", keep=15))
     kpi_first = [e for e in data_entries if e.role == "kpi"]
     body = [e for e in data_entries if e.role in ("data", "part")]
@@ -1467,7 +1491,7 @@ def fit_count(story: "DataStory", tables: Sequence[Table], lo: Optional[int], hi
             cards = _fact_cards(story.plans, order)
             shown = " ".join(s.headline or "" for s in o.slides if s.id == "summary")
             if len(cards) >= 3 and not all(c.value in shown for c in cards):
-                head = "; ".join(f"{c.label.split(' · ')[0]} — {c.value}" for c in cards[:2])
+                head = _cards_head(story.plans, cards)
                 at = 1 + len([s for s in o.slides[1:] if s.id.startswith("context")])
                 o.slides.insert(at, OutlineSlide(id="key-figures", kind=PatternKind.stat_row, headline=head,
                                                  content=SlideContent(numbers=cards),

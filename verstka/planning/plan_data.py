@@ -145,6 +145,37 @@ def _thought_slide(s: OutlineSlide, it, slides: list[OutlineSlide]) -> OutlineSl
                                              "данных о том, что она называет, — пунктами."})
 
 
+# пункт плана — вывод или вопрос «куда дальше» («Выводы: где нам расти в 2027 году», «Итоги», «Что это значит»)
+_CONCLUDE_RE = re.compile(r"(?i)(?<![а-яё])(?:вывод\w*|итог\w*|резюме|где\s+(?:нам\s+)?расти|куда\s+(?:нам\s+)?(?:расти|двигаться|идти)|"
+                          r"точк\w*\s+роста|что\s+это\s+значит|рекомендац\w*)")
+_GROW_ASK_RE = re.compile(r"(?i)(?<![а-яё])(?:расти|рост\w*|точк\w*\s+роста|возможност\w*|куда)")
+
+
+def _growth_answer(it, slides: list[OutlineSlide]) -> Optional[str]:
+    """«Где нам расти?» — ответ из данных: категория, которая растёт быстрее всех, с её проверенным ростом (факты
+    `growth_max` и имя из фактов того же слайда: «PaaS — 41 млрд ₽» → «Где расти: PaaS — +41%, быстрее всех»). None —
+    пункт не о росте или такого факта нет (итог остаётся со своим заголовком)."""
+    if not _GROW_ASK_RE.search(_item_text(it)):
+        return None
+    for s in slides:
+        if s.data is None:
+            continue
+        facts = {f.id: f for f in s.data.headline_facts}
+        g = facts.get("growth_max")
+        if g is None or not re.search(r"\d", g.text or ""):
+            continue
+        who = next((f.text.split(" — ", 1)[0].strip() for k_, f in facts.items() if k_ in ("fastest_from", "fastest_to")
+                    and " — " in f.text), None)
+        if not who:
+            m = re.match(r"^(.+?)\s+раст(?:ёт|ет|ут)\s+быстрее\s+всех", s.headline or "")
+            who = m.group(1).strip() if m else None
+        if not who or who.lower() not in (s.headline or "").lower():
+            continue
+        fig = re.search(r"[+\-−]?\d[\d\u00a0 ]*(?:[.,]\d+)?\s*%?", g.text).group(0).strip()
+        return f"Где расти: {who} — {fig}, быстрее всех"
+    return None
+
+
 def _text_slides(plan, brief_language: str = "ru") -> dict[int, list[OutlineSlide]]:
     """The plan's items laid out as written by the rules (planning/agent.py with no model): item index → its slides."""
     from verstka.planning.agent import run_agent
@@ -236,8 +267,10 @@ def _plan_cover(plan, brief_text: str, story_subtitle: Optional[str]) -> tuple[s
         first = next((ln.strip() for ln in (brief_text or "").splitlines() if ln.strip()), "")
         _, aud = clean_deck_title(re.sub(r"^#+\s*", "", first))
     if plan.subtitle:
-        sub, _ = clean_deck_title(plan.subtitle)
-        sub = sub or None
+        sub, s_aud = clean_deck_title(plan.subtitle)
+        if not sub and re.match(r"(?i)\s*для\s+\S", plan.subtitle):
+            s_aud = s_aud or re.sub(r"(?i)^\s*для\s+", "", plan.subtitle).strip(" .")
+        sub = sub or (f"Для {s_aud or aud}" if (s_aud or aud) else None)
     elif aud:
         sub = f"Для {aud}"
     else:
@@ -304,7 +337,18 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
         part: list[OutlineSlide] = []
         for g in mine:
             part.extend(groups[g])
-        if not mine and k in text_slides and k in texts_for:
+        if not mine and k != closing and _CONCLUDE_RE.search(_item_text(it)) and any(x.id == "summary" for x in summary):
+            # «Выводы: где нам расти в 2027 году» — не строка плана на пустом слайде (жюри R25), а итог колоды на его
+            # месте: выводы данных, заголовок — ответ на вопрос пункта проверенными числами слайдов
+            sm = next(x for x in summary if x.id == "summary")
+            summary = [x for x in summary if x is not sm]
+            sm.section = sm.section or H.cap_first(it.title)
+            ans = _growth_answer(it, slides)
+            if ans:
+                sm.headline = ans
+            part.append(sm)
+            said.append(f"пункт плана «{it.title}» — итог колоды" + (f": «{ans}»" if ans else ""))
+        elif not mine and k in text_slides and k in texts_for:
             for j, s in enumerate(text_slides[k]):
                 s.id = f"data-plan-{k + 1}" + (f"-{j + 1}" if j else "")
                 s.continues = None

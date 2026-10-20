@@ -554,7 +554,8 @@ def plain_headline(task: TaskKind, d: Data, own: bool = False) -> str:
             return f"{title_of(m)} по {by}"
     if task in ("comparison", "shares") and m is not None and d.cats is not None and (task == "comparison" or own):
         p = phrase(d.cats.dim)
-        if p is not None and p.sure:
+        # колонка-период («2025 (млрд ₽)») — не имя величины: «2025 по сегментам» ничего не называет (жюри, R25)
+        if p is not None and p.sure and not re.fullmatch(r"\s*(?:19|20)\d{2}\s*(?:г\.?|год)?\s*", title_of(m) or ""):
             return f"{title_of(m)} по {p.low.dat_pl}"
     if task == "reference" and d.entity:
         p = phrase(d.entity)

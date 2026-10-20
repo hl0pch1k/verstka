@@ -619,7 +619,28 @@ def plan_datasets(tables: Sequence[Table], brief_text: str = "",
         goals = goals_of(brief_text)
     datas = [Data(t, p) for t, p in zip(tables, profs)]
     per = assign_goals(goals, datas)
-    return [plan_dataset(p, t, g, assigned=True) for t, p, g in zip(tables, profs, per)]
+    return [_two_period_fastest(plan_dataset(p, t, g, assigned=True), p, t, g) for t, p, g in zip(tables, profs, per)]
+
+
+def _two_period_fastest(plan: DatasetPlan, profile: DatasetProfile, table: Table, goals: Sequence[Goal]) -> DatasetPlan:
+    """«Какие сегменты растут быстрее всего» над двумя колонками-периодами («2024 · 2025»), понятое как динамика: ряд
+    итога из двух точек, где сегментов не видно, а заголовок — о PaaS (жюри R25, раунд 3). Тот же вопрос как сравнение
+    сегментов по периодам — сегменты рядом; он берётся, когда его проверенный вывод отвечает «быстрее всех»."""
+    g = next((x for x in goals or [] if x.task == "dynamics" and x.ask == "fastest" and x.phrase == plan.task.goal), None)
+    if g is None or plan.task.task != "dynamics":
+        return plan
+    d = Data(table, profile)
+    tv = d.time
+    if tv is None or tv.points > 2 or d.cats is None:
+        return plan
+    try:
+        alt = plan_dataset(profile, table, [g.model_copy(update={"task": "comparison", "viz": "grouped_column"})],
+                           assigned=True)
+    except Exception:  # noqa: BLE001 - the dynamics stays
+        return plan
+    if alt.task.task == "comparison" and "быстрее всех" in (alt.headline or ""):
+        return alt
+    return plan
 
 
 # ── данные слайда ─────────────────────────────────────────────────────────────────────────────────────────────────────

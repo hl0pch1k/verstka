@@ -219,3 +219,45 @@ def test_why_says_the_target_is_on_the_chart():
     p = plan_datasets(_lines(), "")[0]
     why = " ".join(p.options[p.chosen].reasons)
     assert "Цель SLA" in why and "одна величина" not in why
+
+
+# ── жюри, раунд 3 (R25, исследование рынка) ───────────────────────────────────────────────────────────────────────
+MARKET = ROOT / "tests" / "fixtures" / "market"
+
+
+def test_market_research_answers_where_to_grow_with_checked_figures():
+    st = build_data_story((ROOT / "tests" / "fixtures" / "market_plan.md").read_text(encoding="utf-8"), _files(MARKET))
+    o = st.outline
+    texts = " ‖ ".join([s.headline or "" for s in o.slides] + [f"{n.value} · {n.label}" for s in o.slides for n in s.content.numbers])
+    assert "в раз" not in texts and "+5" not in texts, texts  # кратность — «в 5 раз», не «+5» под обрубком
+    kf = next((s for s in o.slides if s.id == "key-figures"), None)
+    if kf is not None:
+        assert any(n.value == "в 5 раз" for n in kf.content.numbers)
+        assert all(n.label != "Сегменты" for n in kf.content.numbers)  # «+41%» назван тем, что растёт: PaaS
+        assert "paaS" not in kf.headline
+    end = next(s for s in o.slides if s.id == "summary")
+    assert end.headline == "Где расти: PaaS — +41%, быстрее всех" and end.section == "Выводы"
+    assert not any((s.headline or "") == "Выводы" for s in o.slides)  # строка плана без ответа — не слайд
+    assert o.slides[0].subtitle == "Для стратегической сессии"
+
+
+def test_fastest_over_two_period_columns_shows_the_segments():
+    """Модель поняла «какие сегменты растут быстрее всего» как динамику: над двумя колонками-периодами это ряд итога из
+    двух точек без сегментов — вид сравнения: сегменты рядом по годам (жюри R25, раунд 3)."""
+    from verstka.data.story import slide_for
+
+    t = read_file(MARKET / "Сегменты.csv")
+    q = "Какие сегменты растут быстрее всего"
+    r = read_goals(q, t, reading=GoalReading.model_validate({"goals": [
+        {"span": q, "dataset": "d1", "task": "dynamics", "metric": "2025", "dimension": "Сегмент", "ask": "fastest"}],
+        "unanswerable": []}))
+    p = plan_datasets(t, q, goals=r.goals)[0]
+    ch = slide_for(p, t[0], slide_id="d").content.chart
+    assert p.task.task == "comparison" and ch.categories == ["IaaS", "SaaS", "PaaS"] and len(ch.series) == 2
+    assert p.headline.startswith("PaaS растёт быстрее всех: +41%")
+
+
+def test_a_firm_ok_noun_keeps_its_vowel():
+    from verstka.data.words import phrase
+
+    assert phrase("Игрок").low.dat_pl == "игрокам" and phrase("Звонок").low.dat_pl == "звонкам"
