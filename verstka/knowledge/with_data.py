@@ -81,6 +81,54 @@ def _is_data(s: OutlineSlide) -> bool:
     return s.data is not None or s.id.startswith("data-") or s.id == "key-figures"
 
 
+def _fit_count(slides: list[OutlineSlide], brief: Optional[Brief], kb_ids: set[int]) -> list[str]:
+    """The person's slide count holds with the base's slides too (жюри 20.10: 7 asked, 10 made): over it, the least
+    needed go first — the story's context and key figures, continuation parts and more views, a file's second slide,
+    the proposed next steps, the summary, then the base's slides from the last. The cover, a file's first slide and
+    the plan's own slides stay. Changes `slides` in place; the headlines of the slides taken out."""
+    import re
+
+    from verstka.data.story import _count_bounds
+
+    try:
+        _, hi = _count_bounds(brief, None, brief.slide_count if brief is not None else None)
+    except Exception:  # noqa: BLE001 - no count read: the slides as they are
+        return []
+    if not hi or len(slides) <= hi:
+        return []
+
+    def rank(i: int, s: OutlineSlide) -> Optional[int]:
+        if i == 0 or s.kind == PatternKind.title:
+            return None
+        if s.id.startswith("context"):
+            return 0
+        if s.id == "key-figures":
+            return 1
+        if s.data is not None and s.data.part[0] > 1:
+            return 2
+        if re.search(r"-m\d+$", s.id):
+            return 3
+        if s.data is not None and any(x.data is not None and x.data.dataset_id == s.data.dataset_id for x in slides[:i]):
+            return 4  # a file's second slide (its peak, another measure): the file's first one shows it
+        if s.id == "next-steps":
+            return 5  # the steps the model proposed
+        if s.id == "summary":
+            return 6
+        if id(s) in kb_ids:
+            return 7
+        return None
+
+    gone: list[str] = []
+    while len(slides) > hi:
+        cands = [(r, -i, s) for i, s in enumerate(slides) if (r := rank(i, s)) is not None]
+        if not cands:
+            break
+        s = min(cands, key=lambda x: (x[0], x[1]))[2]
+        slides.remove(s)
+        gone.append(s.headline)
+    return gone
+
+
 # ------------------------------------------------------------------ the writer's slides → outline slides
 
 
@@ -269,6 +317,9 @@ def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference,
             mid_part.append(s)
     after_summary = (summary_idx + 1) if summary_idx is not None else end
     new = slides_now[:before_data] + head_part + slides_now[before_data:before_summary] + mid_part + slides_now[before_summary:after_summary] + tail_part + slides_now[after_summary:]
+    gone = _fit_count(new, brief, {id(s) for _, s in made})
+    if gone:
+        out.log.append("Слайдов просили не больше " + str(len(new)) + ": без " + ", ".join(f"«{h}»" for h in gone[:3]))
     o = outline.model_copy(deep=True)
     o.slides = new
     # the cover says where the text beside the data comes from
@@ -281,6 +332,7 @@ def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference,
     scrub_author_notes(o)  # the base's slides say no note of the author either («Таблицы во вложении …»)
     o.agent_log = list(o.agent_log) + [f"База знаний: {len(made)} слайд(а) по документам — " + "; ".join(f"«{s.headline}»" for _, s in made[:6])]
     o.agent_log += [x for x in out.log if x.startswith("База знаний против таблиц")][:8]
+    o.agent_log += [f"База знаний: {x}" for x in out.log if x.startswith("Слайдов просили")]
     out.outline = o
     out.log.append(o.agent_log[-1])
     if progress is not None:

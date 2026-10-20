@@ -49,7 +49,7 @@ NATURE_LABELS: dict[Nature, str] = {
     "shares": "Доли",
     "distribution": "Распределение",
     "reference": "Справочник",
-    "with_gaps": "С пропусками",
+    "with_gaps": "Временной ряд с пропусками",  # the gaps are a property of the series, not its kind (video S4)
     "text_table": "Таблица в тексте",
     "relationship": "Взаимосвязь",
     "kpi": "Ключевые показатели",

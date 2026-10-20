@@ -13,7 +13,9 @@ are not facts and are skipped."""
 from __future__ import annotations
 
 import re
-from typing import Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterable, Iterator, Optional
 
 from verstka.audit.checks.common import is_chrome_like
 from verstka.audit.registry import AuditContext, check
@@ -168,11 +170,33 @@ class FigureStats:
         return {"checked": self.checked, "derived": self.derived, "unverified": self.unverified}
 
 
+# the texts besides the brief the deck's figures come from (a data deck's knowledge base: its documents and the part the
+# writer wrote of them — «150 клиентов к 31 декабря 2026 года» is the base's, not a figure made up): the API sets them
+# around an edit or a fix of a generation (api/app.py `_figure_sourced`); this check and the edit's grounding read them
+_SOURCES: ContextVar[tuple[str, ...]] = ContextVar("verstka_figure_sources", default=())
+
+
+@contextmanager
+def figure_sources(texts: Iterable[str]) -> Iterator[None]:
+    """Within the block the figures check also takes the figures of `texts` (the knowledge base's documents) as given."""
+    token = _SOURCES.set(tuple(t for t in texts if t and t.strip()))
+    try:
+        yield
+    finally:
+        _SOURCES.reset(token)
+
+
+def figure_texts() -> tuple[str, ...]:
+    """The texts `figure_sources` set for this job (planning/grounding asks them too); empty outside it."""
+    return _SOURCES.get()
+
+
 def _index(ctx: AuditContext):
     from verstka.planning.brief_structure import read_structure
     from verstka.planning.grounding import BriefIndex
 
-    idx = BriefIndex(ctx.brief_text or "", ctx.outline.title if ctx.outline is not None else None)
+    text = "\n\n".join([ctx.brief_text or "", *_SOURCES.get()])
+    idx = BriefIndex(text, ctx.outline.title if ctx.outline is not None else None)
     try:
         idx.use_structure(read_structure(ctx.brief_text or ""))
     except Exception:  # noqa: BLE001  (the rules' reading only adds derived pairs; the brief's figures stand without it)
@@ -228,6 +252,12 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
         shares, totals = _chart_parts(s)
         changes = _chart_changes(s)
         cover = _cover(s, ctx)
+        # the shares of two given figures of the slide: «131» (the data) of «150» (the base's goal) is «87 % цели» on a
+        # card of its own — computed from what the slide shows, not a new figure
+        given = [g.value for e in s.elements for t in _texts(e) for g in figures(t)
+                 if g.unit != "pct" and g.date is None and g.value > 0
+                 and (idx.verdict(g) == "ok" or (data_facts and _near(g.value, g.dec, data_facts)))]
+        shares_of = [a / b * 100.0 for a in given for b in given if a < b]
         for e in s.elements:
             if (e.ph_type or "") in _SKIP_PH or is_chrome_like(e, ctx.ir, ctx.manifest):
                 continue
@@ -264,6 +294,8 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                         v = "derived"  # «×2,1» beside a chart of 120 000 → 254 795: read off the chart's own values
                     elif v != "ok" and f.unit == "pct" and _line_change(t, f):
                         v = "derived"  # «1 840 млн ₽ против 1 750 (+5%)»: the change of the line's own two figures (qa6)
+                    elif v != "ok" and f.unit == "pct" and _near(f.value, f.dec, shares_of):
+                        v = "derived"  # «87 % цели» beside «131» and «150» on the same slide
                     elif v == "ok" and not idx._same(f):
                         v = "derived"  # a difference, a percent change or a ratio of the brief's figures
                     if v != "ok" and t in row_given:

@@ -2620,7 +2620,7 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
                 _fix_active.discard(key)
 
     try:
-        job = runner.submit("fix", run)
+        job = runner.submit("fix", _figure_sourced(gid, run))
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)
@@ -2674,6 +2674,43 @@ def _brief_text_of_meta(gid: Optional[str], meta: dict) -> Optional[str]:
         part = part or (w.get("text") or "")
         return "\n\n".join(x for x in [meta.get("brief") or "", part] if x.strip()) or None
     return _written_text(gid, meta) or meta.get("brief")
+
+
+def _figure_texts_of_meta(gid: Optional[str], meta: dict) -> list[str]:
+    """The texts besides the brief the deck's figures come from: the knowledge base's part the writer wrote of a data
+    deck (writer.md) and the base's documents themselves — «150 клиентов к 31 декабря 2026 года» is the base's figure."""
+    out: list[str] = []
+    w = meta.get("writer") if isinstance(meta.get("writer"), dict) else None
+    if w and w.get("part") == "kb_with_data" and w.get("status") == "written":
+        gdir = store.generation_dir(gid) if gid else None
+        try:
+            out.append((gdir / "writer.md").read_text(encoding="utf-8") if gdir is not None and (gdir / "writer.md").is_file() else (w.get("text") or ""))
+        except OSError:
+            pass
+    kid = meta.get("knowledge_id")
+    if kid:
+        try:
+            from verstka.knowledge.store import KnowledgeBase
+
+            kb = KnowledgeBase.open(store.root, str(kid))
+            for d in (kb.docs if kb is not None else []):
+                out.append(kb.text_md(str(d.get("id") or "")) or "")
+        except Exception:  # noqa: BLE001 - a base that is gone: the brief alone, as before
+            log.debug("knowledge texts for the figures check not read", exc_info=True)
+    return [t for t in out if t and t.strip()]
+
+
+def _figure_sourced(gid: str, run: Callable[[Job], dict]) -> Callable[[Job], dict]:
+    """The job with the figures check taking the generation's knowledge base as a source of its figures too (an edit or
+    a fix of a data deck with a base no longer flags the base's «150» and its dates as made up)."""
+    from verstka.audit.checks.facts import figure_sources
+
+    def sourced(job: Job) -> dict:
+        texts = _figure_texts_of_meta(gid, store.read_generation_meta(gid) or {})
+        with figure_sources(texts):
+            return run(job)
+
+    return sourced
 
 
 def _brief_of_meta(meta: dict) -> Optional[Brief]:
@@ -2841,7 +2878,14 @@ def _data_form_change(gid: str, strategy: str, vdir: Path, meta: dict, manifest,
         workspace_root=store.root, exports=list(meta.get("exports") or []), progress=job_progress(job), request=message,
     )
     store.merge_variant_summary(gid, strategy, {"n_slides": res.n_slides, "score": res.score_after, "errors": res.errors, "warnings": res.warnings})
-    return {"reply": res.reply, "changed": res.applied, "slide": n, "strategy": strategy, "score": res.score_after, "kind": "rebuild",
+    # the slide in the deck after the rebuild: the set's slides merged into fewer («покажи таблицей» — two charts of one
+    # file in one table) start where the set started, so «Показать слайд N» leads to the new slide, not the next one
+    focus = n
+    if len(rp.slides) != len(rp.positions) and res.slides:
+        focus = res.slides[0]
+    if res.n_slides:
+        focus = max(1, min(focus, res.n_slides))
+    return {"reply": res.reply, "changed": res.applied, "slide": focus, "strategy": strategy, "score": res.score_after, "kind": "rebuild",
             "option": rp.option, "viz": rp.kind, "version": res.version}
 
 
@@ -2864,7 +2908,7 @@ def edit_variant(gid: str, strategy: str, body: EditRequestBody) -> dict:
                 _fix_active.discard(key)
 
     try:
-        job = runner.submit("edit", run)
+        job = runner.submit("edit", _figure_sourced(gid, run))
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)
@@ -2958,7 +3002,7 @@ def fix_slide(gid: str, strategy: str, n: int, body: SlideFixBody) -> dict:
                 _fix_active.discard(key)
 
     try:
-        job = runner.submit("slide_fix", run)
+        job = runner.submit("slide_fix", _figure_sourced(gid, run))
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)
@@ -3017,7 +3061,7 @@ def rebuild_slide(gid: str, strategy: str, n: int, body: RebuildBody) -> dict:
                 _fix_active.discard(key)
 
     try:
-        job = runner.submit("rebuild", run)
+        job = runner.submit("rebuild", _figure_sourced(gid, run))
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)
@@ -3094,7 +3138,7 @@ def change_slide_picture(gid: str, strategy: str, n: int, body: PictureBody) -> 
                 _fix_active.discard(key)
 
     try:
-        job = runner.submit("picture", run)
+        job = runner.submit("picture", _figure_sourced(gid, run))
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)

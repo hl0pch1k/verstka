@@ -96,8 +96,8 @@ def _plan() -> DatasetPlan:
 
 def test_the_labels_name_every_kind_in_the_briefs_words():
     assert set(NATURE_LABELS) == set(get_args(Nature))
-    assert list(NATURE_LABELS.values()) == ["Временной ряд", "Сравнение", "Доли", "Распределение", "Справочник", "С пропусками",
-                                            "Таблица в тексте", "Взаимосвязь", "Ключевые показатели", "Не для графика"]
+    assert list(NATURE_LABELS.values()) == ["Временной ряд", "Сравнение", "Доли", "Распределение", "Справочник",
+                                            "Временной ряд с пропусками", "Таблица в тексте", "Взаимосвязь", "Ключевые показатели", "Не для графика"]
     assert set(VIZ_TITLES) == set(get_args(VizKind))
     assert list(VIZ_TITLES.values()) == ["Линейный график", "Столбцы", "Полосы", "Гистограмма", "Круговая", "Кольцевая", "Рассеяние",
                                          "Сгруппированные столбцы", "Сгруппированные полосы", "Накопительные столбцы",
@@ -180,8 +180,8 @@ def test_slide_data_round_trips_and_labels_its_nature():
 
 def test_a_dataset_summary_labels_its_nature():
     s = _round(DatasetSummary(id="ds1", file="NPS по кварталам.csv", kind="csv", rows=8, cols=2, nature="with_gaps",
-                              line="С пропусками · 8 строк · 2 колонки", issues=["2 пропуска"]))
-    assert s.nature_label == "С пропусками" and s.sheet is None
+                              line="Временной ряд с пропусками · 8 строк · 2 колонки", issues=["2 пропуска"]))
+    assert s.nature_label == "Временной ряд с пропусками" and s.sheet is None
     assert DatasetSummary(id="x", file="Итоги квартала.txt", kind="text", nature="text_table").nature_label == "Таблица в тексте"
 
 

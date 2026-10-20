@@ -2014,8 +2014,10 @@ def fit_count(story: "DataStory", tables: Sequence[Table], lo: Optional[int], hi
                 return 2
             if re.search(r"-m\d+$", s.id):
                 return 3
+            if s.id == "next-steps":
+                return 4  # the steps the model proposed (added before the count was fitted — 8 asked, 9 made, video 20.10)
             if s.id == "summary":
-                return 4
+                return 5
             return None
 
         while len(o.slides) > hi:

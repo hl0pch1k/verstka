@@ -64,6 +64,7 @@ idempotent and reports what it changed as warning lines («grounding: …»).
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from itertools import combinations
@@ -1313,11 +1314,44 @@ def _planned_end(name: str, first: str, last: str) -> bool:
     return False
 
 
+_SRC_GUARD: ContextVar[bool] = ContextVar("verstka_sources_index", default=False)
+_SRC_IDX: dict[tuple[str, ...], "BriefIndex"] = {}
+
+
+def _sources_index() -> Optional["BriefIndex"]:
+    """The index of the texts besides the brief an edit of a deck takes its figures from (the knowledge base's
+    documents: audit/checks/facts.figure_sources, set by the API around an edit or a fix) — a figure of the base («не
+    менее 150 клиентов к 31 декабря 2026 года») is not stripped from the slide as made up; None outside such a job."""
+    if _SRC_GUARD.get():
+        return None
+    try:
+        from verstka.audit.checks.facts import figure_texts
+
+        texts = figure_texts()
+    except Exception:  # noqa: BLE001 - the brief alone, as before
+        return None
+    if not texts:
+        return None
+    idx = _SRC_IDX.get(texts)
+    if idx is None:
+        tok = _SRC_GUARD.set(True)
+        try:
+            idx = BriefIndex("\n\n".join(texts))
+        finally:
+            _SRC_GUARD.reset(tok)
+        idx._is_sources = True
+        _SRC_IDX.clear()
+        _SRC_IDX[texts] = idx
+    return idx
+
+
 class BriefIndex:
     """What the brief says: its figures (with units), the values derived from pairs of them, its words, its title.
     Figures and content words come from the brief's text and title only; the user's instructions and the audience
     may be named on the title slide (and give names and contacts), they ground no figure («не более 12 слайдов,
     доклад на 10 минут» makes neither «12» nor «10 минут» the brief's)."""
+
+    _is_sources = False  # the index of the knowledge base's texts itself (_sources_index): it asks no further index
 
     def __init__(self, text: str, title: Optional[str] = None, extra: Iterable[str] = (), audience: Optional[str] = None) -> None:
         body = "\n".join(x for x in (text or "", title or "") if x)
@@ -1645,6 +1679,11 @@ class BriefIndex:
             v = "ok"  # «в 2026 году»; a number without a unit takes no other time unit («64 дня» for NPS 64)
         else:
             v = "bad"
+        if v != "ok" and not self._is_sources:
+            # an edit of a deck with a knowledge base: the base's figure is the deck's source too (_sources_index)
+            src = _sources_index()
+            if src is not None and src.verdict(f) == "ok":
+                v = "ok"
         self._cache[key] = v
         return v
 

@@ -173,7 +173,7 @@ def test_missing_periods_with_an_empty_value_raw_quarters():
     ax = p.time_axis
     assert (ax.freq, ax.start, ax.end, ax.points) == ("quarter", "2024-Q4", "2026-Q3", 8)
     assert ax.missing_periods == ["2025-Q2", "2026-Q2"]
-    assert p.nature == "with_gaps" and p.summary == "С пропусками · 8 строк · 2 колонки"
+    assert p.nature == "with_gaps" and p.summary == "Временной ряд с пропусками · 8 строк · 2 колонки"
 
 
 def test_working_days_are_not_gaps():
@@ -468,7 +468,7 @@ def _load(name: str) -> Table:
         ("Каналы продаж.json", "shares", "Доли · 4 строки · 4 колонки"),
         ("Время ответа поддержки.csv", "distribution", "Распределение · 512 строк · 2 колонки"),
         ("Клиенты.xlsx", "reference", "Справочник · 240 строк · 6 колонок"),
-        ("NPS по кварталам.csv", "with_gaps", "С пропусками · 8 строк · 3 колонки"),
+        ("NPS по кварталам.csv", "with_gaps", "Временной ряд с пропусками · 8 строк · 3 колонки"),
         ("Итоги квартала.txt", "text_table", "Таблица в тексте · 4 строки · 4 колонки"),
     ],
 )
@@ -639,7 +639,7 @@ def test_reader_and_profile_share_one_parser():
         ("Каналы продаж.json", "shares", "Доли · 4 строки · 4 колонки"),
         ("Время ответа поддержки.csv", "distribution", "Распределение · 512 строк · 2 колонки"),
         ("Клиенты.xlsx", "reference", "Справочник · 240 строк · 6 колонок"),
-        ("NPS по кварталам.csv", "with_gaps", "С пропусками · 8 строк · 3 колонки"),
+        ("NPS по кварталам.csv", "with_gaps", "Временной ряд с пропусками · 8 строк · 3 колонки"),
         ("Итоги квартала.txt", "text_table", "Таблица в тексте · 4 строки · 4 колонки"),
     ],
 )
