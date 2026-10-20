@@ -651,3 +651,29 @@ def test_a_one_line_point_of_the_author_s_plan_is_content_not_a_divider():
 
     r = F.read_slide(4, "Часть 2. Решение", "")
     assert r.role == "section"
+
+
+def test_no_heading_twice_in_any_deck():
+    from verstka.planning.meaning import unique_headlines
+    from verstka.schemas.outline import ChartSpec, InlineSeries, SlideItem
+
+    h = "Выручка выросла на 66% за год"
+    o = DeckOutline(title="Итоги продаж 2026", slides=[
+        OutlineSlide(id="c", kind=K.title, headline=h),
+        OutlineSlide(id="s", kind=K.stat_row, headline=h, content=SlideContent(numbers=[NumberCallout(value="66%", label="Рост выручки"), NumberCallout(value="1 240", label="Клиентов")])),
+        OutlineSlide(id="g", kind=K.chart, headline=h, content=SlideContent(chart=ChartSpec(type="line", categories=["2025", "2026"], series=[InlineSeries(name="Выручка, млн ₽", values=[750, 1245])]))),
+        OutlineSlide(id="z", kind=K.bullets, headline="Выручка выросла на 66% за год!", content=SlideContent(bullets=["Расширяем отдел продаж в регионах"])),
+    ])
+    unique_headlines(o)
+    heads = [s.headline for s in o.slides]
+    assert len({h.lower().rstrip("!.") for h in heads}) == 4, heads
+    # (the summary shows the 66% as its figure: it keeps the heading; the chart says its own series)
+    assert heads[0] == "Итоги продаж 2026" and heads[1] == h and heads[2] == "Выручка: 750 → 1 245 млн ₽ (2025–2026)"
+    assert heads[3] == "Расширяем отдел продаж в регионах"
+    # a plan deck: two list slides with one heading — the second says its first line
+    p = DeckOutline(title="T", slides=[
+        OutlineSlide(id="a", kind=K.bullets, headline="Ключевые итоги квартала", content=SlideContent(bullets=["Запустили 3 продукта"])),
+        OutlineSlide(id="b", kind=K.cards, headline="Ключевые итоги квартала", content=SlideContent(items=[SlideItem(title="Наняли 40 инженеров")])),
+        OutlineSlide(id="z", kind=K.bullets, headline="Просим бюджет", content=SlideContent(bullets=["5 млн ₽"]))])
+    unique_headlines(p)
+    assert p.slides[1].headline == "Наняли 40 инженеров"

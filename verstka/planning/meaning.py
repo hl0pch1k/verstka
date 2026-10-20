@@ -940,7 +940,7 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
                  lambda: hero_of_headline(o), lambda: lead_figure(o), lambda: sensible_labels(o, brief_text), lambda: dedupe_lines(o), lambda: keep_author_points(o, brief_text), lambda: name_cover(o, brief_text), lambda: deck_title_said(o, brief_text), lambda: goal_headlines(o, brief_text), lambda: no_meta_lines(o),
-                 lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text)):
+                 lambda: promised_counts_kept(o), lambda: ensure_cover(o), lambda: cap_slides(o, limit, brief_text), lambda: unique_headlines(o)):
         try:
             said.extend(step())
         except Exception:  # noqa: BLE001 - one pass failing leaves the others
@@ -1783,3 +1783,108 @@ def _counted_name(label: str) -> Optional[str]:
     base = m.group(1)
     nom = base + ("и" if re.search(r"[кгхжшчщ]$", base) or m.group(2) == "ей" else "ы")
     return H.cap_first(nom)
+
+
+
+# ------------------------------------------------------------------ no heading twice in a deck
+
+
+_HEAD_STOP = {"который", "которая", "которые", "этого", "этому", "также", "более", "менее", "после", "через", "между", "всего"}
+
+
+def _head_key(t: str) -> tuple[Optional[float], set[str]]:
+    from verstka.planning.brief_structure import numbers_of
+
+    nums = [v for v in numbers_of(t or "") if not (1900 <= v <= 2100)]
+    return (round(nums[0], 2) if nums else None), {w for w in _stems5(t) if w not in _HEAD_STOP}
+
+
+def _same_heading(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    if _norm_line(a) == _norm_line(b):
+        return True
+    (na, sa), (nb, sb) = _head_key(a), _head_key(b)
+    if na is not None and na == nb and sa & sb:
+        return True
+    return bool(sa and sb) and len(sa & sb) / len(sa | sb) >= 0.8
+
+
+def _subject(t: str) -> str:
+    s = re.split(r"\s+(?=[а-яё]+(?:ли|ла|ло|л|ет|ют|ит|ат|ят|ся|сь|ут|ен|ена|ено|ены|ан|ана|ано|аны)\b)|\s*[:—–]\s+", H.strip_end(t or ""), maxsplit=1)[0]
+    return s if 1 <= len(s.split()) <= 5 and not re.search(r"\d", s) else ""
+
+
+def _own_heading(s: OutlineSlide, k: int, n: int, deck_title: str) -> Optional[str]:
+    """A heading said by the slide's own content, for a slide whose heading another slide says (deterministic)."""
+    c = s.content
+    if s.kind == PatternKind.title:
+        if deck_title and not _same_heading(deck_title, s.headline):
+            return H.strip_end(deck_title)
+        subj = _subject(s.headline)
+        return subj or None
+    if c.chart is not None and c.chart.series and c.chart.categories:
+        sr = c.chart.series[0]
+        vals = [v for v in sr.values if v is not None]
+        if len(vals) >= 2:
+            unit = _series_unit(sr.name or "", sr.unit) or c.chart.unit
+            name = H.cap_first(re.sub(r",\s*[^,]*$", "", sr.name or "") or (_subject(s.headline) or "Динамика"))
+            return f"{name}: {fmt(vals[0])} → {_with_unit(vals[-1], unit)} ({c.chart.categories[0]}–{c.chart.categories[-1]})"
+    if c.table is not None:
+        got = table_conclusion(c.table, _chart_values(s) or None)
+        if got:
+            return got[0]
+    if k == n - 1:
+        line = next((x for x in [*c.bullets, *c.paragraphs] if x), None)
+        if line and len(line.split()) <= 14:
+            return H.strip_end(line)
+        return "Что из этого следует"
+    if c.numbers and s.kind in (PatternKind.big_number, PatternKind.stat_row):
+        subj = _subject(s.headline)
+        return f"{subj} в цифрах" if subj else "Главное в цифрах"
+    first = next((x for x in [*c.bullets, *c.paragraphs, *(it.title for it in [*c.items, *c.columns])] if x), None)
+    if first:
+        from verstka.planning.digest import headline_of
+
+        return headline_of(first)
+    return None
+
+
+def _fit(s: OutlineSlide, head: str) -> int:
+    """How well a heading belongs to a slide: its figure is the slide's data (a chart, a table, its large figures)."""
+    n, _ = _head_key(head)
+    if n is None:
+        return 1 if s.kind != PatternKind.title else 0
+    vals = {round(v, 2) for vv in _chart_values(s) for v in vv}
+    vals |= {round(v, 2) for x in s.content.numbers for v in [cell_number(x.value)] if v is not None}
+    return 3 if n in vals else (2 if s.kind not in (PatternKind.title, PatternKind.thanks) else 0)
+
+
+def unique_headlines(o: DeckOutline) -> list[str]:
+    """No heading twice in a deck, the cover included (the owner, 20.10: «Выручка выросла на 66%…» on the cover, the
+    summary, the chart and the closing): of two headings that say the same — the same main figure about the same
+    subject, or nearly the same words — the slide it fits best keeps it (its figure is that slide's data), the other
+    is said by its own content: a chart — its series from first to last, a summary of figures — «… в цифрах», a list —
+    its first line, the closing — its first line or «Что из этого следует», the cover — the deck's subject."""
+    said: list[str] = []
+    n = len(o.slides)
+    for _ in range(3):
+        changed = False
+        for i in range(n):
+            for j in range(i + 1, n):
+                a, b = o.slides[i], o.slides[j]
+                if not _same_heading(a.headline, b.headline):
+                    continue
+                keep, other, k = (a, b, j) if _fit(a, a.headline) >= _fit(b, b.headline) else (b, a, i)
+                new = _own_heading(other, k, n, o.title or "")
+                taken = [x.headline for x in o.slides if x is not other]
+                if not new or any(_same_heading(new, t) for t in taken):
+                    new = None
+                if new and new != other.headline:
+                    said.append(f"slide {other.id}: the heading «{other.headline[:50]}» is slide {keep.id}'s — said by its own content: «{new[:50]}»")
+                    other.section = other.section or None
+                    other.headline = new
+                    changed = True
+        if not changed:
+            break
+    return said
