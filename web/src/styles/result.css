@@ -35,6 +35,8 @@
 .ra-col{scrollbar-width:none}
 .ra-col::-webkit-scrollbar{display:none}
 .ra-col>*{flex:none}
+/* «Новая презентация» в полном виде — во всю ширину под «PDF» и «Изменить текст» */
+.ra-acts2>.ra-new{grid-column:1 / -1}
 .ra-card{position:relative;display:block;padding:16px 24px;border-radius:24px;background:#F3F4F1;color:#0B1220;text-decoration:none;transition:transform 160ms var(--ease)}
 .ra-card:hover{color:#0B1220;transform:translateY(-2px)}
 .ra-card:active{transform:scale(.98)}

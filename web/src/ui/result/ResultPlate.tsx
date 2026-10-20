@@ -447,10 +447,10 @@ function ResultBody({ g }: { g: Generation }) {
             </Stage>
             <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={filmMarks} />
           </div>
-          <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} className="ra-main"
+          <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onNew={goHome} open={openSheet} className="ra-main"
             hidden={rm.shown || !!pic.column?.shown} style={{ height: g2.height }} />
           {pic.column && (
-            <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} id="rt-pcol" enter={false} bottom
+            <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onNew={goHome} open={openSheet} id="rt-pcol" enter={false} bottom
               className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1, height: g2.height }}
               extra={fullCard ? <PictureCard {...pic.column.card} /> : undefined} />
           )}

@@ -35,10 +35,12 @@ const LINKS: { tab: SheetTab; label: string; icon: IconName }[] = [
   { tab: "files", label: "Файлы", icon: "folder-down" },
 ];
 
-export function Aside({ d, onVariant, onEditText, open, id, className, enter = true, bottom, extra, hidden, style }: {
+export function Aside({ d, onVariant, onEditText, onNew, open, id, className, enter = true, bottom, extra, hidden, style }: {
   d: AsideData;
   onVariant(key: string): void;
   onEditText(): void;
+  /** «Новая презентация»: «Создать» с чистым листом (useGoHome) — в полном виде, как в компактном. */
+  onNew?(): void;
   open(tab: SheetTab): void;
   id?: string;
   className?: string;
@@ -65,7 +67,15 @@ export function Aside({ d, onVariant, onEditText, open, id, className, enter = t
       <Icon name="pen" size={18} />
       <span>Изменить текст</span>
     </button>,
+    onNew && (
+      <button key="new" type="button" className="p2-ob ra-new" onClick={onNew} title="Новая презентация: чистый лист на «Создать», шаблон остаётся">
+        <Icon name="plus" size={18} />
+        <span>Новая презентация</span>
+      </button>
+    ),
   ].filter(Boolean);
+  // «Новая презентация» — во всю ширину под остальными (ra-new в result.css)
+  const cols = Math.max(1, second.length - (onNew ? 1 : 0));
   const content = <>
     {/* длинное название — две строки и многоточие, целиком — в подсказке */}
     <h1 className="ra-h1" title={d.title} style={{
@@ -103,7 +113,7 @@ export function Aside({ d, onVariant, onEditText, open, id, className, enter = t
         <span>Скачать PowerPoint</span>
       </a>
     )}
-    <div className="ra-acts2" style={{ display: "grid", gridTemplateColumns: `repeat(${second.length}, minmax(0, 1fr))`, gap: 16, marginTop: 16 }}>{second}</div>
+    <div className="ra-acts2" style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16, marginTop: 16 }}>{second}</div>
     <AsideCards data={d.cards} open={open} />
     {extra && <div className="ra-extra" style={{ marginTop: 8 }}>{extra}</div>}
     <div className="ra-sep" style={{ height: 1, marginTop: 16, background: "rgba(11,18,32,.08)" }} />
