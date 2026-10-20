@@ -30,12 +30,15 @@
   <a href="#docs"><b>Документация</b></a>
 </p>
 
-| Экспертам | Где |
+| Экспертам<br><img src="docs/readme/svg/spacer.svg" width="400" height="1" alt=""> | Где<br><img src="docs/readme/svg/spacer.svg" width="400" height="1" alt=""> |
 |---|---|
 | Скринкаст второй ступени | в форме сдачи · [Видео](#video) |
 | Готовые презентации | [Примеры](#examples) |
 | Запуск на своей машине | [Быстрый старт](#start) |
 | Соответствие ТЗ | [Таблица](#tz) |
+
+<br>
+<br>
 
 <a id="examples"></a>
 
@@ -52,11 +55,15 @@
 
 **01 · Данные + брендбук** — 7 файлов продаж и брендбук VK Cloud → отчёт правлению, где у каждого графика заголовок-вывод. [PDF](examples/showcase/01-data-brandbook/deck.pdf) · [бриф](examples/showcase/01-data-brandbook/input.txt) · [то же на шаблоне ЛЦТ](examples/showcase/01-data-brandbook/deck-lct.pdf)
 
+<br>
+
 <p align="center">
   <a href="examples/showcase/02-data-knowledge/deck.pdf"><img src="docs/readme/showcase/02-data-knowledge.webp" width="100%" alt="Итоги Q3 «Склад24» для совета директоров на шаблоне ЛЦТ 2026: «MRR 1,82 млн ₽ — 61 % цели 3 млн ₽», «Ежемесячный отток 5,2 % — выше цели 3 %», деньги и запас на 9 месяцев, линейный график MRR с января по сентябрь"></a>
 </p>
 
 **02 · Таблица + база знаний** — показатели в Excel и инвестмеморандум → отчёт совету «факт против цели». [PDF](examples/showcase/02-data-knowledge/deck.pdf) · [план](examples/showcase/02-data-knowledge/input.txt) · [таблица](examples/showcase/02-data-knowledge/sklad24_q3.xlsx) · [база знаний](examples/showcase/02-data-knowledge/investmemorandum_sklad24.docx)
+
+<br>
 
 <p align="center">
   <a href="examples/showcase/03-vk-tech-ml-platform/deck.pdf"><img src="docs/readme/showcase/03-vk-tech-ml-platform.webp" width="100%" alt="ML Platform для ритейла на шаблоне VK Tech: обложка, слайд с картинкой и крупными цифрами 340 магазинов и 12 регионов, график «Списания снизились с 5,1 до 3,4 % оборота», план запуска в три шага"></a>
@@ -64,11 +71,15 @@
 
 **03 · Готовый текст** — 255 слов о запуске продукта → питч на 15 слайдов с двумя картинками. [PDF](examples/showcase/03-vk-tech-ml-platform/deck.pdf) · [вход](examples/showcase/03-vk-tech-ml-platform/input.txt)
 
+<br>
+
 <p align="center">
   <a href="examples/showcase/04-workspace-migration/deck.pdf"><img src="docs/readme/showcase/04-workspace-migration.webp" width="100%" alt="Миграция «Северного порта» на шаблоне VK WorkSpace: тёмная обложка, крупные цифры 41 ТБ, 96 млн, 2,3 млн, 0,3 %, слайд «Было / Стало» и итог «расходы снизились на 38 %»"></a>
 </p>
 
 **04 · Длинный доклад** — выступление на 611 слов → колода для конференции в стиле VK WorkSpace. [PDF](examples/showcase/04-workspace-migration/deck.pdf) · [вход](examples/showcase/04-workspace-migration/input.txt)
+
+<br>
 
 <p align="center">
   <a href="examples/showcase/05-lct-pitch/deck.pdf"><img src="docs/readme/showcase/05-lct-pitch.webp" width="100%" alt="Питч «ТрубаСкан» на шаблоне ЛЦТ 2026: фиолетовая обложка, процесс из пяти шагов, ключевые цифры 14, 380, 1 260 и крупное «19 дней»"></a>
@@ -76,17 +87,23 @@
 
 **05 · Питч на хакатон** — текст команды на 607 слов → 15 слайдов на шаблоне ЛЦТ. [PDF](examples/showcase/05-lct-pitch/deck.pdf) · [вход](examples/showcase/05-lct-pitch/input.txt)
 
+<br>
+
 <p align="center">
   <a href="examples/showcase/06-education-lesson/deck.pdf"><img src="docs/readme/showcase/06-education-lesson.webp" width="100%" alt="Урок «Как сообщение доходит от тебя до друга» на шаблоне VK Education: обложка, слайд с картинкой телефона, путь пакетов через роутеры в пять шагов и сборка сообщения в четыре шага"></a>
 </p>
 
 **06 · План урока** — урок информатики для 7 класса → 12 слайдов с картинкой по смыслу. [PDF](examples/showcase/06-education-lesson/deck.pdf) · [вход](examples/showcase/06-education-lesson/input.txt)
 
+<br>
+
 <p align="center">
   <a href="examples/showcase/07-unseen-template/deck.pdf"><img src="docs/readme/showcase/07-unseen-template.webp" width="100%" alt="Бизнес-план фитнес-студии на незнакомом шаблоне LibreOffice «Vivid»: крупные цифры цели, круговая диаграмма критериев выбора, воронка с картинкой и два линейных графика роста клиентов и прибыли"></a>
 </p>
 
 **07 · Незнакомый шаблон** — бизнес-план и шаблон LibreOffice, которого сервис раньше не видел → колода с подобранными шрифтами и диаграммами. [PDF](examples/showcase/07-unseen-template/deck.pdf) · [PPTX](examples/showcase/07-unseen-template/deck.pptx)
+
+<br>
 
 <details>
 <summary><b>Ещё примеры в репозитории</b></summary>
@@ -96,6 +113,9 @@
 - Брифы и планы в разных формах — [`examples/briefs`](examples/briefs), [`tests/fixtures/plans`](tests/fixtures/plans).
 
 </details>
+
+<br>
+<br>
 
 <a id="video"></a>
 
@@ -118,6 +138,9 @@
 
 Агент работает на виду: читает вход, продумывает слайды, верстает и проверяет себя.
 
+<br>
+<br>
+
 <a id="features"></a><a id="что-умеет"></a>
 
 <picture>
@@ -134,36 +157,50 @@
 
 <a id="вторая-ступень-данные-и-брендбук"></a>
 
+<br>
+
 #### Данные → выводы
 
 - Сам выбирает, как показать данные — линией, столбцами, долями или таблицей — и объясняет выбор.
 - Заголовок слайда — **вывод с числом**, а не тема.
 - Перепроверяет каждое число по исходной таблице; чего в данных нет, так и говорит.
 
+<br>
+
 #### Любой брендбук
 
 - PDF, токены, ссылка Figma, файл `.fig`, папка или архив.
 - Цвета, шрифты и логотип бренда ложатся на копию шаблона; при расхождении побеждает бренд.
+
+<br>
 
 #### База знаний
 
 - Документы и ссылки, по которым агент пишет текст и сверяет факты.
 - Источник каждого утверждения — в заметках к слайду.
 
+<br>
+
 #### Любой вход
 
 - План, письмо, тезисы, DOCX или PDF, короткая тема, готовая презентация.
 - Свой текст можно разложить дословно, без пересказа.
+
+<br>
 
 #### Картинки по смыслу
 
 - Появляются там, где их просит автор или где заголовок называет предмет, — в палитре шаблона.
 - Картинку с надписью модель зрения отбраковывает и рисует заново.
 
+<br>
+
 #### Правки и Помощник
 
 - «Исправить слайд» — одной кнопкой по замечанию.
 - Правки словами: «покажи таблицей», «короче», «почему слайд 4 такой».
+
+<br>
 
 <a id="как-это-выглядит"></a>
 
@@ -185,6 +222,9 @@
 
 </details>
 
+<br>
+<br>
+
 <a id="how"></a><a id="как-устроено"></a>
 
 <picture>
@@ -204,6 +244,9 @@
 - Вёрстка идёт по слайдам-образцам шаблона, потом проверка качества и автоисправление.
 - Промпты и настройки лежат отдельными файлами с версиями. Подробно — [ARCHITECTURE.md](ARCHITECTURE.md).
 
+<br>
+<br>
+
 <a id="quality"></a>
 
 <picture>
@@ -221,6 +264,9 @@
 - Проверки смотрят вёрстку, шаблон, смысл и графики; замечания видны прямо на слайде. Список — [AUDIT.md](AUDIT.md).
 - Автоисправление откатывает правку, если после неё стало хуже.
 - Тесты не ходят в сеть; CI на Ubuntu 24.04 повторяет быстрый старт с нуля.
+
+<br>
+<br>
 
 <a id="start"></a><a id="запуск"></a>
 
@@ -321,6 +367,9 @@ cd web && npm test           # интерфейс
 
 </details>
 
+<br>
+<br>
+
 <a id="models"></a>
 
 <picture>
@@ -332,6 +381,9 @@ cd web && npm test           # интерфейс
 - Картинки — Z-Image на Polza, 1,40 ₽ за картинку.
 - Обе модели — открытые веса под Apache 2.0, закрытых API нет. Без ключей сервис работает без моделей.
 - Роли, промпты и расход — [MODELS.md](MODELS.md).
+
+<br>
+<br>
 
 <a id="tz"></a><a id="соответствие-тз"></a>
 
@@ -366,6 +418,9 @@ cd web && npm test           # интерфейс
 | Брендбук важнее шаблона | ✅ | [`brand/`](verstka/brand), [01 · Данные + брендбук](#examples) |
 | Наборы данных и брендбуки для проверки | ✅ | [`examples/`](examples) |
 | Документация, промпты и конфиги отдельно | ✅ | [Документация](#docs), [`configs/`](configs) |
+
+<br>
+<br>
 
 <a id="docs"></a>
 
