@@ -28,10 +28,38 @@ from verstka.schemas.template import TemplateManifest
 
 
 def _workspace(manifest: TemplateManifest, workspace_root: Optional[Path | str]) -> Optional[TemplateWorkspace]:
+    """Рабочая папка шаблона — только названная явно (API и копия передают свою): без неё расхождения считаются по
+    файлу и разбору, а не по чужой рабочей папке по умолчанию (её «title.txt» менял итог от машины к машине)."""
+    if workspace_root is None:
+        return None
     try:
         return TemplateWorkspace.open(manifest.template_id, workspace_root)
     except FileNotFoundError:
         return None
+
+
+_INSETS: dict = {}
+
+
+def _inset_of(path: Path) -> Optional[float]:
+    """Поле шаблона (px на 1920) — один раз на файл: расхождения зовутся на каждый запрос брендбука."""
+    from verstka.brand.palette import file_key
+
+    key = file_key(path)
+    if key is not None and key in _INSETS:
+        return _INSETS[key]
+    try:
+        from verstka.brand.apply import template_inset_px
+        from verstka.brand.package import Package
+
+        inset = template_inset_px(Package(path))
+    except Exception:  # noqa: BLE001 - a template that does not read: no line
+        inset = None
+    if key is not None:
+        if len(_INSETS) > 64:
+            _INSETS.clear()
+        _INSETS[key] = inset
+    return inset
 
 
 def _template_title(ws: Optional[TemplateWorkspace]) -> Optional[str]:
@@ -106,6 +134,10 @@ def brand_conflicts(
             result = _hx(res) if res == b else f"{_hx(res)} — оттенок {_hx(b)}"
             add(ACCENT_ORDINALS[i], _hx(a), _hx(b), result, "color", tpl_color(a))
 
+    if cp.mono and cp.main:
+        add("Акценты", ", ".join(_hx(a) for a in cp.main[:3]), f"только основной {_hx(cp.mono)}",
+            f"Акценты шаблона заменены цветами бренда: тона {_hx(cp.mono)}", "color")
+
     # --- текст и фон: только заметная разница
     for what, pair, role in (("Цвет текста", cp.text_pair, "text"), ("Фон", cp.background_pair, "background")):
         bc = brand.color(role)  # type: ignore[arg-type]
@@ -126,13 +158,7 @@ def brand_conflicts(
 
     # --- поля: брендбук шире шаблона — текст отодвигается от краёв (`apply._apply_margins`)
     if brand.margins_px and 0 < brand.margins_px <= 200 and path is not None and path.exists():
-        try:
-            from verstka.brand.apply import template_inset_px
-            from verstka.brand.package import Package
-
-            inset = template_inset_px(Package(path))
-        except Exception:  # noqa: BLE001 - a template that does not read: no line
-            inset = None
+        inset = _inset_of(path)
         if inset is not None and inset < brand.margins_px - 4:
             add("Поля", f"{inset:g} px", f"{brand.margins_px:g} px", f"{brand.margins_px:g} px: текст отодвинут от краёв", "margins")
 

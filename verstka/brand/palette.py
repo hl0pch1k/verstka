@@ -405,6 +405,8 @@ class ColorPlan:
     brand_accents: set[str] = field(default_factory=set)  # «акцент» бренда — не раньше остальных цветов диаграмм
     link: Optional[str] = None  # цвет ссылок бренда — основной
     danger: Optional[str] = None  # цвет ошибки бренда (роль danger), если он есть
+    # монохромный бренд (основной — тёмный или серый, хроматических цветов нет): акценты шаблона — тона основного
+    mono: Optional[str] = None
     warnings: list[str] = field(default_factory=list)
     _cache: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -425,6 +427,8 @@ class ColorPlan:
         t = tone(h)
         if t == "chromatic" and self.danger and status_red(h):
             return self.danger  # красный ошибки и падения — цвет ошибки бренда
+        if self.mono and t in ("chromatic", "tint") and not status_red(h):
+            return at_lightness(self.mono, lightness(h))  # монохромный бренд: любой цвет акцента — тон основного
         if t == "chromatic" and self.anchors:
             # тот же цвет, чуть иначе записанный (#007DEA при #0187F6, маркер списка #FD0C50 при #FF0053); другой
             # насыщенный цвет, которого нет в палитре разбора (жёлтый рядом с оранжевым), остаётся как был
@@ -685,7 +689,30 @@ def plan_colors(
             else:
                 plan.kept(h, "semantic")  # красный акцент темы — цвет ошибки и падения; пары в брендбуке нет
     plan.palette = [p for p in dict.fromkeys(palette) if p not in plan.keep and p not in plan.table]
-    if not chrom:
+    mono = _brand_hex(brand, "primary") if not chrom else None
+    if mono:
+        # бренд задаёт только основной (тёмный/серый) и нейтральные — приоритет у брендбука: акценты шаблона заменяются
+        # тонами основного бренда при своей светлоте (светлое остаётся светлым — текст на нём читаем); главный — сам
+        # основной, если он виден на фоне шаблона; статусные — цветами бренда (выше); графики — те же тона
+        plan.mono = mono
+        plan.link = mono
+        bg = plan.background_pair[1] if plan.background_pair else (theme.slots.get("lt1") if light_ground else theme.slots.get("dk1")) or ("FFFFFF" if light_ground else "000000")
+        for i, a in enumerate(plan.palette):
+            if a in plan.table:
+                continue
+            exact = i == 0 and not _is_ground(manifest, a) and contrast_ratio(mono, bg) >= 3.0
+            b = mono if exact or abs(lightness(a) - lightness(mono)) <= 8 else at_lightness(mono, lightness(a))
+            plan.brand_of[a] = mono
+            plan.anchors[a] = b
+            plan.table.setdefault(a, b)
+        for a in plan.main:
+            if a not in plan.table and a not in plan.keep:
+                plan.brand_of[a] = mono
+                plan.table[a] = at_lightness(mono, lightness(a))
+                plan.anchors[a] = plan.table[a]
+        plan.warnings.append(f"Акценты шаблона заменены цветами бренда: в брендбуке только основной #{mono} и нейтральные — "
+                             "акценты стали его тонами своей светлоты.")
+    elif not chrom:
         for a in plan.main:
             if a not in plan.table:
                 plan.kept(a, "no_brand_colors")
@@ -821,6 +848,58 @@ def _guard_contrast(plan: ColorPlan, pairs: list[TextPair]) -> None:
 # ============================================================================================ разбор копии
 
 
+def _mono_roles(copy: TemplateManifest, plan: ColorPlan) -> bool:
+    """Монохромный бренд: в разборе копии насыщенным остаётся только статусный цвет («ошибка» бренда на месте красного
+    шаблона) — и он стал бы акцентом колоды (числа, выделение в графиках — красным, будто всё плохо). Акцент — тон
+    основного бренда на месте главного акцента шаблона; статусные цвета — только смысловые; серии графиков — тона
+    основного, выделение — этот акцент."""
+    hl = plan.anchors.get(plan.main[0]) or plan.table.get(plan.main[0]) or plan.mono
+    status = {h for h in (plan.danger,) if h} | {t.hex.upper() for t in copy.tokens.colors if t.semantic in ("positive", "negative")}
+    status |= {t.hex.upper() for t in copy.tokens.colors if tone(t.hex.upper()) == "chromatic"}  # всё насыщенное здесь — статусное
+    changed = False
+    accents = []
+    for t in copy.tokens.colors:
+        acc = [r for r in t.roles if r.startswith("accent.")] + ([t.role] if (t.role or "").startswith("accent.") else [])
+        if t.hex.upper() in status and acc:
+            t.roles = [r for r in t.roles if not r.startswith("accent.")]
+            if (t.role or "").startswith("accent."):
+                t.role = t.roles[0] if t.roles else None
+            if t.semantic is None and status_red(t.hex.upper()):
+                t.semantic = "negative"
+            changed = True
+        elif acc:
+            accents.append(t)
+    lead = next((t for t in copy.tokens.colors if t.hex.upper() == hl.upper()), None)
+    if lead is None:
+        from verstka.schemas.template import ColorToken
+
+        lead = ColorToken(hex=hl.upper(), role="accent.1", roles=["accent.1"], weight=1.0)
+        copy.tokens.colors.append(lead)
+        changed = True
+    others = [t for t in accents if t is not lead]
+    for t in [lead] + others:
+        t.roles = [r for r in t.roles if not r.startswith("accent.")]
+    lead.roles.insert(0, "accent.1")
+    lead.role = "accent.1"
+    for k, t in enumerate(others, 2):
+        t.roles.insert(0, f"accent.{k}")
+        if (t.role or "").startswith("accent.") or t.role is None:
+            t.role = f"accent.{k}"
+    comp = copy.components
+    for obj, attr in ((comp.number_callout, "color_hex"), (comp.icon_chip, "icon_color_hex")):
+        if obj is not None and (getattr(obj, attr) or "").upper().lstrip("#") in status:
+            setattr(obj, attr, hl)
+            changed = True
+    old = [x.upper().lstrip("#") for x in comp.chart_style.series_colors]
+    series = list(dict.fromkeys([hl.upper()] + [x for x in old if x not in status and x != hl.upper()]))
+    if len(series) < 3:
+        series += [at_lightness(plan.mono, L) for L in (45, 65, 80) if at_lightness(plan.mono, L) not in series]
+    if series != old:
+        comp.chart_style.series_colors = series[:6]
+        changed = True
+    return True
+
+
 def retune_manifest(copy: TemplateManifest, original: TemplateManifest, plan: ColorPlan, applied: dict[str, str]) -> bool:
     """Разбор копии под бренд: цвета, оставшиеся от картинок шаблона и заливок с модификаторами, заменяются по тому же
     плану; цвета диаграмм начинаются с цветов бренда (основной первым, «акцент» бренда — не раньше остальных). True —
@@ -880,6 +959,8 @@ def retune_manifest(copy: TemplateManifest, original: TemplateManifest, plan: Co
         if nh != b.hex:
             b.hex = nh
             changed = True
+    if plan.enabled and plan.mono and plan.main:
+        changed = _mono_roles(copy, plan) or changed
     if plan.enabled and plan.chart_order and plan.anchors:
         old = [s.upper().lstrip("#") for s in comp.chart_style.series_colors]
         lead = [h for h in plan.chart_order if h not in plan.brand_accents]

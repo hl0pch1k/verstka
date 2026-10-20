@@ -2657,6 +2657,9 @@ def add_chart(
         elif not _unit_shown_above(slide, bbox, unit_full, explicit=True):
             y_title = f"{y_title.rstrip(' ,.:;')}, {unit_full}"  # (a heading that says the unit does not take it off the axis)
             axis_unit = True
+    elif y_title and glyph and unit_full and unit_full not in y_title:
+        # «Текучесть» над столбцами «18,2%»: знак — и на подписях, и в названии оси («Текучесть, %»), как пишут в отчётах
+        y_title = f"{y_title.rstrip(' ,.:;')}, {unit_full}"
     head = spec.title or None
     head_is_title = bool(head)
     unit_in_head = False

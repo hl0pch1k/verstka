@@ -616,6 +616,8 @@ class _Line:
     size: float
     bold: bool
     cells: list[tuple[float, float, str]]  # (x start, x end, text)
+    # the pieces of text as drawn (one per position): a narrow table's columns, merged into one cell by their small gap
+    parts: list[tuple[float, float, str]] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -716,8 +718,15 @@ def _lines_of(pieces: list[_Piece], page_no: int) -> list[_Line]:
         # a list's marker set apart from its text («•», «1.») is one cell with it
         if len(cells) >= 2 and _MARK_RE.fullmatch(cells[0][2]):
             cells = [(cells[0][0], cells[1][1], f"{cells[0][2]} {cells[1][2]}")] + cells[2:]
+        parts: list[tuple[float, float, str]] = []
+        for p in g:
+            if parts and abs(p.x - parts[-1][0]) < 0.5:
+                parts[-1] = (parts[-1][0], parts[-1][1] + p.width, parts[-1][2] + " " + p.text)
+            else:
+                parts.append((p.x, p.x + p.width, p.text))
+        parts = [(a, b, " ".join(t.split())) for a, b, t in parts if t.strip()]
         if cells:
-            out.append(_Line(page_no, g[0].y, size, all(p.bold for p in g), cells))
+            out.append(_Line(page_no, g[0].y, size, all(p.bold for p in g), cells, parts))
     out.sort(key=lambda ln: -ln.y)
     return out
 
@@ -842,6 +851,44 @@ def _body_size(lines: list[_Line]) -> float:
     return c.most_common(1)[0][0] if c else 10.0
 
 
+def _split_aligned(lines: list[_Line]) -> None:
+    """A narrow table (columns a word apart: «Москва 18400», «Город Заказов в месяц»): its rows came out one cell each.
+    Three or more consecutive lines whose pieces start at the same columns (beyond the first) are split there — the
+    columns are where most of the lines have a piece; prose with a bold word somewhere does not line up like that."""
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if len(ln.cells) != 1 or len(ln.parts) < 2 or _MARK_RE.fullmatch(ln.parts[0][2]):
+            i += 1
+            continue
+        j = i + 1
+        while (j < len(lines) and lines[j].page == ln.page and len(lines[j].cells) == 1 and len(lines[j].parts) >= 2
+               and not _MARK_RE.fullmatch(lines[j].parts[0][2]) and abs(lines[j].size - ln.size) <= 0.3 * ln.size and 0 < lines[j - 1].y - lines[j].y <= 3.2 * ln.size):
+            j += 1
+        run = lines[i:j]
+        if len(run) >= 3 and sum(len(t) for r in run for _, _, t in r.parts) / sum(len(r.parts) for r in run) <= 40:
+            tol = 0.8 * ln.size
+            xs = sorted(x for r in run for x, _, _ in r.parts[1:])
+            cols: list[list[float]] = []
+            for x in xs:
+                if cols and x - cols[-1][-1] <= tol:
+                    cols[-1].append(x)
+                else:
+                    cols.append([x])
+            need = max(3, 0.75 * len(run))
+            keep = [sum(c) / len(c) for c in cols if len({id(r) for r in run for x, _, _ in r.parts[1:] if abs(x - sum(c) / len(c)) <= tol}) >= need]
+            if keep:
+                for r in run:
+                    groups: list[list[tuple[float, float, str]]] = [[] for _ in range(len(keep) + 1)]
+                    for part in r.parts:
+                        k = sum(1 for c in keep if part[0] >= c - tol)
+                        groups[k].append(part)
+                    r.cells = [(g[0][0], g[-1][1], " ".join(t for _, _, t in g)) for g in groups if g]
+                i = j
+                continue
+        i += 1
+
+
 def _table_runs(lines: list[_Line]) -> list[tuple[int, int]]:
     """Runs of lines (start, end) that are a table: 3+ consecutive lines of 2+ cells whose cells start at the same
     columns (a body line wrapped inside a cell — one cell — may sit between them)."""
@@ -915,6 +962,7 @@ def _col_of(starts: list[float], x: float, size: float) -> int:
 
 def _pdf_blocks(doc: DocumentText, lines: list[_Line]) -> None:
     body = _body_size(lines)
+    _split_aligned(lines)
     runs = _table_runs(lines)
     in_table = {k: r for r in runs for k in range(r[0], r[1])}
     left = Counter(round(ln.x0) for ln in lines if ln.size <= body * 1.05)

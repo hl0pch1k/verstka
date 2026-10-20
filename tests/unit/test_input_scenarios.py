@@ -230,3 +230,71 @@ def test_figma_plugin_export_string_font_variable(tmp_path):
         encoding="utf-8")
     spec = read_brandbook(p)
     assert {f.role: f.family for f in spec.fonts} == {"heading": "PT Serif", "body": "PT Sans"}
+
+
+def _pdf_with(items: list[tuple[float, float, str, bool]]) -> bytes:
+    """Одна страница A4: текст в точках (x, y), Helvetica (жирный — Helvetica-Bold)."""
+    ops = "".join(f"BT /{'F2' if b else 'F1'} 12 Tf {x} {y} Td ({t}) Tj ET\n" for x, y, t, b in items).encode("latin-1")
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n" % len(ops) + ops + b"endstream",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
+    out, offs = bytearray(b"%PDF-1.4\n"), []
+    for k, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += b"%d 0 obj\n" % k + o + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offs)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return bytes(out)
+
+
+def test_pdf_narrow_table_columns_by_alignment():
+    """Таблица PDF с колонками в одно слово друг от друга («Moscow 18400»): раньше строки шли абзацами, а жирная шапка —
+    заголовком; теперь колонки находятся по выравниванию начал слов — таблица с шапкой, число — данные. Проза из
+    нескольких кусков с разными отступами таблицей не становится."""
+    items = [(56, 780, "Delivery report", True), (56, 750, "The service runs in three cities since 2025.", False),
+             (63, 600, "City", True), (105, 600, "Orders per month", True)]
+    for k, (c, n) in enumerate([("Moscow", "18400"), ("Kazan", "6200"), ("Perm", "3100")]):
+        items += [(58, 569 - 31 * k, c, False), (103, 569 - 31 * k, n, False)]
+    items += [(56, 400, "Plain text goes on here with a", False), (240, 400, "bold", True), (270, 400, "word inside.", False),
+              (56, 386, "Another line of plain text,", False), (60, 372, "and one more line", False), (200, 372, "of text.", False)]
+    d = read_document("narrow.pdf", _pdf_with(items))
+    md = d.markdown()
+    assert "| City | Orders per month |" in md and "| Moscow | 18400 |" in md and "### City" not in md
+    assert d.summary()["data_tables"] == 1
+    assert "Plain text goes on here" in md and "| Plain" not in md
+
+
+def test_monochrome_brand_replaces_template_accents(tmp_path, monkeypatch):
+    """Брендбук задаёт только основной #2C2C2C и нейтральные (Simple Design System): приоритет у брендбука — акценты
+    шаблона (#1F6FEB, #E8590C) становятся тонами основного, строка «Акценты шаблона заменены цветами бренда»; в разборе
+    копии акцент — тон основного, а не красный «ошибки» бренда."""
+    import verstka.brand.apply as ap
+    from test_brand_apply import _analyze, build_template
+    from verstka.brand.apply import apply_brand, brand_plan
+    from verstka.brand.conflicts import brand_conflicts
+    from verstka.brand.palette import retune_manifest, tone
+    from verstka.schemas.brand import BrandColor, BrandSpec
+    from verstka.schemas.template import ColorToken
+
+    monkeypatch.setattr(ap, "font_available", lambda f: True)
+    src = build_template(tmp_path, logo=False)
+    m = _analyze(src, tmp_path / "ws")
+    brand = BrandSpec(name="Simple", source="figma", colors=[BrandColor(hex="#2C2C2C", role="primary"), BrandColor(hex="#FFFFFF", role="background"),
+                                                              BrandColor(hex="#1E1E1E", role="text"), BrandColor(hex="#EC221F", role="danger")])
+    plan = brand_plan(src, m, brand, "brand").colors
+    assert plan.mono == "2C2C2C"
+    for a in ("1F6FEB", "E8590C"):
+        assert tone(plan.map(a)) != "chromatic", (a, plan.map(a))
+    res = apply_brand(src, tmp_path / "out.pptx", brand, manifest=m)
+    assert "#1F6FEB" in res.colors and tone(res.colors["#1F6FEB"].lstrip("#")) != "chromatic"
+    rows = {c.what: c for c in brand_conflicts(m, brand, source=src, workspace_root=tmp_path / "ws")}
+    assert rows["Акценты"].result.startswith("Акценты шаблона заменены цветами бренда")
+    copy = m.model_copy(deep=True)
+    copy.tokens.colors = [ColorToken(hex="EC221F", role="accent.1", roles=["accent.1"], weight=5.0),
+                          ColorToken(hex="FFFFFF", role="background.light", roles=["background.light"], weight=50.0)]
+    copy.components.number_callout.color_hex = "EC221F"
+    assert retune_manifest(copy, m, plan, {})
+    assert copy.tokens.color_for("accent.1") != "EC221F" and tone(copy.tokens.color_for("accent.1")) != "chromatic"
+    assert copy.components.number_callout.color_hex != "EC221F"
