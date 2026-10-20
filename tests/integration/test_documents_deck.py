@@ -36,7 +36,7 @@ def test_a_document_becomes_a_brief_and_data_and_a_deck(fixtures_dir, tmp_path, 
     prs = Presentation(str(v.out_dir / "deck.pptx"))
     text = " ".join(sh.text_frame.text for s in prs.slides for sh in s.shapes if sh.has_text_frame)
     assert any(sh.has_chart for s in prs.slides for sh in s.shapes), "the table of figures is a chart"
-    assert "Итоги третьего квартала 2026" in text.replace("\xa0", " ")
+    assert "Итоги третьего квартала 2026" in text.replace("\xa0", " ").replace("\x0b", " ")
     assert v.audit is None or v.audit.summary.errors == 0
 
 

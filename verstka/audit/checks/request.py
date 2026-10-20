@@ -188,6 +188,10 @@ def slide_count_unmet(ctx: AuditContext) -> list[Issue]:
         said = str(want)
     from verstka.data.words import plural
 
+    # «на 12 слайдов» над планом «Слайд 1…12»: the person counts their own slides, the cover comes on top of them
+    first = ctx.outline.slides[0] if ctx.outline is not None and ctx.outline.slides else None
+    if have == want + 1 and first is not None and getattr(first.kind, "value", first.kind) == "title":
+        return []
     gap = abs(have - want)
     def n_slides(n: int) -> str:
         return plural(n, "слайд", "слайда", "слайдов")

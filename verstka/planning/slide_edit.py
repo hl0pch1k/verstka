@@ -756,9 +756,11 @@ def redesign_slide(
         from verstka.planning import data_edit as DE
 
         wish = DE.read_wish(request, old)
-        if wish.measure or wish.highlight or wish.chart in ("column", "bar"):
+        # «выдели Казань цветом» alone is the chart's own highlight below (the emphasis path); «сделай заголовок короче»
+        # is one part's edit for the designer — the rules shorten the whole slide only when the whole slide is asked
+        if wish.measure or (wish.highlight and wish.highlight != "named") or wish.chart in ("column", "bar"):
             data_done = DE.apply_wish(old, wish)
-        if data_done is None and wish.shorter and not wish.measure:
+        if data_done is None and wish.shorter and not wish.measure and len(edit_targets(request)) > 1:
             data_done = DE.shorter(old)
     emphasis: Optional[tuple[str, int]] = None
     if data_done is None and not fixing and emphasis_request(request):
