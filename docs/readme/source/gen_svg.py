@@ -290,9 +290,9 @@ def video_card(c, dark, first):
         b.append(f'<rect x=".5" y=".5" width="{Wd - 1}" height="{H - 1}" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".1"/>')
     if not first:
         b.append(f'<rect x="1.5" y="1.5" width="{Wd - 3}" height="{H - 3}" rx="26.5" fill="none" stroke="#2563EB" stroke-width="3"/>')
-    b.append(T(tag, "M", 15, 36, 60, tagc, track=0.06))
-    b.append(f'<circle cx="490" cy="104" r="44" fill="{play}"/>')
-    b.append('<path d="M478 84 L510 104 L478 124 Z" fill="#FFFFFF"/>')
+    b.append(T("01" if first else "02", "U", 120, 30, 140, "#FFFFFF", opacity=.08, track=-0.04))
+    b.append(f'<circle cx="490" cy="84" r="44" fill="{play}"/>')
+    b.append('<path d="M478 64 L510 84 L478 104 Z" fill="#FFFFFF"/>')
     b.append(T(title, "U", 32, 36, 196, "#FFFFFF", opacity=(.72 if first else 1), track=-0.03))
     b.append(T(meta, "M", 19, 36, 232, "#FFFFFF", opacity=.72))
     b.append(T(link, "M", 19, 36, 262, "#38BDF8" if not first else "#9AA3B2"))
