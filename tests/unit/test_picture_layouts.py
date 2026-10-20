@@ -312,10 +312,39 @@ def test_pictures_go_only_where_the_slide_shows_a_thing_one_can_see():
     assert [(i, s.content.photo_hint) for i, s in enumerate(b.slides) if s.content.photo_slot] == got
     assert all(a.slides[i].content.photo_slot == AUTO_LABEL and not a.slides[i].content.photo_own for i, _ in got)
     assert ensure_pictures([a]) == []  # enough already
-    # money and plans only: no picture, and the run says why
-    plain = _picture_deck({})
-    said = ensure_pictures([plain])
-    assert not any(s.content.photo_slot for s in plain.slides) and said and said[0].startswith("no picture added")
+
+
+
+def test_pictures_on_means_pictures_even_when_no_heading_names_a_thing():
+    """The owner (18.10): «если стоит настройка генерировать изображения, они ОБЯЗАНЫ быть». A deck of money and plans
+    gets 1 picture up to 7 slides and 2 from 8 — concrete scenes of its topic (its place, its people at work), each
+    once, on its roomiest short slides, never neighbours, the same slides in every variant; never on a table."""
+    from verstka.planning.pictures import AUTO_LABEL, SCENES, ensure_pictures, min_pictures
+
+    assert (min_pictures(6), min_pictures(7), min_pictures(8), min_pictures(12)) == (1, 1, 2, 2)
+    a, b = _picture_deck({}, n=10, kinds={5: "table"}), _picture_deck({}, n=10, kinds={5: "table"})
+    a.slides[3].content.bullets = ["Длинный пункт про выручку, план и проценты квартала, который занимает место."] * 4
+    said = ensure_pictures([a, b])
+    got = [(i, s.content.photo_hint) for i, s in enumerate(a.slides) if s.content.photo_slot]
+    assert len(got) == 2 and all("a scene of the deck's topic" in w for w in said)
+    assert [h.split(" — ")[0] for _, h in got] == [f"Сцена по теме колоды: {SCENES[0]}", f"Сцена по теме колоды: {SCENES[1]}"]
+    assert abs(got[0][0] - got[1][0]) > 1 and 4 not in [i for i, _ in got] and 3 not in [i for i, _ in got]
+    assert [(i, s.content.photo_hint) for i, s in enumerate(b.slides) if s.content.photo_slot] == got
+    assert all(a.slides[i].content.photo_slot == AUTO_LABEL for i, _ in got)
+    small = _picture_deck({}, n=6)
+    ensure_pictures([small])
+    assert sum(1 for s in small.slides if s.content.photo_slot) == 1
+
+
+def test_a_picture_with_no_room_goes_to_the_next_short_slide():
+    """The renderer drops an added picture whose slide is too tight (rendering/synth.py): the same thing goes to the
+    next short slide still without a picture, so the deck keeps its pictures."""
+    from verstka.planning.pictures import AUTO_LABEL, pass_picture_on
+
+    o = _picture_deck({}, n=6, kinds={4: "table"})
+    nxt = pass_picture_on(o, o.slides[2], "Склад — Итоги квартала 3")
+    assert nxt is o.slides[4] and nxt.content.photo_slot == AUTO_LABEL and nxt.content.photo_hint == "Склад — Итоги квартала 5"
+    assert pass_picture_on(o, o.slides[5], "Склад — x") is None
 
 
 def test_one_thing_is_pictured_once_and_never_beside_steps_or_three_cards():
@@ -333,11 +362,12 @@ def test_one_thing_is_pictured_once_and_never_beside_steps_or_three_cards():
     o = _picture_deck({3: "Сканеры на складе"}, n=6)
     o.slides[2].content.items = [SlideItem(title=t, text="коротко") for t in ("Тест", "Трафик", "Учения")]
     o.slides[2].content.bullets = []
-    assert not ensure_pictures([o])[0].startswith("picture added") and not o.slides[2].content.photo_slot
+    ensure_pictures([o])
+    assert not o.slides[2].content.photo_slot and sum(1 for s in o.slides if s.content.photo_slot) == 1  # a scene elsewhere
     o = _picture_deck({3: "Сканеры на складе", 5: "Новые сканеры в зоне приёмки"}, n=8)
     o.slides[2].content.photo_slot, o.slides[2].content.photo_hint = "Изображение", "сканер в руке кладовщика"
     ensure_pictures([o])
-    assert not o.slides[4].content.photo_slot  # the author already shows a scanner
+    assert not (o.slides[4].content.photo_hint or "").startswith("Сканер")  # the author already shows a scanner
 
 
 def test_an_added_picture_leaves_a_slide_whose_words_it_would_break(env_deck):

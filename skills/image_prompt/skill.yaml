@@ -1,5 +1,5 @@
 name: image_prompt
-version: 0.5.0
+version: 0.6.0
 role: llm
 description: Turns the author's description of a slide picture (Russian, a few words) and the person's wish into short English prompts for an open-weight text-to-image model.
 prompt_files:
@@ -15,3 +15,4 @@ changelog:
   - "0.2.0: live run on Polza Z-Image (2026-10-06): the model drew the slide's headline and the palette's colour codes into the pictures, and pseudo-text and digits on every screen — the subject never carries titles, values, labels or timestamps; a screen is tiles with one pictogram and a progress bar each, a chart is one smooth curve (checked live: no text left)"
   - "0.4.0: one clear subject seen whole; a slide without a description is pictured by its concrete subject, never a symbol (the owner, 18.10: a glass trophy for «Бренд и клиентская база»)"
   - "0.5.0: the jury of 20.10: a cloud for «облачные сервисы», an envelope, an arrow «рост» on a slide about rising costs — a place Verstka chose names its thing («Склад — …») and is pictured as that thing; no abstract word of a headline is drawn as a symbol"
+  - "0.6.0: the owner (18.10) «картинки обязаны быть»: a deck whose headings name nothing one can see gets scenes of its topic («Сцена по теме колоды: люди темы за работой — …») — its place, its people at work, its product in use; never a symbol"

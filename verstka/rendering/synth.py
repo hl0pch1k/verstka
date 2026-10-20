@@ -1067,11 +1067,16 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
 
         why = crowded_beside(slide, (strip.x, strip.y, strip.w, strip.h), builder.slide_w, builder.slide_h)
         if why:
+            from verstka.planning.pictures import pass_picture_on
+
             _rollback(builder, before)
+            hint = oslide.content.photo_hint
             oslide.content.photo_slot = None
             oslide.content.photo_hint = None
             slide, warns = _render_content(builder, comp, oslide, manifest, ws, outline)
-            warns = [*warns, f"the added picture left out: {why}"]
+            # pictures on: the picture goes to the next short slide of the deck instead (it is laid out after this one)
+            nxt = pass_picture_on(outline, oslide, hint)
+            warns = [*warns, f"the added picture left out: {why}" + (f"; it goes to slide {nxt.id}" if nxt is not None else "")]
     return put_back_brand_logos(slide, warns)
 
 

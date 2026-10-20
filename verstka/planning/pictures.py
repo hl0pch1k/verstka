@@ -297,45 +297,96 @@ def _pick(cands: list[tuple[int, str]], k: int, used: set[str], n: int) -> list[
     return sorted(out)
 
 
+# the owner (18.10): «если стоит настройка генерировать изображения, они ОБЯЗАНЫ быть в презентации» — with pictures on
+# a deck has at least this many (1 up to 7 slides, 2 from 8): the slides that name a thing one can see first, else a
+# concrete scene of the deck's own topic (its place, its people at work, its product in use — never a symbol)
+def min_pictures(n: int) -> int:
+    return 1 if n <= 7 else 2
+
+
+SCENES = ("люди темы за работой", "место, где идёт работа темы", "продукт или предмет темы в деле")
+_SCENE_PREFIX = "Сцена по теме колоды"
+
+
+def _scene_hint(k: int, head: str) -> str:
+    return f"{_SCENE_PREFIX}: {SCENES[k % len(SCENES)]} — {head}"
+
+
+def _place(outlines: list[Any], first: Any, i: int, hint: str) -> None:
+    """The place on slide i of the first variant and on the same slide of every other one (by the text's slide number,
+    else by position)."""
+    ref = first.slides[i].spec_ref
+    for o in outlines:
+        host = next((s for s in o.slides if ref is not None and s.spec_ref == ref and _fits_picture(s)), None)
+        if host is None and ref is None and i < len(o.slides) and _fits_picture(o.slides[i]):
+            host = o.slides[i]
+        if host is None:
+            continue
+        host.content.photo_slot = AUTO_LABEL
+        host.content.photo_hint = hint
+        host.content.photo_own = False
+
+
 def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
-    """Pictures on the slides that show something one can see: a short content slide whose heading names a place, a
-    product, a device, a process at work (`concrete_subject`) gets a place — at most one per PICTURE_SHARE slides, each
-    showing another thing than the deck's other pictures (the author's included), never forced on a slide of money,
-    plans or percentages. The place is described by its thing and the slide's heading (the text's «Слайд N. …» heading
-    when it has one), so the variants share one picture per place. Returns what was done, for the warnings."""
+    """Pictures on the slides where they help. A short content slide whose heading names a thing one can see (a place,
+    a product, a device, a process at work — `concrete_subject`) gets a place first, each showing another thing than
+    the deck's other pictures (the author's included), at most about one per PICTURE_SHARE slides. A deck with fewer
+    than `min_pictures` gets the rest on its roomiest short slides as concrete scenes of its topic (`SCENES`: its
+    place, its people at work, its product in use — each scene once). The place is described by its thing (or scene)
+    and the slide's heading (the text's «Слайд N. …» heading when it has one), so the variants share one picture per
+    place. Returns what was done, for the warnings."""
     outlines = [o for o in outlines if o is not None and getattr(o, "slides", None)]
     if not outlines:
         return []
     heads = {int(m.group(1)): H.strip_end(m.group(2)) for m in _SLIDE_HEAD_RE.finditer(brief_text or "")}
     first = outlines[0]
     n = len(first.slides)
-    want = max(1, round(n / PICTURE_SHARE)) if n >= 5 else 1
+    need = min_pictures(n)
+    cap = max(need, round(n / PICTURE_SHARE))
     placed = [s for s in first.slides if s.content.photo_slot and not s.content.photo_own]
-    if len(placed) >= want:
+    if len(placed) >= cap:
         return []
     used = {t[0] for t in (concrete_subject(f"{s.content.photo_hint or ''} {s.headline or ''}") for s in placed) if t}
-    cands: list[tuple[int, str]] = []
-    for i, s in enumerate(first.slides):
-        got = concrete_subject(s.headline or "") if _fits_picture(s) else None
-        if got is not None:
-            cands.append((i, got[0]))
-    out: list[str] = []
-    for i, thing in _pick(cands, want - len(placed), used, n):
+
+    def head_of(i: int) -> str:
         s0 = first.slides[i]
-        ref = s0.spec_ref
-        head = (heads.get(ref) if ref is not None else None) or H.strip_end(s0.headline or "")
-        hint = f"{H.cap_first(thing)} — {head}"  # the thing itself, not the word of the heading («Склад», not «Комплектации»)
-        for o in outlines:
-            # the same slide of every variant: by the text's slide number, else by position
-            host = next((s for s in o.slides if ref is not None and s.spec_ref == ref and _fits_picture(s)), None)
-            if host is None and ref is None and i < len(o.slides) and _fits_picture(o.slides[i]):
-                host = o.slides[i]
-            if host is None:
-                continue
-            host.content.photo_slot = AUTO_LABEL
-            host.content.photo_hint = hint
-            host.content.photo_own = False
-        out.append(f"picture added on slide {i + 1} ({thing}: {head[:60]}): the slide shows something one can see")
+        return (heads.get(s0.spec_ref) if s0.spec_ref is not None else None) or H.strip_end(s0.headline or "")
+
+    fits = [i for i, s in enumerate(first.slides) if _fits_picture(s)]
+    cands = [(i, got[0]) for i in fits if (got := concrete_subject(first.slides[i].headline or "")) is not None]
+    out: list[str] = []
+    picked = _pick(cands, cap - len(placed), used, n)
+    for i, thing in picked:
+        _place(outlines, first, i, f"{H.cap_first(thing)} — {head_of(i)}")  # the thing itself, not the heading's word
+        out.append(f"picture added on slide {i + 1} ({thing}: {head_of(i)[:60]}): the slide shows something one can see")
+    short = need - len(placed) - len(picked)
+    if short > 0:
+        # pictures are on and the text names nothing one can see: scenes of the deck's topic on its roomiest short
+        # slides (fewest words first), never next to another picture
+        taken = {i for i, _ in picked} | {k for k, s in enumerate(first.slides) if s.content.photo_slot}
+        free = [i for i in fits if i not in taken and all(abs(i - t) > 1 for t in taken)] or [i for i in fits if i not in taken]
+        room = sorted(free, key=lambda i: (len(_slide_text(first.slides[i])), i))[: max(short * 3, short)]
+        scenes = _pick([(i, f"scene{k}") for k, i in enumerate(sorted(room))], short, set(), n)
+        for k, (i, _) in enumerate(scenes):
+            _place(outlines, first, i, _scene_hint(k, head_of(i)))
+            out.append(f"picture added on slide {i + 1} (a scene of the deck's topic: {head_of(i)[:60]}): pictures are on and no heading names a thing one can see")
     if not out and not placed:
-        out.append("no picture added: no short slide names a thing one can see (a place, a product, a device) — a picture would say nothing")
+        out.append("no picture added: no short content slide has room for one")
     return out
+
+
+def pass_picture_on(outline: Any, oslide: Any, hint: str | None) -> Any:
+    """An added picture the slide had no room for (rendering/synth.py) goes to the next short slide of the deck still
+    without one, described by the same thing (or scene) and that slide's heading. Returns that slide, or None."""
+    slides = list(getattr(outline, "slides", None) or [])
+    at = next((k for k, s in enumerate(slides) if s is oslide or s.id == oslide.id), None)
+    if at is None:
+        return None
+    thing = (hint or "").split(" — ", 1)[0].strip() or f"{_SCENE_PREFIX}: {SCENES[0]}"
+    for s in slides[at + 1:]:
+        if _fits_picture(s) and not s.content.photo_slot:
+            s.content.photo_slot = AUTO_LABEL
+            s.content.photo_hint = f"{thing} — {H.strip_end(s.headline or '')}"
+            s.content.photo_own = False
+            return s
+    return None
