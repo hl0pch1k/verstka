@@ -632,3 +632,20 @@ def test_a_heading_never_says_what_the_slide_holds():
     no_meta_lines(o)
     assert o.slides[0].headline == "Производные шести основных элементарных функций" and o.slides[0].takeaway is None
     assert DG.headline_of("Правила: (u+v)' = u' + v'; (uv)' = u'v + uv'.") == "Правила: (u+v)' = u' + v'; (uv)' = u'v + uv'"
+
+
+def test_a_one_line_point_of_the_author_s_plan_is_content_not_a_divider():
+    st = load_strategies()
+    text = "Слайд 1: Обложка — Итоги хакатона 2025\nСлайд 2: 412 участников из 37 городов\nСлайд 3: Лучшие команды и их решения\nСлайд 4: Что дальше — акселератор весной\n"
+    res = run_agent(parse_brief_text(text), None, [st["structured"]])
+    o = res.outlines["structured"]
+    assert o.slides[0].headline == "Итоги хакатона 2025"
+    assert not any(s.kind == K.section for s in o.slides)
+    big = next(s for s in o.slides if s.kind == K.big_number)
+    assert big.content.numbers[0].value == "412" and "Лучшие команды и их решения." in big.content.bullets
+    nxt = o.slides[-1]
+    assert nxt.headline == "Что дальше" and nxt.content.paragraphs == ["Акселератор весной."]
+    from verstka.planning import faithful as F
+
+    r = F.read_slide(4, "Часть 2. Решение", "")
+    assert r.role == "section"

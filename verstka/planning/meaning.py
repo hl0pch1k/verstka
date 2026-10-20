@@ -935,7 +935,7 @@ def finish_deck(outline: DeckOutline, brief_text: str = "", *, author_order: boo
     from verstka.planning.proportions import check_outline
 
     # (the proportions before the tables' conclusions: those are counted from the cells, not said by anyone)
-    for step in (lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: tidy_values(o), lambda: split_mixed_units(o), lambda: keep_table_beside_chart(o), lambda: keep_author_tables(o, brief_text), lambda: keep_figures(o) if o.planned_by not in ("agent", "model") else [], lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
+    for step in (lambda: dictated_lines(o), lambda: scrub_outline(o), lambda: check_outline(o, brief_text), lambda: tidy_values(o), lambda: split_mixed_units(o), lambda: keep_table_beside_chart(o), lambda: keep_author_tables(o, brief_text), lambda: keep_figures(o) if o.planned_by not in ("agent", "model") else [], lambda: table_conclusions(o), lambda: label_figures(o, brief_text),
                  lambda: tidy(o), lambda: conclusion_headlines(o, model=o.planned_by in ("agent", "model")),
                  lambda: close_story(o, brief_text, author_order=author_order),
                  lambda: true_tense(o, brief_text) if o.planned_by in ("agent", "model") else [],
@@ -1711,4 +1711,45 @@ def no_meta_lines(o: DeckOutline) -> list[str]:
             if new:
                 said.append(f"slide {s.id}: the heading «{s.headline[:50]}» said what the slide holds → «{new[:50]}»")
                 s.headline = new
+    return said
+
+
+
+def dictated_lines(o: DeckOutline) -> list[str]:
+    """A point of the author's plan of one line is content, not a divider (scenarios 20.10, p03: «Слайд 2: 412 участников
+    из 37 городов» laid out as a section): a line with a figure — the figure large, the rest of the line its label; a
+    line «Что дальше — акселератор весной» — its head the title, its statement the text; a bare line («Лучшие команды
+    и их решения») — a line of the slide before. A divider stays only for a part the author names as one («Часть 2»,
+    «Проблема») — or that has lines of its own."""
+    from verstka.planning.faithful import _PART_MARK_RE, _part_name
+
+    said: list[str] = []
+    for k, s in enumerate(list(o.slides)):
+        if s.kind != PatternKind.section or s.spec_ref is None or s.subtitle or k == 0:
+            continue
+        head = H.strip_end(s.headline or "")
+        if not head or _part_name(head) or _PART_MARK_RE.match(head):
+            continue
+        kp = [x for x in H.kpis_of(head) if x.value and re.search(r"\d", x.value) and not re.fullmatch(r"(?:19|20)\d{2}", x.value.strip())]
+        dash = re.match(r"^(?P<h>[^—–:]{2,60}?)\s*[—–:]\s+(?P<t>\S.*)$", head)
+        if kp:
+            v = kp[0].value
+            lab = re.sub(_value_re(v), " ", head, count=1)
+            lab = " ".join(lab.split()).strip(" ,;:—–-")
+            lab = re.sub(r"^(?:на|в|до|с|из|около|более|менее|свыше)\s+", "", lab, flags=re.I)
+            s.kind = PatternKind.big_number
+            s.content.numbers = [NumberCallout(value=v, label=H.cap_first(lab) if lab else head)]
+            said.append(f"slide {s.id}: the author's line «{head[:50]}» — its figure large, not a divider")
+        elif dash:
+            s.kind = PatternKind.bullets
+            s.headline = H.cap_first(dash.group("h").strip())
+            s.content.paragraphs = [H.cap_first(H.strip_end(dash.group("t"))) + "."]
+            said.append(f"slide {s.id}: the author's line «{head[:50]}» — a statement, not a divider")
+        else:
+            prev = next((x for x in reversed(o.slides[:o.slides.index(s)]) if x.kind not in _FRAME or x.kind == PatternKind.big_number), None)
+            if prev is None or prev.kind == PatternKind.title:
+                continue
+            prev.content.bullets = [*prev.content.bullets, head + "."]
+            o.slides.remove(s)
+            said.append(f"slide {s.id}: the author's line «{head[:50]}» — a line of the slide before, not a divider")
     return said
