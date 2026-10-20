@@ -417,7 +417,7 @@ cd web && npm test           # тесты интерфейса
   <img src="docs/readme/svg/section-09-docs-light.svg" width="100%" alt="09 · Документация и ограничения — где читать подробно и что пока не умеет">
 </picture>
 
-**Документация.** [ARCHITECTURE.md](ARCHITECTURE.md) — слои, контракты, данные и брендбук · [MODELS.md](MODELS.md) — модели, роли, расход · [AUDIT.md](AUDIT.md) — все проверки и тесты · [docs/video](docs/video/README.md) — видео первой ступени · [питч первой ступени, PDF](docs/presentation/verstka-pitch.pdf).
+**Документация.** [ARCHITECTURE.md](ARCHITECTURE.md) — слои, контракты, данные и брендбук · [MODELS.md](MODELS.md) — модели, роли, расход · [AUDIT.md](AUDIT.md) — все проверки и тесты · [docs/video](docs/video/README.md) — видео первой ступени · [питч первой ступени, PDF](docs/presentation/verstka-pitch.pdf) · графика этого README собирается скриптами [`docs/readme/source`](docs/readme/source) из шрифтов интерфейса.
 
 **Ограничения — честно.**
 
