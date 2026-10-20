@@ -19,6 +19,8 @@
 Кейс №4 VK Tech «Цифровой дизайнер презентаций», хакатон «Лидеры цифровой трансформации 2026», команда «Рекрут 2».
 
 <p align="center">
+  <a href="#interface"><b>Интерфейс</b></a> ·
+  <a href="#helper"><b>Помощник</b></a> ·
   <a href="#examples"><b>Примеры</b></a> ·
   <a href="#video"><b>Видео</b></a> ·
   <a href="#features"><b>Что умеет</b></a> ·
@@ -32,10 +34,88 @@
 
 | Экспертам<br><img src="docs/readme/svg/spacer.svg" width="400" height="1" alt=""> | Где<br><img src="docs/readme/svg/spacer.svg" width="400" height="1" alt=""> |
 |---|---|
-| Скринкаст второй ступени | в форме сдачи · [Видео](#video) |
+| Интерфейс и Помощник | [Интерфейс](#interface) · [Помощник](#helper) |
 | Готовые презентации | [Примеры](#examples) |
+| Скринкаст второй ступени | в форме сдачи · [Видео](#video) |
 | Запуск на своей машине | [Быстрый старт](#start) |
 | Соответствие ТЗ | [Таблица](#tz) |
+
+<br>
+<br>
+
+<a id="interface"></a><a id="как-это-выглядит"></a>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-01-interface-dark.svg">
+  <img src="docs/readme/svg/section-01-interface-light.svg" width="100%" alt="01 · Интерфейс и Помощник — создать, сборка, результат и правки словами в чате">
+</picture>
+
+Интерфейс «Слои» — веб-интерфейс сервиса: путь «Создать → Сборка → Результат → Правки» идёт на одном экране, плиты-слои сменяют друг друга.
+
+<br>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-result.webp" width="100%" alt="Результат: колода «Закрытие Q3 2026 — VK Cloud» на шаблоне VK Tech с брендбуком VK Cloud, оценки трёх вариантов, кнопки «Скачать PowerPoint», PDF, «Изменить текст» и сводка проверки качества">
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-create.webp" width="49%" alt="Создать: текст с планом, три файла с данными и цели, найденные в тексте; ниже плита «03 Параметры и запуск»">
+  <img src="docs/readme/showcase/ui-brand.webp" width="49%" alt="Брендбук VK Cloud: палитра, шрифты и расхождения с шаблоном VK Tech с переключателем «Брендбук / Шаблон»">
+</p>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-build.webp" width="49%" alt="Сборка: раскладка десяти слайдов эскизами и «Как думает агент» — дизайнер, вёрстка, проверка, взгляд дизайнера">
+  <img src="docs/readme/showcase/ui-why.webp" width="49%" alt="Почему так: профиль файла с данными и три варианта визуализации с причинами — диаграмма рассеяния выбрана, столбцы и таблица можно пересобрать">
+</p>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-remarks.webp" width="49%" alt="Замечания и «Исправить слайд»: замечание проверки рамкой прямо на слайде, пояснение справа и кнопка «Исправить слайд»">
+  <img src="docs/readme/showcase/ui-history.webp" width="49%" alt="Мои презентации: колоды за сегодня с шаблоном, числом слайдов и оценкой качества">
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/readme/showcase/ui-phone.webp" width="100%" alt="Телефон — в разработке: три экрана мобильной версии «Слоёв» в рамках телефона — «Создать», «Сборка» с ходом мысли агента и «Результат» с оценкой и кнопкой «Скачать PowerPoint»">
+</p>
+
+Мобильная версия интерфейса — в разработке; сейчас сервис работает в браузере на компьютере.
+
+<br>
+
+<a id="helper"></a><a id="помощник"></a>
+
+### Помощник
+
+Помощник — агент в чате, который правит готовую презентацию **словами**. Можно назвать номер слайда или сказать «этот слайд»; несколько просьб подряд встают в очередь.
+
+- «на слайде 5 итог Q3 к Q2 в процентах, выдели падение» → пересчитал, выделил падение, переписал вывод.
+- «на слайде 6 выдели Госсектор цветом» → выделил категорию на диаграмме.
+- «на слайде 6 добавь картинку: инженеры в серверной» → перестроил слайд под картинку.
+- «сделай слайд короче» → сократил текст, числа остались.
+- «почему слайд 4 такой?» → открыл объяснение «Почему так» для этого слайда.
+
+Замечания проверки исправляет кнопка «Исправить слайд», просьба «исправь всё» — во всех вариантах сразу, а «верни как было» отменяет правку.
+
+<br>
+
+<p align="center">
+  <img src="docs/readme/showcase/helper-1-q3-q2.webp" width="100%" alt="Просьба «на слайде 5 итог Q3 к Q2 в процентах, выдели падение»: до — «Выручка Q3 выше Q2 у 2 из 3 сервисов»; после — «Выручка Q3 — 334 млн ₽, +7,4% к Q2; резервное копирование снизилось на 8,6%», Q2 и Q3 рядом, крупно −8,6%">
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/readme/showcase/helper-2-picture.webp" width="100%" alt="Просьба «на слайде 6 добавь картинку: инженеры в серверной»: до — слайд «Команда PaaS укладывается в план» из двух колонок текста; после — тот же текст рядом с картинкой во всю высоту слайда">
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/readme/showcase/helper-3-chat.webp" width="100%" alt="Чат Помощника: очередь из двух просьб, ответ на «добавь картинку» с итогом правки и кнопками «Верни как было» и «Почему слайд 6 такой?», просьба «исправь всё» с ходом исправления трёх вариантов">
+</p>
 
 <br>
 <br>
@@ -43,11 +123,13 @@
 <a id="examples"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-01-examples-dark.svg">
-  <img src="docs/readme/svg/section-01-examples-light.svg" width="100%" alt="01 · Примеры презентаций — настоящие колоды на шаблонах VK Tech, VK WorkSpace, VK Education и ЛЦТ">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-02-examples-dark.svg">
+  <img src="docs/readme/svg/section-02-examples-light.svg" width="100%" alt="02 · Примеры презентаций — настоящие колоды на шаблонах VK Tech, VK WorkSpace, VK Education и ЛЦТ">
 </picture>
 
 Колоды собраны 20.10 с моделью на инференсе VK, слайды — без правок руками. Нажмите на карточку, чтобы открыть PDF.
+
+<br>
 
 <p align="center">
   <a href="examples/showcase/01-data-brandbook/deck.pdf"><img src="docs/readme/showcase/01-data-brandbook.webp" width="100%" alt="Итоги продаж VK Cloud на шаблоне VK Tech с брендбуком VK Cloud: ключевые показатели с выводом «Выручка растёт быстрее числа клиентов: +23% против +18%», линейный график выручки по месяцам, ранжированные столбцы восьми регионов, кольцо долей каналов, гистограмма времени ответа поддержки и NPS с разрывами на месте пропусков"></a>
@@ -103,8 +185,6 @@
 
 **07 · Незнакомый шаблон** — бизнес-план и шаблон LibreOffice, которого сервис раньше не видел → колода с подобранными шрифтами и диаграммами. [PDF](examples/showcase/07-unseen-template/deck.pdf) · [PPTX](examples/showcase/07-unseen-template/deck.pptx)
 
-<br>
-
 <details>
 <summary><b>Ещё примеры в репозитории</b></summary>
 
@@ -120,8 +200,8 @@
 <a id="video"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-02-video-dark.svg">
-  <img src="docs/readme/svg/section-02-video-light.svg" width="100%" alt="02 · Видео — запись живого сервиса: первая ступень и скринкаст второй">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-03-video-dark.svg">
+  <img src="docs/readme/svg/section-03-video-light.svg" width="100%" alt="03 · Видео — запись живого сервиса: первая ступень и скринкаст второй">
 </picture>
 
 <p align="center">
@@ -131,6 +211,8 @@
 
 - Первая ступень — запись живого сервиса одним дублем. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4) · [что в видео по минутам](docs/video/README.md)
 - Вторая ступень — скринкаст до 10 минут, ссылка появится здесь.
+
+<br>
 
 <p align="center">
   <img src="docs/images/build.gif" width="100%" alt="Сборка «Интеграла» в интерфейсе «Слои»: текст по теме, аналитик, дизайнер, критик, раскладка по макетам, взгляд дизайнера и готовый результат">
@@ -144,8 +226,8 @@
 <a id="features"></a><a id="что-умеет"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-03-features-dark.svg">
-  <img src="docs/readme/svg/section-03-features-light.svg" width="100%" alt="03 · Что умеет — данные, брендбук, база знаний, любой вход, картинки, правки">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-04-features-dark.svg">
+  <img src="docs/readme/svg/section-04-features-light.svg" width="100%" alt="04 · Что умеет — данные, брендбук, база знаний, любой вход, картинки, правки">
 </picture>
 
 <p align="center">
@@ -155,9 +237,9 @@
   </picture>
 </p>
 
-<a id="вторая-ступень-данные-и-брендбук"></a>
-
 <br>
+
+<a id="вторая-ступень-данные-и-брендбук"></a>
 
 #### Данные → выводы
 
@@ -201,86 +283,13 @@
 - Правки словами: «покажи таблицей», «короче», «почему слайд 4 такой».
 
 <br>
-
-<a id="helper"></a><a id="помощник"></a>
-
-### Помощник
-
-Помощник — агент в чате, который правит готовую презентацию **словами**. Можно назвать номер слайда или сказать «этот слайд»; несколько просьб подряд встают в очередь.
-
-- «на слайде 5 итог Q3 к Q2 в процентах, выдели падение» → пересчитал, выделил падение, переписал вывод.
-- «на слайде 6 выдели Госсектор цветом» → выделил категорию на диаграмме.
-- «на слайде 6 добавь картинку: инженеры в серверной» → перестроил слайд под картинку.
-- «сделай слайд короче» → сократил текст, числа остались.
-- «почему слайд 4 такой?» → открыл объяснение «Почему так» для этого слайда.
-
-Замечания проверки исправляет кнопка «Исправить слайд», просьба «исправь всё» — во всех вариантах сразу, а «верни как было» отменяет правку.
-
-<br>
-
-<p align="center">
-  <img src="docs/readme/showcase/helper-1-q3-q2.webp" width="100%" alt="Просьба «на слайде 5 итог Q3 к Q2 в процентах, выдели падение»: до — «Выручка Q3 выше Q2 у 2 из 3 сервисов»; после — «Выручка Q3 — 334 млн ₽, +7,4% к Q2; резервное копирование снизилось на 8,6%», Q2 и Q3 рядом, крупно −8,6%">
-</p>
-
-<br>
-
-<p align="center">
-  <img src="docs/readme/showcase/helper-2-picture.webp" width="100%" alt="Просьба «на слайде 6 добавь картинку: инженеры в серверной»: до — слайд «Команда PaaS укладывается в план» из двух колонок текста; после — тот же текст рядом с картинкой во всю высоту слайда">
-</p>
-
-<br>
-
-<p align="center">
-  <img src="docs/readme/showcase/helper-3-chat.webp" width="100%" alt="Чат Помощника: очередь из двух просьб, ответ на «добавь картинку» с итогом правки и кнопками «Верни как было» и «Почему слайд 6 такой?», просьба «исправь всё» с ходом исправления трёх вариантов">
-</p>
-
-<br>
-
-<a id="interface"></a><a id="как-это-выглядит"></a>
-
-### Интерфейс «Слои»
-
-Веб-интерфейс сервиса: путь «Создать → Сборка → Результат → Правки» идёт на одном экране, плиты-слои сменяют друг друга.
-
-<br>
-
-<p align="center">
-  <img src="docs/readme/showcase/ui-result.webp" width="100%" alt="Результат: колода «Закрытие Q3 2026 — VK Cloud» на шаблоне VK Tech с брендбуком VK Cloud, оценки трёх вариантов, кнопки «Скачать PowerPoint», PDF, «Изменить текст» и сводка проверки качества">
-</p>
-
-<br>
-
-<p align="center">
-  <img src="docs/readme/showcase/ui-create.webp" width="49%" alt="Создать: текст с планом, три файла с данными и цели, найденные в тексте; ниже плита «03 Параметры и запуск»">
-  <img src="docs/readme/showcase/ui-brand.webp" width="49%" alt="Брендбук VK Cloud: палитра, шрифты и расхождения с шаблоном VK Tech с переключателем «Брендбук / Шаблон»">
-</p>
-
-<p align="center">
-  <img src="docs/readme/showcase/ui-build.webp" width="49%" alt="Сборка: раскладка десяти слайдов эскизами и «Как думает агент» — дизайнер, вёрстка, проверка, взгляд дизайнера">
-  <img src="docs/readme/showcase/ui-why.webp" width="49%" alt="Почему так: профиль файла с данными и три варианта визуализации с причинами — диаграмма рассеяния выбрана, столбцы и таблица можно пересобрать">
-</p>
-
-<p align="center">
-  <img src="docs/readme/showcase/ui-remarks.webp" width="49%" alt="Замечания и «Исправить слайд»: замечание проверки рамкой прямо на слайде, пояснение справа и кнопка «Исправить слайд»">
-  <img src="docs/readme/showcase/ui-history.webp" width="49%" alt="Мои презентации: колоды за сегодня с шаблоном, числом слайдов и оценкой качества">
-</p>
-
-<br>
-
-<p align="center">
-  <img src="docs/readme/showcase/ui-phone.webp" width="100%" alt="Телефон — в разработке: три экрана мобильной версии «Слоёв» в рамках телефона — «Создать», «Сборка» с ходом мысли агента и «Результат» с оценкой и кнопкой «Скачать PowerPoint»">
-</p>
-
-Мобильная версия интерфейса — в разработке; сейчас сервис работает в браузере на компьютере.
-
-<br>
 <br>
 
 <a id="how"></a><a id="как-устроено"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-04-how-dark.svg">
-  <img src="docs/readme/svg/section-04-how-light.svg" width="100%" alt="04 · Как это работает — восемь шагов от файла до PPTX">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-05-how-dark.svg">
+  <img src="docs/readme/svg/section-05-how-light.svg" width="100%" alt="05 · Как это работает — восемь шагов от файла до PPTX">
 </picture>
 
 <p align="center">
@@ -301,8 +310,8 @@
 <a id="quality"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-05-quality-dark.svg">
-  <img src="docs/readme/svg/section-05-quality-light.svg" width="100%" alt="05 · Качество — проверки, время сборки, тесты">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-06-quality-dark.svg">
+  <img src="docs/readme/svg/section-06-quality-light.svg" width="100%" alt="06 · Качество — проверки, время сборки, тесты">
 </picture>
 
 <p align="center">
@@ -322,8 +331,8 @@
 <a id="start"></a><a id="запуск"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-06-start-dark.svg">
-  <img src="docs/readme/svg/section-06-start-light.svg" width="100%" alt="06 · Быстрый старт — Linux или macOS: установка, ключи, сервер и CLI">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-07-start-dark.svg">
+  <img src="docs/readme/svg/section-07-start-light.svg" width="100%" alt="07 · Быстрый старт — Linux или macOS: установка, ключи, сервер и CLI">
 </picture>
 
 Постоянного стенда нет: сервис запускается на своей машине примерно за 15 минут. GPU не нужен, на Windows — внутри WSL 2.
@@ -424,8 +433,8 @@ cd web && npm test           # интерфейс
 <a id="models"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-07-models-dark.svg">
-  <img src="docs/readme/svg/section-07-models-light.svg" width="100%" alt="07 · Модели и стоимость — открытые веса на инференсе VK, без закрытых API">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-08-models-dark.svg">
+  <img src="docs/readme/svg/section-08-models-light.svg" width="100%" alt="08 · Модели и стоимость — открытые веса на инференсе VK, без закрытых API">
 </picture>
 
 - Текст и зрение — Qwen3.8-27B на инференсе VK; если VK не ответил, та же модель на Polza.
@@ -439,8 +448,8 @@ cd web && npm test           # интерфейс
 <a id="tz"></a><a id="соответствие-тз"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-08-tz-dark.svg">
-  <img src="docs/readme/svg/section-08-tz-light.svg" width="100%" alt="08 · Соответствие ТЗ — обе ступени кейса по пунктам">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-09-tz-dark.svg">
+  <img src="docs/readme/svg/section-09-tz-light.svg" width="100%" alt="09 · Соответствие ТЗ — обе ступени кейса по пунктам">
 </picture>
 
 ✅ — сделано, ◐ — частично.
@@ -476,8 +485,8 @@ cd web && npm test           # интерфейс
 <a id="docs"></a>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-09-docs-dark.svg">
-  <img src="docs/readme/svg/section-09-docs-light.svg" width="100%" alt="09 · Документация и ограничения — где читать подробно и что пока не умеет">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-10-docs-dark.svg">
+  <img src="docs/readme/svg/section-10-docs-light.svg" width="100%" alt="10 · Документация и ограничения — где читать подробно и что пока не умеет">
 </picture>
 
 Подробно: [ARCHITECTURE.md](ARCHITECTURE.md) — устройство · [MODELS.md](MODELS.md) — модели и расход · [AUDIT.md](AUDIT.md) — проверки и тесты · [видео первой ступени](docs/video/README.md) · [питч первой ступени](docs/presentation/verstka-pitch.pdf) · [исходники графики README](docs/readme/source).
