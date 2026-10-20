@@ -78,7 +78,7 @@ def test_the_rules_digest_keeps_the_facts_and_never_the_speech():
         assert bad not in text, bad
     assert "30 сентября" in text and "35 млрд" in text
     for s in d.slides:
-        assert len(s.title.split()) <= DG.HEAD_WORDS + 1 and s.points
+        assert len(s.title.split()) <= DG.HEAD_WORDS + 4 and s.points
 
 
 def test_the_person_s_count_sizes_the_digest():
@@ -336,7 +336,7 @@ def test_a_topic_article_is_digested_by_its_sections_with_the_topic_on_the_cover
     text = d.text()
     assert "Подзаголовок: По статье «Байкал» из Википедии" in text
     assert "1642 м" in text and "2600 видов" in text and "Примечани" not in text and "Ссылка на источник" not in text
-    assert "бур." not in text and "Озеро тектонического происхождения" in text
+    assert "бур." not in text and "Байкал — озеро тектонического происхождения" in text
     assert 4 <= d.size <= 6
 
 
@@ -424,3 +424,29 @@ def test_the_author_s_points_come_back_when_a_form_left_them_out():
                                                     content=SlideContent(numbers=[NumberCallout(value="×2", label="В ноябре ускорить синхронизацию")]))])
     keep_author_points(o, brief)
     assert any("тёмную тему" in b and "семейная подписка" in b for b in o.slides[0].content.bullets)
+
+
+# ------------------------------------------------------------------ a digest's titles are finished thoughts
+
+
+def test_a_digest_title_is_a_finished_thought_never_a_sentence_cut_off():
+    cases = {
+        "В 1959—1962 годах уровень озера вырос на 1,2 м в связи с подпором уровня воды плотиной Иркутской ГЭС.":
+            "В 1959—1962 годах уровень озера вырос на 1,2 м",
+        "Обязательное дополнение — скринкаст работы сервиса (до 5 минут), где показано:": "Обязательное дополнение — скринкаст работы сервиса",
+        "2021 год объявлен Годом Байкала в Иркутской области в соответствии с Указом Губернатора Иркутской области № 256-уг от 9 сентября 2020 года.":
+            "2021 год объявлен Годом Байкала",
+        "Вёрстка слайда: заголовок-вывод («Продажи выросли на 23% к декабрю», а не «Продажи по месяцам»), подписи осей, единицы измерения, источник данных.":
+            "Вёрстка слайда: заголовок-вывод, подписи осей, единицы измерения, источник данных",
+        "Байкал (бур. Байгал далай) — озеро тектонического происхождения в южной части Восточной Сибири площадью 31 722 км².":
+            "Байкал — озеро тектонического происхождения в южной части Восточной Сибири площадью 31 722 км²",
+    }
+    for sentence, title in cases.items():
+        assert DG.headline_of(sentence) == title, sentence
+    for sentence in ["Тайминг на хокатоне, потому что есть целый блок вопросов, связанных с тем, когда дедлайн, когда происходит экспертиза данных работ.",
+                     "С 2010 года ведётся строительство нейтринного телескопа НТ1000 с эффективным объёмом 1 км3, строительство которого предполагалось завершить не ранее 2017 года."]:
+        t = DG.headline_of(sentence)
+        last = t.split()[-1].lower().strip(",.;:")
+        assert last not in DG._TAIL_BAD and DG._balanced(t) and len(t.split()) <= DG.HEAD_WORDS + 4, t
+    assert DG.headline_of("Сложные случаи при избыточном объёме данных и при нетипизируемых данных, когда график нечитаем и нужен совсем другой вид.",
+                          fallback="Сложные случаи") == "Сложные случаи"

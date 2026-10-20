@@ -274,30 +274,139 @@ def _read(text: str) -> _Doc:
 # ------------------------------------------------------------------ titles and lines
 
 
-def headline_of(sentence: str, max_words: int = HEAD_WORDS) -> str:
-    """A slide's title made of a sentence: the sentence itself when short, else its clause that carries the figure or the
-    decision, at most `max_words` words, cut where a phrase ends."""
+_TAIL_BAD = {
+    "в", "во", "на", "с", "со", "к", "ко", "по", "за", "от", "до", "из", "у", "о", "об", "при", "для", "без", "через", "под", "над", "между",
+    "и", "а", "но", "или", "либо", "что", "чтобы", "как", "где", "когда", "если", "то", "не", "ни", "это", "также", "так", "же", "ли",
+    "связи", "соответствии", "отношении", "результате", "течение", "рамках", "качестве", "области", "счёт", "счет", "числе", "том",
+    "котором", "которой", "которых", "который", "которая", "которое", "которые", "его", "её", "их", "свой", "своей", "своих", "the", "of",
+    "and", "to", "in", "for", "with", "a", "an",
+}
+# a clause that hangs on the main one: «…, где показано», «…, которые …», «…, в том числе …» — never the end of a title
+_SUBORDINATE_RE = re.compile(
+    r",\s+(?=(?:котор\w+|где|когда|куда|откуда|что|чтобы|если|потому|поэтому|так\s+как|хотя|причём|причем|пока|после\s+того|"
+    r"в\s+том\s+числе|включая|а\s+также|в\s+то\s+время|благодаря|несмотря|который|а\s+не|но\s+и)\b)|\s*;\s+|\s+\(",
+    re.I,
+)
+_VERB_RE = re.compile(
+    r"(?<![\wё])[а-яё]{2,}(?:ет|ют|ит|ят|ат|ут|ёт|ил|ила|ило|или|ал|ала|ало|али|ял|яла|яли|ос|осла|осли|ёс|ёл|ыл|ыла|ыли|ался|алась|ались|ется|ются|ится|ятся|"
+    r"ен|ена|ено|ены|ан|ана|ано|аны|ён|ть|ться|ешь|ем|им)(?![\wё])|(?<![\wё])(?:есть|нет|нужн\w*|необходим\w*|должн\w*|можно|нельзя)(?![\wё])|\s[—–]\s",
+    re.I,
+)
+
+
+def _balanced(t: str) -> bool:
+    return t.count("«") == t.count("»") and t.count("(") == t.count(")") and t.count("\"") % 2 == 0
+
+
+# a verb that needs what follows it: «мы ожидаем», «считаем», «является» — no end of a title
+_DANGLING_RE = re.compile(r"^(?:ожида\w*|счита\w*|дума\w*|хоч\w*|хотим|хотят|говор\w*|скаж\w*|будет|будут|явля\w*|станет|стал[аио]?|"
+                          r"составля\w*|составил\w*|включа\w*|означа\w*|получа\w*|показано|сказано|указано|следующ\w*|такие|такой|такая)$", re.I)
+_PREP_CUT = ("в", "во", "на", "с", "со", "к", "по", "за", "от", "до", "из", "у", "о", "об", "при", "для", "без", "через", "под", "над", "между",
+             "после", "перед", "около", "из-за", "благодаря", "согласно", "вокруг", "среди")
+
+
+def _bare(word: str) -> str:
+    return re.sub(r"[^\wё-]", "", word.lower())
+
+
+def _clean_end(t: str) -> str:
+    """The text without the words it may not end on (a preposition, a conjunction, «в связи», «в соответствии», «№»)."""
+    ws = t.rstrip(" ,;:—–-").split()
+    while len(ws) > 2 and (_bare(ws[-1]) in _TAIL_BAD or not _bare(ws[-1])):
+        ws.pop()
+    return " ".join(ws).rstrip(" ,;:—–-")
+
+
+def _complete(t: str, max_words: int) -> bool:
+    """A finished thought short enough for a title: 3+ words, a verb (or «X — Y»), quotes and brackets closed, an end that is
+    no preposition or conjunction."""
+    w = _words(t)
+    if not 3 <= w <= max_words or not _balanced(t) or not _VERB_RE.search(" " + t):
+        return False
+    last = _bare((t.split() or [""])[-1])
+    # («Предоставится, Qen 3.8 …», «Проектной работы, и всегда …»: a word or two cut off the sentence before)
+    return (bool(last) and last not in _TAIL_BAD and not _DANGLING_RE.match(last) and not _FRAGMENT_RE.match(t)
+            and not re.match(r"^[^\s,]+(?:\s[^\s,]+)?,\s", t))
+
+
+def _phrase_cuts(t: str, limit: int) -> list[str]:
+    """`t` shortened by its syntax: cut right before a preposition that opens a trailing phrase («…вырос на 1,2 м | в
+    связи с подпором…»), the longest first, each within `limit` words."""
+    ws = t.split()
+    out = []
+    for k in range(min(len(ws) - 1, limit), 2, -1):
+        if _bare(ws[k]) in _PREP_CUT:
+            out.append(" ".join(ws[:k]).rstrip(" ,;:—–-"))
+    return out
+
+
+def title_ok(t: str, max_words: int = HEAD_WORDS) -> bool:
+    """A title that is a finished thought (see _complete)."""
+    return _complete(t, max_words + 4)
+
+
+def headline_of(sentence: str, max_words: int = HEAD_WORDS, fallback: Optional[str] = None) -> str:
+    """A slide's title made of a sentence — always a finished thought, never a sentence cut off («…в связи», «…где
+    показано»): the sentence itself when it fits (up to max_words + 4 words), else its main part — the clause before the
+    first subordinate one («, где …», «, который …», «(…»), then without its trailing parts after commas — while it
+    keeps its verb; a «Метка: текст» line its label and the head of the text; else `fallback` (the section's name); else
+    the sentence cut where a phrase ends, never on a preposition or a conjunction."""
+    ended = not sentence.rstrip().endswith(":")
     s = H.strip_end(sentence)
-    if _words(s) <= max_words or (_words(s) <= max_words + 4 and not re.search(r"[,;:—–]", s)):
+    # an aside in brackets is no part of a title («Байкал (бур. Байгал далай) — …», «заголовок-вывод («…»)»)
+    bare = re.sub(r"\s*\([^()]*\)", "", s).strip()
+    if _words(bare) >= 3 and _balanced(bare):
+        s = bare
+    # spoken asides between commas are no part of a title («…своих, значит, наработок», «Предоставится, если быть
+    # суперточным, Qen 3.8 …»)
+    s = re.sub(r",\s*(?:значит|к\s+примеру|например|собственно|конечно|видимо|наверное|так\s+сказать|скажем|в\s+общем|"
+               r"если\s+быть\s+\w+|грубо\s+говоря|честно\s+говоря|да|вот|ну)\s*(?=,)", "", s, flags=re.I)
+    s = re.sub(r"^(?:значит|к\s+примеру|например|собственно|конечно|ну|вот|да)\s*,\s*", "", s, flags=re.I)
+    s = H.cap_first(s)
+    limit = max_words + 4
+    last = _bare((s.split() or [""])[-1])
+    if (ended and _words(s) <= limit and _balanced(s) and last not in _TAIL_BAD and not _DANGLING_RE.match(last)
+            and (_VERB_RE.search(" " + s) or ":" in s) and not _FRAGMENT_RE.match(s) and not _FILLER_RE.search(s)
+            and not re.match(r"^[^\s,]+(?:\s[^\s,]+)?,\s", s)):  # («Критичные, какие-нибудь модели…»: words cut off their sentence)
         return s
-    lab = re.match(r"^(?P<l>[^:«»]{3,40}):\s+(?P<r>\S.+)$", s)
+    lab = re.match(r"^(?P<l>[^:«»()]{3,40}):\s+(?P<r>\S.+)$", s)
     if lab and _words(lab.group("l")) <= 4 and max_words - _words(lab.group("l")) >= 5:
         # «Выбор визуализации: ранжированный список из 2–3 вариантов …» — the label and the head of what it says
-        rest = headline_of(lab.group("r"), max_words - _words(lab.group("l")))
-        return H.cap_first(lab.group("l").strip()) + ": " + (rest[:1].lower() + rest[1:] if rest[1:2].islower() else rest)
-    parts: list[str] = []
-    for p in re.split(r"\s*[;:]\s+|\s+[—–]\s+|,\s+", s):
-        if parts and (parts[-1].count("«") > parts[-1].count("»") or parts[-1].count("(") > parts[-1].count(")")):
-            parts[-1] += ", " + p  # never cut inside a quotation
-        else:
-            parts.append(p)
-    parts = [p.strip(" ,;:—–-") for p in parts if p.strip()]
-    best = None
-    whole = [p for p in parts if 4 <= _words(p) <= max_words and not _FRAGMENT_RE.match(p) and not _RELATIVE_RE.search(" ".join(p.split()[:3]))]
-    best = next((p for p in whole if _FIG_RE.search(p) or _DECISION_RE.search(p)), None) or next(iter(whole), None)
-    if best is None:
-        best = clip_words(s, max_words)
-    return H.cap_first(H.strip_end(best.rstrip(" ,;:—–-")))
+        rest = headline_of(lab.group("r"), max_words - _words(lab.group("l")), fallback=None)
+        if _words(rest) >= 3 and _clean_end(rest) == rest:
+            return H.cap_first(lab.group("l").strip()) + ": " + (rest[:1].lower() + rest[1:] if rest[1:2].islower() else rest)
+    main = _SUBORDINATE_RE.split(s, maxsplit=1)[0].strip(" ,;:—–-")
+    for cand in (main, *_shorter(main), *_phrase_cuts(main, limit)):
+        if _complete(cand, limit):
+            return H.cap_first(cand)
+    # «Байкал — самое глубокое озеро на планете, крупнейший …»: the statement before the dash's tail
+    if " — " in s:
+        head = s.split(" — ", 1)[0]
+        tail = s.split(" — ", 1)[1]
+        tail_main = re.split(r",\s+|\s+[—–]\s+", tail, maxsplit=1)[0]
+        cand = f"{head} — {tail_main}"
+        if _words(cand) <= limit and _balanced(cand) and _clean_end(cand) == cand and not _DANGLING_RE.match(_bare(cand.split()[-1])):
+            return H.cap_first(cand)
+    if fallback:
+        return H.cap_first(H.strip_end(fallback))
+    head = re.split(r",\s+|\s+[—–]\s+", main, maxsplit=1)[0]
+    if 3 <= _words(head) <= limit and _balanced(head) and _clean_end(head) == head:
+        return H.cap_first(head)  # «Тайминг на хокатоне»: the subject, never a run-on cut mid-phrase
+    main = re.sub(r"^[^\s,]+(?:\s[^\s,]+)?,\s+(?=\S+\s+\S+\s+\S+)", "", main)  # (words cut off the sentence before)
+    cut = _clean_end(clip_words(main if _words(main) >= 4 else s, limit))
+    while not _balanced(cut) and _words(cut) > 3:
+        cut = _clean_end(" ".join(cut.split()[:-1]))
+    return H.cap_first(cut)
+
+
+def _shorter(t: str) -> list[str]:
+    """`t` without its trailing parts after commas, one by one (the longest first)."""
+    parts = re.split(r",\s+", t)
+    out = []
+    while len(parts) > 1:
+        parts = parts[:-1]
+        out.append(", ".join(parts))
+    return out
 
 
 def point_of(sentence: str) -> str:
@@ -427,6 +536,12 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
     def fresh(s: _Sent) -> bool:
         return not any(_similar(s.text, u) for u in used)
 
+    def heading_of(x: _Sent) -> Optional[str]:
+        """The name of the document's section the sentence stands in (a title when its sentences give none)."""
+        k = max((p for p in doc.heads if p <= x.para), default=None)
+        h = doc.heads.get(k) if k is not None else None
+        return h if h and h != LEAD_HEAD and 1 <= _words(h) <= 10 else None
+
     out: list[DigestSlide] = []
     tables = list(doc.tables[:2])
     n_text = max(1, n_content - len(tables))
@@ -444,8 +559,9 @@ def digest_by_rules(text: str, slides: Optional[int] = None, *, title_hint: Opti
                     break
             if not pick:
                 continue
-            lead = max(pick[:3], key=lambda s: s.score - max(0, s.words - HEAD_WORDS - 2) * 0.5 - 4 * bool(_FRAGMENT_RE.match(s.text)))
-            title = headline_of(lead.text)
+            lead = max(pick[:3], key=lambda s: s.score - max(0, s.words - HEAD_WORDS - 2) * 0.5 - 4 * bool(_FRAGMENT_RE.match(s.text))
+                       - 3 * (not title_ok(headline_of(s.text))))
+            title = headline_of(lead.text, fallback=heading_of(lead))
             rest = sorted((s for s in pick if s is not lead), key=lambda s: s.pos)
             points = [point_of(s.text) for s in rest][:per]
             if _words(H.strip_end(lead.text)) - _words(title) >= 3:
