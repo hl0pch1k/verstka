@@ -37,7 +37,7 @@ from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
 from verstka.data.profile import profile_table
-from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, stems_of, technical_name, times_word, upper_first
+from verstka.data.words import count_words, file_title, fmt_num, fmt_pct, fmt_signed, fmt_value, stems_of, technical_name, times_word, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
 from verstka.schemas.outline import (
@@ -711,6 +711,34 @@ def lower_first_soft(text: str) -> str:
     return text[:1].lower() + text[1:]
 
 
+_TOPIC_START = re.compile(r"(?i)^(?:итоги|отч[её]т|результаты|обзор|анализ|сводка|динамика|исследование|показатели|"
+                          r"продажи|выручка|состояние)\b")
+
+
+def _topic_cover(brief: Optional[Brief], entries: Sequence["_Entry"], plans: Sequence[DatasetPlan]) -> Optional[str]:
+    """«Итоги 2025 года для правления. Покажи, что выручка растёт…» → «Итоги 2025 года: выручка +66%»: the brief's own
+    topic and the main goal's checked figure (its change, else its first figure), the audience under it. None — the
+    brief does not open with a topic."""
+    first = next(iter(_sentences((brief.text if brief is not None else "") or "")), "")
+    topic, _ = clean_deck_title(first)
+    if not topic or len(topic.split()) > 7 or not _TOPIC_START.match(topic):
+        return None
+    for e in entries:
+        k = e.plan_index
+        if k is None or e.role not in ("data", "kpi") or not plans[k].task.goal:
+            continue
+        p = plans[k]
+        nom, _ = _metric_word(p)
+        ch = next((f for f in p.headline_facts if f.id == "change" and f.unit == "%"), None)
+        fig = None
+        if ch is not None and str(int(round(ch.value))) in re.sub(r"\D", "", p.headline or ""):
+            fig = fmt_signed(ch.value if not re.search(r"(?i)сниз|упал|сократ|уменьш", p.headline or "") else -ch.value, "%")
+        if nom and fig:
+            return _cut(f"{topic}: {nom} {fig}", MAX_TITLE)
+        break
+    return topic
+
+
 def _main_answer(entries: Sequence["_Entry"], plans: Sequence[DatasetPlan], heads: dict) -> Optional[str]:
     """The cover of a brief that asks without a question mark («Покажи, как менялась посещаемость сети») or of a
     paragraph whose goal is buried: the verified headline of the first slide a goal of the brief chose — not a topic
@@ -823,6 +851,36 @@ def _card_label0(fact_text: str, value: str, topic: str) -> str:
     return words
 
 
+def _metric_word(p: DatasetPlan) -> tuple[str, str]:
+    """(величина в именительном, в родительном) по теме слайда: «Выручка по месяцам» → («выручка», «выручки»)."""
+    from verstka.data.words import phrase
+
+    w = re.split(r"\s+(?:по|за|в)\s+", p.plain_headline or "", maxsplit=1)[0].strip()
+    ph = phrase(w) if w and not re.search(r"\d", w) else None
+    if ph is None or not ph.sure:
+        return "", ""
+    return ph.low.nom, ph.low.gen
+
+
+def _human_label(f: HeadlineFact, p: DatasetPlan) -> Optional[str]:
+    """Подпись крупной цифры словами человека (S10): «рост выручки за 2025 год», «Москва — доля выручки», «Прямые
+    продажи — крупнейшая доля» — а не «за период · выручка по месяцам». None — сказать так нечем (прежняя подпись)."""
+    nom, gen = _metric_word(p)
+    task = p.task.task
+    if f.kind == "change" and f.unit == "%" and task == "dynamics" and gen:
+        when = re.search(r"(?<![а-яё])(?:за|с)\s+(?!в\s)[^,;:]+$", re.sub(r"\s*[—–:].*$", "", p.headline or ""))
+        word = "рост" if f.value >= 0 and not re.search(r"(?i)сниз|упал|сократ|уменьш", p.headline or "") else "снижение"
+        return f"{word} {gen}" + (f" {when.group(0).strip()}" if when else "")
+    if f.kind in ("share", "leader") and f.unit == "%" and " — " in (f.text or "") and task in ("comparison", "shares"):
+        who = f.text.split(" — ", 1)[0].strip()
+        if not who or re.search(r"\d", who):
+            return None
+        if not gen or re.match(r"(?i)дол[яи]", nom):
+            return f"{who} — крупнейшая доля"
+        return f"{who} — доля {gen}"
+    return None
+
+
 def _cards_head(plans: Sequence[DatasetPlan], cards: Sequence[NumberCallout]) -> str:
     """The heading of the key figures: the two first conclusions they come from («Объём рынка вырос в 5 раз за 6 лет;
     PaaS растёт быстрее всех: +41%»), not «label — figure» glued from a cut label («… вырос в раз за 6 лет — +5», жюри
@@ -835,8 +893,10 @@ def _cards_head(plans: Sequence[DatasetPlan], cards: Sequence[NumberCallout]) ->
         if not h:
             return "; ".join(f"{x.label.split(' · ')[0]} — {x.value}" for x in cards[:2])
         heads.append(h if not heads or _names_first(h, p) else lower_first_soft(h))
-    head = "; ".join(heads)
-    return head if len(head) <= MAX_HEADLINE else heads[0]
+    # one main conclusion — the strongest by the brief's goals (the cards come in their order); the other figures are
+    # the cards themselves, not a second clause after «;» (S10: «…за 11 месяцев; Москва даёт 46% выручки: 412 500 из …»)
+    head = heads[0]
+    return head if len(head) <= MAX_HEADLINE else (_cut_clause(head, MAX_HEADLINE) or head)
 
 
 def _names_first(text: str, plan: Optional[DatasetPlan]) -> bool:
@@ -876,7 +936,7 @@ def _fact_cards(plans: Sequence[DatasetPlan], order: Sequence[int]) -> list[Numb
             value = f"в {fmt_num(f.value)} {times_word(f.value)}"  # кратность — «в 5 раз», а не «+5»
         if any(c.value == value for c in out):
             continue  # one figure once (two files said the same +23%)
-        out.append(NumberCallout(value=value, label=_card_label(f.text, value, p.plain_headline, p.headline), fact_id=f.id))
+        out.append(NumberCallout(value=value, label=_human_label(f, p) or _card_label(f.text, value, p.plain_headline, p.headline), fact_id=f.id))
         if len(out) == 4:
             break
     return out
@@ -1355,7 +1415,9 @@ def build_data_story(
         # бриф без вопросительного знака: обложка — проверенный вывод главной цели, а не первая фраза брифа (F11)
         main = _main_answer(entries, plans, heads)
         if main:
-            title = main
+            # the cover names the deck's topic and its result («Итоги 2025 года: выручка +66%») when the brief opens
+            # with its topic; never the first chart's heading again (S10: the cover = slide 3)
+            title = _topic_cover(brief, entries, plans) or main
             entries[0].slide.headline = title
             story.cover_answer = True
     picked = _summary_pick(plans, sorted(kept), order, brief_text, heads, answers=[a["plan"] for a in answers if a["plan"] in kept])
@@ -1405,6 +1467,12 @@ def build_data_story(
         outline = story.outline
     except Exception:  # noqa: BLE001 - the story's own order stays
         log.warning("the plan's order not applied to the data story", exc_info=True)
+    # the end says what the figures mean, not the opening's cards again (S10: slides 2 and 6 alike)
+    try:
+        for line in final_meaning(story):
+            voice.say(line, 0.15)
+    except Exception:  # noqa: BLE001 - the summary stays as it is
+        log.warning("the data story's closing meaning not made", exc_info=True)
     # the person's slide count both ways: «слайдов 8–10» is at least 8 as well as at most 10 (жюри 20.10: 7 slides)
     try:
         lo, hi = _count_bounds(brief, slide_count, limit)
@@ -1418,6 +1486,71 @@ def build_data_story(
     story.log = list(voice.lines)
     story.seconds = time.monotonic() - t0
     return story
+
+
+def _implications(story: "DataStory") -> list[tuple[str, list[str]]]:
+    """What the checked figures mean, without a model: a concentration (one category with 40 % or more — a risk and,
+    the rest, a reserve of growth) and a trend (a growth or a fall over the period). (headline, points), strongest
+    first; every figure is a fact of a data slide."""
+    from verstka.data.words import phrase
+
+    out: list[tuple[str, list[str]]] = []
+    shown = {s.data.dataset_id for s in story.outline.slides if s.data is not None}
+    conc = []
+    for p in story.plans:
+        if p.slides <= 0 or p.profile.table_id not in shown:
+            continue
+        if p.task.task in ("comparison", "shares"):
+            f = next((x for x in p.headline_facts if x.id == "leader_share" and x.unit == "%" and x.value >= 40), None)
+            dims = list(p.profile.dimensions)
+            dp = phrase(dims[0]) if dims else None
+            if f is not None and " — " in f.text and dp is not None and dp.sure:
+                conc.append((f.value, f.text.split(" — ", 1)[0].strip(), dp, p))
+        if p.task.task == "dynamics":
+            ch = next((x for x in p.headline_facts if x.id == "change" and x.unit == "%"), None)
+            nom, _ = _metric_word(p)
+            when = re.search(r"(?<![а-яё])(?:за|с)\s+(?!в\s)[^,;:]+$", re.sub(r"\s*[—–:].*$", "", p.headline or ""))
+            if ch is not None and nom and ch.value >= 10:
+                down = bool(re.search(r"(?i)сниз|упал|сократ|уменьш", p.headline or ""))
+                tail = f" {when.group(0).strip()}" if when else ""
+                ratio = next((x for x in p.headline_facts if x.id == "ratio"), None)
+                fig = (f"в {fmt_num(ratio.value)} {times_word(ratio.value)}" if ratio is not None and f"в {fmt_num(ratio.value)}" in (p.headline or "")
+                       else fmt_signed(-ch.value if down else ch.value, '%'))
+                out.append(("", [f"{upper_first(nom)}: {fig}{tail} — "
+                                 + ("причину спада стоит найти раньше, чем он станет трендом" if down else "темп есть, его стоит удержать")]))
+    if conc:
+        v, who, dp, p = max(conc, key=lambda x: x[0])
+        _, gen = _metric_word(p)
+        head = f"{who} — {fmt_pct(v)}%{(' ' + gen) if gen else ''}: итог зависит от одного {dp.low.gen}"
+        pts = [f"Риск: при спаде у лидера ({who}) проседает весь итог", f"Резерв роста — остальные {dp.low.nom_pl}"]
+        out.insert(0, (head, pts))
+    return out
+
+
+def final_meaning(story: "DataStory") -> list[str]:
+    """The data deck's end when its opening already shows the key figures: not the same cards again (S10), but what
+    they mean — the strongest implication as the heading, its points and the trend's (`_implications`). Without one the
+    opening's cards go and the summary closes the deck alone. The input's own ask, when there is one, still comes last."""
+    o = story.outline
+    opening = next((s for s in o.slides if s.id == "key-figures"), None)
+    summary = next((s for s in o.slides if s.id == "summary"), None)
+    if opening is None or summary is None:
+        return []
+    imps = _implications(story)
+    if not imps:
+        o.slides.remove(opening)
+        return ["ключевые цифры — только в итоге: в начале они повторили бы его карточки"]
+    head = next((h for h, _ in imps if h), None)
+    pts = [x for _, ps in imps for x in ps][:4]
+    if head is None:
+        head, pts = pts[0], pts[1:]  # (a trend alone: it is the heading)
+    if summary.headline.startswith("Где расти"):
+        head = summary.headline  # (the plan's question is answered: its answer stays the heading)
+    summary.kind = PatternKind.bullets
+    summary.headline = head
+    summary.content = SlideContent(bullets=pts)
+    summary.rationale = "Что значат проверенные цифры колоды — следствия из данных, а не повтор карточек начала."
+    return [f"финал — что значат цифры: «{head[:80]}»"]
 
 
 _AT_MOST_RE = re.compile(r"(?i)не\s+(?:более|больше)\s+\d+\s+слайд|до\s+\d+\s+слайд|максимум\s+\d+\s+слайд|\d+\s+слайд\w*\s+максимум")

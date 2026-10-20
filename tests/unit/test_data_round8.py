@@ -244,7 +244,7 @@ def test_noisy_series_compares_means_not_endpoints():
     h = _sp(_plan(t).headline)
     assert "−21%" not in h and "21%" not in h and ("без выраженного тренда" in h or "в среднем" in h), h
     t = _t("Выручка.csv", [["Месяц", "Выручка, млн ₽"]] + [[f"2025-{k + 1:02d}", 100 + 10 * k] for k in range(12)])
-    assert "за 11 месяцев" in _sp(_plan(t).headline)  # настоящий тренд — по краям, как раньше
+    assert "за 2025 год" in _sp(_plan(t).headline)  # настоящий тренд — по краям, как раньше
 
 
 # ── M9: опечатка в ряду ────────────────────────────────────────────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ def test_typo_outlier_is_named_and_left_out_of_the_series():
     vals = [4210, 4385, 4520, 4610, 4475, 4702, 4520000, 4810, 4655, 4890, 5012, 5240]
     t = _t("Продажи по месяцам.csv", [["Месяц", "Продажи, шт."]] + [[f"{m} 2025", v] for m, v in zip(MONTHS, vals)])
     p = _plan(t)
-    assert _sp(p.headline) == "Продажи выросли на 24% за 11 месяцев", p.headline
+    assert _sp(p.headline) == "Продажи выросли на 24% за 2025 год", p.headline
     assert "Июль 2025 — 4 520 000 шт.: похоже на опечатку" in _sp(p.caption)
     s = chart_spec_of(p, t)
     assert s.series[0].values[6] is None and "без выброса: июль 2025" in s.series[0].name

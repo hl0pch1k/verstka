@@ -537,6 +537,21 @@ def _metric_title(m: Measure) -> str:
     return re.sub(r"\s*,[^,]*$", "", subject_of(m.name, m.type)[0]).strip() or m.name
 
 
+def calendar_when(freq: Optional[str], first: str, last: str) -> Optional[str]:
+    """Период словами календаря, как говорят люди: январь–декабрь одного года — «за 2025 год», а не «за 11 месяцев»
+    (число интервалов между точками); I–IV квартал — тоже «за 2025 год». None — ряд не совпадает с календарным годом
+    (тогда — число периодов, как прежде)."""
+    m1 = re.fullmatch(r"(\d{4})-(\d{2})", first or "")
+    m2 = re.fullmatch(r"(\d{4})-(\d{2})", last or "")
+    if freq == "month" and m1 and m2 and m1.group(1) == m2.group(1) and m1.group(2) == "01" and m2.group(2) == "12":
+        return f"за {m1.group(1)} год"
+    q1 = re.fullmatch(r"(\d{4})-Q([1-4])", first or "")
+    q2 = re.fullmatch(r"(\d{4})-Q([1-4])", last or "")
+    if freq == "quarter" and q1 and q2 and q1.group(1) == q2.group(1) and q1.group(2) == "1" and q2.group(2) == "4":
+        return f"за {q1.group(1)} год"
+    return None
+
+
 def plain_headline(task: TaskKind, d: Data, own: bool = False) -> str:
     """Заголовок-описание (тема, не вывод): «Выручка по месяцам», «Выручка по регионам», «Список клиентов».
     `own` — величина своим именем колонки («Куплено мест по продуктам»): самопроверка отвергла пересказ имени
@@ -870,11 +885,13 @@ def _dynamics(d: Data) -> FactSet:
                 if tv.freq in ("month", "quarter"):
                     fs.ctx["than"] = period_than(pb)  # «на 17% больше, чем во II квартале 2025»
             else:
-                when = (f"за {pw[0]}" if span == 1 else f"за {count_words(span, pw[0], pw[1], pw[2])}") \
-                    if tv.freq != "irregular" else "за период"
+                when = calendar_when(tv.freq, pf, pl) or ((f"за {pw[0]}" if span == 1 else f"за {count_words(span, pw[0], pw[1], pw[2])}")
+                                                         if tv.freq != "irregular" else "за период")
                 fs.add("span", span, "count", f"{count_words(span, pw[0], pw[1], pw[2])}", None,
                        f"От {period_gen(pf)} до {period_gen(pl)}.", prov=_ptime(d, tv, "span", frm=pf, to=pl))
             fs.ctx["when"] = when
+            if re.fullmatch(r"за \d{4} год", when):
+                fs.ctx.setdefault("labels", []).append(when[3:])  # («2025 год» — дата, не число вывода)
             if yoy:
                 # год к году — в подписи прямо: какие периоды сравнены
                 caption.append(f"{upper_first(period_text(pl))} к {period_dat_full(pb)}: {fmt_value(last, unit)} против "
@@ -1391,7 +1408,8 @@ def _dynamics_composition(d: Data, tv: TimeView, fs: FactSet) -> bool:
     subj, gender, ph = _whole_subject(d, tm, tv.measure.type)
     unit = tv.measure.unit_text
     span = L - F
-    when = f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период"
+    when = calendar_when(tv.freq, tv.periods[F], tv.periods[L]) or (
+        f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период")
     moves = []
     by_name = {d.series_names.get(x.name, x.name): x for x in d.parallel}
     # «сильнее всех» у части: на длинном ряду — средние первых и последних k периодов, а не концы (у P1 3, 2, 4 … 1, 0
@@ -1417,6 +1435,8 @@ def _dynamics_composition(d: Data, tv: TimeView, fs: FactSet) -> bool:
     whole = dict(col=tm) if tm is not None else dict(cols=list(d.parallel))
     _time_structure(d, tv, fs)
     labels = [subj] + [x[0] for x in moves]
+    if re.fullmatch(r"за \d{4} год", when):
+        labels.append(when[3:])  # («2025 год» — дата, не число вывода)
     fs.ctx.update(comp_time=True, subject=subj, gender=gender, metric=ph, unit_short=unit, when=when, labels=labels)
     if first > 0:
         pct = (last / first - 1) * 100

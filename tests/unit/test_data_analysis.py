@@ -233,7 +233,7 @@ def test_long_format_series_by_category():
     spec = chart_spec_of(p, t)
     assert [s.name for s in spec.series] == ["Москва", "Казань", "Омск"] and len(spec.categories) == 12
     assert "stacked_column" in _kinds(p)
-    assert p.headline == "Выручка выросла на 40% за 11 месяцев"
+    assert p.headline == "Выручка выросла на 40% за 2025 год"
 
 
 def test_relationship_scatter():

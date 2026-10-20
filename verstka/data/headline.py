@@ -45,6 +45,8 @@ def numbers_in(text: str, labels: Sequence[str] = ()) -> list[float]:
     out: list[float] = []
     text = _without(text or "", labels)
     text = re.sub(r"\b(?:две|три)\s+(?:трети|четверти)\b", " ", text, flags=re.I)  # доли словами — не числа
+    # год с «год/году/года/г.» — дата, не число вывода («за 2025 год», «в 2025 году»)
+    text = re.sub(r"(?<![\d.,])(?:19|20)\d{2}(?=\s+(?:год|году|года|г\.)(?![а-яё]))", " ", text)
     for m in _NUM_IN_TEXT.finditer(text):
         tok = m.group(0)
         tok = re.sub(r"[   ]", "", tok).replace(",", ".").lstrip("+−–-")
