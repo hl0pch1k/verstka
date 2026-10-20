@@ -13,3 +13,5 @@ web/dist/
 .DS_Store
 *.log
 examples/pitch/**/slides/
+.env.*
+!.env.example
