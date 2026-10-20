@@ -702,6 +702,15 @@ def plan_colors(
                 continue
             exact = i == 0 and not _is_ground(manifest, a) and contrast_ratio(mono, bg) >= 3.0
             b = mono if exact or abs(lightness(a) - lightness(mono)) <= 8 else at_lightness(mono, lightness(a))
+            if i == 0 and not _is_ground(manifest, a):
+                # главный акцент — числа и выделение: читается на фоне и на плашке шаблона (≥ 4,5 : 1), серый средний
+                # на тёмной карточке — нет (WorkSpace: #7D7D7D на #212121)
+                surf = _token_with(manifest, "surface")
+                grounds = [g for g in (bg, plan.table.get(surf, surf) if surf else None) if g and (lightness(g) < 50) == (lightness(bg) < 50)]
+                L = lightness(b)
+                while any(contrast_ratio(b, g) < 4.5 for g in grounds) and 0 < L < 100:
+                    L = min(100.0, L + 4) if lightness(bg) < 50 else max(0.0, L - 4)
+                    b = at_lightness(mono, L)
             plan.brand_of[a] = mono
             plan.anchors[a] = b
             plan.table.setdefault(a, b)
@@ -848,12 +857,30 @@ def _guard_contrast(plan: ColorPlan, pairs: list[TextPair]) -> None:
 # ============================================================================================ разбор копии
 
 
-def _mono_roles(copy: TemplateManifest, plan: ColorPlan) -> bool:
+def _mono_roles(copy: TemplateManifest, plan: ColorPlan, pictured: frozenset | set = frozenset()) -> bool:
     """Монохромный бренд: в разборе копии насыщенным остаётся только статусный цвет («ошибка» бренда на месте красного
     шаблона) — и он стал бы акцентом колоды (числа, выделение в графиках — красным, будто всё плохо). Акцент — тон
     основного бренда на месте главного акцента шаблона; статусные цвета — только смысловые; серии графиков — тона
     основного, выделение — этот акцент."""
     hl = plan.anchors.get(plan.main[0]) or plan.table.get(plan.main[0]) or plan.mono
+    ground = _pictured_ground(copy, pictured)
+    if ground is not None:
+        # фон — насыщенная картинка (её не перекрасить): тон бренда читается и не спорит с ней — на тёмной светлый,
+        # на светлой тёмный (контраст с фоном ≥ 4,5 : 1); серые карточки средней светлоты — не заливкой, а контуром
+        dark = lightness(ground) < 55
+        hl = next((c for c in ((at_lightness(plan.mono, L) for L in (95, 98, 100)) if dark else (plan.mono, at_lightness(plan.mono, 15), "000000"))
+                   if contrast_ratio(c, ground) >= 4.5), "FFFFFF" if dark else "000000")
+    else:
+        # сплошной фон: выделение читается и на фоне, и на карточке (≥ 4,5 : 1) — серый средний на тёмной плашке нет
+        grounds = [t.hex.upper() for t in copy.tokens.colors if any(r in ("background.dark", "background.light", "surface") for r in t.roles)]
+        main_bg = next((b.hex.upper() for b in sorted(copy.tokens.backgrounds, key=lambda b: -len(b.slides)) if b.hex), None)
+        grounds = [g for g in dict.fromkeys(([main_bg] if main_bg else []) + grounds) if (lightness(g) < 50) == (lightness(main_bg or g) < 50)]
+        if grounds:
+            dark = lightness(grounds[0]) < 50
+            L = lightness(hl)
+            while any(contrast_ratio(hl, g) < 4.5 for g in grounds) and 0 < L < 100:
+                L = min(100.0, L + 5) if dark else max(0.0, L - 5)
+                hl = at_lightness(plan.mono, L)
     status = {h for h in (plan.danger,) if h} | {t.hex.upper() for t in copy.tokens.colors if t.semantic in ("positive", "negative")}
     status |= {t.hex.upper() for t in copy.tokens.colors if tone(t.hex.upper()) == "chromatic"}  # всё насыщенное здесь — статусное
     changed = False
@@ -887,9 +914,19 @@ def _mono_roles(copy: TemplateManifest, plan: ColorPlan) -> bool:
             t.role = f"accent.{k}"
     comp = copy.components
     for obj, attr in ((comp.number_callout, "color_hex"), (comp.icon_chip, "icon_color_hex")):
-        if obj is not None and (getattr(obj, attr) or "").upper().lstrip("#") in status:
+        if obj is not None and ((getattr(obj, attr) or "").upper().lstrip("#") in status or ground is not None):
             setattr(obj, attr, hl)
             changed = True
+    if ground is not None:
+        for t in copy.tokens.colors:
+            if "surface" in t.roles and tone(t.hex.upper()) != "chromatic" and 20 <= lightness(t.hex.upper()) <= 80:
+                t.roles = [r for r in t.roles if r != "surface"]
+                if t.role == "surface":
+                    t.role = t.roles[0] if t.roles else None
+        for obj, attr in ((comp.card, "fill_hex"), (copy.tokens.shapes, "card_fill_hex")):
+            v = (getattr(obj, attr) or "").upper().lstrip("#") if obj is not None else ""
+            if v and tone(v) != "chromatic" and 20 <= lightness(v) <= 80:
+                setattr(obj, attr, None)
     old = [x.upper().lstrip("#") for x in comp.chart_style.series_colors]
     series = list(dict.fromkeys([hl.upper()] + [x for x in old if x not in status and x != hl.upper()]))
     if len(series) < 3:
@@ -900,17 +937,34 @@ def _mono_roles(copy: TemplateManifest, plan: ColorPlan) -> bool:
     return True
 
 
+def _pictured_ground(copy: TemplateManifest, pictured) -> Optional[str]:
+    """Цвет фона-картинки, под которым стоит больше всего слайдов копии, если он насыщенный; иначе None."""
+    best = None
+    for b in copy.tokens.backgrounds:
+        h = (b.hex or "").upper()
+        if b.fill_kind == "image" and h in pictured and tone(h) == "chromatic":
+            if best is None or len(b.slides) > len(best.slides):
+                best = b
+    solid = sum(len(b.slides) for b in copy.tokens.backgrounds if b.fill_kind != "image")
+    return best.hex.upper() if best is not None and len(best.slides) >= solid else None
+
+
 def retune_manifest(copy: TemplateManifest, original: TemplateManifest, plan: ColorPlan, applied: dict[str, str]) -> bool:
     """Разбор копии под бренд: цвета, оставшиеся от картинок шаблона и заливок с модификаторами, заменяются по тому же
     плану; цвета диаграмм начинаются с цветов бренда (основной первым, «акцент» бренда — не раньше остальных). True —
     что-то изменилось."""
     orig = {t.hex.upper() for t in original.tokens.colors}
     outputs = {v.lstrip("#").upper() for v in applied.values()} | set(plan.table.values())
+    # монохромный бренд: фон-картинка шаблона не перекрашивается — в разборе копии остаётся её настоящий цвет (иначе
+    # сборка «видит» серый фон и кладёт серые карточки на синюю картинку)
+    pictured = {b.hex.upper() for b in original.tokens.backgrounds if plan.mono and b.hex and b.fill_kind == "image"}
 
     def m(h: Optional[str]) -> Optional[str]:
         if not h or not re.fullmatch(r"#?[0-9A-Fa-f]{6}", h):
             return h
         hu = h.lstrip("#").upper()
+        if hu in pictured:
+            return h
         if hu in orig and hu not in outputs:
             nh = plan.map(hu)
             return ("#" + nh) if h.startswith("#") else nh
@@ -955,12 +1009,18 @@ def retune_manifest(copy: TemplateManifest, original: TemplateManifest, plan: Co
             setattr(obj, attr, nv)
             changed = True
     for b in copy.tokens.backgrounds:
+        if plan.mono and b.fill_kind == "image":
+            src = next((o.hex for o in original.tokens.backgrounds if o.fill_kind == "image" and set(o.slides) & set(b.slides)), None)
+            if src and src.upper() != (b.hex or "").upper():
+                b.hex = src.upper()
+                changed = True
+            continue
         nh = m(b.hex)
         if nh != b.hex:
             b.hex = nh
             changed = True
     if plan.enabled and plan.mono and plan.main:
-        changed = _mono_roles(copy, plan) or changed
+        changed = _mono_roles(copy, plan, pictured) or changed
     if plan.enabled and plan.chart_order and plan.anchors:
         old = [s.upper().lstrip("#") for s in comp.chart_style.series_colors]
         lead = [h for h in plan.chart_order if h not in plan.brand_accents]

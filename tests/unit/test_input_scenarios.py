@@ -298,3 +298,40 @@ def test_monochrome_brand_replaces_template_accents(tmp_path, monkeypatch):
     assert retune_manifest(copy, m, plan, {})
     assert copy.tokens.color_for("accent.1") != "EC221F" and tone(copy.tokens.color_for("accent.1")) != "chromatic"
     assert copy.components.number_callout.color_hex != "EC221F"
+
+
+def test_monochrome_brand_on_a_saturated_picture_ground(tmp_path, monkeypatch):
+    """Фон шаблона — насыщенная синяя картинка (Metropolis), её не перекрасить: в разборе копии фон остаётся синим,
+    выделение — светлый тон основного с контрастом ≥ 4,5 : 1, серые плашки средней светлоты — не заливкой (контур)."""
+    import verstka.brand.apply as ap
+    from test_brand_apply import _analyze, build_template
+    from verstka.brand.apply import brand_plan
+    from verstka.brand.palette import lightness, retune_manifest
+    from verstka.schemas.brand import BrandColor, BrandSpec
+    from verstka.schemas.common import contrast_ratio
+    from verstka.schemas.template import BackgroundFamily, ColorToken
+
+    monkeypatch.setattr(ap, "font_available", lambda f: True)
+    src = build_template(tmp_path, logo=False)
+    m = _analyze(src, tmp_path / "ws")
+    brand = BrandSpec(name="Simple", source="figma", colors=[BrandColor(hex="#2C2C2C", role="primary"), BrandColor(hex="#FFFFFF", role="background"),
+                                                              BrandColor(hex="#1E1E1E", role="text")])
+    orig = m.model_copy(deep=True)
+    orig.tokens.colors = [ColorToken(hex="20549A", role="background.dark", roles=["background.dark", "accent.1"], weight=1.0)]
+    orig.tokens.backgrounds = [BackgroundFamily(family="dark", fill_kind="image", hex="20549A", slides=[1, 2, 3])]
+    plan = brand_plan(src, m, brand, "brand").colors
+    plan.main = ["20549A"] + [x for x in plan.main if x != "20549A"]
+    plan.table.setdefault("20549A", "555555")
+    copy = orig.model_copy(deep=True)
+    copy.tokens.colors = [ColorToken(hex="555555", role="background.dark", roles=["background.dark", "accent.1"], weight=1.0),
+                          ColorToken(hex="656565", role="surface", roles=["surface"], weight=0.5)]
+    copy.tokens.backgrounds = [BackgroundFamily(family="dark", fill_kind="image", hex="555555", slides=[1, 2, 3])]
+    from verstka.schemas.template import CardSpec
+
+    copy.components.card = CardSpec(fill_hex="656565")
+    retune_manifest(copy, orig, plan, {})
+    assert copy.tokens.backgrounds[0].hex == "20549A"
+    acc = copy.tokens.color_for("accent.1")
+    assert lightness(acc) > 80 and contrast_ratio(acc, "20549A") >= 4.5
+    assert not any("surface" in t.roles for t in copy.tokens.colors if t.hex == "656565")
+    assert copy.components.card.fill_hex is None
