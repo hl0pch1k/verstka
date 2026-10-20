@@ -1498,6 +1498,7 @@ def write_topic_deck(
                 "request": mode.topic, "subject": subject, "language": "русский" if mode.language == "ru" else "English",
                 "slides": content_n, "theses": mode.theses, "reference": ref_plan,
                 "reference_title": kb.name if kb is not None else (main.title if main else ""), "source": source, "plan_items": plan_items,
+                "beside_data": mode.reason == "kb_data",  # (the data tables judge the goals, jury 5)
             })
             usage(r)
             keep_raw("topic_planner", r)
@@ -1551,7 +1552,7 @@ def write_topic_deck(
                 r = skills.run("topic_slide_writer", bound, {
                     "deck_title": plan.title, "subject": subject, "language": "русский" if mode.language == "ru" else "English",
                     "plan": plan_rows, "n": k, "title": ps.title, "goal": ps.goal, "form": ps.form, "picture": ps.picture,
-                    "facts": facts, "source": source,
+                    "facts": facts, "source": source, "beside_data": mode.reason == "kb_data",
                     "reference": kb.relevant(query, KB_SLIDE_CHARS) if kb is not None else relevant(paras, query, REF_SLIDE_CHARS),
                 })
                 usage(r)

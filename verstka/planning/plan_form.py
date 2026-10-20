@@ -160,6 +160,15 @@ def _split_item(text: str) -> tuple[str, list[str]]:
     t = _strip_seq(_plain(text))
     if not t:
         return "", []
+    # «призыв: что просим у правления (…)» — «призыв» says where the item stands (the end), the item is what follows
+    m = re.match(r"^(?:призыв|финал|call\s+to\s+action|cta)\s*[:—–-]\s*(?P<rest>\S.{3,})$", t, re.I)
+    if m:
+        return _split_item(m.group("rest"))
+    # «что просим у правления (2 инженера в команду PaaS и 15 млн ₽ на маркетинг)»: the bracket is the item's content —
+    # its line, the lead its title (жюри 5: the whole line with its bracket was the heading)
+    m = re.match(r"^(?P<lab>[^()\d:—–]{3,60}?)\s*\((?P<inner>[^()]{8,200})\)\.?$", t)
+    if m and re.search(r"\d", m.group("inner")) and len(m.group("inner").split()) >= 3:
+        return _title_case(m.group("lab")), [H.cap_first(f"{H.strip_end(m.group('lab'))}: {m.group('inner').strip()}")]
     # «как менялось число обращений за год (покажи рост)»: an ask to the designer in brackets is the slide's intent — a
     # line of its own the form is read from, never a part of the heading or of the text
     asks = [m.group(1).strip() for m in _BRACKET_RE.finditer(t) if is_directive(m.group(1).strip())]

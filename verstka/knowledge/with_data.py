@@ -174,14 +174,19 @@ def _write(brief: Brief, kb: KbReference, items: list[str], topic: str, n_slides
 
 
 def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference, *, skills: Any = None, providers: Any = None,
-                  progress: Optional[Callable[[dict], None]] = None, budget_end: Optional[float] = None) -> KbPart:
-    """The data story's outline with the knowledge base's slides for what the data does not show (see the module)."""
+                  progress: Optional[Callable[[dict], None]] = None, budget_end: Optional[float] = None, tables: Any = None) -> KbPart:
+    """The data story's outline with the knowledge base's slides for what the data does not show (see the module).
+    `tables` — the data files' tables: the base's goals and thresholds are checked against them (knowledge/against_data.py)."""
     from verstka.planning.topic_writer import plan_items, topic_subject
+
+    from verstka.planning.directives import plan_text, scrub_author_notes
 
     out = KbPart(outline=outline)
     if brief is None or not (brief.text or "").strip() or kb.empty:
         return out
-    head, items = plan_items(brief.text)
+    # the plan without what the author says to the deck-maker («Таблицы во вложении, полный отчёт — в базе знаний»,
+    # «(метод — в отчёте)»): the writer gets the items, never the notes (жюри 5, W-D «Что исследовали и как (метод»)
+    head, items = plan_items(plan_text(brief.text))
     data_slides = [s for s in outline.slides if _is_data(s)]
     if len(items) >= 2:
         out.covered = [it for it in items if item_covered(it, data_slides)]
@@ -225,6 +230,16 @@ def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference,
     made = [(at if at >= 0 else (free.pop(0) if free else -1), s) for at, s in made]
     if not made:
         return out
+    if tables:
+        # what the base says of goals, norms and thresholds, against the facts of the tables (жюри 5: «Цели года не
+        # достигнуты» at FCR 71 % ≥ 70; an approval for an overrun of more than 10 % at 5 %)
+        try:
+            from verstka.knowledge.against_data import reconcile
+
+            for line in reconcile([s for _, s in made], tables, kb.full_texts()):
+                out.log.append(f"База знаний против таблиц: {line}")
+        except Exception:  # noqa: BLE001 - the base's slides as written
+            log.warning("knowledge slides not checked against the tables", exc_info=True)
     out.items = todo
     slides_now = list(outline.slides)
     # the story's context lines that only said an item the base now answers was not in the data
@@ -263,7 +278,9 @@ def add_knowledge(outline: DeckOutline, brief: Optional[Brief], kb: KbReference,
             + ". Источник каждого факта — в заметках слайда. Проверьте факты перед выступлением.")
     if o.slides:
         o.slides[0].notes = f"{o.slides[0].notes}\n\n{line}".strip()
+    scrub_author_notes(o)  # the base's slides say no note of the author either («Таблицы во вложении …»)
     o.agent_log = list(o.agent_log) + [f"База знаний: {len(made)} слайд(а) по документам — " + "; ".join(f"«{s.headline}»" for _, s in made[:6])]
+    o.agent_log += [x for x in out.log if x.startswith("База знаний против таблиц")][:8]
     out.outline = o
     out.log.append(o.agent_log[-1])
     if progress is not None:

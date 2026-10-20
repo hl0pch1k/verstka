@@ -30,4 +30,11 @@ Reference excerpt («{{ reference_title }}», Wikipedia):
 {% else %}
 No reference excerpt: write from well-established knowledge only.
 {% endif %}
+{% if beside_data is defined and beside_data %}
+Data tables of the person stand beside these slides in the same deck: they, not the documents, show what was achieved.
+A goal, a norm or a threshold of the documents is stated as the documents state it (as a goal, a norm, a rule — «цель
+— NPS не ниже 45 к концу года»); never write whether it is reached, missed, exceeded, behind or on track («цели не
+достигнуты», «отставание от плана», «перерасход требует одобрения»), and never a step that asks for an approval or an
+exception a rule needs only past its threshold: the deck checks every goal against the tables itself.
+{% endif %}
 JSON only.

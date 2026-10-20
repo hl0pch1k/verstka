@@ -796,7 +796,7 @@ def _fonts_meta(choice: Any, pick: bool) -> Optional[dict]:
             "reason": choice.reason, "pick": pick}
 
 
-def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: str, gdir: Path, progress, use_models: bool):
+def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: str, gdir: Path, progress, use_models: bool, tables=None):
     """(the data story's outline with the knowledge base's slides beside it, the writer's result of that part or None)
     — never raises: the data deck stays."""
     from verstka.knowledge.with_data import add_knowledge
@@ -807,7 +807,7 @@ def _with_knowledge(outline: DeckOutline, brief: Optional[Brief], knowledge_id: 
         if kb is None:
             return outline, None
         part = add_knowledge(outline, brief, kb, skills=skills() if use_models else None, providers=providers() if use_models else None,
-                             progress=_event_sink(progress))
+                             progress=_event_sink(progress), tables=tables)
         if part.writer is not None:
             try:
                 part.writer.write_files(gdir)
@@ -862,12 +862,14 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         )
         outline, data_brief, brief = story.outline, brief, None  # the figures of a data deck are checked against the data, not the text
         steps["data"] = story.seconds
+        kb_tables = list(data.tables) if req.knowledge_id else []  # the base's goals are checked against them
         data.tables, data.profiles = [], []  # the rows are not needed any more: only the plans and the slides stay
         if req.knowledge_id:
             # «примерный план + данные + база знаний»: the data story's charts and conclusions, and the base's slides for
             # the plan's items the data does not show (verstka/knowledge/with_data.py)
             tk = time.monotonic()
-            outline, kb_writer = _with_knowledge(outline, data_brief, req.knowledge_id, gdir, progress, use_models)
+            outline, kb_writer = _with_knowledge(outline, data_brief, req.knowledge_id, gdir, progress, use_models, tables=kb_tables)
+            kb_tables = []
             steps["knowledge"] = time.monotonic() - tk
     # «Улучшить готовую»: the original deck's pictures come from its own workspace — always, whatever template the deck is
     # laid out on (its fonted or branded copy has none of them: jury 20.10, the picture of slide 5 lost to a grey place)

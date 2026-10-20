@@ -86,7 +86,9 @@ def _point(x: str) -> str:
 def _clean_item(item: str) -> str:
     """A plan item as a slide title: its own words, without the author's ask after a dash («— покажи на графике»)."""
     head = re.split(r"\s+[—–-]\s+", item, maxsplit=1)[0]
-    return head.strip(" .:;").capitalize()[:120] if head else item[:120]
+    head = head.strip(" .:;")
+    # (only its first letter: «MRR и клиенты», «SLA по линиям» keep their capitals — жюри 5, L-D «Mrr и клиенты»)
+    return (head[:1].upper() + head[1:])[:120] if head else item[:120]
 
 
 _REQUEST_LEAD_RE = re.compile(r"^(?:коротко|кратко|вкратце|в\s+двух\s+словах)?\s*(?:для\s+[^:.,]{2,40})?\s*:\s*", re.I)

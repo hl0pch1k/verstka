@@ -342,3 +342,285 @@ def picture_asks_as_notes(text: str) -> str:
         else:
             out.append(line)
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+# ------------------------------------------------------------------ what the author says to the deck-maker (жюри 5)
+# «сделай 8 слайдов, без картинок», «не выдумывай цифру», «проверь», «по-моему PaaS быстрее всех», «(наметки, таблицы
+# приложил)», «Таблица по месяцам и SLA во вложении, цели — в регламенте (база знаний)»: rules of the deck, the author's
+# guesses to check and pointers to the material are done (the count, no pictures, the data asked), never printed — on a
+# data deck the jury read them on the cover and the slides (VKT-C, W-C, E-C, L-C, L-D).
+
+_V = r"(?:и\s+|а\s+|но\s+|только\s+)?"
+_PIC = r"(?:картин\w*|изображени\w*|фото\w*|иллюстраци\w*|рисунк\w*|анимаци\w*)"
+_NOTE_RES = (
+    # no pictures / pictures
+    re.compile(rf"^{_V}(?:без|с|со)\s+{_PIC}(?:\s+(?:и|или)\s+{_PIC})?$", re.I),
+    re.compile(rf"^{_V}{_PIC}\s+(?:не\s+(?:нужн\w*|надо|став\w*|добавля\w*|вставля\w*|рису\w*)|ненужн\w*)$", re.I),
+    # never invent
+    re.compile(rf"^{_V}(?:ничего\s+)?(?:не\s+(?:выдумыва|придумыва|додумыва|сочиня|фантазир|домысл|выдума|придума)\w*|без\s+(?:выдумок|домыслов|фантазий))\b", re.I),
+    re.compile(r"^(?:выдумывать|придумывать|додумывать)\s+(?:ничего\s+)?не\s+(?:надо|нужно|стоит)\b", re.I),
+    # the analyst's own work: «проверь», «посчитай по таблице выручки»
+    re.compile(rf"^{_V}(?:проверь(?:те)?|перепроверь(?:те)?|посчитай(?:те)?|подсчитай(?:те)?|пересчитай(?:те)?|вычисли(?:те)?|сверь(?:те)?|"
+               r"уточни(?:те)?|глянь(?:те)?|посмотри(?:те)?|прикинь(?:те)?|разберись|выясни(?:те)?)\b", re.I),
+    # the author's guess («по-моему PaaS быстрее всех»): the data answers it, the deck never states it
+    re.compile(rf"^{_V}(?:по-моему|по\s+моему|мне\s+кажется|кажется|я\s+думаю|думаю|наверное|вроде(?:\s+бы)?|если\s+не\s+ошибаюсь|подозреваю)\b", re.I),
+    # pointers to the material: «таблицы приложил», «Таблица по месяцам и SLA во вложении», «цели — в регламенте»
+    re.compile(r"(?:^|\s)(?:во\s+вложени\w*|в\s+приложени\w*|приложил\w*|приложены|приложена|приложен|прикрепил\w*|прилагаю|прикладываю|в\s+аттаче)$", re.I),
+    re.compile(r"^[^—–:]{1,70}?\s*[—–-]\s*(?:в|во)\s+(?:файл\w*|таблиц\w*|вложени\w*|приложени\w*|баз\w*\s+знаний|регламент\w*|положени\w*|"
+               r"отч[её]т\w*|\w*меморандум\w*|документ\w*|материал\w*|excel|xlsx|csv)(?:\s+[\w-]+){0,2}$", re.I),
+    re.compile(r"^(?:все\s+|полные\s+|сырые\s+)?(?:данные|цифры|таблиц\w*|файл\w*|выгрузк\w*)(?:\s+[\w«»-]+){0,4}?\s+(?:в|во)\s+"
+               r"(?:файл\w*|таблиц\w*|вложени\w*|приложени\w*)(?:\s+(?:ниже|выше))?$", re.I),
+    re.compile(r"^(?:база\s+знаний|в\s+базе\s+знаний|см\.?\s.+|смотри\s.+)$", re.I),
+    # the author's marks: «(наметки)», «(черновик)»
+    re.compile(r"^(?:наметки|наброс\w*|черновик\w*|черновой(?:\s+\w+)?|драфт|draft|wip|todo|tbd|предварительн\w*|не\s+финал\w*|"
+               r"примерн\w*(?:\s+(?:план|структура|наметки|тезисы))?|сыро\w*|для\s+себя|пока\s+наброс\w*|"
+               r"причин\w*\s+(?:пока\s+)?не\s+зна\w*)$", re.I),
+    # «О чём хочу рассказать:» — the line that opens the plan
+    re.compile(r"^(?:о\s+ч[её]м\s+(?:хочу|хотим|хотел\w*|буду|будем|нужно|надо)\s+рассказать|что\s+(?:хочу|хотим)\s+рассказать)$", re.I),
+)
+# the rules of the deck as a whole («сделай 8 слайдов», «5 слайдов»): what is left of the clause without its count
+_COUNT_LEFT_RE = re.compile(r"^(?:(?:сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|нужно|нужн[аы]|надо|давай|уложись\s+в|уложиться\s+в|хватит|"
+                            r"примерно|около|всего|ровно|итого|максимум|не\s+больше|не\s+более)\s*)*$", re.I)
+_HEDGE_TAIL_RE = re.compile(r"\s+[—–]\s+(?=(?:по-моему|по\s+моему|мне\s+кажется|кажется|я\s+думаю|думаю|наверное|вроде|подозреваю|проверь)\b)", re.I)
+_CHECK_RE = re.compile(r"^(?:и\s+|а\s+)?(?:проверь(?:те)?|перепроверь(?:те)?|сверь(?:те)?)$", re.I)
+
+
+def is_author_note(clause: str) -> bool:
+    """A clause the author says to whoever makes the deck, not to its audience: the deck's size, no pictures, «не
+    выдумывай цифру», «проверь», a guess («по-моему …»), a pointer to the material («таблицы приложил», «цели — в
+    регламенте»), a mark («наметки», «черновик»)."""
+    c = " ".join((clause or "").replace(" ", " ").split()).strip(" .!,;:—–-«»\"")
+    if not c:
+        return False
+    if re.search(r"слайд", c, re.I):
+        left = strip_count_phrase(c)
+        if left != c and _COUNT_LEFT_RE.match((left or "").strip(" ,.:;—–-")):
+            return True
+    if any(rx.search(c) for rx in _NOTE_RES):
+        return True
+    return is_pointer(c)
+
+
+_STRONG_NOTE_RES = _NOTE_RES[:4]  # pictures and «не выдумывай»: a bracket with one of them is the author's note entirely
+# what a plan keeps to be read by (the item's subject): «посчитай по таблице выручки» names the file the item is about,
+# «по-моему PaaS быстрее всех» the series — the deck's last check takes them off the slides (scrub_author_notes)
+_PLAN_KEEPS = (_NOTE_RES[4], _NOTE_RES[5])
+
+
+def _is_note(clause: str, for_plan: bool) -> bool:
+    if not is_author_note(clause):
+        return False
+    if for_plan:
+        c = " ".join((clause or "").split()).strip(" .!,;:—–-")
+        if any(rx.search(c) for rx in _PLAN_KEEPS) and not _CHECK_RE.match(c):
+            return False
+    return True
+
+
+def _clean_brackets(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        parts = [p.strip() for p in re.split(r"[,;]\s*", m.group(1)) if p.strip()]
+        if not parts:
+            return m.group(0)
+        notes = [p for p in parts if is_author_note(p)]
+        if not notes:
+            return m.group(0)
+        if len(notes) == len(parts) or any(rx.search(p) for p in notes for rx in _STRONG_NOTE_RES) or \
+                any(re.search(r"слайд", p, re.I) for p in notes):
+            return ""
+        return " (" + ", ".join(p for p in parts if p not in notes) + ")"
+
+    t = re.sub(r"\s*\(([^()]{1,120})\)", repl, text)
+    # a bracket the line was cut through («Для правления (наметки», «VK Cloud, таблицы приложил)»)
+    m = re.search(r"\s*\(([^()]*)$", t)
+    if m and m.group(1).strip() and all(is_author_note(p) for p in re.split(r"[,;]\s*", m.group(1)) if p.strip()):
+        t = t[: m.start()]
+    m = re.match(r"^([^()]*)\)", t)
+    if m:
+        parts = re.split(r"(,\s+|;\s+)", m.group(1))
+        tail = parts[-1]
+        if is_author_note(tail):
+            t = "".join(parts[:-2]) + t[m.end():]
+    return t
+
+
+# «Что просим: 3 кладовщика сделай 6 слайдов» — the deck's size glued to the line before it (a plan's last item and the
+# count line after it, read as one)
+_GLUED_COUNT_RE = re.compile(r"\s+(?:сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|нужно|надо|давай|всего|итого)\s+(?:на\s+|ровно\s+|не\s+более\s+|до\s+)?"
+                             r"\d{1,2}(?:\s*[–—-]\s*\d{1,2})?\s+слайд\w*", re.I)
+
+
+def _clean_sentence(sent: str, for_plan: bool = False) -> str:
+    s = _GLUED_COUNT_RE.sub("", sent.strip()).strip()
+    end = s[-1] if s and s[-1] in ".!?…" else ""
+    body = s[:-1].rstrip() if end else s
+    pieces = re.split(r"(,\s+|;\s+)", body)
+    clauses, seps = pieces[0::2], pieces[1::2]
+    keep: list[tuple[str, str]] = []  # (separator before, clause)
+    last_dropped = False
+    for i, c in enumerate(clauses):
+        sep = seps[i - 1] if i else ""
+        if _is_note(c, for_plan):
+            if _CHECK_RE.match(c.strip(" .!?")) and keep and not for_plan:
+                # «госсектор выстрелил, проверь»: the guess before «проверь» goes with it — the data answers it
+                psep, prev = keep[-1]
+                cut = list(re.finditer(r"\s+[—–]\s+", prev))
+                if cut:
+                    keep[-1] = (psep, prev[: cut[-1].start()])
+                elif len(keep) > 1:
+                    keep.pop()
+            last_dropped = True
+            continue
+        # «Какие сервисы тянут рост — по-моему PaaS быстрее всех»: the guess after a dash goes
+        m = None if for_plan else _HEDGE_TAIL_RE.search(c)
+        if m:
+            c = c[: m.start()]
+            last_dropped = True
+        else:
+            last_dropped = False
+        if c.strip():
+            keep.append((sep, c))
+    if not keep:
+        return ""
+    out = "".join((sep if k else "") + c for k, (sep, c) in enumerate(keep)).strip(" ,;—–-")
+    if not out:
+        return ""
+    if end:
+        out += end if not last_dropped or end in ".…" else "."
+    return out
+
+
+def drop_author_notes(text: Optional[str], for_plan: bool = False) -> Optional[str]:
+    """`text` without what the author says to the deck-maker (is_author_note): its brackets of notes, its clauses of
+    rules, guesses and pointers; "" when nothing else is said. A text without such words comes back as it is."""
+    if not text or not text.strip():
+        return text
+    t = _clean_brackets(text)
+    sents = re.split(r"(?<=[.!?…])\s+(?=\S)", t.strip())
+    out = [x for x in (_clean_sentence(s, for_plan) for s in sents) if x and x.strip(" .!?…,;:—–-")]
+    joined = " ".join(out)
+    joined = re.sub(r"\s+([,.;:!?])", r"\1", joined).strip()
+    if joined.rstrip(".") == (text or "").strip().rstrip("."):
+        return text
+    if joined and not re.search(r"[.!?…]$", (text or "").strip()):
+        joined = joined.rstrip(".")
+    return H.cap_first(joined) if (text or "").strip()[:1].isupper() else joined
+
+
+_LIST_MARK_RE = re.compile(r"^(\s*(?:[-–—•*·]|\d{1,2}\s*[.)])\s+)(.*)$")
+
+
+def plan_text(text: str) -> str:
+    """The author's text with what they say to the deck-maker taken out line by line (drop_author_notes) — the plan
+    the deck is read from (plan_form.as_slides); a line that only said such things goes. The designer's asks («покажи
+    рост») stay: the planner takes them as the slide's form; so do the analyst's asks and the author's guesses
+    («посчитай по таблице выручки», «по-моему PaaS быстрее всех») — they name what the item is about, the deck's last
+    check (scrub_author_notes) takes them off the slides."""
+    out: list[str] = []
+    for line in (text or "").splitlines():
+        if not line.strip() or line.lstrip().startswith("|"):
+            out.append(line)
+            continue
+        m = _LIST_MARK_RE.match(line)
+        mark, body = (m.group(1), m.group(2)) if m else ("", line)
+        new = drop_author_notes(body, for_plan=True)
+        if new is None or not new.strip(" .!?…,;:—–-"):
+            continue
+        out.append(mark + new)
+    return "\n".join(out) + ("\n" if (text or "").endswith("\n") else "")
+
+
+def _is_data_slide(s) -> bool:
+    return getattr(s, "data", None) is not None or s.id in ("key-figures", "summary", "next-steps") or \
+        (s.id.startswith("data-") and not s.id.startswith("data-plan"))
+
+
+def scrub_author_notes(outline) -> list[str]:
+    """The last check of a data deck (with and without a model, with and without a knowledge base): no cover, heading,
+    line or note says what the author said to the deck-maker (drop_author_notes); the slides of the author's text lose
+    their asks to the designer too (scrub_slide). The data slides keep their charts and conclusions — only a note that
+    came into their words goes. A slide of text left with nothing to say goes. What changed, in English."""
+    from verstka.schemas.common import PatternKind
+
+    said: list[str] = []
+
+    def fix(v: Optional[str], where: str) -> Optional[str]:
+        nv = drop_author_notes(v)
+        if nv != v:
+            said.append(f"{where}: the author's note «{(v or '')[:60]}» cut")
+        return nv
+
+    for attr in ("title", "subtitle"):
+        v = getattr(outline, attr, None)
+        nv = fix(v, f"deck {attr}")
+        if nv != v and (nv or attr == "subtitle"):
+            setattr(outline, attr, nv or None)
+    keep_slides = []
+    cover = outline.slides[0] if outline.slides and outline.slides[0].kind == PatternKind.title else None
+    if cover is not None and cover.headline and cover.subtitle:
+        # «Итоги Q3 по поддержке» over «Итоги Q3 по поддержке для директора …»: the subtitle says only what is new
+        head, sub = H.strip_end(cover.headline), cover.subtitle.strip()
+        if sub.lower().startswith(head.lower()) and len(sub) > len(head) + 3:
+            rest = sub[len(head):].strip(" ,—–-:")
+            if rest:
+                cover.subtitle = H.cap_first(rest)
+                said.append("cover: the subtitle repeated the title — its new part kept")
+    for s in outline.slides:
+        c = s.content
+        head = fix(s.headline, f"slide {s.id} headline")
+        if head and head.strip():
+            s.headline = head
+        s.subtitle = fix(s.subtitle, f"slide {s.id} subtitle") or None
+        s.takeaway = fix(s.takeaway, f"slide {s.id} takeaway") or None
+        s.footnote = fix(s.footnote, f"slide {s.id} footnote") or None
+        if s.notes:
+            lines = [ln if ln.lstrip().startswith(("Источник", "Источники", "Посчитано")) else (drop_author_notes(ln) or "") for ln in s.notes.splitlines()]
+            s.notes = "\n".join(ln for ln in lines if ln.strip()) or None
+        if s.kind == PatternKind.title or _is_data_slide(s):
+            keep_slides.append(s)
+            continue
+        seen: set[str] = set()
+        bullets = []
+        for b in c.bullets:
+            nb = fix(b, f"slide {s.id} line")
+            k = " ".join((nb or "").lower().split()).rstrip(".")
+            if k == " ".join(H.strip_end(s.headline or "").lower().split()):
+                continue  # («Какие сервисы тянут рост» under itself once its guess is gone)
+            if nb and nb.strip(" .") and k not in seen:
+                seen.add(k)
+                bullets.append(nb)
+        c.bullets = bullets
+        c.paragraphs = [p for p in (fix(p, f"slide {s.id} paragraph") for p in c.paragraphs) if p and p.strip(" .")]
+        for group in (c.items, c.columns):
+            kept = []
+            for it in group:
+                it.title = fix(it.title, f"slide {s.id} item") or ""
+                it.text = fix(it.text, f"slide {s.id} item") or ""
+                it.bullets = [b for b in (fix(b, f"slide {s.id} item line") for b in it.bullets) if b and b.strip(" .")]
+                if it.title or it.text or it.bullets or it.number:
+                    kept.append(it)
+            group[:] = kept
+        try:
+            said.extend(f"slide {s.id}: {x}" for x in scrub_slide(s))
+        except Exception:  # noqa: BLE001 - the slide as it is
+            pass
+        if not (head or "").strip():
+            # the heading was a note itself: the slide's first line heads it
+            first = next((b for b in c.bullets), None)
+            if first:
+                s.headline = H.strip_end(first)
+                c.bullets = c.bullets[1:]
+        if s.id.startswith("data-plan") and c.bullets and not (c.paragraphs or c.items or c.columns or c.numbers or c.table is not None
+                                                               or c.chart is not None) \
+                and all(b.rstrip().endswith("?") and not re.search(r"\d", b) for b in c.bullets):
+            # «Воронка: где теряем?» once its guess is gone: a question to the data, no words of the author's own — the
+            # plan's bare item has no slide (planning/plan_data.py)
+            said.append(f"slide {s.id}: only the author's question «{c.bullets[0][:50]}» — dropped")
+            continue
+        empty = not (c.bullets or c.paragraphs or c.items or c.columns or c.numbers or c.table is not None or c.chart is not None)
+        if not (s.headline or "").strip() or (empty and s.kind != PatternKind.section and (s.id.startswith(("context", "ask")) or not (s.subtitle or ""))):
+            said.append(f"slide {s.id}: only the author's notes — dropped")
+            continue
+        keep_slides.append(s)
+    outline.slides = keep_slides
+    return said

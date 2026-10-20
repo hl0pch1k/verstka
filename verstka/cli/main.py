@@ -232,7 +232,8 @@ def generate(
 
                 kref = _knowledge(_knowledge_base(kb_items, workspace), Path(workspace) if workspace else _default_root())
                 if kref is not None:
-                    part = add_knowledge(outline_obj, data_brief, kref, skills=skills if use_models else None, providers=providers if use_models else None)
+                    part = add_knowledge(outline_obj, data_brief, kref, skills=skills if use_models else None, providers=providers if use_models else None,
+                                         tables=tables)
                     outline_obj = part.outline
                     for line in part.log:
                         console.print(f"  {line}")

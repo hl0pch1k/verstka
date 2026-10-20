@@ -202,8 +202,10 @@ def input_asks(brief_text: str, notes: Optional[list[str]] = None) -> list[str]:
     """What the input asks for or says comes next, in its own words: the brief's request sentences («Просим утвердить
     …») and the files' own lines «Что дальше: …», «Предлагаем …» — never a step nobody wrote."""
     from verstka.planning.agent import brief_asks
+    from verstka.planning.directives import plan_text
 
-    out = [H.strip_end(sn) for _, sn in brief_asks(brief_text or "")]
+    # (what the author says to the deck-maker — «сделай 8 слайдов», «не выдумывай цифру» — is no ask of the deck: жюри 5)
+    out = [H.strip_end(sn) for _, sn in brief_asks(plan_text(brief_text or ""))]
     for text in notes or []:
         for line in (text or "").splitlines():
             for sn in H.split_sentences(line.strip()) or []:
@@ -241,6 +243,10 @@ def close_with_ask(outline: DeckOutline, brief_text: str, notes: Optional[list[s
     """A data deck whose brief asks for something («Просим утвердить …») ends on it: a last slide in the brief's own
     words, after the summary — unless a slide already says it. (The files' «Что дальше» lines are no request of the
     person's: they close a plan's item that asks for them, follow_plan.)"""
+    from verstka.planning.directives import scrub_author_notes
+
+    # the last check of a deck without a plan: no note of the author on its cover and slides (жюри 5)
+    scrub_author_notes(outline)
     asks = input_asks(brief_text, None)
     if not asks or not outline.slides:
         return []
@@ -262,8 +268,23 @@ def _plan_cover(plan, brief_text: str, story_subtitle: Optional[str]) -> tuple[s
     обращений…» on the cover, the browser tab and «Мои презентации»); the subtitle is the plan's own, or whom the deck
     is for («Для операционного директора»), never the data story's list of files."""
     from verstka.data.story import clean_deck_title
+    from verstka.planning.directives import drop_author_notes
 
-    t, aud = clean_deck_title(plan.title or "")
+    raw = drop_author_notes(plan.title or "") or ""
+    # an aside in brackets is no part of a cover («… «Склад24» (SaaS для складов малого бизнеса)»: жюри 5, L-D — its
+    # «для» was read as the audience and the bracket cut in two), a formula's brackets stay
+    raw = re.sub(r"\s*\((?![^()]*[=+^*/<>])[^()]{2,80}\)", "", raw).strip()
+    t, aud = clean_deck_title(raw)
+    if not aud:
+        # «Осенний набор 2026 — итоги для руководителя направления и вузов-партнёров»: whom it is for — the subtitle
+        fm = re.search(r"(?i)\s+для\s+([^,;:—–«»()]{3,70})$", t)
+        if fm and len(t[: fm.start()].split()) >= 3:
+            t, aud = t[: fm.start()].rstrip(" ,—–-"), fm.group(1).strip()
+    name = re.search(r"«[^«»]{2,30}»", aud or "")
+    if name and "«" not in t:
+        # «Итоги Q3 2026 для совета директоров «Склад24»»: the name is the deck's subject, not its audience's
+        t = f"{t} {name.group(0)}"
+        aud = " ".join((aud[: name.start()] + aud[name.end():]).split()).strip(" ,") or None
     if not aud:
         first = next((ln.strip() for ln in (brief_text or "").splitlines() if ln.strip()), "")
         _, aud = clean_deck_title(re.sub(r"^#+\s*", "", first))
@@ -282,9 +303,12 @@ def _plan_cover(plan, brief_text: str, story_subtitle: Optional[str]) -> tuple[s
 def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[int] = None, notes: Optional[list[str]] = None) -> list[str]:
     """Puts the data story's slides in the order of the author's plan (see the module); what it did, in Russian (the
     build's log). Leaves the outline as it is when the text is no plan or the plan does not speak of the data."""
+    from verstka.planning.directives import plan_text, scrub_author_notes
     from verstka.planning.plan_form import as_slides
 
-    plan = as_slides(brief_text or "")
+    # the plan without what the author says to the deck-maker («сделай 8 слайдов, без картинок», «не выдумывай цифру»,
+    # «(наметки, таблицы приложил)»): it is done, never a line of an item (жюри 5: VKT-C, W-C, E-C, L-C)
+    plan = as_slides(plan_text(brief_text or ""))
     if plan is None or len(plan.items) < 2:
         return []
     slides = list(outline.slides)
@@ -410,6 +434,7 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
     if deck_title:
         outline.title = deck_title
         outline.subtitle = sub
+    scrub_author_notes(outline)
     head = (f"План автора — {len(plan.items)} пунктов: слайды данных стоят на пунктах, о которых говорят, в его порядке"
             + ("; просьба — последней" if closing is not None and tail else "") + ".")
     return [head, *said]

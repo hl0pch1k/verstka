@@ -1,5 +1,5 @@
 name: topic_slide_writer
-version: 1.6.0
+version: 1.7.0
 role: llm
 description: >
   Writer mode, step 2 (verstka/planning/topic_writer.py): writes one content slide of a deck planned by
@@ -23,3 +23,4 @@ changelog:
   - "1.4.0: complete definitions in mathematics (the derivative through its limit), properties named rightly, a written count matches the items shown (jury 20.10, round 3)"
   - "1.5.0: a worked example reaches its answer; a conclusion counts what the slide shows (jury 20.10, round 4)"
   - "1.6.0: no title or conclusion that describes the slide («Таблица содержит …») — the content's point (scenarios 20.10)"
+  - "1.7.0: beside a data deck (`beside_data`) a goal, norm or threshold is stated as a goal — never judged as reached or missed, never an approval its threshold does not need (jury 5, 20.10)"
