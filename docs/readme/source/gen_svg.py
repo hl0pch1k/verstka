@@ -98,16 +98,27 @@ def hero(c, dark):
     b = [f'<rect width="{Wd}" height="{H}" rx="32" fill="{c["bg"]}"/>']
     if dark:
         b.append(f'<rect x=".5" y=".5" width="{Wd - 1}" height="{H - 1}" rx="31.5" fill="none" stroke="#FFFFFF" stroke-opacity=".08"/>')
-    x = 64
-    b.append(T("ЛЦТ 2026 · КЕЙС VK TECH № 4 · ВТОРАЯ СТУПЕНЬ", "M", 17, x, 92, c["muted"], track=0.06))
-    # the word box starts where the ink of «V» would start minus its side bearing: align the ink with the text column
-    wx = x - ink("Verstka", "U", 104, -0.03)[0]
-    b.append(logo(wx, 204, 104, c, c["ink"]))
-    b.append(T("Шаблон, текст и данные —", "M", 31, x, 322, c["ink"], track=-0.01))
-    b.append(T("три готовые презентации PowerPoint", "M", 31, x, 362, c["ink"], track=-0.01))
-    b.append(T("Модель понимает и пишет, код считает и проверяет", "MR", 21, x, 410, c["muted"]))
+    # left half: the case label and the interface logo, centred as one block in the space left of the plates
+    px = 664
+    lab, lsize, ltrack = "ЛЦТ 2026 · КЕЙС VK TECH № 4 · ВТОРАЯ СТУПЕНЬ", 17, 0.06
+    size, k = 104, 104 / 20
+    wx0, wx1, wy0, _ = ink("Verstka", "U", size, -0.03)
+    lab_cap = cap("M", lsize)
+    gap = 36  # label baseline → top of the word's ink
+    bars_bottom = (-_baseline_in_line() + 23 + 4) * k  # from the word baseline
+    block_h = lab_cap + gap + (-wy0) + bars_bottom
+    top = (H - block_h) / 2
+    lab_base = top + lab_cap
+    base = lab_base + gap - wy0
+    cx = px / 2
+    lx0, lx1, _, _ = ink(lab, "M", lsize, ltrack)
+    b.append(T(lab, "M", lsize, cx - (lx0 + lx1) / 2, lab_base, c["muted"], track=ltrack))
+    # the logo is one unit (bars start under the word box, as in the header); centre the unit by its ink
+    unit_x1 = max(wx1, 1 * k + logo_width(20 * k))
+    unit_x0 = min(wx0, 1 * k)
+    b.append(logo(cx - (unit_x0 + unit_x1) / 2, base, size, c, c["ink"]))
     # stacked plates, as on the «Создать» screen: one column of numbers, equal gap number → text, equal paddings
-    px, pw, pad, band = 664, 472, 24, 84
+    pw, pad, band = 472, 24, 84
     nsize, gap = 40, 20
     col = max(ink(n, "U", nsize, -0.04)[1] - ink(n, "U", nsize, -0.04)[0] for n in ("01", "02", "03"))
     tx = px + pad + col + gap
@@ -144,7 +155,7 @@ def hero(c, dark):
         b.append(slide_sketch(round(xx), sy, sw, sh, k, c))
         b.append(centered(lab, "M", 16, xx + sw / 2, lab_base - cap("M", 16) / 2, c["p3t"], opacity=.62))
     return svg(Wd, H, "Verstka — цифровой дизайнер презентаций",
-               "Шаблон, текст и данные превращаются в три готовые редактируемые презентации PowerPoint. "
+               "Слева — логотип Verstka и подпись «ЛЦТ 2026 · кейс VK Tech № 4 · вторая ступень». "
                "Справа — три плиты интерфейса «Слои»: 01 Шаблон, 02 Текст и данные, 03 Три варианта.", "".join(b))
 
 
