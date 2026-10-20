@@ -402,3 +402,12 @@ def test_an_empty_place_says_why_and_a_lost_original_picture_is_a_fault(tmp_path
     assert [i.severity for i in asked] == ["info"] and "генерация изображений выключена" in asked[0].message
     lost = run("Изображение со слайда 5 исходной презентации · 729ed8")
     assert [i.severity for i in lost] == ["warn"] and "исходной презентации не перенесена" in lost[0].message
+
+
+def test_a_figures_caption_is_short_text_never_running_text():
+    """Labels that may step under the template's body floor so a figure leads them 1.6× (synth_sidebar43, 20.10):
+    captions only — under 25 characters or four words, as the audit tells body text."""
+    from verstka.rendering.compose import _caption_like
+
+    assert _caption_like("Четыре занятия в месяц") and _caption_like("Восемь занятий")
+    assert not _caption_like("Средняя месячная выручка на одного клиента")

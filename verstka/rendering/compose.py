@@ -923,6 +923,13 @@ def _emu(pt: float) -> int:
 ALOUD = "строки ушли в заметки: нет места на слайде"  # the warning of lines said aloud (`Composer._lines_to_notes`)
 
 
+def _caption_like(text: str) -> bool:
+    """A figure's label short enough to read as a caption, not as running text: under 25 characters or four words (as
+    the audit's `body_below_template` tells body text)."""
+    t = " ".join((text or "").split())
+    return len(t) < 25 or len(t.split()) < 4
+
+
 class Composer:
     def __init__(self, slide: Slide, kit: Kit, oslide: OutlineSlide, outline: DeckOutline, strategy: str, manifest: TemplateManifest) -> None:
         self.slide = slide
@@ -2750,6 +2757,12 @@ class Composer:
         # 16 over 14 pt read as one size) — the label takes the largest size of the template under that, never under the
         # template's body size; a row whose figures cannot get there is set again (`kpis`)
         cands = list(dict.fromkeys([k.lead, k.body] + [x for x in reversed(k.sizes) if k.text_floor - 0.05 <= x < k.body - 0.05]))
+        if fs < FIG_RATIO * cands[-1] - 0.3 and all(_caption_like(distinct_label(x.value, x.label, self.o.headline)) for x in numbers):
+            # labels that are captions — short, under four words or 25 characters, never running text (the audit's own
+            # line between a caption and body text, `body_below_template`) — step down the template's sizes under its
+            # body floor to the small size, so the figure still leads them 1.6× when the slide's running text and its
+            # conclusion leave the row little height (a 4:3 template, three prices over their plans — 20.10)
+            cands += [x for x in reversed(k.sizes) if k.small - 0.05 <= x < k.text_floor - 0.05]
         label_size = None
         for ls in cands:
             if fs < FIG_RATIO * ls - 0.3:
