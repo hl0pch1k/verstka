@@ -907,14 +907,22 @@ def _subject(p: DatasetPlan) -> Optional[str]:
 
     nom, gen = _metric_word(p)
     if p.task.task == "dynamics" and gen:
+        if re.search(r"(?i)без\s+(?:выраженного\s+)?тренда|не\s+меня", p.headline or ""):
+            return None  # (тренда нет — не «рост», жюри 5b W-C)
         down = bool(re.search(r"(?i)сниз|упал|сократ|уменьш", p.headline or ""))
         return f"{'спад' if down else 'рост'} {gen}"
     if p.task.task in ("comparison", "shares"):
+        first = (p.headline or "").replace("\u00a0", " ").split(", ")[0]
+        fast = re.match(r"^([^,:;]+?)\s+раст(?:ёт|ет|ут)\s+быстрее\s+всех", first)
+        if fast:
+            return f"лидер роста — {fast.group(1).strip()}"  # (вывод слайда — рост, а не крупнейшая доля: VKT-C)
         f = next((x for x in p.headline_facts if x.id in ("leader_share", "leader_value") and " — " in (x.text or "")), None)
         dims = list(p.profile.dimensions)
         dp = phrase(dims[0]) if dims else None
         if f is not None and dp is not None and dp.sure:
             who = f.text.split(" — ", 1)[0].strip()
+            if who.lower() not in (p.headline or "").replace("\u00a0", " ").split(", ")[0].lower():
+                return None  # (вывод слайда — о другом: «ниже всего конверсия — Госсектор», а не «главный — Крупный бизнес», жюри 5b)
             return f"{_ADJ_MAIN.get(dp.gender, 'главный')} {dp.low.nom} — {who}"
     topic = (p.plain_headline or "").strip()
     return lower_first_soft(topic) if topic and not re.search(r"\.[a-z]{2,4}$|^[A-Za-z_\s-]+$", topic) else None
@@ -932,7 +940,7 @@ def general_head(plans: Sequence[DatasetPlan]) -> Optional[str]:
     head = f"{lead} в {_IN_FIGURES[len(subs)]} цифрах: " + ", ".join(subs)
     # (a list of the files' topics is no generalisation: «итоги года, часы подготовки…» — the conclusions instead; a
     # growth or a leader named makes it one)
-    specific = sum(1 for x in subs if re.match(r"(?:рост|спад|главн\w+)\s", x))
+    specific = sum(1 for x in subs if re.match(r"(?:рост|спад|главн\w+|лидер)\s", x))
     return head if len(head) <= MAX_HEADLINE + 10 and specific >= max(1, len(subs) // 2) else None
 
 
@@ -1225,6 +1233,55 @@ def _summary_cards(plans: Sequence[DatasetPlan], picked: Sequence[int], heads: d
     return out
 
 
+def _position_to_growth(plans: list, tables: Sequence[Table]) -> list:
+    """«Госсектор выстрелил, проверь» над колонками-срезами «Клиентов на 30.06 · на 30.09»: место категории по последнему
+    срезу («Госсектор — 131: ниже всех») противоречит её росту, когда она и есть лидер роста (+38%) — вывод слайда тогда
+    рост (жюри 5b, VKT-C). Остальные планы — как были."""
+    if len(plans) != len(tables):
+        return plans
+    out = list(plans)
+    for i, (p, t) in enumerate(zip(plans, tables)):
+        spec = p.task.spec
+        sd = spec if isinstance(spec, dict) else (spec.model_dump() if spec is not None else {})
+        cats = list(sd.get("categories") or [])
+        if p.task.task != "comparison" or sd.get("ask") != "position" or not cats \
+                or any((c.unit or "").strip() == "%" for c in p.profile.columns if c.role == "metric"):
+            continue  # (рост доли в процентах от процентов — «+59%» вместо «+10 п. п.» — не вывод)
+        try:
+            q = plan_datasets([t], "что тянет рост")[0]
+        except Exception:  # noqa: BLE001 - the position stays
+            continue
+        lead = re.match(r"^(.+?)\s+раст(?:ёт|ет|ут)\s+быстрее\s+всех", (q.headline or "").replace("\u00a0", " "))
+        if q.slides <= 0 or lead is None or not any(f.id == "growth_max" for f in q.headline_facts) \
+                or lead.group(1).strip().lower() not in {str(c).lower() for c in cats}:
+            continue
+        out[i] = q.model_copy(update={"task": q.task.model_copy(update={"goal": p.task.goal})})
+    return out
+
+
+def _summary_card_figure(c: dict) -> Optional[dict]:
+    """Карточка итога «в цифрах» — главный вывод слайда с его проверенной цифрой, и цифра — то, что вывод утверждает:
+    не ноль («Excel вручную: 0 ₽»), не коэффициент корреляции («r = 0,99»), не первый/старый период («от 980 тыс. ₽
+    (январь) до 1 820 тыс. ₽» → 1 820 тыс. ₽). None — честной цифры у вывода нет (жюри 5b: «0 ₽ / 0,99», «980 / 0»)."""
+    num, text = c.get("number"), " ".join((c.get("text") or "").replace("\u00a0", " ").split())
+    if c.get("plan") is None or not num:
+        return c
+    num = " ".join(num.replace("\u00a0", " ").split())
+    if re.search(r"(?<![A-Za-zА-Яа-яЁё])r\s*=\s*" + re.escape(num), text):
+        return None
+    m = re.search(r"(?<![а-яё])от\s+(.+?)\s+до\s+(.+)$", text)
+    if m and num in m.group(1):
+        last = key_figure(re.sub(r"\([^)]*\)", "", m.group(2)))
+        if not last:
+            return None
+        c = {**c, "number": last}
+        num = last
+    vals = numbers_in(num)
+    if vals and all(abs(v) < 1e-9 for v in vals):
+        return None
+    return c
+
+
 @dataclass
 class _Entry:
     slide: OutlineSlide
@@ -1311,6 +1368,7 @@ def build_data_story(
             goals = None
             plans = plan_datasets(tables, brief_text, profiles, goals=None)
     plans = list(plans)
+    plans = _position_to_growth(plans, tables)
     ids = list(dataset_ids) if dataset_ids is not None else [p.profile.table_id for p in plans]
     order = story_order(plans, brief_text, goals=goals)
     files = [{"id": i, "file": t.file, "sheet": t.sheet, "sha256": _table_sha(t)} for i, t in zip(ids, orig_tables)]
@@ -1486,6 +1544,10 @@ def build_data_story(
             story.cover_answer = True
     picked = _summary_pick(plans, sorted(kept), order, brief_text, heads, answers=[a["plan"] for a in answers if a["plan"] in kept])
     cards = _summary_cards(plans, picked, heads, firsts, answers, weak_asked=bool(_BOTTLENECK_RE.search(brief_text or "")))
+    n_cards = len(cards)
+    cards = [c for c in (_summary_card_figure(c) for c in cards) if c is not None]
+    if len(cards) < n_cards and len(cards) < 2:
+        cards = []  # (меньше двух главных выводов с честной цифрой — итога «в цифрах» нет, жюри 5b)
     for u in unmet[:2]:
         cards.append({"title": "Без ответа в данных", "text": f"«{u['quote']}» — {u['why']}", "number": None,
                       "conclusion": "", "plan": None, "kind": "unmet"})
@@ -1688,8 +1750,11 @@ def _deck_topic(brief: Optional[Brief], tables: Sequence[Table], plans: Sequence
     own, _ = data_own_title(tables, plans)
     if own:
         return own
-    files = [file_title(p.profile.file, p.profile.sheet) for p in plans if p.slides > 0]
-    return _topic_title(list(dict.fromkeys(files)))
+    # (имя файла, которое не читается по-русски — «Hranilishe_q3», — не тема: тема графика, UI1)
+    files = [file_title(p.profile.file, p.profile.sheet) if not (technical_name(p.profile.file) and not p.profile.sheet
+             and re.fullmatch(r"[A-Za-z0-9_\-. ]+", file_title(p.profile.file))) else (p.plain_headline or "")
+             for p in plans if p.slides > 0]
+    return _topic_title(list(dict.fromkeys(x for x in files if x)))
 
 
 def _summed_plans(story: "DataStory", t: OutlineSlide) -> list[DatasetPlan]:
@@ -1871,6 +1936,21 @@ def _more_views(story: "DataStory", tables: Sequence[Table]) -> list[tuple[int, 
                 continue  # (a pie names its series «Доля»: the plan's column says which one it shows)
             heads.add(q.headline.strip().lower())
             out.append((k, sl))
+        if p.task.task == "comparison" and not any(f.id == "growth_max" for f in p.headline_facts) \
+                and not any((c.unit or "").strip() == "%" for c in p.profile.columns if c.role == "metric") \
+                and any(s.content.chart is not None and len(s.content.chart.series) >= 2 for s in mine):
+            # две колонки-среза одной величины («Выручка Q2 · Выручка Q3»): рост по категориям — свой вывод, а не второй
+            # вид тех же чисел (UI1: «что растёт» — Объектное хранилище +13%, резервное копирование −8,6%)
+            try:
+                q = plan_datasets([tables[k]], "что тянет рост")[0]
+            except Exception:  # noqa: BLE001 - no growth view of this file
+                q = None
+            if q is not None and q.slides > 0 and q.headline and any(f.id == "growth_max" for f in q.headline_facts) \
+                    and q.headline.strip().lower() not in heads and not topic_only(q.headline):
+                sl = slide_for(q, tables[k], 1, slide_id=f"data-{k + 1}-g1")
+                if isinstance(sl, OutlineSlide) and sl.content.chart is not None:
+                    heads.add(q.headline.strip().lower())
+                    out.append((k, sl))
         if p.task.task == "dynamics":
             peak = _peak_view(k, p, tables[k], said, heads)
             if peak is not None:
@@ -2225,7 +2305,8 @@ def _tell(story: DataStory, brief: Optional[Brief], voice: _Voice, skills: Any, 
     explained = _explained(story.notes)
     # a step stands on the files' own proposal or on a weak spot of the data, never on the model's invention (qa4
     # NEW-S5)
-    basis = steps_basis(story.notes)
+    # (и предложение самого брифа: «план на Q4: акция на резервное копирование …» — шаг автора, а не выдумка, UI1)
+    basis = steps_basis(list(story.notes) + ([{"text": brief.text}] if brief is not None and brief.text else []))
     weak_words = set().union(*(plan_vocab(p) for p in story.plans if p.slides > 0 and p.task.task == "distribution")) if story.plans else set()
     data_words = set().union(*(plan_vocab(p) for p in story.plans if p.slides > 0)) if story.plans else set()
     for x in steps:
@@ -2549,7 +2630,10 @@ class _Attribution:
             from verstka.data.headline import _matches
 
             for n in numbers_in(_without_years(line, data_years(s)), self.labels[s.id]):
+                # (итог всех строк — ничей: «Q3: выручка 334 млн ₽, Объектное хранилище — 64%» — 334 не про хранилище, UI1)
                 hits = [f for f in s.data.headline_facts if _matches(n, f.value)]
+                if any(f.id.startswith(("total", "cols_total")) for f in hits):
+                    continue
                 if hits and not any(c.lower() in (f.text or "").lower() for f in hits for c in cats) \
                         and not any(_label_named(f.text or "", line) for f in hits):
                     return None, f"число {_num(n)} в данных относится к другой категории"

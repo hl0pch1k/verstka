@@ -422,6 +422,8 @@ def check(line: str, pool: Pool, vocab: Vocab, *, labels: Sequence[str] = (), fr
                 continue  # «на вопрос» — слово не о данных
         if all(_hit(stem(w), own) for w in words) and _phrase_in(q, pool_low):
             continue
+        if all(re.fullmatch(r"квартал\w*", w) for w in words) and re.search(r"(?<![a-z])q[1-4](?![0-9])|[1-4]\s*кв|\b[iv]{1,3}\s+кв", pool_low):
+            continue  # «итоги квартала» над колонками «Выручка Q2 · Выручка Q3» — квартал и есть срез данных (UI1)
         if re.fullmatch(r"за\s+год", q) and re.search(r"год\s+к\s+году|тому\s+же\s+периоду|чем\s+в\s+[а-я]+\s+\d{4}|"
                                                      r"к\s+[а-я]+\s+\d{4}", pool_low):
             continue  # «за год выросла на 23%» — тот же рост к тому же месяцу прошлого года

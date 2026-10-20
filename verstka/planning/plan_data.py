@@ -40,7 +40,7 @@ def _stems(text: str) -> set[str]:
     for w in _WORD_RE.findall((text or "").lower().replace("ё", "е")):
         if w.isdigit():
             continue
-        if len(w) >= 4 or (len(w) >= 3 and re.fullmatch(r"[a-z]+", w)):
+        if len(w) >= 4 or (len(w) >= 3 and re.fullmatch(r"[a-z]+", w)) or re.fullmatch(r"q[1-4]", w):
             st = w[:5]
             if st not in _ASK_WORDS:
                 out.add(st)
@@ -77,7 +77,36 @@ def _item_text(it) -> str:
 
 
 _ASK_ITEM_RE = re.compile(r"\b(?:просим|прошу|предлагаем|предлагаю|утвердить|согласовать|одобрить|выделить|запрашиваем|"
-                          r"что\s+просим|следующие\s+шаги|что\s+дальше|план\s+на\s+(?:iv|4|следующ)|решение)\b", re.I)
+                          r"что\s+просим|следующие\s+шаги|что\s+дальше|план\s+на\s+(?:iv|4|q4|следующ)|решение)\b", re.I)
+
+
+_ASIDE_Q_RE = re.compile(r"\s*\([^()]*\?\s*\)")
+
+
+def _no_questions(s: OutlineSlide) -> OutlineSlide:
+    """Вопрос автора в скобках («Зависимость от Compute (больше половины выручки?)») — не текст слайда: ответ на него
+    дают данные (итог), а напечатанный вопрос без ответа — нет (жюри 5b, VKT-C)."""
+    def cut(x: Optional[str]) -> Optional[str]:
+        return _ASIDE_Q_RE.sub("", x).strip() if x else x
+
+    c = s.content
+    upd = {"headline": cut(s.headline) or s.headline, "subtitle": cut(s.subtitle),
+           "content": c.model_copy(update={"bullets": [y for y in (cut(b) for b in c.bullets) if y]})}
+    if getattr(s, "notes", None):
+        upd["notes"] = cut(s.notes)
+    return s.model_copy(update=upd)
+
+
+def _item_head(it) -> str:
+    return re.split(r":\s+", _item_text(it).strip(), maxsplit=1)[0]
+
+
+def _item_rest(it) -> str:
+    """Шаг, который пункт-финал говорит сам после двоеточия («План на Q4: акция на … для текущих клиентов» → «Акция на …»),
+    или "" — пункт лишь тема («Что просим у правления»)."""
+    parts = re.split(r":\s+", (it.lines[0] if it.lines else it.title).strip(), maxsplit=1)
+    rest = H.strip_end(parts[1]) if len(parts) == 2 else ""
+    return H.cap_first(rest) if len(_stems(rest)) >= 3 else ""
 
 
 def _own_words(it) -> bool:
@@ -94,6 +123,16 @@ def _own_words(it) -> bool:
         return True
     extra = _stems(rest) - _stems(it.title)
     return len(extra) >= 4
+
+
+_UP_RE = re.compile(r"(?i)вырос|выросл|раст[её]т|растут|увелич|подня")
+_DOWN_RE = re.compile(r"(?i)упал|упад|сниз|просел|просед|сократ|уменьш|паден")
+
+
+def _opposite(a: str, b: str) -> bool:
+    """«В сентябре заявки упали» и «Заявки выросли на 78%» — о разном: вывод другого знака мысли не подтверждает."""
+    return bool((_DOWN_RE.search(a) and _UP_RE.search(b) and not _DOWN_RE.search(b))
+                or (_UP_RE.search(a) and _DOWN_RE.search(b) and not _UP_RE.search(b)))
 
 
 def _thought_slide(s: OutlineSlide, it, slides: list[OutlineSlide]) -> OutlineSlide:
@@ -125,6 +164,19 @@ def _thought_slide(s: OutlineSlide, it, slides: list[OutlineSlide]) -> OutlineSl
         if d_s.data is None:
             continue
         facts = {f.id: f for f in d_s.data.headline_facts}
+        # вывод слайда о том, что мысль называет («Госсектор растёт быстрее всех: +38%»), — раньше голого факта того же
+        # имени («Госсектор — 131», минимум по последнему срезу противоречил бы росту, жюри 5b VKT-C)
+        first = re.split(r",\s+", (d_s.headline or "").replace("\u00a0", " "), maxsplit=1)[0].strip()
+        who = re.split(r"\s+(?:раст|дал|дает|даёт|выросл|вырос|сниз|упал)\w*|:\s|\s[—–]\s", first, maxsplit=1)[0].strip()
+        if who and len(who) >= 3 and who.lower() in (it.title + " " + text).lower() and who not in seen \
+                and not _opposite(text, first) \
+                and re.search(r"\d", re.sub(r"(?<!\d)(?:19|20)\d\d(?!\d)", "", first)) and who.lower() != H.strip_end(text).lower():
+            seen.add(who)
+            bullets.append(first)
+            if who.lower() not in low and who.lower() in it.title.lower() and len(it.title) + len(head) <= 80:
+                head = f"{it.title}: {head[:1].lower() + head[1:]}"  # «ML-платформа: в июне данных нет …»
+            if len(bullets) >= 3:
+                break
         for f in d_s.data.headline_facts:
             name = f.text.split(" — ", 1)[0].strip() if " — " in f.text else ""
             if not name or len(name) < 4 or name.lower() not in low or not re.search(r"\d", f.text) or name in seen:
@@ -136,6 +188,32 @@ def _thought_slide(s: OutlineSlide, it, slides: list[OutlineSlide]) -> OutlineSl
             seen.add(name)
             bullets.append(line)
             if len(bullets) >= 3:
+                break
+    if not any(re.search(r"\d", b) for b in bullets):
+        # ни вывода, ни факта о том, что мысль называет, — его ряд на графике данных («ML-платформа: с 12 до 36 млн ₽
+        # (янв 2026 → сен 2026)»): одна строка автора — не слайд (жюри 5b, VKT-C s3)
+        from verstka.data.words import fmt_num
+
+        whole = (it.title + " " + text).lower()
+        for d_s in slides:
+            ch = d_s.content.chart if d_s.data is not None else None
+            if ch is None or len(ch.categories) < 2:
+                continue
+            for ser in ch.series:
+                name = (ser.name or "").split(",")[0].strip()
+                pts = [(c, v) for c, v in zip(ch.categories, ser.values) if v is not None]
+                if len(name) < 3 or name.lower() not in whole or len(pts) < 2 or name in seen:
+                    continue
+                unit = f" {ch.unit}" if ch.unit else ""
+                (c0, v0), (c1, v1) = pts[0], pts[-1]
+                if (_DOWN_RE.search(text) and v1 > v0) or (_UP_RE.search(text) and v1 < v0):
+                    continue  # (ряд идёт не туда, куда говорит мысль: «в сентябре заявки упали» — не «с 2 300 до 4 100»)
+                bullets.append(f"{name}: с {fmt_num(v0)} до {fmt_num(v1)}{unit} ({c0} → {c1})")
+                seen.add(name)
+                if name.lower() not in low and name.lower() in it.title.lower() and len(it.title) + len(head) <= 80:
+                    head = f"{it.title}: {head[:1].lower() + head[1:]}"
+                break
+            if any(re.search(r"\d", b) for b in bullets):
                 break
     if not bullets:
         return s
@@ -337,8 +415,8 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
         k = next((c for c in cands if c not in taken), cands[0])
         at[g] = k
         taken[k] = taken.get(k, 0) + 1
-    if len(set(at.values())) < min(2, len(plan.items)):
-        return []  # the plan does not speak of the data: the story's own order stays
+    if len(set(at.values())) < min(2, len(plan.items), len(groups)):
+        return []  # the plan does not speak of the data (one file — one item at least): the story's own order stays
     said: list[str] = []
     closing = len(plan.items) - 1 if _ASK_ITEM_RE.search(_item_text(plan.items[-1])) and (len(plan.items) - 1) not in taken else None
     texts_for = [k for k in range(len(plan.items)) if k not in taken and _own_words(plan.items[k])]
@@ -377,7 +455,7 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
             for j, s in enumerate(text_slides[k]):
                 s.id = f"data-plan-{k + 1}" + (f"-{j + 1}" if j else "")
                 s.continues = None
-                part.append(_thought_slide(s, it, slides))
+                part.append(_no_questions(_thought_slide(s, it, slides)))
             said.append(f"пункт плана «{it.title}» — слайд из текста автора: данных о нём в файлах нет")
         elif mine:
             said.append(f"пункт плана «{it.title}» — " + ", ".join(f"«{groups[g][0].data.file}»" for g in mine))
@@ -396,6 +474,27 @@ def follow_plan(outline: DeckOutline, brief_text: str, *, slide_count: Optional[
             if lines:
                 part.append(_ask_slide(f"data-plan-{k + 1}", _closing_head(lines), lines))
                 said.append(f"пункт плана «{it.title}» — словами входа: «{lines[0][:60]}»")
+        elif not mine and k == closing and _item_rest(it):
+            # «план на Q4: акция на резервное копирование для текущих клиентов» — сам пункт и есть шаг, его словами (UI1)
+            lines = [_item_rest(it)]
+            part.append(_ask_slide(f"data-plan-{k + 1}", H.cap_first(H.strip_end(_item_head(it))), lines))
+            said.append(f"пункт плана «{it.title}» — словами автора")
+        elif not mine and k != closing and (th := _thought_slide(
+                OutlineSlide(id=f"data-plan-{k + 1}", kind=PatternKind.section, headline=H.cap_first(it.title)), it, slides)).kind != PatternKind.section \
+                and any(re.search(r"\d", b) for b in th.content.bullets):
+            # «резервное копирование просело — почему, пока не знаем» — мысль автора и проверенные числа данных о том, что
+            # она называет (одна строка без своих слов — не повод терять пункт, UI1)
+            whole = H.strip_end(it.lines[0] if it.lines else it.title)
+            tail_ = re.sub(r"^\s*[—–:,-]\s*", "", whole[len(it.title):]) if whole.lower().startswith(it.title.lower()) else ""
+            if tail_ and th.content.bullets:
+                # заголовок — пункт автора («Резервное копирование просело»), его продолжение — пунктом (вместо того
+                # продолжения, что отрезал `_thought_slide`, или перед числами данных, если не отрезал)
+                split = H.strip_end(th.headline).lower() != H.strip_end(whole).lower()
+                rest_ = th.content.bullets[1:] if split else th.content.bullets
+                th = th.model_copy(update={"headline": H.cap_first(it.title),
+                                           "content": th.content.model_copy(update={"bullets": [H.cap_first(tail_)] + rest_})})
+            part.append(th)
+            said.append(f"пункт плана «{it.title}» — мысль автора и числа данных о ней")
         elif not mine:
             said.append(f"пункт плана «{it.title}» — ни файла, ни своего текста: слайда нет")
         used.update(s.id for s in part)
