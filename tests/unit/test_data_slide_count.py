@@ -59,7 +59,7 @@ def test_the_interface_count_both_ways():
     big = st.outline
     assert len(big.slides) >= 11, [s.id for s in big.slides]
     # short of 14: said plainly, not filled with empty or repeated slides
-    assert len(big.slides) == 14 or any("больше осмысленных слайдов данные не дают" in x for x in st.log)
+    assert len(big.slides) == 14 or any("осмысленных слайдов из" in x for x in st.log)
     assert not any(s.id == "data-3-m1" for s in big.slides)  # «Число клиентов +18%» — figure of the key figures
     _no_repeats(big)
     # the files' own key figures are a slide already: no second row of figures

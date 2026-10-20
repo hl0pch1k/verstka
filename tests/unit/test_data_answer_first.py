@@ -11,7 +11,7 @@ import pytest
 
 from verstka.data.answer import step_grounded, summary_headline, topic_only
 from verstka.data.readers import read_file
-from verstka.data.story import build_data_story
+from verstka.data.story import same_headline, build_data_story
 from verstka.providers.mock import MockProvider
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.outline import Brief
@@ -70,7 +70,9 @@ def _figures(s) -> set:
 def test_a_question_brief_is_answered_on_the_cover_first_and_in_the_summary(sales):
     st = build_data_story(Brief(text=Q1), sales)
     o = st.outline
-    assert o.title == "Москва даёт 41% выручки, Казань растёт быстрее всех" and o.slides[0].headline == o.title
+    # the cover is the deck's topic, the answer is its slide's own heading — never said twice (owner, 21.10)
+    assert o.slides[0].headline == o.title and not any(same_headline(o.title, s.headline) for s in o.slides[1:])
+    assert _data(o)[0].headline == "Москва даёт 41% выручки, Казань растёт быстрее всех"
     assert "Что с NPS?" in (o.subtitle or "") and o.title != "Что показывают данные"
     assert [s.data.file for s in _data(o)][:2] == ["Регионы.xlsx", "NPS по кварталам.csv"]
     cards = _summary(o).content.items
@@ -82,7 +84,8 @@ def test_a_question_about_two_channels_gets_their_shares_sums_and_deals(sales):
     st = build_data_story(Brief(text=Q2), sales)
     o = st.outline
     assert _data(o)[0].data.file == "Каналы продаж.json"
-    assert _plain(o.title) == "Прямые продажи — 46% выручки, партнёры — 28%" and Q2 in (o.subtitle or "")
+    assert not any(same_headline(o.title, s.headline) for s in o.slides[1:]) and Q2 in (o.subtitle or "")
+    assert _plain(_data(o)[0].headline).startswith("Прямые продажи дают 46% выручки")
     card = _summary(o).content.items[0]
     text = _plain(card.text)
     assert "партнёры — 28% (978 млн ₽)" in text and "сделок: 391" in text and "сделок: 214" in text
@@ -94,20 +97,23 @@ def test_a_question_about_two_channels_gets_their_shares_sums_and_deals(sales):
 def test_a_brief_without_questions_keeps_its_own_cover_and_order(sales):
     o = build_data_story(Brief(text=SALES_BRIEF), sales).outline
     # conv5 F11: the cover is the verified conclusion of the brief's main goal, never its first sentence verbatim
-    assert not o.title.startswith("Итоги продаж VK Cloud") and _data(o)[0].data.file == "Итоги квартала.txt"
-    assert o.title == next(s for s in _data(o) if s.data.file == "Выручка по месяцам.csv").headline
+    # the cover — the brief's topic, not a slide's conclusion again (owner, 21.10; before: the revenue line's heading)
+    assert o.title == "Итоги продаж VK Cloud за 9 месяцев 2026 года" and _data(o)[0].data.file == "Итоги квартала.txt"
+    assert not any(same_headline(o.title, s.headline) for s in o.slides[1:])
 
 
 # ── NEW-S1: the summary's headline is a conclusion ───────────────────────────────────────────────────────────────────
 def test_the_summary_headline_says_the_two_strongest_conclusions(sales, science):
     o = build_data_story(Brief(text=SALES_BRIEF), sales).outline
     head = _plain(_summary(o).headline)
-    assert head == "Выручка растёт быстрее числа клиентов; Москва даёт 41% выручки"
+    # a generalisation of the deck, not two slides' conclusions again (owner, 21.10)
+    assert head.startswith("Главное в четырёх цифрах: итоги квартала, главный регион — Москва")
     assert not topic_only(head) and "главных вывода" not in head
     q1 = build_data_story(Brief(text=Q1), sales).outline
-    assert _plain(_summary(q1).headline) == "Москва даёт 41% выручки; NPS вырос до 52"
+    assert not any(same_headline(_summary(q1).headline, s.headline) for s in q1.slides if s.id != "summary")
     sci = build_data_story(Brief(text=SCIENCE_BRIEF), science).outline
-    assert not topic_only(_summary(sci).headline)
+    # (no generalisation of mere topics: the deck's guard says the summary by its own words, never a slide's again)
+    assert not any(same_headline(_summary(sci).headline, s.headline) for s in sci.slides if s.id != "summary")
     assert summary_headline(["Прямые продажи дают 46% выручки: 1 608 из 3 495 млн ₽", "Партнёры растут"]) == "Прямые продажи дают 46% выручки; партнёры растут"
 
 
@@ -126,12 +132,13 @@ def test_the_models_label_for_the_summary_is_refused_and_a_conclusion_taken(sale
         assert _summary(st.outline).headline != label
         assert any(r["what"] == "summary_title" and not r["accepted"] for r in st.rephrased)
     st = _told(sales, SALES_BRIEF, {"summary_title": "Выручка растёт быстрее числа клиентов, Москва даёт 41% выручки"})
-    assert _summary(st.outline).headline == "Выручка растёт быстрее числа клиентов, Москва даёт 41% выручки"
+    # (accepted, then said by its slides already — the summary generalises instead: no repeat, owner 21.10)
+    assert _summary(st.outline).headline.startswith("Главное в четырёх цифрах")
 
 
 def test_the_models_topic_title_does_not_replace_the_answer(sales):
     st = _told(sales, Q1, {"title": "Итоги III квартала 2026: рост выручки и NPS", "subtitle": "Для правления"})
-    assert st.outline.title == "Москва даёт 41% выручки, Казань растёт быстрее всех"
+    assert not any(same_headline(st.outline.title, s.headline) for s in st.outline.slides[1:])
     refused = {r["what"]: r["why"] for r in st.rephrased if not r["accepted"]}
     assert "тема" in refused["title"] and "вопрос" in refused["subtitle"]
 

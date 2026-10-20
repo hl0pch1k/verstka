@@ -37,7 +37,7 @@ from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, file_context, goal_notes, plan_datasets, slide_data_of
 from verstka.data.profile import profile_table
-from verstka.data.words import count_words, file_title, fmt_num, fmt_pct, fmt_signed, fmt_value, stems_of, technical_name, times_word, upper_first
+from verstka.data.words import count_words, file_title, fmt_num, fmt_pct, lower_first, fmt_signed, fmt_value, stems_of, technical_name, times_word, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
 from verstka.schemas.outline import (
@@ -118,6 +118,8 @@ class DataStory:
     brief_text: str = ""  # the brief as written (its hash goes into the run manifest)
     log: list[str] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)  # {"file", "sheet", "message"}: datasets with no slide
+    split_meaning: list = field(default_factory=list)  # (fact, action) pairs of the closing meaning (`_next_steps`)
+    short_of: Optional[tuple] = None  # (slides made, slides asked) when the data gave fewer meaningful slides
     dropped: list[str] = field(default_factory=list)  # slides the slide count left out (their headlines)
     model: Optional[str] = None  # the model that wrote the connecting text (None: the rules did)
     model_used: bool = False
@@ -721,7 +723,7 @@ def _topic_cover(brief: Optional[Brief], entries: Sequence["_Entry"], plans: Seq
     brief does not open with a topic."""
     first = next(iter(_sentences((brief.text if brief is not None else "") or "")), "")
     topic, _ = clean_deck_title(first)
-    if not topic or len(topic.split()) > 7 or not _TOPIC_START.match(topic):
+    if not topic or len(topic.split()) > 10 or not _TOPIC_START.match(topic):
         return None
     for e in entries:
         k = e.plan_index
@@ -733,9 +735,8 @@ def _topic_cover(brief: Optional[Brief], entries: Sequence["_Entry"], plans: Seq
         fig = None
         if ch is not None and str(int(round(ch.value))) in re.sub(r"\D", "", p.headline or ""):
             fig = fmt_signed(ch.value if not re.search(r"(?i)сниз|упал|сократ|уменьш", p.headline or "") else -ch.value, "%")
-        if nom and fig:
-            return _cut(f"{topic}: {nom} {fig}", MAX_TITLE)
         break
+    # (the topic alone: «Итоги 2025 года» — the main figure is its slide's own conclusion, never said twice — owner, 21.10)
     return topic
 
 
@@ -881,6 +882,45 @@ def _human_label(f: HeadlineFact, p: DatasetPlan) -> Optional[str]:
     return None
 
 
+_IN_FIGURES = {2: "двух", 3: "трёх", 4: "четырёх", 5: "пяти", 6: "шести"}
+_ADJ_MAIN = {"m": "главный", "f": "главная", "n": "главное", "pl": "главные"}
+
+
+def _subject(p: DatasetPlan) -> Optional[str]:
+    """О чём вывод слайда — словами обобщения, без его числа: «рост выручки», «главный регион — Москва»."""
+    from verstka.data.words import phrase
+
+    nom, gen = _metric_word(p)
+    if p.task.task == "dynamics" and gen:
+        down = bool(re.search(r"(?i)сниз|упал|сократ|уменьш", p.headline or ""))
+        return f"{'спад' if down else 'рост'} {gen}"
+    if p.task.task in ("comparison", "shares"):
+        f = next((x for x in p.headline_facts if x.id in ("leader_share", "leader_value") and " — " in (x.text or "")), None)
+        dims = list(p.profile.dimensions)
+        dp = phrase(dims[0]) if dims else None
+        if f is not None and dp is not None and dp.sure:
+            who = f.text.split(" — ", 1)[0].strip()
+            return f"{_ADJ_MAIN.get(dp.gender, 'главный')} {dp.low.nom} — {who}"
+    topic = (p.plain_headline or "").strip()
+    return lower_first_soft(topic) if topic and not re.search(r"\.[a-z]{2,4}$", topic) else None
+
+
+def general_head(plans: Sequence[DatasetPlan]) -> Optional[str]:
+    """The heading of a summary of figures — a generalisation of the deck («2025 год в трёх цифрах: рост выручки,
+    главный регион — Москва, главный канал — Прямые продажи»), not one slide's conclusion again (owner, 21.10). None —
+    fewer than two subjects to name."""
+    subs = list(dict.fromkeys(x for x in (_subject(p) for p in plans) if x))
+    if len(subs) < 2 or len(subs) not in _IN_FIGURES:
+        return None
+    years = {m.group(1) for p in plans for m in re.finditer(r"за (\d{4}) год", p.headline or "")}
+    lead = f"{years.pop()} год" if len(years) == 1 else "Главное"
+    head = f"{lead} в {_IN_FIGURES[len(subs)]} цифрах: " + ", ".join(subs)
+    # (a list of the files' topics is no generalisation: «итоги года, часы подготовки…» — the conclusions instead; a
+    # growth or a leader named makes it one)
+    specific = sum(1 for x in subs if re.match(r"(?:рост|спад|главн\w+)\s", x))
+    return head if len(head) <= MAX_HEADLINE + 10 and specific >= max(1, len(subs) // 2) else None
+
+
 def _cards_head(plans: Sequence[DatasetPlan], cards: Sequence[NumberCallout]) -> str:
     """The heading of the key figures: the two first conclusions they come from («Объём рынка вырос в 5 раз за 6 лет;
     PaaS растёт быстрее всех: +41%»), not «label — figure» glued from a cut label («… вырос в раз за 6 лет — +5», жюри
@@ -893,8 +933,17 @@ def _cards_head(plans: Sequence[DatasetPlan], cards: Sequence[NumberCallout]) ->
         if not h:
             return "; ".join(f"{x.label.split(' · ')[0]} — {x.value}" for x in cards[:2])
         heads.append(h if not heads or _names_first(h, p) else lower_first_soft(h))
-    # one main conclusion — the strongest by the brief's goals (the cards come in their order); the other figures are
-    # the cards themselves, not a second clause after «;» (S10: «…за 11 месяцев; Москва даёт 46% выручки: 412 500 из …»)
+    # a generalisation of the cards («2025 год в трёх цифрах: …»), else one main conclusion — never a second clause after
+    # «;» (S10) and never the first chart's heading again (owner, 21.10)
+    srcs = [p for c in cards for p in plans if any(f.id == c.fact_id for f in p.headline_facts)
+            and re.sub(r"\D", "", c.value) in re.sub(r"\D", "", p.headline or "")]
+    uniq: list = []
+    for p in srcs:
+        if not any(p is q for q in uniq):
+            uniq.append(p)
+    gen = general_head(uniq)
+    if gen:
+        return gen
     head = heads[0]
     return head if len(head) <= MAX_HEADLINE else (_cut_clause(head, MAX_HEADLINE) or head)
 
@@ -1432,7 +1481,10 @@ def build_data_story(
         if not all(it.number for it in items):
             items = [it.model_copy(update={"number": None}) for it in items]  # all cards with a figure, or none
         # the headline says the two strongest conclusions, never «Четыре главных вывода» (qa4 NEW-S1)
-        head = summary_headline([c["conclusion"] for c in cards if c["conclusion"]], _proper_names(firsts.values())) or "Главные выводы"
+        # the summary generalises the deck — what its figures are about — and repeats no slide's own conclusion (owner,
+        # 21.10: «Выручка выросла на 66%» on the summary and on the chart); without subjects the two strongest conclusions
+        head = general_head([plans[c["plan"]] for c in cards if c.get("plan") is not None]) or \
+            summary_headline([c["conclusion"] for c in cards if c["conclusion"]], _proper_names(firsts.values())) or "Главные выводы"
         summary = OutlineSlide(id="summary", kind=PatternKind.cards, headline=head, content=SlideContent(items=items), rationale="Выводы из фактов данных: ответы на вопросы брифа, ключевые цифры, то, о чём спрашивает бриф, и слабое место, когда о нём спрашивают.")
         body_n = len([e for e in entries if e.role != "appendix"])
         entries.insert(body_n, _Entry(summary, "summary", keep=95))
@@ -1473,6 +1525,12 @@ def build_data_story(
             voice.say(line, 0.15)
     except Exception:  # noqa: BLE001 - the summary stays as it is
         log.warning("the data story's closing meaning not made", exc_info=True)
+    # no two headings alike: one main figure and one subject are said once in the deck (owner, 21.10)
+    try:
+        for line in unique_headlines(story, topic=_deck_topic(brief, tables, plans)):
+            voice.say(line, 0.15)
+    except Exception:  # noqa: BLE001 - the headings stay as they are
+        log.warning("the data story's headings not made unique", exc_info=True)
     # the person's slide count both ways: «слайдов 8–10» is at least 8 as well as at most 10 (жюри 20.10: 7 slides)
     try:
         lo, hi = _count_bounds(brief, slide_count, limit)
@@ -1481,6 +1539,19 @@ def build_data_story(
         outline = story.outline
     except Exception:  # noqa: BLE001 - the deck keeps the slides it has
         log.warning("the data story's slide count not fitted", exc_info=True)
+    try:
+        # the general guard of every deck (planning/meaning.unique_headlines) last, over the data story's own uniqueness
+        from verstka.planning.meaning import unique_headlines as deck_unique
+
+        # (a table's or a series' continuation keeps its first part's heading by design: the guard does not see it)
+        own = [x for x in story.outline.slides if not ("(продолжение)" in (x.headline or "") or (x.data is not None and x.data.part[0] > 1))]
+        for line in deck_unique(story.outline.model_copy(update={"slides": own})):
+            voice.say(line, 0.16)
+        if story.outline.slides and story.outline.slides[0].kind == PatternKind.title:
+            story.outline.title = story.outline.slides[0].headline
+        outline = story.outline
+    except Exception:  # noqa: BLE001 - the headings stay as the data story made them
+        log.warning("the deck's heading guard not applied to the data story", exc_info=True)
     _say_designs(voice, outline)
     outline.agent_log = list(voice.lines) + list(outline.agent_log)
     story.log = list(voice.lines)
@@ -1518,13 +1589,146 @@ def _implications(story: "DataStory") -> list[tuple[str, list[str]]]:
                        else fmt_signed(-ch.value if down else ch.value, '%'))
                 out.append(("", [f"{upper_first(nom)}: {fig}{tail} — "
                                  + ("причину спада стоит найти раньше, чем он станет трендом" if down else "темп есть, его стоит удержать")]))
+                story.split_meaning.append((f"{upper_first(nom)}: {fig}{tail}",
+                                            f"{'Найти причину спада' if down else 'Удержать темп'}: {nom} {fig}{tail}"))
     if conc:
         v, who, dp, p = max(conc, key=lambda x: x[0])
         _, gen = _metric_word(p)
-        head = f"{who} — {fmt_pct(v)}%{(' ' + gen) if gen else ''}: итог зависит от одного {dp.low.gen}"
-        pts = [f"Риск: при спаде у лидера ({who}) проседает весь итог", f"Резерв роста — остальные {dp.low.nom_pl}"]
+        # (the heading — the consequence, without the figure its slide already states: no repeat — owner, 21.10)
+        head = f"Итог зависит от одного {dp.low.gen}: это риск и резерв роста"
+        pts = [f"Риск: {who} — {fmt_pct(v)}%{(' ' + gen) if gen else ''}, при спаде у лидера проседает весь итог",
+               f"Резерв роста — остальные {dp.low.nom_pl}"]
         out.insert(0, (head, pts))
+        story.split_meaning.insert(0, (pts[0], f"Расти за пределами лидера: остальные {dp.low.nom_pl} — резерв роста"))
     return out
+
+
+def _next_steps(story: "DataStory") -> Optional[OutlineSlide]:
+    """«Что дальше» из следствий данных, когда колоде не хватает слайда до заданного числа: финал «что значат цифры»
+    оставляет факты и риск, действия уходят на свой слайд («Удержать темп: выручка +66% за 2025 год», «Расти за
+    пределами лидера: остальные регионы — резерв роста»). None — финал не из следствий или их меньше двух."""
+    o = story.outline
+    summary = next((s for s in o.slides if s.id == "summary"), None)
+    pairs = list(getattr(story, "split_meaning", []) or [])
+    if summary is None or not (summary.rationale or "").startswith("Что значат") or len(pairs) < 2 \
+            or any(s.id == "data-next" for s in o.slides):
+        return None
+    summary.content = SlideContent(bullets=[fact for fact, _ in pairs])
+    acts = [act for _, act in pairs]
+    verbs = [a.split(":", 1)[0] for a in acts][:2]
+    head = verbs[0] + "".join(f" и {lower_first(v)}" for v in verbs[1:])
+    return OutlineSlide(id="data-next", kind=PatternKind.bullets, headline=head, content=SlideContent(bullets=acts),
+                        rationale="Что дальше — действия из следствий проверенных цифр (концентрация, темп), а не новые числа.")
+
+
+_HEAD_STOP = {"больше", "меньше", "всего", "всех", "году", "года", "годом", "лидер", "главный", "главная", "главное",
+              "главные", "цифрах", "итоги", "итог", "выросла", "вырос", "выросли", "выросло", "растёт", "растет", "даёт", "дает",
+              "крупнейшая", "крупнейший", "впереди", "почти", "половина", "треть"}
+
+
+def headline_key(text: str) -> tuple[frozenset, frozenset]:
+    """(числа, основы слов) заголовка — для сравнения на повтор: годы с «год» — не числа, служебные слова — не предмет."""
+    nums = frozenset(round(x, 2) for x in numbers_in(text or ""))
+    words = frozenset(w[:5] for w in re.findall(r"[а-яёa-z]{4,}", (text or "").lower().replace("ё", "е")) if w not in _HEAD_STOP)
+    return nums, words
+
+
+def same_headline(a: str, b: str) -> bool:
+    """Повтор: одинаковый текст (без регистра и пробелов) или одно и то же главное число о том же предмете («Выручка
+    выросла на 66% за 2025 год» на сводке и на графике; обложка «Итоги 2025 года: выручка +66%» рядом с ним)."""
+    na, nb = " ".join((a or "").lower().split()), " ".join((b or "").lower().split())
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    (xa, wa), (xb, wb) = headline_key(a), headline_key(b)
+    return bool(xa & xb) and bool(wa & wb)
+
+
+def _alt_data_head(s: OutlineSlide) -> Optional[str]:
+    """Другая формулировка вывода слайда данных его же проверенными фактами — то, что видно именно на графике: у ряда —
+    откуда и куда («Выручка: с 41,2 до 68,4 млн ₽ в месяц за 2025 год»)."""
+    d = s.data
+    if d is None:
+        return None
+    facts = {f.id: f for f in d.headline_facts}
+    first, last = facts.get("first"), facts.get("last")
+    if first is not None and last is not None and first.unit == last.unit and first.value != last.value:
+        name = re.split(r"\s+(?:по|за)\s+", d.plain_headline or "", maxsplit=1)[0].strip() or "Значение"
+        year = re.search(r"за \d{4} год", s.headline or "")
+        per = {"month": " в месяц", "quarter": " в квартал", "week": " в неделю", "day": " в день"}.get(
+            d.time_axis.freq if d.time_axis is not None else "", "")
+        return (f"{upper_first(name)}: с {fmt_value(first.value, None)} до {fmt_value(last.value, last.unit)}{per}"
+                + (f" {year.group(0)}" if year else ""))
+    return None
+
+
+def _deck_topic(brief: Optional[Brief], tables: Sequence[Table], plans: Sequence[DatasetPlan]) -> str:
+    """Тема колоды для обложки, когда её заголовок повторил бы вывод слайда: тема брифа («Итоги 2025 года»), заголовок
+    самих данных, темы файлов."""
+    first = next(iter(_sentences((brief.text if brief is not None else "") or "")), "")
+    topic, _ = clean_deck_title(first)
+    if topic and len(topic.split()) <= 10 and _TOPIC_START.match(topic):
+        return topic
+    own, _ = data_own_title(tables, plans)
+    if own:
+        return own
+    files = [file_title(p.profile.file, p.profile.sheet) for p in plans if p.slides > 0]
+    return _topic_title(list(dict.fromkeys(files)))
+
+
+def _summed_plans(story: "DataStory", t: OutlineSlide) -> list[DatasetPlan]:
+    """The plans a summary of figures speaks of: its cards' slides (the summary) or its figures' facts (key figures)."""
+    o = story.outline
+    out: list[DatasetPlan] = []
+
+    def add(p: Optional[DatasetPlan]) -> None:
+        if p is not None and not any(p is q for q in out):
+            out.append(p)
+
+    if t.id == "summary":
+        by_id = {x.id: x for x in o.slides}
+        for c in story.cards or []:
+            x = by_id.get(c.get("slide") or "")
+            if x is not None and x.data is not None:
+                add(next((p for p in story.plans if p.profile.table_id == x.data.dataset_id), None))
+    for n in t.content.numbers:
+        add(next((p for p in story.plans if any(f.id == n.fact_id for f in p.headline_facts)
+                  and re.sub(r"\D", "", n.value) in re.sub(r"\D", "", p.headline or "")), None))
+    return out
+
+
+def unique_headlines(story: "DataStory", topic: str = "") -> list[str]:
+    """Каждый заголовок колоды — свой: повтор (`same_headline`) с заголовком раньше меняется на формулировку своего уровня
+    — обложка становится темой, сводка — обобщением (`general_head`), слайд данных — тем, что видно на его графике
+    (`_alt_data_head`). Что заменено — в журнале."""
+    o = story.outline
+    said: list[str] = []
+    def cont(x: OutlineSlide) -> bool:
+        return "(продолжение)" in (x.headline or "") or (x.data is not None and x.data.part[0] > 1)
+
+    for j, s in enumerate(o.slides):
+        for i in range(j):
+            if cont(s) or cont(o.slides[i]) or not same_headline(o.slides[i].headline, s.headline):
+                continue  # (a table's or a series' continuation carries its first part's heading by design)
+            a, b = o.slides[i], s
+            if (b.headline or "").startswith("Где расти") or (a.headline or "").startswith("Где расти"):
+                continue  # (the plan's question answered — its own words, without the segment slide's figure)
+            # the slide whose own level allows another wording changes: the cover, a summary, then the later data slide
+            for t in (a, b) if a.kind == PatternKind.title or a.id in ("key-figures", "summary") else (b, a):
+                old = t.headline
+                if t.kind == PatternKind.title:
+                    t.headline = topic or old  # the deck's subject (a cut «Школа № 26 впереди» is no title)
+                elif t.id in ("key-figures", "summary"):
+                    t.headline = general_head(_summed_plans(story, t)) or old
+                elif t.data is not None:
+                    t.headline = _alt_data_head(t) or old
+                if t.headline != old and not same_headline(a.headline, b.headline):
+                    said.append(f"заголовок «{old[:60]}» повторял другой — теперь «{t.headline[:60]}»")
+                    if t is o.slides[0]:
+                        o.title = t.headline
+                    break
+    return said
 
 
 def final_meaning(story: "DataStory") -> list[str]:
@@ -1536,6 +1740,7 @@ def final_meaning(story: "DataStory") -> list[str]:
     summary = next((s for s in o.slides if s.id == "summary"), None)
     if opening is None or summary is None:
         return []
+    story.split_meaning = []
     imps = _implications(story)
     if not imps:
         o.slides.remove(opening)
@@ -1657,12 +1862,19 @@ def fit_count(story: "DataStory", tables: Sequence[Table], lo: Optional[int], hi
                                                  content=SlideContent(numbers=cards),
                                                  rationale="Главные числа выводов колоды — по одному из каждого файла."))
                 added.append(head)
+        nxt = _next_steps(story) if len(o.slides) < lo else None
+        if nxt is not None:
+            # the meaning of the figures and what to do with it — two slides: the facts and the risk, then the actions
+            summary = next(s for s in o.slides if s.id == "summary")
+            o.slides.insert(o.slides.index(summary) + 1, nxt)
+            added.append(nxt.headline)
         if added:
             said.append(f"Слайдов просили не меньше {lo}: добавлено {count_words(len(added), 'слайд', 'слайда', 'слайдов')} "
                         f"со своим выводом — " + ", ".join(f"«{h}»" for h in added[:3]))
         if len(o.slides) < lo:
-            said.append(f"Слайдов {len(o.slides)} при просьбе от {lo}: больше осмысленных слайдов данные не дают — пустых и "
-                        "повторных слайдов колода не добавляет")
+            said.append(f"Данных хватило на {count_words(len(o.slides), 'осмысленный слайд', 'осмысленных слайда', 'осмысленных слайдов')} "
+                        f"из {lo} запрошенных — пустых и повторных слайдов колода не добавляет")
+            story.short_of = (len(o.slides), lo)
     if hi and len(o.slides) > hi:
         gone = []
 

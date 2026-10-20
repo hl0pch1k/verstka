@@ -61,7 +61,10 @@ def test_the_sample_story_follows_the_scenario(sales_story):
     assert len(o.slides) == 9
     assert o.slides[0].kind.value == "title"
     # conv5 F11: the cover is the verified conclusion of the brief's first goal, never its first sentence verbatim
-    assert o.title == next(s for s in o.slides if s.data is not None and s.data.file == "Выручка по месяцам.csv").headline
+    # the cover — the deck's topic, never a slide's conclusion again (owner, 21.10)
+    from verstka.data.story import same_headline
+
+    assert not any(same_headline(o.title, s.headline) for s in o.slides[1:])
     assert o.subtitle == "Для правления"
     files = [s.data.file if s.data else s.id for s in o.slides]
     # cover → key figures → the goals' datasets in the goals' order → distribution → quality (gaps) → reference → summary
@@ -92,7 +95,8 @@ def test_every_data_slide_carries_its_data_headline_source_and_reasons(sales_sto
         assert headline_ok(s.headline, d.headline_facts, data_slide_labels(s)), s.headline
         assert s.headline != d.plain_headline
     rev = _by_file(sales_story.outline)["Выручка по месяцам.csv"]
-    assert rev.headline == "Выручка — на 23% больше, чем в сентябре 2025"
+    # (+23% is the key figures' own: the line says what its chart shows — from where to where — owner 21.10)
+    assert rev.headline == "Выручка: с 296 до 423\u00a0млн ₽ в месяц"
     assert rev.content.chart.y_title and rev.content.chart.x_title and rev.content.chart.unit == "млн ₽"
     nps = _by_file(sales_story.outline)["NPS по кварталам.csv"]
     assert nps.content.chart.gaps is True and None in nps.content.chart.series[0].values
@@ -105,14 +109,14 @@ def test_the_summary_says_the_goals_conclusions(sales_story):
     # key figures' own — said once), the weak spot the brief asks about («где узкие места») said as one; the cards'
     # topics, never a file's name; the headline is the two strongest conclusions (qa4 NEW-S1, S3, NEW-S4)
     assert [it.title for it in summary.content.items] == ["Выручка и клиенты", "Выручка по регионам", "Каналы продаж", "Узкое место: время ответа поддержки"]
-    assert summary.headline == "Выручка растёт быстрее числа клиентов; Москва даёт 41% выручки"
+    assert summary.headline.startswith("Главное в четырёх цифрах: итоги квартала, главный регион — Москва")
     heads = {s.headline for s in sales_story.outline.slides if s.data}
     assert all(it.text in heads for it in summary.content.items[:3])
 
 
 def test_the_story_logs_what_the_analyst_decided(sales, sales_story):
     log = sales_story.outline.agent_log
-    assert len([x for x in log if x.startswith("Аналитик данных:")]) == len(sales)
+    assert len([x for x in log if x.startswith("Аналитик данных: «")]) == len(sales)
     assert any("Цель «покажи рост выручки»" in x for x in log)
     events = []
     build_data_story(SALES_BRIEF, sales, progress=lambda m, f=None, event=None: events.append(event))
@@ -233,7 +237,9 @@ def test_the_storyteller_rephrases_only_with_the_facts(sales):
     # conv5 F11: the cover is the verified answer of the brief's first goal — a topic title of the model does not replace it
     assert o.title == build_data_outline(Brief(text=SALES_BRIEF, slide_count=10), sales).title and o.slides[0].headline == o.title
     assert any(r["what"] == "title" and r["to"] == "Продажи VK Cloud в 2026 году" and not r["accepted"] for r in st.rephrased)
-    assert by["Выручка по месяцам.csv"].headline == "Выручка за год выросла на 23%"
+    # the model's «Выручка за год выросла на 23%» was taken, then said the key figures' +23% again: the line's own view
+    assert any(r["to"] == "Выручка за год выросла на 23%" and r["accepted"] for r in st.rephrased)
+    assert by["Выручка по месяцам.csv"].headline == "Выручка: с 296 до 423\u00a0млн ₽ в месяц"
     assert by["Каналы продаж.json"].headline == "Почти половину выручки приносят прямые продажи"
     # refused: a number the data does not give — the analysis's own headline stays
     assert by["Регионы.xlsx"].headline == "Москва даёт 41% выручки, Казань растёт быстрее всех"

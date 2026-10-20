@@ -75,7 +75,7 @@ def test_the_summary_headline_says_only_what_its_cards_back(sales):
     st = _story(sales, SALES_BRIEF, {"summary_title": "Рост выручки опережает рост клиентской базы"})
     assert _summary(st.outline).headline == "Рост выручки опережает рост клиентской базы"
     st = _story(sales, SALES_BRIEF, {"summary_title": "Пик выручки пришёлся на декабрь"})  # no card speaks of the months
-    assert _summary(st.outline).headline == "Выручка растёт быстрее числа клиентов; Москва даёт 41% выручки"
+    assert _summary(st.outline).headline.startswith("Главное в четырёх цифрах")  # (a generalisation, owner 21.10)
     assert any(r["what"] == "summary_title" and "карточках" in r["why"] for r in st.rejected)
     ok = _story(sales, SALES_BRIEF, {"summary_title": "Рост держится на Москве и прямых продажах"})
     assert _summary(ok.outline).headline == "Рост держится на Москве и прямых продажах"

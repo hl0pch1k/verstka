@@ -172,7 +172,8 @@ def _growth_answer(it, slides: list[OutlineSlide]) -> Optional[str]:
         if not who or who.lower() not in (s.headline or "").lower():
             continue
         fig = re.search(r"[+\-−]?\d[\d\u00a0 ]*(?:[.,]\d+)?\s*%?", g.text).group(0).strip()
-        return f"Где расти: {who} — {fig}, быстрее всех"
+        # (без числа: его говорит слайд сегментов — один вывод не повторяется в колоде, владелец 21.10)
+        return f"Где расти: {who} — быстрее всех"
     return None
 
 

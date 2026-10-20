@@ -236,7 +236,7 @@ def test_market_research_answers_where_to_grow_with_checked_figures():
         assert all(n.label != "Сегменты" for n in kf.content.numbers)  # «+41%» назван тем, что растёт: PaaS
         assert "paaS" not in kf.headline
     end = next(s for s in o.slides if s.id == "summary")
-    assert end.headline == "Где расти: PaaS — +41%, быстрее всех" and end.section == "Выводы"
+    assert end.headline == "Где расти: PaaS — быстрее всех" and end.section == "Выводы"  # (+41% — слайда сегментов)
     assert not any((s.headline or "") == "Выводы" for s in o.slides)  # строка плана без ответа — не слайд
     assert o.slides[0].subtitle == "Для стратегической сессии"
 

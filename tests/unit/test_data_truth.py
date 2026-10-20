@@ -45,6 +45,17 @@ def _story(prefix: str, brief: str, goals: list[dict], writing: dict, notes: lis
     return build_data_story(Brief(text=brief), tables, use_llm=True, skills=SkillsRegistry.load(), providers=reg)
 
 
+def _answer(st) -> str:
+    """The question's answer — the heading of the slide that answers it (the first data slide). The cover is the deck's
+    topic: one conclusion is never said twice (owner, 21.10; before, the answer was the cover too)."""
+    from verstka.data.story import same_headline
+
+    o = st.outline
+    ans = next(s for s in o.slides if s.data is not None).headline
+    assert not same_headline(o.slides[0].headline, ans)
+    return ans
+
+
 def _texts(st) -> str:
     o = st.outline
     out = [o.title or "", o.subtitle or ""]
@@ -72,7 +83,7 @@ def test_a_true_number_said_as_another_measure_is_refused_02b():
     bad = "Школа № 12 — 28% не сдавших, разрыв с другими школами в 11 раз"
     st = _story("02", brief, [goal], {"title": bad, "headlines": [{"id": "data-1", "headline": bad}]})
     # the weighted mean of a count is a ratio (F2): the fail rate, and the worst one is School 26 (6 of 51)
-    assert "Школа № 26" in st.outline.slides[0].headline and "11,8%" in st.outline.slides[0].headline
+    assert "Школа № 26" in _answer(st) and "11,8%" in _answer(st)
     assert bad not in _texts(st)
 
 
@@ -104,7 +115,7 @@ def test_a_network_figure_is_never_said_of_one_region_18c():
             "dimension": "Регион", "categories": ["Сибирь"], "aggregation": "weighted_mean", "weight": "Инцидентов",
             "period": {"kind": "compare", "base": "2025-01", "target": "2025-07"}, "yes_no": True}
     st = _story("18", brief, [goal], {"title": "Время восстановления в Сибири сократилось на 13% во втором полугодии"})
-    head = st.outline.slides[0].headline
+    head = _answer(st)
     # F5: Siberia only, the halves as ranges (the brief's words), not the network's January against July
     assert head.startswith("Сибирь") and "июль – декабрь 2025" in head and "январь – июнь 2025" in head
     assert "−24%" in head and "13%" not in _texts(st)
@@ -171,7 +182,7 @@ def test_the_cover_answers_the_question_with_the_measure_09c():
     goal = {"span": brief, "dataset": "d1", "task": "comparison", "metric": "Оценка качества", "dimension": "Группа",
             "categories": ["Ночная"], "yes_no": True, "direction": "higher"}
     st = _story("09", brief, [goal], {"title": "Группа «Ночная» не хуже остальных по оценке качества"})
-    assert st.outline.title.startswith("Ночная — ") and "79" in st.outline.title and "5,8" not in st.outline.title
+    assert _answer(st).startswith("Ночная — ") and "79" in _answer(st) and "5,8" not in _answer(st)
 
 
 # ── F2: per-unit, top-N, named shares, column against column, period extremes, what is not computed ───────────────
@@ -345,7 +356,7 @@ def test_the_cover_is_never_an_opinion_from_the_brief_12c_25c():
     st = _story("12", brief, [goal], {"title": "Из 3 988 откликов до выхода дошли 118"})
     title = st.outline.title
     assert "HR-директор" not in title and "3 988" not in title
-    assert "6,4%" in title and "118 из 1 850" in title  # the funnel (a stage it lacks is a gap, not the end)
+    assert "6,4%" in _answer(st) and "118 из 1 850" in _n(_answer(st))  # the funnel (a stage it lacks is a gap, not the end)
     st = build_data_story(Brief(text="Мэрия хочет закрыть один филиал. Я против, но аргументы нужны."), _t("25"))
     assert not st.outline.title.startswith("Мэрия") and st.outline.title != "Что показывают данные"
 
@@ -400,7 +411,8 @@ def test_two_named_rows_compared_are_answered_not_noted_23c():
     q = "Короче: правда ли, что на «Ледокол-2» продано больше билетов, чем на «Северный ветер»?"
     st = _story("23", brief, [{"span": q, "dataset": "d1", "task": "comparison", "metric": "Зрители", "ask": "compare_columns",
                                "categories": ["Ледокол-2", "Северный ветер"], "yes_no": True}], {})
-    assert _n(st.outline.title) == "Ледокол-2 — зрители: 2 710 тыс., больше, чем у «Северный ветер» (2 480 тыс.)"
+    # (the slide's own answer; before, the cover said it again: «Ледокол-2 — зрители: 2 710 тыс., больше, чем у …»)
+    assert _n(_answer(st)) == "Ледокол-2 впереди: 2 710 тыс., Северный ветер — 2 480 тыс."
     assert "всех зрителей" not in _texts(st)  # a share of two named films is no share of all viewers
 
 
