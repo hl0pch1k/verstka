@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 import logging
 import math
 import re
+from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
@@ -354,11 +356,13 @@ def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette, cont
             content = sorted(round(s.style.size_pt) for p in manifest.patterns if p.family == family and p.kind not in _NOT_CONTENT_CANVAS for s in p.slots if s.role == SlotRole.title and s.style.size_pt)
             if content:
                 size = float(content[len(content) // 2])  # the median (of two middle sizes, the larger)
-        colors = Counter(s.style.color_hex for s in slots if s.style.color_hex)
+        # the template's most frequent heading colour that reads on this ground: headings set white over the photos
+        # of its samples say nothing of the headings on a plain light page (ЛЦТ with a brandbook: the white of the
+        # photo samples lost, the heading fell back to a tone sampled from the cover photo — purple under a green
+        # brand — instead of the samples' own dark heading colour, recoloured by the brand)
+        colors = Counter(s.style.color_hex for s in slots if s.style.color_hex and contrast_ratio(s.style.color_hex, pal.bg) >= 3.0)
         if colors:
-            cand = colors.most_common(1)[0][0]
-            if contrast_ratio(cand, pal.bg) >= 3.0:
-                color = cand
+            color = colors.most_common(1)[0][0]
         bold = sum(1 for s in slots if s.style.bold) > len(slots) / 2
         fonts = Counter(s.style.font_family for s in slots if s.style.font_family)
         if fonts:
@@ -731,6 +735,7 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
     first = canvas = _canvas_for(manifest, family, comp)
     fallback = None
     busy_ok = None  # the first canvas that passes all but the calm backdrop
+    nologo_ok = None  # the first that passes all but the brand's logo (a branded copy's samples carry it elsewhere)
     seen: list[Pattern] = []
     while canvas is not None:
         seen.append(canvas)
@@ -750,6 +755,10 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         if ok and _canvas_rank(builder, manifest, canvas, wide)[1]:
             busy_ok = busy_ok or canvas
             ok = False
+        if ok and _canvas_rank(builder, manifest, canvas, wide)[3]:
+            # (a calm canvas without the brand's logo only when no calm one carries it)
+            nologo_ok = nologo_ok or canvas
+            ok = False
         if ok and wide:
             g = _canvas_ground(builder, canvas)
             if g is not None and g.w < 0.7 * builder.slide_w:
@@ -760,6 +769,8 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         tried.add(canvas.id)
         m = m.model_copy(update={"patterns": [p for p in m.patterns if p.id not in tried]})
         canvas = _canvas_for(m, family, comp)
+    if nologo_ok is not None:
+        return nologo_ok
     if busy_ok is not None:
         return busy_ok
     if fallback is not None or not seen:
@@ -770,7 +781,7 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
     best = min(seen, key=lambda p: _canvas_rank(builder, manifest, p, wide))
     rank = _canvas_rank(builder, manifest, best, wide)
     lay = _clean_layout(builder, manifest)
-    if lay is not None and (rank[0] or rank[1] or lay[1] >= -rank[3] + 0.2) and lay[1] >= 0.7:
+    if lay is not None and (rank[0] or rank[1] or lay[1] >= -rank[4] + 0.2) and lay[1] >= 0.7:
         builder.__dict__.setdefault("_prefer_layout", {})[family] = lay[0]
         return None
     return best
@@ -846,8 +857,43 @@ def _canvas_rank(builder: DeckBuilder, manifest: TemplateManifest, p: Pattern, w
         on_grid = t is not None and _on_grid(manifest, t)
         clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups) + len(p.decor_assets)
         rough = _title_turned(builder, p) or _ground_structure(builder, p) >= GROUND_STRUCTURE_MAX
-        cache[key] = (rough, busy or _canvas_photo(builder, p), bool(wide and free_w < 0.6), -round(share, 1), not on_grid, clutter, -p.quality, p.source_slide)
+        # a branded copy whose samples carry the brand's logo: a canvas without it comes after those with it — the
+        # logo stays on every slide where the template's samples hold it (Forestbird + a brandbook's logo: the content
+        # slides went to the bunnies' layout, a hair freer, where no logo was set — only the cover kept it)
+        logo_miss = _brand_logo_canvases(builder, manifest) and not _carries_brand_logo(builder, p)
+        cache[key] = (rough, busy or _canvas_photo(builder, p), bool(wide and free_w < 0.6), logo_miss, -round(share, 1), not on_grid, clutter, -p.quality, p.source_slide)
     return cache[key]
+
+
+def _carries_brand_logo(builder: DeckBuilder, p: Pattern) -> bool:
+    """Whether the sample's slide or its layout holds a branded copy's logo."""
+    from verstka.rendering.brand_logo import is_brand_logo_any
+
+    try:
+        src = builder.source_slide(p.source_slide)
+    except IndexError:
+        return False
+    for part in (src, src.slide_layout):
+        tree = part._element.cSld.find(q("p:spTree"))
+        if tree is not None and any(is_brand_logo_any(el) for el in tree.iter(q("p:pic"))):
+            return True
+    return False
+
+
+def _brand_logo_canvases(builder: DeckBuilder, manifest: TemplateManifest) -> bool:
+    """Whether any content sample of the copy carries the brand's logo (a branded copy that set its logo there)."""
+    cache = builder.__dict__.setdefault("_brand_logo_canvases", {})
+    if "v" not in cache:
+        # only a logo the copy added where the template had none: a template whose own logo the brand's replaced keeps
+        # its samples with and without it as the designer set them
+        try:
+            info = json.loads((Path(builder.template).parent / "brand.json").read_text(encoding="utf-8"))
+            r = info.get("result") or {}
+            added = (r.get("logos_added") or 0) > 0 and not (r.get("logos_replaced") or 0)
+        except (OSError, ValueError, TypeError, AttributeError):
+            added = False
+        cache["v"] = added and any(_carries_brand_logo(builder, p) for p in manifest.patterns if p.kind not in _COVER_KINDS)
+    return cache["v"]
 
 
 def _canvas_free(builder: DeckBuilder, manifest: TemplateManifest, p: Pattern) -> tuple[float, bool, float]:
@@ -1944,6 +1990,14 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         else:
             x1 = max(sx, art.box.x2 + g)
             sw, sx = max(sx + sw - x1, int(0.3 * W)), x1
+    bm = _brand_margins(slide, ws, W)
+    if bm is not None:
+        # a brandbook's margins moved the layouts' text frames in from the edges (VK Tech + «поля 120 px»): the chart, the
+        # cards and the conclusion keep to them as the heading does — the content column ran from the template's 50 px
+        if sx < bm[0]:
+            sw, sx = sw - (bm[0] - sx), bm[0]
+        if sx + sw > bm[1]:
+            sw = bm[1] - sx
     top = _content_top(slide, heading_bottom, h1, W, H)
     bottom = _content_bottom_limit(slide, sy + sh, W, H)
     if bottom - top < int(0.25 * H):
@@ -4221,10 +4275,51 @@ def _hug_label(back_el, title_el, label: str, font: Optional[str], size: float, 
         set_element_pos(title_el, w=max(need - (tb[0] - b[0]), int(0.05 * W)))
 
 
+def _brand_margins(slide: Slide, ws: Optional[TemplateWorkspace], W: int) -> Optional[tuple[int, int]]:
+    """(left, right) of the page a brandbook's margins set on a branded copy whose layouts' text frames they moved
+    (`brand.json`: margins_moved) — the left edge of this slide's layout title and body frames, mirrored on the right;
+    None otherwise."""
+    if ws is None:
+        return None
+    try:
+        info = json.loads((Path(ws.dir) / "brand.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not ((info.get("result") or {}).get("margins_moved") or 0):
+        return None
+    xs, x2s = [], []
+    try:
+        for ph in slide.slide_layout.placeholders:
+            t = ph.placeholder_format.type
+            name = str(t).split(".")[-1].split(" ")[0].upper() if t is not None else ""
+            if not any(k in name for k in ("TITLE", "BODY", "OBJECT")) or "SUB" in name or ph.left is None or ph.width is None:
+                continue
+            xs.append(int(ph.left))
+            x2s.append(int(ph.left + ph.width))
+    except Exception:  # noqa: BLE001 - a layout without readable frames sets no margin
+        return None
+    if not xs:
+        return None
+    left = min(xs)
+    if not 0 < left < 0.2 * W:
+        return None
+    return left, W - left  # (the brand's margins are the same on both sides; a title frame may stop short of the right one)
+
+
+def _unsigned(text, author) -> bool:
+    from verstka.rendering.compose import is_unsigned_statement
+
+    return is_unsigned_statement(text, author)
+
+
 def _heading_on(ground: str, manifest: TemplateManifest, pal: "_Palette") -> str:
     """A heading colour that reads on the ground: the brand's dark or light colour before plain black/white."""
     t = manifest.tokens
-    cands = [t.color_for("background.dark"), t.color_for("text.primary"), pal.text, t.color_for("background.light"), "000000", "FFFFFF"]
+    # the template's own headings that read on this ground come first — recoloured by a brandbook, they are the
+    # brand's (ЛЦТ with a green brand: the slide headings under the green labels were purple — the «dark background»
+    # token is a tone sampled from the cover photo, which no brand recolours)
+    own = Counter(s.style.color_hex.upper() for p in manifest.patterns for s in p.slots if s.role == SlotRole.title and s.style.color_hex and contrast_ratio(s.style.color_hex, ground) >= 4.5)
+    cands = [c for c, _ in own.most_common()] + [t.color_for("background.dark"), t.color_for("text.primary"), pal.text, t.color_for("background.light"), "000000", "FFFFFF"]
     return next((c for c in cands if c and contrast_ratio(c, ground) >= 4.5), pal.text)
 
 
@@ -4851,7 +4946,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         return slide, warnings
 
     if comp == "quote" and c.quote:
-        _textbox(slide, Bbox(x=sx, y=top, w=int(sw * 0.85), h=int(avail_h * 0.65)), [ParagraphSpec("«" + c.quote.strip("«»\"") + "»")], size=h2 * 1.15, color=pal.text, font=font, scale=scale, anchor="ctr")
+        _textbox(slide, Bbox(x=sx, y=top, w=int(sw * 0.85), h=int(avail_h * 0.65)), [ParagraphSpec(c.quote.strip() if _unsigned(c.quote, c.quote_author) else "«" + c.quote.strip("«»\"") + "»")], size=h2 * 1.15, color=pal.text, font=font, scale=scale, anchor="ctr")
         if c.quote_author:
             _textbox(slide, Bbox(x=sx, y=top + int(avail_h * 0.68), w=int(sw * 0.85), h=int(avail_h * 0.2)), [ParagraphSpec(c.quote_author)], size=small, color=pal.accent, font=font, scale=scale)
         return slide, warnings

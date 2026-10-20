@@ -839,6 +839,15 @@ def figure_pair(text: str) -> Optional[tuple[str, tuple[str, str], tuple[str, st
     return head, ((m1.group(1) + m1.group(2)).strip(), l1), ((m2.group(1) + m2.group(2)).strip(), l2)
 
 
+_QUOTE_MARKS_RE = re.compile(r"[«»\"“”„‟]")
+
+
+def is_unsigned_statement(text: Optional[str], author: Optional[str]) -> bool:
+    """A «quote» with no author whose words carry no quote marks of their own: a statement of the slide, not a person's
+    words (planning sets a short line of the plan as a quote slide with an empty heading — p03, 20.10)."""
+    return bool((text or "").strip()) and not (author or "").strip() and not _QUOTE_MARKS_RE.search(text or "")
+
+
 _ORDINAL_RE = re.compile(r"(?<![\w])\d+\s?-\s?(?:й|я|е|го|му|м|х|ый|ой|ий|ая|ое|ые)(?![а-яё])", re.I)
 _MONEY_WORD_RE = re.compile(r"(\d)\s?(?:рубл(?:ей|я|ь)|руб\.?)(?![а-яё])", re.I)
 _PLAIN_FIG_RE = re.compile(r"(?<![\w.,:])\d{1,3}(?: \d{3})+(?:[.,]\d+)?(?![\w:])|(?<![\w.,:])\d+(?:[.,]\d+)?(?![\w:%])")
@@ -1809,7 +1818,12 @@ class Composer:
             else:
                 self._text_block(area, self._running())
         elif comp == "quote" and c.quote:
-            self.quote(area, c.quote, c.quote_author)
+            if is_unsigned_statement(c.quote, c.quote_author):
+                # a line of the plan set as a quote with no one to say it and no quote marks of its own («Лучшие команды
+                # и их решения») is the slide's statement, not a person's words: no quote mark, large, in the middle
+                self.statement(area, c.quote.strip())
+            else:
+                self.quote(area, c.quote, c.quote_author)
         elif comp == "statement" or (not c.bullets and not c.items and len(c.paragraphs) == 1 and len(c.paragraphs[0]) <= 260):
             text = (c.paragraphs or [c.quote or ""])[0]
             hero = single_figure(text)
@@ -3465,6 +3479,10 @@ class Composer:
             # (Pencil, Lights, Inspiration: 16–18 pt over an empty page under a small heading in its band, 20.10)
             want = 0.045 * k.hpt
             up = [x for x in sorted(k.sizes) if want - 0.05 <= x <= 0.06 * k.hpt + 0.05]
+            if not up:
+                # (a scale without a size there — ЛЦТ: 20 pt, then 32: «Чего нет в данных» at 3.7 % — the statement
+                # takes 4.5 %, never above the slide's heading)
+                up = [min(round(want * 2) / 2, k.head_size or want)]
             if up and up[0] > top + 0.05:
                 top = up[0]
         size = top

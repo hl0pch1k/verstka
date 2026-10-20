@@ -1916,6 +1916,39 @@ def _icons_per_cell(ctx: _SlideCtx, cells: list) -> int:
     return changed
 
 
+def _keep_brand_margins(ctx: _SlideCtx) -> int:
+    """What the deck put on a cloned slide of a branded copy — the chart, the table, the conclusion, the footnote —
+    keeps to the brandbook's margins as the layouts' text frames do (VK Tech + «поля 120 px»: the heading moved in,
+    the chart and its conclusion still ran from 50 px). The sample's own art stays where it is. Returns how many
+    shapes were moved in."""
+    from verstka.rendering.synth import _brand_margins
+
+    bm = _brand_margins(ctx.slide, ctx.ws, ctx.W)
+    if bm is None:
+        return 0
+    left, right = bm
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    moved = 0
+    for el in list(tree) if tree is not None else []:
+        tag = etree.QName(el).localname
+        name = (el.find(".//" + q("p:cNvPr")).get("name") or "") if el.find(".//" + q("p:cNvPr")) is not None else ""
+        ours = tag == "graphicFrame" or name.split(" ")[0] in ("Chart", "Table", "Conclusion", "Footnote", "Source", "Takeaway", "Legend")
+        if not ours:
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0:
+            continue
+        x, w = b[0], b[2]
+        nx, nx2 = max(x, left), min(x + w, right)
+        if (nx, nx2) == (x, x + w) or nx2 - nx < 0.3 * w:
+            continue
+        set_element_pos(el, x=int(nx), w=int(nx2 - nx))
+        moved += 1
+    if moved:
+        ctx.warnings.append(f"{moved} shape(s) kept to the brandbook's margins")
+    return moved
+
+
 def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
     """Tall cards the slide fills to less than a third of their height (ЛЦТ p24: two white cards with a figure and a
     line at their top, two thirds empty) are no place for the content: RuntimeError, the renderer takes another sample
@@ -7090,6 +7123,20 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         o_notes = oslide.model_copy(update={"takeaway": None}) if pattern.note_slot and (oslide.takeaway or "").strip() else oslide
         ctx.tail_room, ctx.notes_floor = notes_need(builder, slide, o_notes, outline, manifest, pattern)
     c = oslide.content
+    if oslide.kind == PatternKind.quote:
+        from verstka.rendering.compose import is_unsigned_statement
+
+        if is_unsigned_statement(c.quote, c.quote_author):
+            # no one says it and it carries no quote marks: the slide's statement, set large by the composer — not a
+            # sample's quote with its mark and its author's empty line
+            raise SampleRefused("цитата без автора и без кавычек — утверждение слайда, а не цитата образца")
+    if not _is_bookend(oslide):
+        from verstka.rendering.synth import _brand_logo_canvases, _carries_brand_logo
+
+        if _brand_logo_canvases(builder, manifest) and not _carries_brand_logo(builder, pattern):
+            # a branded copy set the brand's logo on its samples, but not on this one (no room on its layout —
+            # Forestbird's bunnies): the slide takes a sample with the logo, or is composed on one
+            raise SampleRefused("на образце нет логотипа бренда, а на других образцах копии он есть")
     if oslide.kind not in _BOOKENDS:
         # a divider's design — its heading under the text (Классика p13: «ЧТО ДАЛЬШЕ» under the list, the list at 7 pt —
         # qa3 N-L4) — is no place for a content slide: another sample, or the slide is composed
@@ -7113,6 +7160,11 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         # a data deck's closing slides — the summary's cards led by their figures, the next steps — are the slide's
         # whole content: the gate measures them on the slide as shown (`clone_check.closing_trouble`)
         slide.__dict__["_verstka_closing"] = [(i.number or "", i.title or "", i.text or "") for i in c.items]
+    if ctx.data_deck and oslide.data is None and oslide.verbatim and oslide.kind == PatternKind.bullets and not c.items and 1 <= len(c.bullets) <= 3 and sum(len(x) for x in c.bullets) <= 400:
+        # a data deck's notes — «Чего нет в данных», the context: one to three lines are the slide's message, set large
+        # by the composer as a statement or a short list. In a sample they stood at 8 pt in the top third of a card
+        # covering the slide (ЛЦТ p13) or as one line over an empty page (scenarios 20.10)
+        raise SampleRefused("одна–три строки заметки колоды данных — крупно, утверждением или коротким списком, не в карточке образца")
     if ctx.data_deck and oslide.data is None and oslide.kind == PatternKind.process and c.items and not any(x.role == SlotRole.number for x in pattern.slots):
         # a data deck's closing steps («Что дальше») are the slide's whole content: numbered steps, not three short lines
         # in a sample's ruled list or tall cards (ЛЦТ p15, VK Tech p24/p25/p28 — the steps read as a footnote): a sample
@@ -7459,6 +7511,10 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
         live = [e for e in ctx.item_text_els if e.getparent() is not None]
         if len(live) >= 3:
             _cards_not_empty(ctx, [[e] for e in live])
+    try:
+        _keep_brand_margins(ctx)
+    except Exception:  # noqa: BLE001 - the shapes stay where the sample put them
+        log.debug("brand margins not kept", exc_info=True)
     if oslide.notes:
         try:
             slide.notes_slide.notes_text_frame.text = oslide.notes

@@ -461,3 +461,23 @@ def test_a_pair_stands_side_by_side_and_a_lone_figure_in_the_middle(env):
     assert size >= 0.044 * c2.kit.hpt, size
     lb = element_bbox(lab)
     assert abs((lb[0] + lb[2] / 2) - (area.x + area.w / 2)) < 0.05 * W  # centred in the area
+
+
+def test_an_unsigned_quote_is_the_slides_statement(env):
+    """A plan line set as a quote with no author and no quote marks (p03 «Лучшие команды и их решения», 20.10) is a
+    statement: no quote mark, large — from 4.5 % of the slide height; a person's words with their author stay a quote."""
+    from verstka.rendering.compose import is_unsigned_statement
+
+    assert is_unsigned_statement("Лучшие команды и их решения", None)
+    assert not is_unsigned_statement("Хакатон дал нам команду", "Анна Петрова")
+    assert not is_unsigned_statement("«Хакатон дал нам команду»", None)
+    o = OutlineSlide(id="q", kind=PatternKind.quote, headline="", content=SlideContent(quote="Лучшие команды и их решения"))
+    c, W, H = _composer(env, o)
+    n0 = len(c.cv.tree)
+    c.compose("quote", Bbox(x=int(0.06 * W), y=int(0.2 * H), w=int(0.88 * W), h=int(0.68 * H)))
+    els = list(c.cv.tree)[n0:]
+    text = "".join("".join(el.itertext()) for el in els)
+    assert "«" not in text and "“" not in text and "Лучшие команды" in text
+    st = next(el for el in els if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith("Statement"))
+    size = max(int(r.get("sz")) / 100 for r in st.iter(q("a:rPr")) if r.get("sz"))
+    assert size >= 0.044 * c.kit.hpt, size
