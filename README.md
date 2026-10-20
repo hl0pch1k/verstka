@@ -344,9 +344,9 @@
   <img src="docs/readme/svg/section-07-start-light.svg" width="100%" alt="07 · Быстрый старт">
 </picture>
 
-Постоянного стенда нет: сервис запускается на своей машине примерно за 15 минут. GPU не нужен, на Windows — внутри WSL 2.
+Постоянного стенда нет: сервис запускается на своём компьютере примерно за 15 минут — Linux (Ubuntu 24.04) или macOS; на Windows — внутри WSL 2. Видеокарта не нужна: модели работают в облаке.
 
-**1. Системные программы**
+**1. Установите программы** — Python, Node.js, LibreOffice (для картинок слайдов и PDF) и Git.
 
 ```bash
 # Ubuntu 24.04 (Node.js 20 — из NodeSource: в стандартном репозитории 18)
@@ -357,7 +357,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-ge
 brew install python@3.11 node poppler git && brew install --cask libreoffice
 ```
 
-**2. Код и зависимости**
+**2. Скачайте код и установите зависимости**
 
 ```bash
 git clone https://github.com/hl0pch1k/verstka.git && cd verstka
@@ -368,13 +368,13 @@ cd web && npm install && npm run build && cd ..
 cp verstka/fonts/Play-*.ttf ~/Library/Fonts/   # только macOS: шрифт шаблонов VK для превью LibreOffice
 ```
 
-**3. Проверка без ключа — 15 секунд**
+**3. Проверьте, что всё работает** — без ключей и без моделей, около 15 секунд. Готовая презентация появится в папке `out/check`.
 
 ```bash
 verstka generate -t tests/fixtures/tpl_audit/templates/lo_focus.pptx -b examples/briefs/fitness_studio.md -o out/check --no-llm --no-vlm --export all
 ```
 
-**4. Ключи моделей** — `cp .env.example .env` и заполните:
+**4. Добавьте ключи моделей.** Скопируйте шаблон настроек: `cp .env.example .env`. Откройте `.env` в любом редакторе, уберите `#` в начале строк с ключами VK и впишите значения:
 
 ```
 VK_INFERENCE_API_KEY=     # инференс VK
@@ -382,23 +382,25 @@ VK_PROJECT_ID=
 POLZA_API_KEY=            # картинки и запасной путь, если VK не отвечает
 ```
 
+Проверьте, что модель отвечает: соберите ту же презентацию с моделью и посмотрите, кто составил план.
+
 ```bash
 verstka generate -t tests/fixtures/tpl_audit/templates/lo_focus.pptx -b examples/briefs/fitness_studio.md -o out/model_check
 python -c "import json; p = json.load(open('out/model_check/structured/run_manifest.json'))['planner']; print(p['planned_by'], p.get('model'))"
-# agent … — план составила модель; rules None — модель недоступна, колода собрана без неё
+# «model qwen38-27b-fp8» или «agent …» — модель ответила и составила план; «rules None» — модель недоступна, презентация собрана без неё
 ```
 
-**5. Веб-интерфейс**
+**5. Запустите веб-интерфейс** и откройте в браузере http://127.0.0.1:8000
 
 ```bash
-verstka serve                    # http://127.0.0.1:8000, API — http://127.0.0.1:8000/docs
+verstka serve                    # интерфейс — http://127.0.0.1:8000, описание API — http://127.0.0.1:8000/docs
 ```
 
-Шаблоны датасета кейса загрузите кнопкой «Загрузить свой» или положите папку `Датасет` рядом с репозиторием.
+Шаблоны VK из датасета кейса загрузите в интерфейсе: плита «01 Шаблон» → «Загрузить свой». Можно загрузить и любой другой шаблон PowerPoint.
 
 <a id="как-проверить"></a>
 
-**6. Каждый вид входа из командной строки**
+**6. Для разработчиков: каждый вид входа из командной строки**
 
 ```bash
 T=tests/fixtures/tpl_audit/templates/lo_focus.pptx     # незнакомый шаблон LibreOffice из репозитория
@@ -410,11 +412,11 @@ verstka generate -t $T --data examples/data-sales-2026 --brand examples/brandboo
   -o out/data --no-llm --no-vlm                                                                         # данные + брендбук
 ```
 
-**7. Тесты**
+**7. Тесты** — интеграционным тестам нужны шаблоны VK: папка `Датасет` рядом с папкой репозитория или путь в `VERSTKA_FIXTURES_DIR`.
 
 ```bash
 pytest tests/unit            # модульные
-pytest tests/integration     # полный пайплайн на шаблонах VK и ЛЦТ (нужен датасет)
+pytest tests/integration     # полный пайплайн на шаблонах VK и ЛЦТ
 cd web && npm test           # интерфейс
 ```
 
