@@ -17,6 +17,13 @@ from verstka.api.edits import parse_edit, slide_refs
         ("убери вывод на слайде 4", 2, "slide", [4], None),
         ("убери слайд 5", 2, "delete", [5], None),
         ("удали этот слайд", 4, "delete", [4], None),
+        # «этот / текущий слайд» — the one on screen; a number in the message — the slide it names (owner 19.10: on
+        # «Слайд 4 из 10» «переделай этот слайд» must redo slide 4)
+        ("переделай этот слайд", 4, "slide", [4], None),
+        ("переделай текущий слайд", 4, "slide", [4], None),
+        ("переделай этот слайд в стиле слайда 3", 4, "slide", [4], None),
+        ("переделай слайд 3", 4, "slide", [3], None),
+        ("сделай тут короче", 4, "slide", [4], None),
         ("поменяй местами слайды 2 и 3", 2, "swap", [2, 3], None),
         ("поменяй местами 4-й и 5-й слайды", 2, "swap", [4, 5], None),
         ("перенеси слайд 6 после второго", 2, "move", [6], 3),
@@ -55,3 +62,21 @@ def test_slide_refs_stay_in_the_deck():
 def test_edit_or_other_intent(message, expected):
     intent, _ = _intent(message)
     assert _is_edit(message, intent) is expected
+
+
+def test_chat_edits_the_slide_on_screen_after_another_was_discussed(tmp_path, monkeypatch):
+    """The chat's own history never decides «этот слайд»: «почему слайд 3 такой?», then «переделай этот слайд» on
+    slide 4 — the edit goes to slide 4 (the request carries the slide on screen)."""
+    import verstka.api.app as A
+
+    monkeypatch.setattr(A, "_generation_payload", lambda gid: {"variants": [{"strategy": "structured", "outline": {"slides": [{"kind": "title"}] + [{"kind": "bullets"}] * 9}}]})
+    sent = {}
+
+    def fake_edit(gid, strategy, body):
+        sent["slide"] = body.slide
+        return {"job_id": "j1"}
+
+    monkeypatch.setattr(A, "edit_variant", fake_edit)
+    req = A.ChatRequest(session_id="this-slide", message="переделай этот слайд", generation_id="g1", strategy="structured", slide=4)
+    r = A.chat(req)
+    assert "слайд 4" in r["reply"] and r["actions"][0]["slide"] == 4 and sent["slide"] == 4

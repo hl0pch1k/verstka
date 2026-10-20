@@ -27,6 +27,7 @@ _SLIDE_REFS = [
     re.compile(rf"\b({_ORD_RX})\w*\s+слайд", re.I),
     re.compile(r"\b(последн)\w*\s+слайд|слайд\w*\s+(последн)\w*", re.I),
 ]
+_THIS_SLIDE_RX = re.compile(r"\b(?:этот|этом|этого|эту|этой|текущ\w*|данн\w*)\s+слайд", re.I)
 _THIS_RX = re.compile(r"\b(этот|этом|этого|эту|этой|здесь|тут|текущ\w*)\b", re.I)
 
 # the verbs of a change: a request that has one of them and names a slide (or the slide on screen) is an edit
@@ -132,6 +133,10 @@ def parse_edit(message: str, on_screen: Optional[int], total: int) -> Optional[E
             if target is not None and target != src:
                 return EditRequest(kind="move", slides=[src], target=max(1, min(total, target)), text=text)
     refs = slide_refs(text, total)
+    if on_screen and _THIS_SLIDE_RX.search(text):
+        # «этот / текущий слайд» is the one on screen, whatever other slide the message mentions («переделай этот слайд
+        # как слайд 3»); a number alone is the slide it names
+        refs = [on_screen] + [r for r in refs if r != on_screen]
     if not refs and on_screen and _THIS_RX.search(text):
         refs = [on_screen]
     if _DELETE_RX.search(text):
