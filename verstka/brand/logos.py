@@ -1861,6 +1861,8 @@ def add_logos(
 # ============================================================================================ логотипы: всё вместе
 
 _COVER_KINDS = ("title", "section", "thanks")
+DEFAULT_LOGO_PLACE = "top_right"
+DEFAULT_LOGO_CORNERS = ("top_right", "bottom_right", "bottom_left", "top_left")
 CORNER_RU = {"bottom_right": "справа внизу", "bottom_left": "слева внизу", "top_right": "справа вверху", "top_left": "слева вверху"}
 
 
@@ -1884,6 +1886,7 @@ class LogoOutcome:
     covered: int = 0  # из них с логотипом бренда (заменённым, перенесённым или добавленным)
     note: Optional[str] = None  # место логотипа словами (для расхождений и предупреждений)
     covers: AddReport = field(default_factory=AddReport)  # логотип бренда на обложках, где логотипа не было
+    default_place: bool = False  # место логотипа выбрано за брендбук (у шаблона логотипа нет, брендбук угол не называет)
 
 
 _COVER_NAME_RE = re.compile(r"титул|обложк|заставк|cover|title\s*slide|спасибо|thank|финал|final|раздел|section|divider|qr", re.I)
@@ -2076,6 +2079,11 @@ def brand_logos(
     out.template_logo = any(not lk.duplicate for lk in pics) or bool(texts)
     if not images:
         return out
+    if not out.template_logo and not brand.logo_place:
+        # у шаблона логотипа нет, брендбук место не называет (папка, .fig, Figma без правила): логотип бренда всё же
+        # ставится — в правый верхний угол (заголовки начинаются слева, номер слайда чаще внизу), а если он занят — вдоль края
+        brand = brand.model_copy(update={"logo_place": DEFAULT_LOGO_PLACE})
+        out.default_place = True
     order = pkg.slide_order()
     cover = _cover_parts(pkg, manifest)
     main = _main_lockups(pics, brand.logo_place, sw, sh)
@@ -2099,6 +2107,18 @@ def brand_logos(
     taken = frozenset(i for i in range(1, len(order) + 1) if _shows(pkg, order[i - 1], stay_parts))
     ignore = tuple(boxes(drop) + (boxes(content) if move else []))
     twins: dict[str, str] = {}
+    if out.default_place:
+        # угол за брендбук: тот, где логотип встаёт на макеты (их наследуют все слайды колоды), а не на один образец
+        best_k = None
+        for cn in DEFAULT_LOGO_CORNERS:
+            r = add_logos(pkg, manifest, brand.model_copy(update={"logo_place": cn}), images, [], src, exclude=exclude, skip_layouts=skip,
+                          ignore=ignore, dry_run=True, taken=taken, quiet=True)
+            k = (r.box is not None and r.corner == cn, sum(1 for p in r.placed if "/slideLayouts/" in p), r.covered)
+            if best_k is None or k > best_k:
+                best_k, place = k, cn
+        brand = brand.model_copy(update={"logo_place": place})
+        if not dry_run:
+            warnings.append(f"Логотип: брендбук не говорит, где он стоит, — поставлен {CORNER_RU[place]}.")
     if not move:
         rep = add_logos(pkg, manifest, brand, images, warnings, src, exclude=exclude, skip_layouts=skip, ignore=ignore, dry_run=dry_run, taken=taken)
     else:

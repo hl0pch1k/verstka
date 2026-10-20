@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from verstka.brand.apply import brand_plan, font_base, font_result, resolve_brand_dir
-from verstka.brand.logos import has_template_logo, logo_outcome, logo_path
+from verstka.brand.logos import CORNER_RU, DEFAULT_LOGO_PLACE, has_template_logo, logo_outcome, logo_path
 from verstka.brand.palette import ACCENT_ORDINALS, NEUTRAL_DE, delta_e, kept_reason_text
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.schemas.brand import BrandConflict, BrandPriority, BrandSpec
@@ -137,6 +137,12 @@ def brand_conflicts(
         if outcome is not None and outcome.note:
             result = f"{brd}: {outcome.note}"
         add("Логотип", tpl, brd, result, "logo")
+    elif brand.logos and found and outcome is not None and not own:
+        # у шаблона логотипа нет: логотип бренда добавлен (место — из брендбука или правый верхний угол)
+        where = CORNER_RU.get(outcome.add.corner or brand.logo_place or DEFAULT_LOGO_PLACE, "")
+        placed = outcome.add.box is not None or outcome.covered > 0
+        how = (f"{brd} {where}" + (" (брендбук место не называет)" if outcome.default_place else "")) if placed else "без логотипа: места на слайдах нет"
+        add("Логотип", "у шаблона нет", brd, how, "logo")
     if not brand.logos:
         # в брендбуке нет файлов логотипа — видно и в слое «Брендбук», а не только в отчёте копии; итог при любом
         # приоритете один: логотип шаблона, а где его нет — без логотипа

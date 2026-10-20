@@ -379,7 +379,8 @@ def test_dark_ground_gets_white_logo(tmp_path, fonts_here):
 
 def test_no_template_logo_brand_rule_adds_logo(tmp_path, fonts_here):
     """Логотипа в шаблоне нет, в брендбуке есть правило места — логотип бренда встаёт на макеты содержательных слайдов
-    в правый нижний угол с полями брендбука; без правила — ничего не добавляется."""
+    в правый нижний угол с полями брендбука; без правила логотип всё равно ставится (бренд важнее) — в угол, где он
+    встаёт на макеты (сначала правый верхний), и об этом сказано."""
     src = build_template(tmp_path, logo=False)
     m = _analyze(src, tmp_path / "ws")
     bdir = _brand_dir(tmp_path)
@@ -395,8 +396,9 @@ def test_no_template_logo_brand_rule_adds_logo(tmp_path, fonts_here):
     assert abs(W - (x + cx) - margin) < W * 0.002 and abs(H - (y + cy) - margin) < H * 0.01
     out2 = tmp_path / "no-rule.pptx"
     res2 = apply_brand(src, out2, _brand(logo_place=None), manifest=m, brand_dir=bdir)
-    assert res2.logos_added == 0
-    assert "Логотип Облако" not in _all(out2, r"ppt/slideLayouts/.*\.xml$")
+    assert res2.logos_added >= 1 and res2.logo_layouts >= 1
+    assert "Логотип Облако" in _all(out2, r"ppt/slideLayouts/.*\.xml$")
+    assert any("брендбук не говорит, где он стоит" in w for w in res2.warnings)
 
 
 def test_added_logo_takes_one_fallback_corner(tmp_path, fonts_here):
