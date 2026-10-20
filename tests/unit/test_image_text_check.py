@@ -79,3 +79,41 @@ def test_the_vision_models_answer_is_read_leniently():
     assert TextCheck.model_validate({"text": "нет"}).clean and TextCheck.model_validate({"text": False}).clean
     assert not TextCheck.model_validate({"text": "yes", "what": "  a sign  "}).clean
     assert TextCheck.model_validate({"text": True}).text == "some" and TextCheck.model_validate({"what": None}).what == ""
+
+
+def _grader(fits: list[int], calls: list, seen_ctx: list):
+    """A vision model that sees no writing and grades the pictures it is shown by `fits`, in turn."""
+
+    def answer(messages):
+        calls.append(1)
+        seen_ctx.append(messages[-1].content if hasattr(messages[-1], "content") else "")
+        k = min(len(calls), len(fits)) - 1
+        return {"text": "none", "what": "", "fits": fits[k], "flaws": "subject small" if fits[k] < 7 else ""}
+
+    return ProviderRegistry(roles={"vlm": MockProvider(answer, model="qwen/qwen3.8-27b")})
+
+
+def test_a_picture_that_fits_its_slide_badly_is_drawn_again_and_the_best_is_kept(tmp_path):
+    """Pictures to the ideal (20.10): the vision model also grades how well a picture fits its slide (0–10); one under
+    quality.min_fit is drawn again from the same prompt (no stricter rules: it had no writing), and the best clean
+    picture is kept — the others are not left in the folder."""
+    mock = IP.MockImages()
+    calls: list = []
+    ctx: list = []
+    maker = ImageMaker(IP.ImageChain([mock]), None, tmp_path / "pics", deck_title="Пекарня", skills=SKILLS, providers=_grader([4, 6, 5], calls, ctx))
+    made = maker.make(ImageAsk(hint="Витрина пекарни с хлебом", headline="40 магазинов", deck="Пекарня"), "1:1")
+    maker.close()
+    assert len(mock.calls) == 3 and made.attempts == 3 and made.fits == 6
+    assert not any(c["prompt"].startswith("A wordless image") for c in mock.calls)
+    assert len(list((tmp_path / "pics").glob("*.jpg"))) == 1
+    assert any("40 магазинов" in str(c) for c in ctx)  # the vision model is told the slide and the subject
+    mock2, calls2 = IP.MockImages(), []
+    maker = ImageMaker(IP.ImageChain([mock2]), None, tmp_path / "p2", deck_title="Пекарня", skills=SKILLS, providers=_grader([9], calls2, []))
+    assert maker.make(ImageAsk(hint="Витрина", headline="h", deck="d"), "1:1").fits == 9 and len(mock2.calls) == 1
+    maker.close()
+
+
+def test_the_grade_is_read_leniently():
+    assert TextCheck.model_validate({"text": "none", "fits": "7/10"}).fits == 7
+    assert TextCheck.model_validate({"text": "none", "fits": 12}).fits == 10 and TextCheck.model_validate({"text": "none", "fits": "?"}).fits == 10
+    assert TextCheck.model_validate({"text": "none"}).fits == 10  # an answer without a grade never rejects a picture

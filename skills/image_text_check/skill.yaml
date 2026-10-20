@@ -1,5 +1,5 @@
 name: image_text_check
-version: 1.0.0
+version: 2.0.0
 role: vlm
 description: >
   Looks at one picture the text-to-image model made for a slide and says whether it carries any writing — words,
@@ -11,6 +11,7 @@ prompt_files:
 output_schema: verstka.images.text_check.TextCheck
 params:
   temperature: 0.0
-  max_tokens: 120
+  max_tokens: 200
 changelog:
   - "1.0.0: the owner (2026-10-08): «модель рисует текст и числа на картинках очень криво» — every picture is checked before it goes on a slide"
+  - "2.0.0: pictures to the ideal (20.10): the vision model also grades how well the picture fits its slide (0–10: the asked subject, clear, natural; deformed hands, faces, symbols instead of the thing, collages score low) — a picture under configs/images.yaml quality.min_fit is drawn again"

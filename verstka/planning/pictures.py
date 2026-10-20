@@ -304,12 +304,24 @@ def min_pictures(n: int) -> int:
     return 1 if n <= 7 else 2
 
 
-SCENES = ("люди темы за работой", "место, где идёт работа темы", "продукт или предмет темы в деле")
-_SCENE_PREFIX = "Сцена по теме колоды"
+# a scene is the text model's reading of the slide itself — its process, place, object or result — never a fixed
+# angle: «люди темы за работой» gave «a team at a table» on 7 of 17 pictures of the jury's round 3, unrelated to «Просим
+# 120 млн» and twice in one deck; the deck's other pictures go to the model with it (images/service.py), so none repeats
+SCENE = "Сцена по смыслу слайда"
 
 
 def _scene_hint(k: int, head: str) -> str:
-    return f"{_SCENE_PREFIX}: {SCENES[k % len(SCENES)]} — {head}"
+    return f"{SCENE} — {head}"
+
+
+def _first_words(s: Any, head: str, limit: int = 140) -> str:
+    """The slide's own first words past its heading (its first point, paragraph, card or figure), up to `limit`."""
+    c = s.content
+    for t in [*c.bullets, *c.paragraphs, *(f"{it.title} {it.text}".strip() for it in c.items), *(f"{n.value} {n.label}".strip() for n in c.numbers), s.subtitle or "", s.takeaway or ""]:
+        t = " ".join(str(t or "").split())
+        if t and t.lower() not in (head or "").lower() and not is_picture_note(t):
+            return H.strip_end(t[:limit].rsplit(" ", 1)[0] if len(t) > limit else t)
+    return ""
 
 
 def _place(outlines: list[Any], first: Any, i: int, hint: str) -> None:
@@ -331,8 +343,8 @@ def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
     """Pictures on the slides where they help. A short content slide whose heading names a thing one can see (a place,
     a product, a device, a process at work — `concrete_subject`) gets a place first, each showing another thing than
     the deck's other pictures (the author's included), at most about one per PICTURE_SHARE slides. A deck with fewer
-    than `min_pictures` gets the rest on its roomiest short slides as concrete scenes of its topic (`SCENES`: its
-    place, its people at work, its product in use — each scene once). The place is described by its thing (or scene)
+    than `min_pictures` gets the rest on its roomiest short slides as scenes of what each of them says (`SCENE`: its
+    process, place, object or result as the text model reads it — never a scene the deck already has). The place is described by its thing (or scene)
     and the slide's heading (the text's «Слайд N. …» heading when it has one), so the variants share one picture per
     place. Returns what was done, for the warnings."""
     outlines = [o for o in outlines if o is not None and getattr(o, "slides", None)]
@@ -352,12 +364,19 @@ def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
         s0 = first.slides[i]
         return (heads.get(s0.spec_ref) if s0.spec_ref is not None else None) or H.strip_end(s0.headline or "")
 
+    def said_of(i: int) -> str:
+        """The heading and the slide's first words: a heading alone («Что просим») gave the text model nothing to
+        picture, and it drew a server room for a request to hire sales managers (live run of 20.10)."""
+        head = head_of(i)
+        more = _first_words(first.slides[i], head)
+        return f"{head}. {more}" if more else head
+
     fits = [i for i, s in enumerate(first.slides) if _fits_picture(s)]
     cands = [(i, got[0]) for i in fits if (got := concrete_subject(first.slides[i].headline or "")) is not None]
     out: list[str] = []
     picked = _pick(cands, cap - len(placed), used, n)
     for i, thing in picked:
-        _place(outlines, first, i, f"{H.cap_first(thing)} — {head_of(i)}")  # the thing itself, not the heading's word
+        _place(outlines, first, i, f"{H.cap_first(thing)} — {said_of(i)}")  # the thing itself, not the heading's word
         out.append(f"picture added on slide {i + 1} ({thing}: {head_of(i)[:60]}): the slide shows something one can see")
     short = need - len(placed) - len(picked)
     if short > 0:
@@ -368,7 +387,7 @@ def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
         room = sorted(free, key=lambda i: (len(_slide_text(first.slides[i])), i))[: max(short * 3, short)]
         scenes = _pick([(i, f"scene{k}") for k, i in enumerate(sorted(room))], short, set(), n)
         for k, (i, _) in enumerate(scenes):
-            _place(outlines, first, i, _scene_hint(k, head_of(i)))
+            _place(outlines, first, i, _scene_hint(k, said_of(i)))
             out.append(f"picture added on slide {i + 1} (a scene of the deck's topic: {head_of(i)[:60]}): pictures are on and no heading names a thing one can see")
     if not out and not placed:
         out.append("no picture added: no short content slide has room for one")
@@ -382,7 +401,7 @@ def pass_picture_on(outline: Any, oslide: Any, hint: str | None) -> Any:
     at = next((k for k, s in enumerate(slides) if s is oslide or s.id == oslide.id), None)
     if at is None:
         return None
-    thing = (hint or "").split(" — ", 1)[0].strip() or f"{_SCENE_PREFIX}: {SCENES[0]}"
+    thing = (hint or "").split(" — ", 1)[0].strip() or SCENE
     for s in slides[at + 1:]:
         if _fits_picture(s) and not s.content.photo_slot:
             s.content.photo_slot = AUTO_LABEL

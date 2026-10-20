@@ -168,7 +168,7 @@ def test_the_crop_keeps_the_subject_not_the_middle():
 def test_the_picture_is_asked_in_its_frames_composition_and_the_templates_style():
     pal = P.Palette(dark="0B1F44", light="F4F6FA", accents=["FF6A00"])
     tall, _ = build_prompt(ImageAsk(hint="Стеклянный фасад офиса", frame="tall"), pal)
-    assert "Vertical portrait composition" in tall
+    assert "Composition for a tall vertical crop" in tall and "middle third" in tall
     circle, _ = build_prompt(ImageAsk(hint="Стеклянный фасад офиса", frame="circle"), pal)
     assert "circular crop" in circle
     plain, _ = build_prompt(ImageAsk(hint="Стеклянный фасад офиса"), pal)
@@ -230,7 +230,8 @@ def test_a_rendered_place_gets_its_frame_through_plan_and_apply(tmp_path):
     mock = IP.MockImages()
     maker = ImageMaker(IP.ImageChain([mock]), None, tmp_path / "cache", deck_title="Банк")
     pend = plan_pictures(path, outline, maker)
-    assert pend[0].frame.kind == "bleed" and pend[0].aspect == "3:4" and "Vertical portrait" in mock_prompt(pend)
+    # a tall frame's picture is asked square and cropped to it (asked tall, the subject sat under an empty sky — 20.10)
+    assert pend[0].frame.kind == "bleed" and pend[0].aspect == "1:1" and "tall vertical crop" in mock_prompt(pend)
     res = apply_pictures(path, pend, wait_s=10)
     maker.close()
     rec = res.records[0]
@@ -308,7 +309,7 @@ def test_pictures_go_only_where_the_slide_shows_a_thing_one_can_see():
     said = ensure_pictures([a, b])
     got = [(i, s.content.photo_hint) for i, s in enumerate(a.slides) if s.content.photo_slot]
     assert [i for i, _ in got] == [2, 6] and len(said) == 2
-    assert got[0][1] == "Сканер — Перевод на сканеры окупится за год" and got[1][1].startswith("Склад — ")
+    assert got[0][1] == "Сканер — Перевод на сканеры окупится за год. Короткий пункт" and got[1][1].startswith("Склад — ")
     assert [(i, s.content.photo_hint) for i, s in enumerate(b.slides) if s.content.photo_slot] == got
     assert all(a.slides[i].content.photo_slot == AUTO_LABEL and not a.slides[i].content.photo_own for i, _ in got)
     assert ensure_pictures([a]) == []  # enough already
@@ -319,7 +320,7 @@ def test_pictures_on_means_pictures_even_when_no_heading_names_a_thing():
     """The owner (18.10): «если стоит настройка генерировать изображения, они ОБЯЗАНЫ быть». A deck of money and plans
     gets 1 picture up to 7 slides and 2 from 8 — concrete scenes of its topic (its place, its people at work), each
     once, on its roomiest short slides, never neighbours, the same slides in every variant; never on a table."""
-    from verstka.planning.pictures import AUTO_LABEL, SCENES, ensure_pictures, min_pictures
+    from verstka.planning.pictures import AUTO_LABEL, SCENE, ensure_pictures, min_pictures
 
     assert (min_pictures(6), min_pictures(7), min_pictures(8), min_pictures(12)) == (1, 1, 2, 2)
     a, b = _picture_deck({}, n=10, kinds={5: "table"}), _picture_deck({}, n=10, kinds={5: "table"})
@@ -327,7 +328,8 @@ def test_pictures_on_means_pictures_even_when_no_heading_names_a_thing():
     said = ensure_pictures([a, b])
     got = [(i, s.content.photo_hint) for i, s in enumerate(a.slides) if s.content.photo_slot]
     assert len(got) == 2 and all("a scene of the deck's topic" in w for w in said)
-    assert [h.split(" — ")[0] for _, h in got] == [f"Сцена по теме колоды: {SCENES[0]}", f"Сцена по теме колоды: {SCENES[1]}"]
+    # a scene of what the slide says, its heading and its own first words (never a fixed «team at work» angle)
+    assert all(h.startswith(f"{SCENE} — ") and "Короткий пункт" in h for _, h in got) and got[0][1] != got[1][1]
     assert abs(got[0][0] - got[1][0]) > 1 and 4 not in [i for i, _ in got] and 3 not in [i for i, _ in got]
     assert [(i, s.content.photo_hint) for i, s in enumerate(b.slides) if s.content.photo_slot] == got
     assert all(a.slides[i].content.photo_slot == AUTO_LABEL for i, _ in got)
@@ -438,3 +440,49 @@ def test_a_place_verstka_chose_is_never_drawn_from_its_heading_alone(tmp_path):
         raised = e
     maker.close()
     assert raised is not None and "описание" in getattr(raised, "why", "") and not mock.calls
+
+
+def test_grading_keeps_the_pictures_light_and_moves_only_its_hues():
+    """Pictures to the ideal (20.10): a dark template's «light» colour #212121 mapped every light of a picture to grey,
+    Nature's dark brown accent turned mid-tones to mud. The light stop stays light, the dark one dark, the most vivid
+    accent leads, and a graded picture keeps its own lightness."""
+    pal = P.Palette(dark="000000", light="212121", accents=["0077FF"])
+    stops = pal.stops()
+    assert P.luminance("%02X%02X%02X" % stops[-1][1]) >= 0.9 and P.luminance("%02X%02X%02X" % stops[0][1]) <= 0.12
+    img = Image.new("RGB", (40, 40), (240, 240, 240))
+    img.paste((30, 120, 40), (0, 0, 20, 40))
+    out = P.grade(img, pal, 0.3)
+    y = lambda c: 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]  # noqa: E731
+    for xy in ((5, 5), (30, 5)):
+        assert abs(y(out.getpixel(xy)) - y(img.getpixel(xy))) <= 3
+    from types import SimpleNamespace as NS
+
+    toks = NS(colors=[NS(hex=h, has_role=lambda r: False) for h in ("000000", "EFF5F5", "663200", "18A000", "FF940D")], accents=lambda: ["663200", "18A000", "FF940D"])
+    assert P.palette_of(NS(tokens=toks)).accents[0] in ("18A000", "FF940D")
+
+
+def test_an_empty_sky_over_a_small_scene_is_cropped_toward_the_scene():
+    """A bakery counter at the bottom of a blue sky (live run of 20.10): the crop zooms in (≤ 1.35×, proportions kept)
+    past the band without detail; a picture with detail to its edges stays as it is."""
+    rng = np.random.default_rng(1)
+    img = Image.new("RGB", (800, 1000), (120, 180, 230))
+    noise = (rng.integers(0, 255, (400, 800, 3))).astype("uint8")
+    img.paste(Image.fromarray(noise), (0, 600))
+    out = P.trim_empty(img)
+    assert out.size[1] < 1000 and abs(out.size[0] / out.size[1] - 0.8) < 0.01 and out.size[1] >= 1000 / P.MAX_ZOOM - 2
+    busy = Image.fromarray(rng.integers(0, 255, (1000, 800, 3)).astype("uint8"))
+    assert P.trim_empty(busy).size == (800, 1000)
+    assert P.fit_to(img, 4, 5).size == (800, 1000) and P.fit_to(img, 4, 5, trim=True).size[1] < 1000
+
+
+def test_a_tall_frames_picture_is_asked_squarer():
+    from verstka.images.fill import _aspect_of
+
+    class F:
+        def __init__(self, comp, box):
+            self.composition, self.box = comp, box
+
+    assert _aspect_of(None, F("tall", (0, 0, 750, 1000)), {"squarer_tall": True}) == "1:1"
+    assert _aspect_of(None, F("tall", (0, 0, 560, 1000)), {"squarer_tall": True}) == "3:4"
+    assert _aspect_of(None, F("tall", (0, 0, 750, 1000)), {"squarer_tall": False}) == "3:4"
+    assert _aspect_of(None, F("wide", (0, 0, 1600, 900)), {}) == "16:9"

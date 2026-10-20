@@ -13,6 +13,12 @@ max_side_px: 1600        # the picture in the deck, its longer side (cropped to 
 # (half of the slide is the picture), a deck of circles or rounded cards gets a round or rounded picture, a place over
 # most of the slide is its background with an underlay under the text; off — the picture fills its place as drawn
 layouts: true
+# a tall frame's picture is asked one step squarer (3:4 → 1:1, 9:16 → 3:4) and cropped to the frame around its subject
+# (images/fill.py): asked tall, the image model left the top half empty (live runs of 20.10)
+squarer_tall: true
+# a picture whose top or bottom is a band without detail (an empty sky, a blank wall over a small scene) is zoomed in
+# toward its subject (at most 1.35×) when it is cropped to its frame (images/palette.py trim_empty; never a background)
+trim_empty: true
 jpeg_quality: 88
 
 palette:
@@ -36,20 +42,26 @@ prompt:
   # Z-Image draws text well — and draws every quoted title, value or colour code it is given: the prompt carries no
   # headline, no deck title and no HEX codes, only words for what to draw (the live run of 2026-10-06 put the slide's
   # headline and «#00D3E6» into the pictures)
-  template: "{subject}. {context}. {style}. {frame}. Colour palette: {colors}. {rules}."
+  # (the palette tints the background and the accents; a leaf stays green — Nature's palette made a chloroplast
+  # orange, live run of 20.10)
+  template: "{subject}. {context}. {style}. {frame}. Colour palette of the background and accents: {colors}; real objects, plants and people keep their natural colours. {rules}."
   max_chars: 1000          # Polza's limit on a picture's prompt: the context goes first, then the end of the subject
   context: "An image for a business presentation slide"
   rules: "The picture contains no text of any kind: no words, no letters, no numbers, no labels, no captions, no logos, no watermarks, no colour codes"
   styles:
-    photo: "Professional editorial photograph, natural soft light, clean uncluttered composition, realistic detail"
-    illustration: "Clean modern digital illustration, simple smooth forms, soft gradients and soft light, generous negative space"
+    photo: "Professional editorial photograph, natural soft light, clean uncluttered composition, realistic detail, sharp focus on the main subject"
+    illustration: "Clean modern digital illustration, simple smooth forms, soft gradients and soft light, the setting drawn around the subject to every edge of the picture, no plain sky or empty wall behind it"
     # a screen invites pseudo-text and digits: pictograms and progress bars stand for every value, a chart is one curve
     screen: "Clean modern flat vector illustration of a software interface on a laptop screen: pictograms and progress bars instead of any text, every chart is a single smooth curve without axes, ticks, numbers or gridlines; minimalist, soft shadows, generous negative space"
   # the composition of the picture's frame on the slide (images/fill.py: the frame is read before the picture is asked)
   frames:
-    tall: "Vertical portrait composition made for a tall frame: one clear main subject seen whole, filling the height, calm background, no borders or frames"
-    wide: "Wide landscape composition: one clear main subject, calm background, no borders or frames"
-    square: "Balanced square composition: one clear main subject in the middle, calm background, no borders or frames"
+    # (live runs of 20.10: «generous negative space» in a tall frame put the subject in the bottom third under an
+    # empty sky — the subject is asked large, in the middle, filling the frame)
+    # (a tall frame's picture is asked one step squarer — squarer_tall — and cropped to the strip: the subject in the
+    # middle third, nothing important at the sides)
+    tall: "Composition for a tall vertical crop: the main subject large in the middle third of the picture, seen whole and filling most of its height, nothing important near the left and right edges, no empty sky, no blank panels, no borders or frames"
+    wide: "Wide landscape composition: one clear main subject filling the middle of the frame, calm background, no borders or frames"
+    square: "Balanced square composition: one clear main subject large in the middle, calm background, no borders or frames"
     circle: "Centred composition for a circular crop: one clear main subject in the very middle with even space around it, plain soft background"
     background: "Calm wide background scene with large even areas of soft low-contrast tone and the main subject small and off to one side, no borders or frames"
   # the person's wish on «Заменить изображение»: without a text model it leads the subject
@@ -70,3 +82,10 @@ prompt:
 text_check:
   enabled: true
   attempts: 3              # the first picture and two stricter ones
+
+# the same look grades how well the picture fits its slide (0–10, skill image_text_check: the asked subject, clear and
+# natural; deformed hands and faces, symbols instead of the thing, collages score low): a picture under min_fit is
+# drawn again within text_check.attempts, and the best clean one is kept (pictures to the ideal, 20.10)
+quality:
+  enabled: true
+  min_fit: 7

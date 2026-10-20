@@ -179,13 +179,13 @@ def change_picture(
             _say(progress, "Ставлю изображение на слайд", 0.55)
             if before == "generated":
                 pic_box = rec.get("box") or box
-                data = fitted(made.path, pic_box, cfg)
+                data = fitted(made.path, pic_box, cfg, trim=(rec.get("frame") or {}).get("kind") != "background")
                 rec.update(made_fields(made))
                 rec["wish"] = wish
                 if not swap_picture(slide, str(rec.get("shape_id")), data, descr=descr_of(rec)):
                     raise ValueError("изображение на слайде не найдено")
             else:
-                data = fitted(made.path, frame.box if frame is not None else place.box, cfg)
+                data = fitted(made.path, frame.box if frame is not None else place.box, cfg, trim=frame is None or frame.kind != "background")
                 rec.update(made_fields(made))
                 rec["wish"] = wish
                 kept = put_picture(slide, place, data, descr=descr_of(rec), frame=frame)

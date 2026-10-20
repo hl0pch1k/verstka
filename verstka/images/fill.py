@@ -67,9 +67,19 @@ def frames_for(prs, places: list[Place], cfg: Optional[dict] = None) -> dict:
         return {}
 
 
-def _aspect_of(place: Place, frame) -> str:
+# a tall frame's picture is asked one step squarer and cropped to the frame around what it shows: asked at 3:4 for a
+# strip, the image model drew a small scene at the bottom under an empty sky or a blank panel (live runs of 20.10);
+# asked square, its subject stands large in the middle (configs/images.yaml `squarer_tall`)
+_SQUARER = {"3:4": "1:1", "9:16": "3:4"}
+
+
+def _aspect_of(place: Place, frame, cfg: Optional[dict] = None) -> str:
     box = frame.box if frame is not None else place.box
-    return nearest_aspect(box[2], box[3])
+    aspect = nearest_aspect(box[2], box[3])
+    cfg = cfg if cfg is not None else load_config()
+    if cfg.get("squarer_tall", True) and frame is not None and frame.composition == "tall":
+        return _SQUARER.get(aspect, aspect)
+    return aspect
 
 
 def descr_of(record: dict) -> str:
@@ -96,6 +106,7 @@ def made_from_record(rec: dict, folder: Optional[Path]):
         model_label=str(rec.get("model_label") or rec.get("model") or ""), seed=int(rec.get("seed") or 0),
         palette_match=float(rec.get("palette_match") or 0.0), seconds=0.0,
         cost_rub=float(rec["cost_rub"]) if rec.get("cost_rub") is not None else None,  # paid once, kept through edits
+        fits=int(rec["fits"]) if isinstance(rec.get("fits"), (int, float)) else None,
     )
 
 
@@ -135,7 +146,7 @@ def plan_pictures(deck: Path, outline, maker, *, enabled: bool = True, reuse: Op
     for place in places:
         # the picture is asked in its frame's proportions and composition (a bleed half of the slide: a tall picture)
         frame = frames.get((place.slide, place.shape_id))
-        aspect = _aspect_of(place, frame)
+        aspect = _aspect_of(place, frame, getattr(maker, "cfg", None))
         comp = frame.composition if frame is not None else ""
         old = _match(place, reuse or [])
         if old is not None and old.get("status") == "removed":
@@ -175,14 +186,16 @@ def made_fields(made) -> dict:
     return {
         "key": made.key, "prompt": made.prompt, "style": made.style, "subject_by": made.subject_by, "model": made.model, "model_label": made.model_label,
         "seed": made.seed, "palette_match": made.palette_match, "seconds": made.seconds, "cost_rub": made.cost_rub, "file": Path(made.path).name,
+        "fits": getattr(made, "fits", None), "attempts": getattr(made, "attempts", 1),
     }
 
 
-def fitted(made_path: str, box, cfg: Optional[dict] = None) -> bytes:
-    """The made picture cropped to `box`'s proportions around what it shows, scaled down, as JPEG."""
+def fitted(made_path: str, box, cfg: Optional[dict] = None, *, trim: bool = False) -> bytes:
+    """The made picture cropped to `box`'s proportions around what it shows (past an empty sky or wall at its top or
+    bottom when `trim`), scaled down, as JPEG."""
     cfg = cfg or {}
     img = P.open_image(Path(made_path).read_bytes())
-    return P.encode(P.fit_to(img, box[2], box[3], int(cfg.get("max_side_px", 1600))), int(cfg.get("jpeg_quality", 88)))
+    return P.encode(P.fit_to(img, box[2], box[3], int(cfg.get("max_side_px", 1600)), trim=trim), int(cfg.get("jpeg_quality", 88)))
 
 
 def apply_pictures(deck: Path, pending: list[Pending], *, wait_s: float = 75.0, cfg: Optional[dict] = None) -> Applied:
@@ -216,7 +229,9 @@ def apply_pictures(deck: Path, pending: list[Pending], *, wait_s: float = 75.0, 
             if made is not None:
                 rec.update(made_fields(made))
                 try:
-                    data = fitted(made.path, frame.box if frame is not None else p.place.box, cfg)
+                    # (a background keeps its calm areas: the text stands on them)
+                    trim = bool((cfg or load_config()).get("trim_empty", True)) and (frame is None or frame.kind != "background")
+                    data = fitted(made.path, frame.box if frame is not None else p.place.box, cfg, trim=trim)
                     kept = put_picture(slides[p.place.slide - 1], p.place, data, descr=descr_of(rec), frame=frame)
                 except Exception as e:  # noqa: BLE001
                     kept = None
@@ -259,7 +274,7 @@ def read_records(vdir: Path) -> list[dict]:
 def public_records(records: list[dict]) -> list[dict]:
     """The records for the interface: no kept XML, no paths."""
     keep = ("id", "slide", "shape_id", "headline", "label", "hint", "own", "status", "why", "wish", "prompt", "style", "subject_by",
-            "model", "model_label", "palette_match", "aspect", "frame", "at")
+            "model", "model_label", "palette_match", "fits", "aspect", "frame", "at")
     return [{k: r.get(k) for k in keep if k in r} for r in records]
 
 

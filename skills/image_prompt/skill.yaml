@@ -1,5 +1,5 @@
 name: image_prompt
-version: 0.6.0
+version: 0.8.0
 role: llm
 description: Turns the author's description of a slide picture (Russian, a few words) and the person's wish into short English prompts for an open-weight text-to-image model.
 prompt_files:
@@ -16,3 +16,5 @@ changelog:
   - "0.4.0: one clear subject seen whole; a slide without a description is pictured by its concrete subject, never a symbol (the owner, 18.10: a glass trophy for «Бренд и клиентская база»)"
   - "0.5.0: the jury of 20.10: a cloud for «облачные сервисы», an envelope, an arrow «рост» on a slide about rising costs — a place Verstka chose names its thing («Склад — …») and is pictured as that thing; no abstract word of a headline is drawn as a symbol"
   - "0.6.0: the owner (18.10) «картинки обязаны быть»: a deck whose headings name nothing one can see gets scenes of its topic («Сцена по теме колоды: люди темы за работой — …») — its place, its people at work, its product in use; never a symbol"
+  - "0.7.0: pictures to the ideal (20.10): 25–50 words — subject, setting, viewpoint, light; a tall frame gets one upright subject filling it (not a small scene under an empty sky); people at some distance, no close-ups of hands and faces; the deck's other pictures are listed so a subject is never repeated"
+  - "0.8.0: the jury of 20.10, round 3: «люди темы за работой» gave a team at a table on 7 of 17 pictures — a scene is now what the slide itself says (its process, place, object or result), never repeated; no scenes full of screens and wall boards (they came back with pseudo-text on every attempt)"

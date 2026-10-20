@@ -889,6 +889,22 @@ def _frame_name(kind: str) -> tuple[str, str]:
     return "обложку", "Обложку агент собирает из названия и разделов текста — исправлено только оформление"
 
 
+def _picture_text_models(skills: Any = None) -> tuple[Any, Any]:
+    """(skills, providers) of the configured models when they have a text model, else (skills, None)."""
+    try:
+        from verstka.providers.registry import ProviderRegistry, default_models_path
+        from verstka.skills_registry.registry import SkillsRegistry
+
+        reg = ProviderRegistry.from_yaml(default_models_path())
+        llm = reg.get("llm") if reg.has("llm") else None
+        if llm is None or not (llm.name == "mock" or getattr(llm, "api_key", "")):
+            return skills, None  # no key for any text model
+        return (skills or SkillsRegistry.load()), reg
+    except Exception:  # noqa: BLE001 - no text model: the picture is drawn from the slide's own words as before
+        log.info("picture: no text model for its description", exc_info=True)
+        return skills, None
+
+
 def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int, *, make: bool = False, manifest: Any = None, skills: Any = None,
                         providers: Any = None) -> Optional[list[dict]]:
     """Slide `n` built again comes with its free picture place: the picture it had goes back in (refitted to the new
@@ -903,6 +919,12 @@ def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int, *,
         osl = outline.slides[n - 1] if 1 <= n <= len(outline.slides) else None
         if make and manifest is not None and osl is not None and osl.content.photo_slot and not osl.content.photo_own:
             from verstka.pipeline.generate import _picture_maker
+
+            if providers is None:
+                # the person asked for a picture on an edited slide (a re-render asks no text model): its description is
+                # still the text model's — without it the image model drew abstract shapes «без модели текста» while
+                # the model chain answered (the jury of 20.10, round 3)
+                skills, providers = _picture_text_models(skills)
 
             maker, _ = _picture_maker(True, None, manifest, vdir.parent / "images", time.time(), skills, providers, None, outline, {})
         if not mine and maker is None:

@@ -40,6 +40,7 @@ class Made:
     cost_rub: Optional[float] = None  # what the picture cost (Polza's usage.cost_rub), every attempt counted
     attempts: int = 1  # pictures drawn for it: the ones before had writing on them (text_check)
     text_checked: bool = False  # the vision model looked at it and saw no writing
+    fits: Optional[int] = None  # the vision model's grade of how well it fits its slide (0–10), None: not looked at
 
     def public(self) -> dict:
         return asdict(self)
@@ -67,6 +68,7 @@ class ImageMaker:
         self._subjects: dict[str, Optional[str]] = {}
         self._lock = threading.Lock()
         self._subject_lock = threading.Lock()
+        self._describe_lock = threading.Lock()
         self.asked = 0
 
     # ---- asking
@@ -100,7 +102,18 @@ class ImageMaker:
         with self._subject_lock:
             if k in self._subjects:
                 return self._subjects[k]
-        got = english_subjects([ask], self.deck_title or ask.deck, self.skills, self.providers).get(k)
+        # one description at a time (a few seconds each; the pictures themselves are still drawn side by side): each
+        # one sees the subjects written before it, so the deck never gets the same scanner twice (live runs of 20.10)
+        with self._describe_lock:
+            with self._subject_lock:
+                if k in self._subjects:
+                    return self._subjects[k]
+            return self._describe(ask, k)
+
+    def _describe(self, ask: ImageAsk, k: str) -> Optional[str]:
+        with self._subject_lock:
+            others = [v for v in self._subjects.values() if v]  # the deck's pictures described so far: never the same again
+        got = english_subjects([ask], self.deck_title or ask.deck, self.skills, self.providers, others=others).get(k)
         with self._subject_lock:
             self._subjects[k] = got
         return got
@@ -122,15 +135,20 @@ class ImageMaker:
         seed = seed if seed is not None else seed_of(ask.key(), aspect)
         tc = self.cfg.get("text_check") or {}
         attempts = max(1, int(tc.get("attempts", 3))) if tc.get("enabled", True) else 1
+        qc = self.cfg.get("quality") or {}
+        min_fit = int(qc.get("min_fit", 6)) if qc.get("enabled", True) else 0
         strength = float((self.cfg.get("palette") or {}).get("strength", 0.3))
         self.folder.mkdir(parents=True, exist_ok=True)
         t0 = time.monotonic()
         cost: Optional[float] = None
         seen: list[dict] = []
+        best: Optional[tuple[int, Path, str, str, float, str, Any]] = None  # (fits, path, prompt, style, match, name, res)
+        strict = 0
         for k in range(attempts):
-            # a picture with writing on it is drawn again from a stricter prompt (the host takes no seed: the same
-            # prompt draws a new picture too)
-            prompt, style = build_prompt(ask2, self.palette, self.cfg, strict=k)
+            # a picture with writing on it is drawn again from a stricter prompt; a clean one that fits its slide badly
+            # (the vision model's grade under quality.min_fit: another subject, deformed hands, a symbol) is drawn again
+            # from the same prompt (the host takes no seed: the same prompt draws a new picture too)
+            prompt, style = build_prompt(ask2, self.palette, self.cfg, strict=strict)
             res = self.provider.generate(prompt, aspect=aspect, seed=seed + k, deadline=self.deadline)
             if res.cost_rub is not None:
                 cost = (cost or 0.0) + float(res.cost_rub)
@@ -139,23 +157,34 @@ class ImageMaker:
             name = f"{ask.key()}-{aspect.replace(':', 'x')}-{seed}" + (f"-{k + 1}" if k else "")
             path = self.folder / f"{name}.jpg"
             path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
-            verdict = check_text(path, self.skills, self.providers) if attempts > 1 else None
-            seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None else verdict.text, "what": None if verdict is None else verdict.what})
+            verdict = check_text(path, self.skills, self.providers, headline=ask.headline, subject=subject or ask.what) if attempts > 1 else None
+            seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None else verdict.text, "what": None if verdict is None else verdict.what,
+                         "fits": None if verdict is None else verdict.fits, "flaws": None if verdict is None else verdict.flaws})
             if verdict is None or verdict.clean:
-                break
-            log.info("picture %s has writing (%s): drawn again", name, verdict.what or "text")
-            path.unlink(missing_ok=True)
+                fits = 10 if verdict is None else verdict.fits
+                if best is None or fits > best[0]:
+                    if best is not None:
+                        best[1].unlink(missing_ok=True)
+                    best = (fits, path, prompt, style, match, name, res)
+                else:
+                    path.unlink(missing_ok=True)
+                if fits >= min_fit:
+                    break
+                log.info("picture %s fits its slide %d/10 (%s): drawn again", name, fits, verdict.flaws if verdict else "")
+            else:
+                log.info("picture %s has writing (%s): drawn again", name, verdict.what or "text")
+                path.unlink(missing_ok=True)
+                strict += 1
             if k + 1 < attempts and self.deadline is not None and self.deadline - time.monotonic() < 25:
                 break  # no time for another picture
-        else:
-            verdict = None
-        if seen and seen[-1]["text"] not in (None, "none"):
+        if best is None:
             self._log_attempts(ask, aspect, seed, seen)
             raise PictureHasText(f"writing on every picture ({seen[-1]['what'] or 'text'}), {len(seen)} attempts")
+        fits, path, prompt, style, match, name, res = best
         made = Made(
             key=ask.key(), aspect=aspect, path=str(path), prompt=prompt, style=style, subject_by="model" if subject else "author",
             model=res.model, model_label=res.label, seed=int(seed), palette_match=match, seconds=round(time.monotonic() - t0, 2), cost_rub=cost,
-            attempts=len(seen), text_checked=bool(seen) and seen[-1]["text"] == "none",
+            attempts=len(seen), text_checked=any(c["text"] == "none" for c in seen), fits=None if all(c["fits"] is None for c in seen) else fits,
         )
         try:
             (self.folder / f"{name}.json").write_text(json.dumps({**made.public(), "hint": ask.hint, "headline": ask.headline, "wish": ask.wish, "palette": P.describe(self.palette), "checks": seen}, ensure_ascii=False, indent=2), encoding="utf-8")

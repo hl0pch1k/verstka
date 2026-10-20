@@ -34,6 +34,23 @@ def saturation(hex_: str) -> float:
     return colorsys.rgb_to_hsv(r, g, b)[1]
 
 
+def _toward(rgb: tuple[int, int, int], to: tuple[int, int, int], *, min_lum: float | None = None, max_lum: float | None = None) -> tuple[int, int, int]:
+    """`rgb` mixed toward `to` just enough to be at least `min_lum` (or at most `max_lum`) light."""
+    def lum(c) -> float:
+        return luminance("%02X%02X%02X" % tuple(int(round(v)) for v in c))
+
+    def ok(c) -> bool:
+        return (min_lum is None or lum(c) >= min_lum) and (max_lum is None or lum(c) <= max_lum)
+
+    if ok(rgb):
+        return rgb
+    for t in np.linspace(0.05, 1.0, 20):
+        c = tuple(int(round(a + (b - a) * t)) for a, b in zip(rgb, to))
+        if ok(c):
+            return c
+    return to
+
+
 @dataclass
 class Palette:
     dark: str = "1F2937"
@@ -45,13 +62,15 @@ class Palette:
         return list(dict.fromkeys([self.dark, *self.accents, self.light]))
 
     def stops(self) -> list[tuple[float, tuple[int, int, int]]]:
-        """The gradient map's stops: the dark colour at 0, the strongest accent at its own lightness, the light at 1."""
-        out = [(0.0, _rgb(self.dark))]
+        """The gradient map's stops: the dark colour at 0, the strongest accent at its own lightness, the light at 1 —
+        the dark one kept dark and the light one light (a dark template's «light» colour #212121 mapped every light of
+        the picture to grey, a yellow one to sepia: the pictures came out dull — live runs of 20.10)."""
+        out = [(0.0, _toward(_rgb(self.dark), (0, 0, 0), max_lum=0.12))]
         if self.accents:
             acc = self.accents[0]
-            y = min(0.85, max(0.15, luminance(acc)))
+            y = min(0.7, max(0.3, luminance(acc)))
             out.append((y, _rgb(acc)))
-        out.append((1.0, _rgb(self.light)))
+        out.append((1.0, _toward(_rgb(self.light), (255, 255, 255), min_lum=0.9)))
         return out
 
 
@@ -71,7 +90,9 @@ def palette_of(manifest) -> Palette:
     accents = [h for h in (tokens.accents() if hasattr(tokens, "accents") else []) if h]
     if not accents:
         accents = [h for h in hexes if h not in (dark, light) and saturation(h) > 0.25]
-    accents = sorted(dict.fromkeys(a.upper().lstrip("#") for a in accents), key=lambda h: -saturation(h))[:3]
+    # the most vivid first (saturated and bright: Nature's green and orange before its dark brown, which turned every
+    # picture's mid-tones to mud — live runs of 20.10)
+    accents = sorted(dict.fromkeys(a.upper().lstrip("#") for a in accents), key=lambda h: -(saturation(h) * max(_rgb(h)) / 255.0))[:3]
     return Palette(dark=dark.upper().lstrip("#"), light=light.upper().lstrip("#"), accents=accents)
 
 
@@ -121,6 +142,10 @@ def grade(img: Image.Image, pal: Palette, strength: float = 0.3) -> Image.Image:
     y = (0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]) / 255.0
     mapped = _gradient_map(y, pal.stops())
     out = a * (1.0 - strength) + mapped * strength
+    # the picture keeps its own lightness (its contrast and its whites): only its hues move toward the palette
+    y2 = (0.2126 * out[..., 0] + 0.7152 * out[..., 1] + 0.0722 * out[..., 2]) / 255.0
+    k = np.where(y2 > 1e-3, y / np.maximum(y2, 1e-3), 1.0)[..., None]
+    out = out * k
     return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), "RGB")
 
 
@@ -199,9 +224,50 @@ def focus_crop(img: Image.Image, target: float) -> tuple[int, int, int, int]:
     return 0, y0, iw, y0 + ch
 
 
-def fit_to(img: Image.Image, w: float, h: float, max_side: int = 1600, *, focus: bool = True) -> Image.Image:
+def _detail_rows(img: Image.Image, side: int = 160) -> np.ndarray:
+    """The share of detailed pixels (a lightness step over 3 ΔL to a neighbour) in each row of a small copy."""
+    small = img.convert("RGB")
+    k = side / max(small.size)
+    small = small.resize((max(8, int(small.width * k)), max(8, int(small.height * k))), Image.BILINEAR)
+    a = np.asarray(small, dtype=np.float32)
+    y = _lab(a.reshape(-1, 3)).reshape(a.shape)[..., 0]
+    gx = np.abs(np.diff(y, axis=1, prepend=y[:, :1]))
+    gy = np.abs(np.diff(y, axis=0, prepend=y[:1, :]))
+    return np.where(gx + gy > 3.0, 1.0, 0.0).mean(1)
+
+
+EMPTY_BAND = 0.22  # a crop whose top and bottom rows without detail take more than this share of it is zoomed in
+MAX_ZOOM = 1.35
+
+
+def trim_empty(img: Image.Image, max_zoom: float = MAX_ZOOM) -> Image.Image:
+    """The picture zoomed in (its proportions kept, at most `max_zoom`) when a band without detail — an empty sky, a
+    blank wall over a small scene — takes much of its top or bottom: the image model drew a bakery counter at the
+    bottom of a blue sky (live runs of 20.10); the window keeps the detailed rows and, across, what the picture shows."""
+    rows = _detail_rows(img)
+    busy = rows > 0.04
+    n = len(rows)
+    if not busy.any() or n < 8:
+        return img
+    top, bot = int(np.argmax(busy)), n - int(np.argmax(busy[::-1]))
+    if (top + n - bot) / n <= EMPTY_BAND:
+        return img
+    cw, ch = img.size
+    keep_h = min(ch, max(ch / max_zoom, (bot - top) / n * ch * 1.12))
+    keep_w = keep_h * cw / ch
+    cy = (top + bot) / 2 / n * ch
+    t = min(max(0.0, cy - keep_h / 2), ch - keep_h)
+    sal = saliency(img).sum(0)
+    xs = np.linspace(0, cw, len(sal))
+    cx = float((sal * xs).sum() / max(float(sal.sum()), 1e-9))
+    left = min(max(0.0, cx - keep_w / 2), cw - keep_w)
+    return img.crop((int(left), int(t), int(left + keep_w), int(t + keep_h)))
+
+
+def fit_to(img: Image.Image, w: float, h: float, max_side: int = 1600, *, focus: bool = True, trim: bool = False) -> Image.Image:
     """The picture cropped to w:h (never stretched) — around what it shows (`focus_crop`), or around its centre —,
-    then scaled down to at most `max_side` px."""
+    zoomed in past an empty band at its top or bottom when `trim` (`trim_empty`), then scaled down to at most
+    `max_side` px."""
     img = img.convert("RGB")
     iw, ih = img.size
     target = w / h if h > 0 else 1.0
@@ -216,6 +282,8 @@ def fit_to(img: Image.Image, w: float, h: float, max_side: int = 1600, *, focus:
             ch = max(1, int(round(iw / target)))
             y0 = (ih - ch) // 2
             img = img.crop((0, y0, iw, y0 + ch))
+    if trim:
+        img = trim_empty(img)
     iw, ih = img.size
     k = min(1.0, max_side / max(iw, ih))
     if k < 1.0:

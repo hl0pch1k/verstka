@@ -175,14 +175,27 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     return text, style
 
 
-def english_subjects(asks: list[ImageAsk], deck: str, skills, providers) -> dict[str, str]:
-    """The `image_prompt` skill: the subjects of every ask in English, in one call ({ask.key(): subject}). Empty when
-    there is no text model or it fails — the prompts then carry the author's own words."""
+# the frame's shape in words for the text model (it composes the subject for it)
+FRAME_WORDS = {
+    "tall": "a tall vertical strip at the slide's edge (drawn square and cropped to the strip: the subject in the middle third)",
+    "wide": "a wide landscape frame",
+    "square": "a square frame",
+    "circle": "a circle",
+    "background": "the whole slide's background, the text over one side of it",
+}
+
+
+def english_subjects(asks: list[ImageAsk], deck: str, skills, providers, others: Optional[list[str]] = None) -> dict[str, str]:
+    """The `image_prompt` skill: the subjects of every ask in English, in one call ({ask.key(): subject}); `others` —
+    the subjects the deck's other pictures already have (a subject is never repeated). Empty when there is no text
+    model or it fails — the prompts then carry the author's own words."""
     if not asks or skills is None or providers is None or not getattr(providers, "has", lambda r: False)("llm"):
         return {}
-    items = [{"id": a.key(), "headline": _clean(a.headline, 120), "hint": _clean(a.hint or a.label or a.headline, 400), "wish": _clean(a.wish, 300) if a.wish else None} for a in asks]
+    items = [{"id": a.key(), "headline": _clean(a.headline, 120), "hint": _clean(a.hint or a.label or a.headline, 400), "frame": FRAME_WORDS.get(a.frame or "", ""),
+              "wish": _clean(a.wish, 300) if a.wish else None} for a in asks]
+    seen = [_clean(o, 200) for o in (others or []) if (o or "").strip()][-8:]
     try:
-        res = skills.run("image_prompt", providers, {"deck": _clean(deck, 160) or "—", "items": items})
+        res = skills.run("image_prompt", providers, {"deck": _clean(deck, 160) or "—", "items": items, "others": seen})
         parsed: ImagePrompts = res.parsed
     except Exception as e:  # noqa: BLE001 - the author's words go in instead
         log.info("image_prompt skill failed: %s", e)
