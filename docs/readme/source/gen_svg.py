@@ -106,13 +106,16 @@ def hero(c, dark):
     lab_cap = cap("M", lsize)
     gap = 36  # label baseline → top of the word's ink
     bars_bottom = (-_baseline_in_line() + 23 + 4) * k  # from the word baseline
-    block_h = lab_cap + gap + (-wy0) + bars_bottom
+    team, tgap = "КОМАНДА «РЕКРУТ 2»", 34  # under the bars: bottom of the bars → cap top of the team line
+    block_h = lab_cap + gap + (-wy0) + bars_bottom + tgap + lab_cap
     top = (H - block_h) / 2
     lab_base = top + lab_cap
     base = lab_base + gap - wy0
     cx = px / 2
     lx0, lx1, _, _ = ink(lab, "M", lsize, ltrack)
     b.append(T(lab, "M", lsize, cx - (lx0 + lx1) / 2, lab_base, c["muted"], track=ltrack))
+    tx0, tx1, _, _ = ink(team, "M", lsize, ltrack)
+    b.append(T(team, "M", lsize, cx - (tx0 + tx1) / 2, base + bars_bottom + tgap + lab_cap, c["ink"], track=ltrack))
     # the logo is one unit (bars start under the word box, as in the header); centre the unit by its ink
     unit_x1 = max(wx1, 1 * k + logo_width(20 * k))
     unit_x0 = min(wx0, 1 * k)
@@ -155,7 +158,7 @@ def hero(c, dark):
         b.append(slide_sketch(round(xx), sy, sw, sh, k, c))
         b.append(centered(lab, "M", 16, xx + sw / 2, lab_base - cap("M", 16) / 2, c["p3t"], opacity=.62))
     return svg(Wd, H, "Verstka — цифровой дизайнер презентаций",
-               "Слева — логотип Verstka и подпись «ЛЦТ 2026 · кейс VK Tech № 4 · вторая ступень». "
+               "Слева — подпись «ЛЦТ 2026 · кейс VK Tech № 4 · вторая ступень», логотип Verstka и команда «Рекрут 2». "
                "Справа — три плиты интерфейса «Слои»: 01 Шаблон, 02 Текст и данные, 03 Три варианта.", "".join(b))
 
 

@@ -3,7 +3,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/hero-dark.svg">
-    <img src="docs/readme/svg/hero-light.svg" width="100%" alt="Verstka — логотип интерфейса «Слои», ЛЦТ 2026, кейс VK Tech № 4, вторая ступень. Справа три плиты: 01 Шаблон, 02 Текст и данные, 03 Три варианта — структурный, визуальный, компактный">
+    <img src="docs/readme/svg/hero-light.svg" width="100%" alt="Verstka — логотип интерфейса «Слои», ЛЦТ 2026, кейс VK Tech № 4, вторая ступень, команда «Рекрут 2». Справа три плиты: 01 Шаблон, 02 Текст и данные, 03 Три варианта — структурный, визуальный, компактный">
   </picture>
 </p>
 
@@ -15,8 +15,6 @@
   <a href="MODELS.md#изображения-внутри-слайдов-t2i"><img src="docs/readme/svg/badge-t2i.svg" height="26" alt="Картинки: Z-Image · Polza"></a>
   <a href="LICENSE"><img src="docs/readme/svg/badge-license.svg" height="26" alt="Лицензия: MIT"></a>
 </p>
-
-Кейс №4 VK Tech «Цифровой дизайнер презентаций», хакатон «Лидеры цифровой трансформации 2026», команда «Рекрут 2».
 
 | Содержание<br><img src="docs/readme/svg/spacer.svg" width="330" height="1" alt=""> | Что там<br><img src="docs/readme/svg/spacer.svg" width="470" height="1" alt=""> |
 |---|---|
