@@ -207,3 +207,17 @@ def test_a_goal_the_tables_do_not_measure_stays_as_the_document_says():
         "Не менее 60 % учеников завершают курс.", "Открыть 5 новых офисов к концу года."]))
     reconcile([s], _tables(), [DOC])
     assert s.content.bullets == ["Не менее 60 % учеников завершают курс.", "Открыть 5 новых офисов к концу года."] and s.headline == "Цели"
+
+
+def test_a_table_of_norms_gets_the_facts_of_the_tables_not_the_writers():
+    from verstka.schemas.outline import TableData
+
+    s = OutlineSlide(id="kb-7", kind=PatternKind.table, headline="Скорость против нормы", content=SlideContent(table=TableData(
+        columns=["Смена", "Факт", "Норматив ожидания ответа"], rows=[["1-я смена", "5 мин", "не более 8 минут"], ["2-я смена", "2 ч", "не более 3 часов"]])))
+    reconcile([s], _tables(), [DOC])
+    t = s.content.table
+    assert t.columns == ["Смена", "Норматив ожидания ответа", "Факт, Q3", "Итог"]
+    assert t.rows == [["1-я смена", "не более 8 минут", "7 мин", "в пределах нормы"], ["2-я смена", "не более 3 часов", "3,5 ч", "дольше нормы"]]
+    assert "2-я смена 3,5 ч — дольше нормы 3 ч" in s.headline
+    g = goals_of("Целевая стоимость привлечения подписчика не должна превышать 25 тысяч рублей.")
+    assert len(g) == 1 and g[0].op == "<=" and g[0].qty.value == 25000

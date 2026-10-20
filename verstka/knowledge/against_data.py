@@ -327,8 +327,8 @@ class Goal:
     sentence: str = ""
 
 
-_LE = r"(?:не\s+более|не\s+больше|не\s+выше|не\s+дольше|не\s+позднее|максимум|до|≤|<=)"
-_GE = r"(?:не\s+менее|не\s+меньше|не\s+ниже|минимум|от|≥|>=)"
+_LE = r"(?:не\s+должн\w*\s+превыша\w*|не\s+более|не\s+больше|не\s+выше|не\s+дольше|не\s+позднее|максимум|до|≤|<=)"
+_GE = r"(?:не\s+должн\w*\s+(?:быть\s+)?(?:ниже|меньше)|не\s+менее|не\s+меньше|не\s+ниже|минимум|от|≥|>=)"
 _NUMU = r"(?P<n>\d{1,3}(?:[   ]\d{3})+|\d+(?:[.,]\d+)?)\s*(?P<u>%|процент\w*|(?:тысяч\w*|тыс\.?|миллион\w*|млн|млрд)\s*(?:₽|руб\w*|рублей)?|₽|руб\w*|мин\w*|час\w*|ч(?![а-яё])|сек\w*|дн\w*|д(?:ня|ней)\b)?"
 _DEADLINE_RE = re.compile(r"(?i)\s*(?P<d>к\s+(?:концу\s+(?:года|квартала|\d{4}\s+года)|\d{1,2}\s+[а-яё]+(?:\s+\d{4}\s+года)?|[а-яё]+ю?\s+\d{4}\s+года|декабрю(?:\s+\d{4}(?:\s+года)?)?|\d{4}\s+году))")
 _GOAL_DASH_RE = re.compile(rf"(?i)^(?P<s>.{{3,120}}?)\s*,?\s*[—–:-]\s*(?P<op>{_LE}|{_GE})\s+{_NUMU}")
@@ -623,11 +623,15 @@ def reconcile(slides: list, tables: Sequence, kb_texts: Iterable[str] = ()) -> l
 def _table_verdicts(t, facts: Sequence[TableFact]) -> list[Verdict]:
     """Each row of a table of norms («1-я линия | не более 15 минут») against its fact: two columns are added — the
     fact («Факт, Q3») and the verdict; nothing when most rows meet no fact."""
-    cols = list(t.columns or [])
-    if len(cols) < 2 or any(re.search(r"(?i)факт|итог", c) for c in cols[1:]):
+    # a «Факт» column the writer filled (from the documents, which have no facts — жюри 5: «12 минут» at 14 in the
+    # table) gives way to the tables' own figures
+    keep = [j for j, c in enumerate(t.columns or []) if j == 0 or not re.search(r"(?i)факт|итог|статус|выполнен", str(c))]
+    cols = [t.columns[j] for j in keep]
+    rows = [[(list(r) + [""] * len(t.columns))[j] for j in keep] for r in t.rows]
+    if len(cols) < 2:
         return []
     found: list[tuple[int, Verdict]] = []
-    for i, row in enumerate(t.rows):
+    for i, row in enumerate(rows):
         if not row:
             continue
         for j in range(1, min(len(row), len(cols))):
@@ -646,7 +650,7 @@ def _table_verdicts(t, facts: Sequence[TableFact]) -> list[Verdict]:
             v.short = f"{v.name} {say(f.qty, g.qty)} — {v.word} {say(g.qty, g.qty)}"
             found.append((i, v))
             break
-    if len(found) < max(1, (len(t.rows) + 1) // 2):
+    if len(found) < max(1, (len(rows) + 1) // 2):
         return []
     whens = {v.fact.when for _, v in found}
     when = next(iter(whens)).replace("в ", "", 1) if len(whens) == 1 and next(iter(whens)) else ""
@@ -654,7 +658,7 @@ def _table_verdicts(t, facts: Sequence[TableFact]) -> list[Verdict]:
     by = dict(found)
     w = len(cols)
     t.rows = [[*(list(r) + [""] * w)[:w], say(by[i].fact.qty, by[i].goal.qty) if i in by else "—", by[i].word if i in by else ""]
-              for i, r in enumerate(t.rows)]
+              for i, r in enumerate(rows)]
     return [v for _, v in found]
 
 
