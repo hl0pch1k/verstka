@@ -1692,13 +1692,93 @@ def _kpi_room(ctx: _SlideCtx, group, items: list[SlideItem], numbers_in_cells: b
         raise SampleRefused(f"в карточках образца нет места для крупной цифры: она встала бы в {size:.0f} pt, нужно от {floor:.0f}")
 
 
+def _number_empty_markers(ctx: _SlideCtx) -> int:
+    """Empty small plates the sample sets at the left of each line of a list (VK Tech p8 «План»: four light squares
+    beside the steps — the sample's icons, nothing in them on our slide) carry the line's number, «1»…«n», centred, in a
+    colour that reads on the plate: an empty square beside each step read as a missing picture (jury 20.10). Only a
+    column of three or more such plates, one beside each filled line. Returns how many were numbered."""
+    from verstka.schemas.common import contrast_ratio as _cr
+
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    if tree is None:
+        return 0
+    W, H = ctx.W, ctx.H
+    texts, plates = [], []
+    for el in tree:
+        if etree.QName(el).localname != "sp" or is_nested(el):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0:
+            continue
+        if shape_text(el).strip():
+            if (ctx.id_of(el) or "") in ctx.filled:
+                texts.append((el, b))
+        elif _has_fill(el) and b[2] <= 0.07 * W and b[3] <= 0.11 * H and 0.6 <= b[2] / max(b[3], 1) * H / W * (W / H) <= 1.7:
+            plates.append((el, b))
+    pairs = []
+    for el, b in sorted(texts, key=lambda t: t[1][1]):
+        cy = b[1] + b[3] // 2
+        near = [(pe, pb) for pe, pb in plates if 0 <= b[0] - (pb[0] + pb[2]) <= 0.06 * W and pb[1] - 0.04 * H <= b[1] + int(0.04 * H) and abs((pb[1] + pb[3] // 2) - cy) <= max(b[3] // 2, pb[3])]
+        if near:
+            pairs.append(min(near, key=lambda x: b[0] - (x[1][0] + x[1][2])))
+    xs = {round(pb[0] / (0.02 * W)) for _, pb in pairs}
+    if len(pairs) < 3 or len({id(pe) for pe, _ in pairs}) != len(pairs) or len(xs) > 1:
+        return 0
+    try:
+        arts = ctx.art_boxes()
+    except Exception:  # noqa: BLE001
+        arts = []
+    if any(Bbox(x=pb[0], y=pb[1], w=pb[2], h=pb[3]).intersection(a) > 0 for _, pb in pairs for a in arts):
+        # a marker on the template's art (VK Tech's spiral under the last square): a number there would be text over the
+        # art — the empty markers go instead
+        for pe, _ in pairs:
+            remove_element(pe)
+        ctx.warnings.append(f"{len(pairs)} empty marker(s) beside the lines left out (one stands on the template's art)")
+        return len(pairs)
+    fill = None
+    sf = pairs[0][0].find(q("p:spPr") + "/" + q("a:solidFill") + "/" + q("a:srgbClr"))
+    if sf is not None:
+        fill = (sf.get("val") or "").upper()
+    t = ctx.manifest.tokens
+    inks = [c for c in (t.color_for("accent.1") if hasattr(t, "color_for") else None, t.color_for("text.primary"), "000000", "FFFFFF") if c]
+    ink = next((c for c in inks if not fill or _cr(c, fill) >= 3.0), "000000")
+    for k, (pe, pb) in enumerate(pairs, 1):
+        size = max(8.0, round(pb[3] / EMU_PER_PT * 0.5 * 2) / 2)
+        txb = pe.find(q("p:txBody"))
+        if txb is None:
+            txb = etree.SubElement(pe, q("p:txBody"))
+            etree.SubElement(txb, q("a:bodyPr"))
+            etree.SubElement(txb, q("a:lstStyle"))
+        for p_ in list(txb.findall(q("a:p"))):
+            txb.remove(p_)
+        bp = txb.find(q("a:bodyPr"))
+        for n_ in ("lIns", "tIns", "rIns", "bIns"):
+            bp.set(n_, "0")
+        bp.set("anchor", "ctr")
+        bp.set("wrap", "none")
+        p_ = etree.SubElement(txb, q("a:p"))
+        etree.SubElement(p_, q("a:pPr")).set("algn", "ctr")
+        r = etree.SubElement(p_, q("a:r"))
+        rpr = etree.SubElement(r, q("a:rPr"))
+        rpr.set("lang", "ru-RU")
+        rpr.set("sz", str(int(size * 100)))
+        rpr.set("b", "1")
+        etree.SubElement(etree.SubElement(rpr, q("a:solidFill")), q("a:srgbClr")).set("val", ink)
+        if ctx.typo.primary_family:
+            etree.SubElement(rpr, q("a:latin")).set("typeface", ctx.typo.primary_family)
+        etree.SubElement(r, q("a:t")).text = str(k)
+    ctx.warnings.append(f"{len(pairs)} empty marker(s) beside the lines numbered 1–{len(pairs)}")
+    return len(pairs)
+
+
 def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
     """Tall cards the slide fills to less than a third of their height (ЛЦТ p24: two white cards with a figure and a
     line at their top, two thirds empty) are no place for the content: RuntimeError, the renderer takes another sample
     or composes the slide."""
     from verstka.rendering.clone_check import ink_box
 
-    kinds = (PatternKind.cards, PatternKind.two_column, PatternKind.comparison, PatternKind.stat_row)
+    # (a list laid into a sample's cards too: VK Tech «Риски» — three theses in three tall cards, half of each empty)
+    kinds = (PatternKind.cards, PatternKind.two_column, PatternKind.comparison, PatternKind.stat_row, PatternKind.bullets)
     if getattr(ctx, "data_deck", False):
         kinds += (PatternKind.process,)  # a data deck's «Что дальше»: three steps in tall cards are near empty (qa3 N-L3)
     if getattr(ctx, "kind", None) not in kinds:
@@ -7195,6 +7275,16 @@ def _render_clone(slide: Slide, builder: DeckBuilder, plan_slide: LayoutSlide, o
             slide.__dict__["_verstka_cell_marks"] = marked
     except Exception:  # noqa: BLE001 - marks unread: the gate's other rules stand
         log.debug("cell marks not read", exc_info=True)
+    try:
+        _number_empty_markers(ctx)
+    except Exception:  # noqa: BLE001 - the markers stay as the sample drew them
+        log.debug("step markers not numbered", exc_info=True)
+    if oslide.kind == PatternKind.bullets and not getattr(ctx, "item_cells_checked", False):
+        # a list laid into a sample's cards, a line a card: the cards half empty refuse the sample as item cards do
+        # (VK Tech «Риски»: three theses at the top of three tall cards, the lower half bare — jury 20.10)
+        live = [e for e in ctx.item_text_els if e.getparent() is not None]
+        if len(live) >= 3:
+            _cards_not_empty(ctx, [[e] for e in live])
     if oslide.notes:
         try:
             slide.notes_slide.notes_text_frame.text = oslide.notes

@@ -341,9 +341,9 @@ def test_a_statement_under_a_label_heading_is_as_large_as_the_label(env):
     assert c2._under_heading() <= 0.9 * c2.kit.head_size + 0.05
 
 
-def test_short_steps_beside_long_lines_leave_the_lines_the_width(env):
-    """Four short steps («1 000 обращений») with long lines: the steps take a narrow column, the lines read at a larger
-    size than in a row of steps with the lines under it (Beehive, Vintage «Привлечение клиентов»: 10 pt notes)."""
+def test_a_row_of_short_steps_keeps_its_lines_readable(env):
+    """Four short steps («1 000 обращений») with long lines: the row of steps stays (a column of four names over empty
+    gaps read worse — Vintage, 20.10) and the lines under it read at 2.6 % of the slide height at least (10 pt before)."""
     from verstka.schemas.common import PatternKind
     from verstka.schemas.outline import SlideItem
 

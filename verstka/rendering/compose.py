@@ -1761,6 +1761,13 @@ class Composer:
         cols = (n if n <= 3 else (2 if n == 4 else 3)) if spread else (2 if n > 3 else 1)
         size = k.body
         dense = getattr(self, "_dense", False)
+        if not dense and not spread:
+            # lines read from the back of the room: never under 2.6 % of the slide height (Vintage: 10 pt under a row of
+            # steps on a 595 pt slide) — the template's first size there; the block over them gives way
+            want = self.READABLE * k.hpt
+            if size < want - 0.05:
+                up = [x for x in sorted(k.sizes) if x >= want - 0.05]
+                size = up[0] if up and up[0] <= max(k.lead, want * 1.2) else size
         if getattr(self, "_lines_aloud", False) and not spread:
             # the dense setting could not keep them on the slide either (`compose`): said aloud, the block takes the area
             self._lines_to_notes(lines)
@@ -3057,6 +3064,14 @@ class Composer:
         # rows close up (the hairline gaps down to 0.45 of a line) before the type steps down (B3-2)
         sizes = [k.h2, k.lead, k.body, k.small_text] if n <= 4 and total <= 260 else ([k.lead, k.body, k.small_text] if total <= 700 else [k.body, k.small_text])
         sizes = list(dict.fromkeys(sizes[:1] + [x for x in reversed(k.sizes) if sizes[-1] - 0.05 <= x < sizes[0] - 0.05] + sizes))
+        if n <= 4 and total <= 260:
+            # a short list reads at a comfortable size for the room — up to 3.4 % of the slide height, never as large as
+            # the slide's heading: a template whose own scale is derived and small (LibreOffice Pencil, Lights: «h2»
+            # 14 pt) set three short lines at 14 pt in a column over an empty slide
+            roomy = 0.034 * k.hpt
+            if k.head_size:
+                roomy = min(roomy, self._under_heading())
+            sizes = [x for x in k.sizes if sizes[0] + 0.05 < x <= roomy + 0.05] + sizes
         sizes.sort(reverse=True)
         if getattr(self, "_boost", 0) >= 1:
             # the fill pass: a short list climbs to the second heading size — and, under a heading that only names the
@@ -3357,6 +3372,12 @@ class Composer:
         least0 = self._least_text(n0)
         if not (c.items or c.columns) or not c.bullets or least0 >= floor - 0.05:
             return
+        steps = list(c.items or c.columns)
+        if len(steps) <= 5 and max(len(f"{i.title} {i.text}".strip()) for i in steps) <= 40:
+            # a row of up to five short steps keeps the sample's row (Vintage «Привлечение клиентов»: the row read better
+            # than a column of four names over empty gaps — 20.10): its lines under it are set larger instead
+            # (`_under_plan`, the readable size)
+            return
         o0, w0, notes0 = state
         keep = (list(self.warnings), self.o, getattr(self, "_notes", None))
         first_els = list(self.cv.tree)[n0:]
@@ -3460,16 +3481,17 @@ class Composer:
                 if block_h > area.h:
                     continue
                 if n > 1 and lines_h > steps_h:
-                    # the steps spread along the lines beside them (never more than two badges apart): one block, not a
-                    # short column over an empty half
-                    between = int(between + min((lines_h - steps_h) / (n - 1), 2 * d))
+                    # the steps a little apart (never stretched along the lines — gaps over half a slide read empty) and
+                    # their compact group centred on the lines beside them
+                    between = int(between + min((lines_h - steps_h) / (n - 1), 0.6 * d))
                     steps_h = sum(hs) + between * (n - 1)
                     block_h = max(steps_h, lines_h)
                 y0 = self._place_v(area, block_h)
                 x = area.x
+                sy = y0 + max(0, (block_h - steps_h) // 2)  # (the steps' group centred on the lines' block)
                 if n > 1:
-                    self.cv.line(x + d // 2, y0 + d // 2, x + d // 2, y0 + sum(hs[:-1]) + between * (n - 1) + d // 2, colors.accent, 1.25, name="Axis")
-                y = y0
+                    self.cv.line(x + d // 2, sy + d // 2, x + d // 2, sy + sum(hs[:-1]) + between * (n - 1) + d // 2, colors.accent, 1.25, name="Axis")
+                y = sy
                 for i, (ps, hh, off) in enumerate(zip(paras, hs, offs)):
                     el = self.cv.ellipse(Bbox(x=x, y=y, w=d, h=d), colors.accent)
                     self._label_in(el, str(i + 1), bs, k.on_accent(colors.accent, colors.text))  # the number at the steps' size
@@ -4694,6 +4716,13 @@ class Composer:
         # 8 pt on a 446 pt slide does not)
         below = [x for x in k.sizes if read * 0.85 - 0.05 <= x < read - 0.05]
         read = max(below) if below else read
+        if not resetting:
+            # a table set in its usual way reads from the back of the room: its cells from 2.6 % of the slide height (the
+            # template's first size there) — the ЛЦТ pitch's comparison table at 13 pt over an empty lower half (20.10)
+            want = self.READABLE * k.hpt
+            up = [x for x in sorted(k.sizes) if x >= want - 0.05]
+            if up and up[0] <= want * 1.25:
+                read = max(read, up[0])
         # a table set again — denser, or above its conclusion's room — keeps its lines and its conclusion on the slide
         # rather than its size: down to 0.8 of the threshold, never to the template's tiniest step (Progress: 8 pt)
         floor = max(floor, read * 0.8) if resetting else max(floor, read)
@@ -4726,7 +4755,7 @@ class Composer:
             # on the fill pass the rows grow until the table takes most of its area
             return measure_table(
                 t, width, k.font, sizes, 1.2,
-                max_h_emu=area.h, fill_h_emu=0 if tight else int((0.9 if boost >= 2 else 0.62) * area.h), min_row_h_emu=int((0.052 if tight else 0.065) * k.H), max_row_h_emu=int((0.13 if boost >= 2 else 0.10) * k.H),
+                max_h_emu=area.h, fill_h_emu=0 if tight else int((0.9 if boost >= 2 else 0.72) * area.h), min_row_h_emu=int((0.052 if tight else 0.065) * k.H), max_row_h_emu=int((0.13 if boost >= 2 else 0.10) * k.H),
                 header_bold=header_bold,
             )
 
