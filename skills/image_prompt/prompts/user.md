@@ -10,6 +10,9 @@ Pictures to describe:
 - id: {{ it.id }}
   slide headline: {{ it.headline }}
   the author's description: {{ it.hint }}
+{%- if it.slide %}
+  the slide's own words: {{ it.slide }}
+{%- endif %}
 {%- if it.frame %}
   the frame on the slide: {{ it.frame }}
 {%- endif %}

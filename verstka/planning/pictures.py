@@ -324,13 +324,14 @@ def _first_words(s: Any, head: str, limit: int = 140) -> str:
     return ""
 
 
-def _place(outlines: list[Any], first: Any, i: int, hint: str) -> None:
+def _place(outlines: list[Any], first: Any, i: int, hint: str, fit: Any = None) -> None:
     """The place on slide i of the first variant and on the same slide of every other one (by the text's slide number,
-    else by position)."""
+    else by position) that `fit` (default `_fits_picture`) lets keep a picture."""
+    fit = fit or _fits_picture
     ref = first.slides[i].spec_ref
     for o in outlines:
-        host = next((s for s in o.slides if ref is not None and s.spec_ref == ref and _fits_picture(s)), None)
-        if host is None and ref is None and i < len(o.slides) and _fits_picture(o.slides[i]):
+        host = next((s for s in o.slides if ref is not None and s.spec_ref == ref and fit(s)), None)
+        if host is None and ref is None and i < len(o.slides) and fit(o.slides[i]):
             host = o.slides[i]
         if host is None:
             continue
@@ -339,14 +340,27 @@ def _place(outlines: list[Any], first: Any, i: int, hint: str) -> None:
         host.content.photo_own = False
 
 
+def _unplace(outlines: list[Any], hint: str) -> None:
+    """Verstka's own place described by `hint` taken off every variant (the variants share one picture per place)."""
+    for o in outlines:
+        for s in o.slides:
+            c = s.content
+            if c.photo_slot == AUTO_LABEL and not c.photo_own and (c.photo_hint or "") == hint:
+                c.photo_slot, c.photo_hint, c.photo_own = None, None, False
+
+
 def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
     """Pictures on the slides where they help. A short content slide whose heading names a thing one can see (a place,
     a product, a device, a process at work — `concrete_subject`) gets a place first, each showing another thing than
     the deck's other pictures (the author's included), at most about one per PICTURE_SHARE slides. A deck with fewer
-    than `min_pictures` gets the rest on its roomiest short slides as scenes of what each of them says (`SCENE`: its
-    process, place, object or result as the text model reads it — never a scene the deck already has). The place is described by its thing (or scene)
-    and the slide's heading (the text's «Слайд N. …» heading when it has one), so the variants share one picture per
-    place. Returns what was done, for the warnings."""
+    than `min_pictures` gets the rest as scenes of what its slides say (`SCENE`), the most concrete slides first
+    (`concreteness`: an example, an application, a thing named in the text) — a definition, a formula, a rule, a
+    «смысл», a heading of mathematics never while a slide with something one can see is free (the live lecture of
+    20.10 spent its pictures on «касательная» and «определение»: Z-Image draws no mathematics, every attempt was
+    rejected). Verstka's own place already on such a slide (the writer's choice, made Verstka's by
+    `writer_places_as_own`) goes when another slide can take it. The place is described by its thing (or scene) and
+    the slide's heading and its most concrete sentence (`scene_words`), so the variants share one picture per place.
+    Returns what was done, for the warnings."""
     outlines = [o for o in outlines if o is not None and getattr(o, "slides", None)]
     if not outlines:
         return []
@@ -355,9 +369,22 @@ def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
     n = len(first.slides)
     need = min_pictures(n)
     cap = max(need, round(n / PICTURE_SHARE))
+    out: list[str] = []
+    fits = [i for i, s in enumerate(first.slides) if _fits_picture(s)]
+    plain = [i for i in fits if not is_abstract(first.slides[i])]
+    # a concrete slide too long for the first choice's half (steps, cards, long points: «Мгновенная скорость» of the
+    # lecture) is still a better place than a definition — when no short slide is left (three cards in half a slide
+    # broke their words, the jury's R07 s7), the renderer narrows the strip or takes the place back where the text
+    # would not read (rendering/synth.py), as for the second chance
+    wider = [i for i, s in enumerate(first.slides) if i not in fits and _fits_second(s) and concreteness(s) > 0 and not is_abstract(s)]
+    for k, s in enumerate(first.slides):
+        c = s.content
+        if c.photo_slot == AUTO_LABEL and not c.photo_own and is_abstract(s) and any(i != k and not first.slides[i].content.photo_slot for i in plain + wider):
+            _unplace(outlines, c.photo_hint or "")
+            out.append(f"picture moved off slide {k + 1} ({H.strip_end(s.headline or '')[:60]}): a definition, a formula or a rule shows nothing one can see")
     placed = [s for s in first.slides if s.content.photo_slot and not s.content.photo_own]
     if len(placed) >= cap:
-        return []
+        return out
     used = {t[0] for t in (concrete_subject(f"{s.content.photo_hint or ''} {s.headline or ''}") for s in placed) if t}
 
     def head_of(i: int) -> str:
@@ -365,33 +392,69 @@ def ensure_pictures(outlines: list[Any], brief_text: str = "") -> list[str]:
         return (heads.get(s0.spec_ref) if s0.spec_ref is not None else None) or H.strip_end(s0.headline or "")
 
     def said_of(i: int) -> str:
-        """The heading and the slide's first words: a heading alone («Что просим») gave the text model nothing to
-        picture, and it drew a server room for a request to hire sales managers (live run of 20.10)."""
+        """The heading and the slide's most concrete sentence: a heading alone («Что просим») gave the text model
+        nothing to picture, and it drew a server room for a request to hire sales managers (live run of 20.10)."""
         head = head_of(i)
-        more = _first_words(first.slides[i], head)
+        more = scene_words(first.slides[i], head)
         return f"{head}. {more}" if more else head
 
-    fits = [i for i, s in enumerate(first.slides) if _fits_picture(s)]
-    cands = [(i, got[0]) for i in fits if (got := concrete_subject(first.slides[i].headline or "")) is not None]
-    out: list[str] = []
+    cands = [(i, got[0]) for i in plain if (got := concrete_subject(first.slides[i].headline or "")) is not None]
     picked = _pick(cands, cap - len(placed), used, n)
     for i, thing in picked:
         _place(outlines, first, i, f"{H.cap_first(thing)} — {said_of(i)}")  # the thing itself, not the heading's word
         out.append(f"picture added on slide {i + 1} ({thing}: {head_of(i)[:60]}): the slide shows something one can see")
     short = need - len(placed) - len(picked)
     if short > 0:
-        # pictures are on and the text names nothing one can see: scenes of the deck's topic on its roomiest short
-        # slides (fewest words first), never next to another picture
+        # pictures are on and the text names nothing one can see: scenes of what the slides say, the most concrete
+        # slides first (fewest words among equals), never next to another picture when it can be helped; a slide of
+        # definitions or formulas only when no other slide is free
         taken = {i for i, _ in picked} | {k for k, s in enumerate(first.slides) if s.content.photo_slot}
-        free = [i for i in fits if i not in taken and all(abs(i - t) > 1 for t in taken)] or [i for i in fits if i not in taken]
-        room = sorted(free, key=lambda i: (len(_slide_text(first.slides[i])), i))[: max(short * 3, short)]
-        scenes = _pick([(i, f"scene{k}") for k, i in enumerate(sorted(room))], short, set(), n)
-        for k, (i, _) in enumerate(scenes):
-            _place(outlines, first, i, _scene_hint(k, said_of(i)))
+        # the short slides, the most concrete first (fewest words among equals), then the longer concrete ones; a
+        # definition only when nothing else is free
+        pool = [i for i in plain + wider if i not in taken] or [i for i in fits if i not in taken]
+        pool.sort(key=lambda i: (i not in fits, -concreteness(first.slides[i]), len(_slide_text(first.slides[i])), i))
+        scenes: list[int] = []
+        for apart in (True, False):
+            for i in pool:
+                if len(scenes) >= short:
+                    break
+                if i in scenes or any(abs(i - j) <= 1 for j in scenes):
+                    continue
+                if apart and any(abs(i - t) <= 1 for t in taken):
+                    continue
+                scenes.append(i)
+        for k, i in enumerate(sorted(scenes)):
+            _place(outlines, first, i, _scene_hint(k, said_of(i)), fit=None if i in fits else _fits_second)
             out.append(f"picture added on slide {i + 1} (a scene of the deck's topic: {head_of(i)[:60]}): pictures are on and no heading names a thing one can see")
     if not out and not placed:
         out.append("no picture added: no short content slide has room for one")
     return out
+
+
+def writer_places_as_own(outlines: list[Any], asked_text: str) -> int:
+    """The places the writer chose itself (planning/topic_writer.py: «[Место под изображение: …]» in the text it wrote
+    from a short request) are Verstka's own, not the person's: labelled AUTO_LABEL, they are chosen again by
+    `ensure_pictures`, count against the build's limit of picture attempts and go when their picture misses the slide
+    (a place the person asked for stays with its reason). A place whose description is in the person's own words
+    (`asked_text`) stays theirs. Returns how many places changed."""
+    from verstka.planning.slide_edit import ASKED_PICTURE
+
+    def norm(t: str) -> str:
+        return " ".join((t or "").lower().replace("ё", "е").split())
+
+    asked = norm(asked_text)
+    changed = 0
+    for o in outlines:
+        for s in getattr(o, "slides", None) or []:
+            c = s.content
+            if not c.photo_slot or c.photo_own or c.photo_slot in (AUTO_LABEL, ASKED_PICTURE):
+                continue
+            hint = norm(c.photo_hint or "")
+            if not hint or hint[:40] in asked:
+                continue
+            c.photo_slot = AUTO_LABEL
+            changed += 1
+    return changed
 
 
 def pass_picture_on(outline: Any, oslide: Any, hint: str | None) -> Any:
@@ -415,22 +478,81 @@ def pass_picture_on(outline: Any, oslide: Any, hint: str | None) -> Any:
 # moves to another slide — the one whose meaning is most a thing one can see (an example, an application, a place, a
 # device; for a lecture on the derivative a speedometer for «мгновенная скорость») — at most this many more per deck
 SECOND_CHANCES = 2
-_CONCRETE_HINT_RE = re.compile(r"пример|применени|кейс|на практике|в жизни|скорост|движени|автомобил|машин[аы]\b|поезд|опыт|эксперимент|"
+_CONCRETE_HINT_RE = re.compile(r"пример|применени|применя|кейс|на практике|в жизни|скорост|движени|автомобил|машин[аы]\b|поезд|опыт|эксперимент|"
                                r"измерени|наблюдени|клиент|покупател|пользовател|сотрудник|команд[аы]\b|город|завод|склад|магазин", re.I)
-_ABSTRACT_RE = re.compile(r"определени|формул|правил[оа]\b|правила|теорем|свойств|аксиом|лемм|доказательств|обозначени|термин", re.I)
+# a definition, a formula, a rule, a «meaning», a notion: nothing one can see (the live lecture of 20.10 spent its pictures
+# on «касательная», «геометрический смысл», «определение» — Z-Image draws no mathematics, every attempt was rejected)
+_ABSTRACT_RE = re.compile(r"определени|формул|правил[оа]\b|правила|теорем|свойств|аксиом|лемм|доказательств|обозначени|термин|"
+                          r"смысл|поняти|сущност|\bсуть\b", re.I)
+# the words of mathematics: a heading made of them names no thing one can see either
+_MATH_RE = re.compile(r"производн|интеграл|\bпредел|касательн|секущ|функци|уравнени|неравенств|дифференц|вектор|матриц|логарифм|"
+                      r"аргумент|приращени|график|координат|парабол|гипербол|коэффициент|экстремум|асимптот|многочлен|синус|косинус|тангенс", re.I)
+_FORMULA_TEXT_RE = re.compile(r"\$|\\frac|\b[a-z]\s*\(\s*[a-z]\s*\)|[a-z][²³]|\bd[xy]\b|[a-z]\s*=\s*[a-z0-9]", re.I)
 
 
-def concreteness(s: Any) -> int:
-    """How much a slide's meaning is a thing one can see: a thing named in its heading (3), in its text (2), an example,
-    an application or people at work (2); a definition, a formula, a rule last (−2)."""
-    head = s.headline or ""
-    text = _slide_text(s)
+def text_concreteness(head: str, text: str = "", formula: bool = False) -> int:
+    """How much a heading (and the words under it) name a thing one can see: a thing named in the heading (3), in the
+    words (2), an example, an application, people at work (2); a definition, a formula, a rule, a «смысл» (−2) and the
+    words of mathematics in the heading (−1) last."""
+    text = f"{head} {text}"
     score = 3 if concrete_subject(head) else (2 if concrete_subject(text) else 0)
     if _CONCRETE_HINT_RE.search(text):
         score += 2
-    if _ABSTRACT_RE.search(head) or (getattr(s.content, "formula", None) or "").strip():
+    if _ABSTRACT_RE.search(head) or formula:
         score -= 2
+    if _MATH_RE.search(head):
+        score -= 1
     return score
+
+
+def concreteness(s: Any) -> int:
+    """How much a slide's meaning is a thing one can see (`text_concreteness` of its heading and its text; a formula on
+    it counts as a definition)."""
+    return text_concreteness(s.headline or "", _slide_text(s), bool((getattr(s.content, "formula", None) or "").strip()))
+
+
+def is_abstract(s: Any) -> bool:
+    """A slide whose meaning is a definition, a formula, a rule, a «смысл» or a notion of mathematics: no picture shows
+    it — a heading «Строгое определение производной появилось» stays one whatever its text names («школа Лейбница»),
+    unless the heading itself names a thing one can see."""
+    head = s.headline or ""
+    return concreteness(s) < 0 or bool(_ABSTRACT_RE.search(head) and not concrete_subject(head))
+
+
+def _sentence_concreteness(t: str) -> int:
+    score = 3 if concrete_subject(t) else 0
+    if _CONCRETE_HINT_RE.search(t):
+        score += 2
+    if _ABSTRACT_RE.search(t):
+        score -= 2
+    if _MATH_RE.search(t) or _FORMULA_TEXT_RE.search(t):
+        score -= 1
+    return score
+
+
+def scene_words(s: Any, head: str, limit: int = 160) -> str:
+    """The slide's own sentence that names the most concrete situation — who or what does what, where («Спидометр
+    автомобиля показывает скорость в данный момент»), not its first words: the first words of «Производная описывает
+    скорость изменения в физике, экономике и технике» were its general claim, and the picture was a turbine «вообще»
+    (live lecture of 20.10). The first words when no sentence is more concrete than another."""
+    c = s.content
+    parts = [*c.bullets, *c.paragraphs, *(f"{it.title}: {it.text}".strip(": ") for it in c.items), *(f"{n.value} {n.label}".strip() for n in c.numbers),
+             s.subtitle or "", s.takeaway or ""]
+    sents: list[str] = []
+    for t in parts:
+        t = " ".join(str(t or "").split())
+        if not t or t.lower() in (head or "").lower() or is_picture_note(t):
+            continue
+        sents.extend(x for x in (H.split_sentences(t) or [t]) if x.strip())
+    if not sents:
+        return ""
+    scored = [(_sentence_concreteness(x), -k, x) for k, x in enumerate(sents)]
+    best = max(scored)
+    if best[0] <= 0 or best[0] == min(scored)[0]:
+        return _first_words(s, head, limit)
+    # (a formula's tokens are no part of a scene: «S′(t) — мгновенная скорость движения тела» → «мгновенная скорость…»)
+    t = re.sub(r"[:;,]\s+(?=—)", " ", " ".join(re.sub(r"\S*[()′=^_\\$]\S*", " ", best[2]).split())).strip(" —-:;,")
+    return H.strip_end(t[:limit].rsplit(" ", 1)[0] if len(t) > limit else t)
 
 
 def _fits_second(s: Any) -> bool:
@@ -463,6 +585,6 @@ def second_chance(outline: Any, tried: set[str], want: int) -> list[tuple[int, s
         if any(abs(k - j) <= 1 for j, _ in out):
             continue
         head = H.strip_end(s.headline or "")
-        more = _first_words(s, head)
+        more = scene_words(s, head)
         out.append((k, _scene_hint(0, f"{head}. {more}" if more else head)))
     return out

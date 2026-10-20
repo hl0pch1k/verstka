@@ -404,6 +404,9 @@ def generate_variants(
         ruled = with_rules(brief.text)
         if ruled != brief.text:
             brief = brief.model_copy(update={"text": ruled})
+    # the person's own words (the writer's text replaces the brief below): a picture place described in them is theirs,
+    # the writer's own places are Verstka's (planning/pictures.py writer_places_as_own)
+    asked_text = (brief.text if brief is not None else "") or ""
     if use_agent:
         rec, agent_models = _recording(providers if models_on else None, agent_stats)
     if use_agent and models_on and writer is not False:
@@ -526,22 +529,36 @@ def generate_variants(
         src_pictures = source_records(src_dir, pic_dir) if src_dir is not None else []
     if src_pictures:
         picture_reuse = {name: [*(picture_reuse or {}).get(name, []), *src_pictures] for name in strategies}
-    maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, providers if models_on else None, brief, outline, planned)
+    # the pictures' descriptions and the vision model's checks of them keep their own time to the end of the content
+    # checks (CONTENT_CHECKS_END_S), not the plan's model budget: a picture drawn at 3:40 was never checked (live 20.10)
+    pic_providers = _recording(providers_base.with_deadline(t_start + CONTENT_CHECKS_END_S), gen_stats)[0] if models_on and providers_base is not None else None
+    early = None
+    maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, pic_providers, brief, outline, planned)
     if pictures and maker is None:
         # the person asked for pictures and none can be made: said plainly, not left to guess
         _event_sink(progress)({"type": "agent", "step": "compile", "message": "Изображения: модель изображений недоступна (нет ключа или она выключена) — слайды собраны без картинок.", "share": 0.3})
     if maker is not None:
         # pictures on: every variant has its pictures, the text's places or short slides Verstka picks (planning/pictures.py)
-        from verstka.planning.pictures import ensure_pictures
+        from verstka.planning.pictures import ensure_pictures, writer_places_as_own
 
+        pic_outlines = [planned[nm][0] for nm in strategies if nm in planned] or ([outline] if outline is not None else [])
         try:
-            added = ensure_pictures([planned[nm][0] for nm in strategies if nm in planned] or ([outline] if outline is not None else []), brief.text if brief is not None else "")
+            if written:
+                writer_places_as_own(pic_outlines, asked_text)
+            added = ensure_pictures(pic_outlines, brief.text if brief is not None else "")
         except Exception:  # noqa: BLE001 - the deck keeps the places its text gave it
             log.warning("pictures: the places were not added", exc_info=True)
             added = []
         for nm in strategies:
             if nm in planned and added:
                 planned[nm][1].extend(added)
+        # the pictures start now, beside the layout (images/early.py): the variants' places get them when laid out (a
+        # plan given to re-render — an edit — keeps its pictures and asks the new ones after its layout, as before)
+        try:
+            early = _start_pictures(maker, pic_outlines, progress) if outline is None else None
+        except Exception:  # noqa: BLE001 - each variant asks its pictures after its layout, as before
+            log.warning("pictures: not asked right after the plan", exc_info=True)
+            early = None
     pending: list[dict] = []
     said_pictures: set = set()  # the timeline tells each place once, not once per variant
     from verstka.audit.eyes import load_config as eyes_config, look as look_at_slides
@@ -724,7 +741,7 @@ def generate_variants(
     # that got one audited again (the deterministic checks: the picture stands where its place stood)
     if any(v["pictures"] for v in pending):
         report("pictures: putting them in", 0.855)
-    second: dict = {}  # the slides that take rejected pictures' places, chosen once for every variant (planning/pictures.py)
+    second: dict = {"early": early} if early is not None else {}  # the slides that take rejected pictures' places, chosen once for every variant (planning/pictures.py)
     for v in pending:
         if not v["pictures"]:
             continue
@@ -732,7 +749,7 @@ def generate_variants(
         try:
             from verstka.images.fill import apply_pictures, write_records
 
-            left = (maker.deadline - time.monotonic()) if maker is not None and maker.deadline is not None else 0.0
+            left = (maker.checks_end - time.monotonic()) if maker is not None and maker.checks_end is not None else 0.0
             applied = apply_pictures(v["vdir"] / "deck.pptx", v["pictures"], wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
             records = applied.records
             # a place Verstka added itself whose picture did not come goes, and its slide is laid out again without it:
@@ -778,6 +795,12 @@ def generate_variants(
                     log.warning("audit after the pictures failed", exc_info=True)
         v["timings"]["pictures"] = round(time.time() - tp, 2)
     if maker is not None:
+        _say_limit(maker, pending, progress)
+        from verstka.images.service import timeline
+
+        tl = timeline(maker, t_start)
+        for v in pending:
+            v["picture_timeline"] = tl
         maker.close()
 
     # LibreOffice once per deck, all decks at once: the PDF export and the slide previews come from the same PDF
@@ -900,9 +923,54 @@ def _picture_maker(pictures: Optional[bool], image_provider, manifest: TemplateM
         return None, icfg
     from verstka.images.service import ImageMaker
 
+    from verstka.planning.pictures import min_pictures
+
     title = (outline.title if outline is not None else None) or next((o.title for o, _, _ in planned.values() if o.title), None) or (brief.title_hint if brief else None) or ""
-    deadline = t_start + float(icfg.get("budget_s", 240))
-    return ImageMaker(chain, manifest, folder, cfg=icfg, skills=skills, providers=providers, deadline=deadline, deck_title=title), icfg
+    # the vision model checks every picture before the content checks end (CONTENT_CHECKS_END_S): the last attempt is
+    # drawn early enough for its check (PICTURE_CHECK_S), and the export waits for the pictures until the checks end
+    checks_end = t_start + CONTENT_CHECKS_END_S
+    deadline = min(t_start + float(icfg.get("budget_s", 240)), checks_end - PICTURE_CHECK_S)
+    first = outline if outline is not None else next((o for o, _, _ in planned.values()), None)
+    n = len(first.slides) if first is not None else 0
+    # the image model's calls for the pictures Verstka chose itself: the owner's minimum × 2 (2 up to 7 slides, 4 from
+    # 8) — the live lecture of 20.10 drew 7 for a limit of 4; the person's own asks come on top of it
+    attempts = min_pictures(n) * PICTURE_ATTEMPTS_PER_MIN if n else None
+    return ImageMaker(chain, manifest, folder, cfg=icfg, skills=skills, providers=providers, deadline=deadline, deck_title=title,
+                      attempts=attempts, checks_end=checks_end), icfg
+
+
+PICTURE_CHECK_S = 15.0  # the vision model's look at a picture (and the export's grace), kept before the content checks end
+PICTURE_ATTEMPTS_PER_MIN = 2  # the image model's calls per picture of the owner's minimum (Verstka's own pictures)
+
+
+def _start_pictures(maker, outlines: list, progress: Optional[ProgressFn]):
+    """Every picture place of the plan asked right after it (images/early.py), the feed told so once."""
+    if maker is None or not outlines:
+        return None
+    from verstka.images.early import EarlyPictures
+    from verstka.planning.pictures import SECOND_CHANCES, min_pictures
+
+    first = outlines[0]
+    early = EarlyPictures(maker, first, need=min_pictures(len(first.slides)), second_max=SECOND_CHANCES, deck_title=maker.deck_title)
+    items = early.start()
+    if items:
+        nums = ", ".join(str(it.index + 1) for it in items)
+        limit = f" (лимит попыток на сборку — {maker.attempts})" if maker.attempts else ""
+        _event_sink(progress)({"type": "agent", "step": "compile", "share": 0.3,
+                               "message": f"Изображения: рисую сразу после плана, пока верстаются варианты — слайды {nums}{limit}."})
+    return early
+
+
+def _say_limit(maker, pending: list[dict], progress: Optional[ProgressFn]) -> None:
+    """The build's limit of attempts spent on Verstka's own pictures: said once, plainly, in the feed and the warnings."""
+    if not getattr(maker, "budget_hit", False):
+        return
+    n = maker.attempts
+    _event_sink(progress)({"type": "agent", "step": "compile", "share": 0.855,
+                           "message": f"Изображения: картинки не прошли проверку соответствия — лимит попыток на сборку ({n}) исчерпан, "
+                                      "слайды без картинок сверстаны без мест под них."})
+    for v in pending:
+        v["warnings"].append(f"pictures: картинки не прошли проверку соответствия — the build's limit of {n} picture attempts is spent")
 
 
 def _short(text: str, n: int = 90) -> str:
@@ -977,7 +1045,14 @@ def _second_chance(v: dict, records: list[dict], drop: dict[str, str], maker, ic
         return records
     tried: set = second.setdefault("tried", set())
     tried.update(missed)
-    if not second.get("chosen"):
+    early = second.get("early")
+    if early is not None:
+        # the second chance started as soon as the picture missed (images/early.py): its slides, drawn already or
+        # being drawn — a slide whose picture missed too is not laid out again for nothing
+        early.sync()
+        second["picks"] = list(early.picks)
+        second["chosen"] = True
+    elif not second.get("chosen"):
         # the candidates, ranked once for every variant (the same slides, the same descriptions: one picture each)
         second["chosen"] = True
         second["picks"] = [(o.slides[k].spec_ref, k, hint) for k, hint in second_chance(o, tried, SECOND_CHANCES + 3)]
@@ -986,6 +1061,9 @@ def _second_chance(v: dict, records: list[dict], drop: dict[str, str], maker, ic
     for ref, k, hint in second.get("picks", []):
         if have >= need:
             break
+        if early is not None and early.state_of(hint) == "failed":
+            attempted.add((ref, k))
+            continue
         if (ref, k) not in attempted and len(attempted) >= SECOND_CHANCES:
             break  # at most SECOND_CHANCES more slides drawn per generation
         host = next((s for s in o.slides if s.spec_ref == ref), None) if ref is not None else (o.slides[k] if k < len(o.slides) else None)
@@ -999,7 +1077,7 @@ def _second_chance(v: dict, records: list[dict], drop: dict[str, str], maker, ic
         if not any(p.ask is not None for p in pend):
             continue  # the renderer took the place back (the text beside it would not read): the next one, nothing paid
         attempted.add((ref, k))
-        left = (maker.deadline - time.monotonic()) if maker.deadline is not None else 60.0
+        left = (maker.checks_end - time.monotonic()) if maker.checks_end is not None else 60.0
         got = apply_pictures(v["vdir"] / "deck.pptx", pend, wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
         records = merged(records, got.records, set(relaid))
         still = free_added_places(got.records, v["outline"])
@@ -1287,11 +1365,13 @@ def _usage_of(stats: list) -> dict:
 
 def _pictures_extra(v: dict) -> dict:
     recs = v.get("picture_records")
+    tl = v.get("picture_timeline") or {}
     if not recs:
-        return {}
+        # (every place gone — its picture missed, the limit spent: when they were drawn and checked is still told)
+        return {"pictures": {"timeline": tl}} if tl.get("attempts") or tl.get("limit_spent") else {}
     from verstka.images.fill import summary
 
-    return {"pictures": summary(recs)}
+    return {"pictures": {**summary(recs), **({"timeline": tl} if tl else {})}}
 
 
 def _fonts_choice(template_id: str, workspace_root) -> Optional[dict]:

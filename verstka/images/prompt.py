@@ -114,6 +114,13 @@ def _clean(text: str, limit: int = 300) -> str:
     return t[:limit].rstrip(" .,;:")
 
 
+def _is_scene(ask: ImageAsk) -> bool:
+    """A scene of what the slide says, a place Verstka chose itself (planning/pictures.py SCENE)."""
+    from verstka.planning.pictures import AUTO_LABEL, SCENE
+
+    return ask.label == AUTO_LABEL and (ask.hint or "").startswith(SCENE) and not (ask.wish or "").strip()
+
+
 # the subject of a picture the person asked for when there is no text model to describe the slide in English
 DECORATIVE_SUBJECT = "Abstract decorative composition of soft overlapping geometric shapes, gentle light and depth"
 
@@ -125,6 +132,10 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     cfg = cfg if cfg is not None else load_config()
     pcfg = cfg.get("prompt") or {}
     style = style_of(" ".join([ask.hint or "", ask.label or "", ask.wish or ""]), cfg, ask.template_style)
+    if style == "diagram" and _is_scene(ask):
+        # a scene Verstka chose is a real situation, never a bare figure: the slide's words of mathematics («производная
+        # характеризует скорость изменения функции») made it a «flat vector diagram» — a lone curve (live lecture 20.10)
+        style = ask.template_style if ask.template_style in ((pcfg.get("styles") or {})) and ask.template_style != "diagram" else str(cfg.get("default_style") or "photo")
     scfg = pcfg.get("strict") or {}
     lead_only = False
     if not ask.subject_en and (ask.label or "") == "Иллюстрация к слайду":
@@ -192,8 +203,10 @@ def english_subjects(asks: list[ImageAsk], deck: str, skills, providers, others:
     model or it fails — the prompts then carry the author's own words."""
     if not asks or skills is None or providers is None or not getattr(providers, "has", lambda r: False)("llm"):
         return {}
+    # (the slide's own words: a scene is the concrete situation they name — who or what does what, where — not an
+    # object of the field «in general»: a turbine for «скорость изменения в технике», live lecture of 20.10)
     items = [{"id": a.key(), "headline": _clean(a.headline, 120), "hint": _clean(a.hint or a.label or a.headline, 400), "frame": FRAME_WORDS.get(a.frame or "", ""),
-              "wish": _clean(a.wish, 300) if a.wish else None} for a in asks]
+              "wish": _clean(a.wish, 300) if a.wish else None, "slide": _clean(a.slide_text, 400) if a.slide_text else None} for a in asks]
     seen = [_clean(o, 200) for o in (others or []) if (o or "").strip()][-8:]
     try:
         res = skills.run("image_prompt", providers, {"deck": _clean(deck, 160) or "—", "items": items, "others": seen})

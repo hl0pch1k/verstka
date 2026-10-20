@@ -21,6 +21,19 @@ from verstka.images.text_check import PictureHasText, PictureNotFitting, check_t
 
 log = logging.getLogger(__name__)
 
+# a picture Verstka chose itself that the build's limit of attempts left undrawn (its place goes, the slide is laid out
+# without it; the feed says so once — pipeline/generate.py)
+WHY_LIMIT = "картинки не прошли проверку соответствия — лимит попыток изображений на сборку исчерпан"
+DRAW_S = 12.0  # an attempt starts only while this long is left before the drawing deadline (Z-Image draws in ~10 s)
+
+
+def is_auto(ask: ImageAsk) -> bool:
+    """A picture Verstka chose itself (planning/pictures.py AUTO_LABEL, no wish of the person's): it counts against the
+    build's limit of attempts; the person's own asks never do."""
+    from verstka.planning.pictures import AUTO_LABEL
+
+    return ask.label == AUTO_LABEL and not (ask.wish or "").strip()
+
 
 @dataclass
 class Made:
@@ -52,7 +65,12 @@ def seed_of(key: str, aspect: str, salt: str = "") -> int:
 
 class ImageMaker:
     def __init__(self, provider, manifest, folder: Path, *, cfg: Optional[dict] = None, skills: Any = None, providers: Any = None,
-                 deadline: Optional[float] = None, limit: Optional[int] = None, deck_title: str = "") -> None:
+                 deadline: Optional[float] = None, limit: Optional[int] = None, deck_title: str = "", attempts: Optional[int] = None,
+                 checks_end: Optional[float] = None) -> None:
+        """`deadline`: no attempt is drawn past it (time.monotonic()); `checks_end`: when the vision model's checks of
+        the pictures end (`providers` are bound to it) — the export waits for the pictures until then. `attempts`: the
+        build's limit of the image model's calls for the pictures Verstka chose itself (`is_auto`; the person's own asks
+        come on top of it), None — no limit."""
         self.provider = provider
         self.cfg = cfg if cfg is not None else load_config()
         self.palette = P.palette_of(manifest)
@@ -63,6 +81,13 @@ class ImageMaker:
         self.deadline = deadline
         self.limit = int(limit if limit is not None else self.cfg.get("max_per_generation", 8))
         self.deck_title = deck_title
+        self.checks_end = checks_end if checks_end is not None else deadline
+        self.attempts = attempts
+        self.auto_used = 0  # the image model's calls for Verstka's own pictures so far
+        self.budget_hit = False  # an attempt (or a second chance) was refused: the limit is spent
+        self.log: list[dict] = []  # every attempt: when it was drawn and checked, its grade (run_manifest «pictures»)
+        self._early: dict[str, Future] = {}  # pictures asked right after the plan, by their ask's key
+        self.first_asked: Optional[float] = None  # when the first picture was asked (time.monotonic())
         self._pool = ThreadPoolExecutor(max_workers=max(1, int(self.cfg.get("concurrency", 3))), thread_name_prefix="t2i")
         self._futures: dict[tuple[str, str], Future] = {}
         self._subjects: dict[str, Optional[str]] = {}
@@ -72,13 +97,45 @@ class ImageMaker:
         self.asked = 0
 
     # ---- asking
+    def budget_left(self) -> Optional[int]:
+        """Attempts left for Verstka's own pictures (None: no limit)."""
+        with self._lock:
+            return None if self.attempts is None else max(0, self.attempts - self.auto_used)
+
+    def _take(self, ask: ImageAsk) -> bool:
+        """One attempt of the build's limit for a picture Verstka chose itself; False — the limit is spent."""
+        if self.attempts is None or not is_auto(ask):
+            return True
+        with self._lock:
+            if self.auto_used >= self.attempts:
+                self.budget_hit = True
+                return False
+            self.auto_used += 1
+            return True
+
+    def prefetch(self, ask: ImageAsk, aspect: str, *, seed: Optional[int] = None) -> Future:
+        """The picture of a place asked right after the plan, before the slide is laid out (pipeline/generate.py): the
+        place's own ask later (`submit`, in its frame's proportions) gets this picture — cropped to its frame — unless
+        the frame is the slide's background (a picture under the text is composed for it)."""
+        fut = self.submit(ask, aspect, seed=seed)
+        with self._lock:
+            self._early.setdefault(ask.key(), fut)
+        return fut
+
     def submit(self, ask: ImageAsk, aspect: str, *, seed: Optional[int] = None, fresh: bool = False) -> Future:
         """The picture for `ask` at `aspect`: one future per (ask, aspect) unless `fresh` (a new picture on the person's
-        wish). Past the generation's limit of different pictures the future fails at once (the place stays free)."""
+        wish); the picture asked for the same place right after the plan (`prefetch`) serves any frame but a
+        background. Past the generation's limit of different pictures the future fails at once (the place stays free)."""
         k = (ask.key(), aspect)
         with self._lock:
+            if self.first_asked is None:
+                self.first_asked = time.monotonic()
             if not fresh and k in self._futures:
                 return self._futures[k]
+            early = self._early.get(ask.key())
+            if not fresh and early is not None and ask.frame != "background":
+                self._futures[k] = early
+                return early
             if not fresh and len({key for key, _ in self._futures}) >= self.limit and ask.key() not in {key for key, _ in self._futures}:
                 f: Future = Future()
                 f.set_exception(ImageError(f"more than {self.limit} pictures in one generation"))
@@ -136,8 +193,16 @@ class ImageMaker:
         return next(iter(got.values()), None)
 
     def _make(self, ask: ImageAsk, aspect: str, seed: Optional[int]) -> Made:
-        if self.deadline is not None and self.deadline - time.monotonic() < 5:
+        if self.deadline is not None and self.deadline - time.monotonic() < min(5.0, DRAW_S):
             raise ImageError("no time left in the generation for a picture")
+        left = self.budget_left()
+        if left is not None and left <= 0 and is_auto(ask):
+            # (not even described: the text model's call would be for a picture that is never drawn)
+            self.budget_hit = True
+            err = ImageError(f"the build's limit of {self.attempts} picture attempts is spent")
+            err.why = WHY_LIMIT
+            raise err
+        began = time.monotonic()  # (the description by the text model comes first)
         subject = self._subject(ask)
         from verstka.planning.pictures import AUTO_LABEL
 
@@ -168,7 +233,14 @@ class ImageMaker:
             # (the vision model's grade under quality.min_fit: another subject, deformed hands, a symbol) is drawn again
             # from the same prompt (the host takes no seed: the same prompt draws a new picture too)
             prompt, style = build_prompt(ask2, self.palette, self.cfg, strict=strict)
+            if not self._take(ask):
+                # the build's limit of attempts for Verstka's own pictures is spent (configs: minimum × 2): no more
+                # money on a slide the image model keeps missing
+                log.info("picture %s: the build's limit of %s attempts is spent", ask.key(), self.attempts)
+                break
+            entry = {"key": ask.key(), "headline": (ask.headline or "")[:80], "auto": is_auto(ask), "attempt": k + 1, "began": began, "start": time.monotonic()}
             res = self.provider.generate(prompt, aspect=aspect, seed=seed + k, deadline=self.deadline)
+            entry["drawn"] = time.monotonic()
             if res.cost_rub is not None:
                 cost = (cost or 0.0) + float(res.cost_rub)
             graded = P.grade(P.open_image(res.data), self.palette, strength)
@@ -178,6 +250,10 @@ class ImageMaker:
             path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
             verdict = check_text(path, self.skills, self.providers, headline=ask.headline, subject=subject or ask.what, points=ask.slide_text) if attempts > 1 else None
             unchecked = bool(verdict is not None and verdict.unchecked)
+            entry.update(checked=time.monotonic(), fits=None if verdict is None or unchecked else verdict.fits, unchecked=unchecked,
+                         text=None if verdict is None or unchecked else verdict.text)
+            with self._lock:
+                self.log.append(entry)
             seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None or unchecked else verdict.text, "what": None if verdict is None else verdict.what,
                          "fits": None if verdict is None or unchecked else verdict.fits, "flaws": None if verdict is None else verdict.flaws, "unchecked": unchecked})
             if verdict is None or verdict.clean:
@@ -203,8 +279,12 @@ class ImageMaker:
                 log.info("picture %s has writing (%s): drawn again", name, verdict.what or "text")
                 path.unlink(missing_ok=True)
                 strict += 1
-            if k + 1 < attempts and self.deadline is not None and self.deadline - time.monotonic() < 25:
-                break  # no time for another picture
+            if k + 1 < attempts and self.deadline is not None and self.deadline - time.monotonic() < DRAW_S:
+                break  # no time for another picture (and its check) before the drawing deadline
+        if best is None and not seen:
+            err = ImageError(f"the build's limit of {self.attempts} picture attempts is spent")
+            err.why = WHY_LIMIT
+            raise err
         if best is None:
             self._log_attempts(ask, aspect, seed, seen)
             raise PictureHasText(f"writing on every picture ({seen[-1]['what'] or 'text'}), {len(seen)} attempts")
@@ -241,3 +321,22 @@ class ImageMaker:
             (self.folder / f"{name}.json").write_text(json.dumps({"hint": ask.hint, "headline": ask.headline, "checks": seen}, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+
+def timeline(maker: Optional["ImageMaker"], t_start: float) -> dict:
+    """The pictures' attempts for run_manifest.json: when the first was drawn and the last checked (seconds from the
+    generation's start), how many the image model drew (Verstka's own against the build's limit) and each one's grade."""
+    if maker is None:
+        return {}
+    with maker._lock:
+        log_ = [dict(e) for e in maker.log]
+    rel = lambda t: round(float(t) - t_start, 1) if t is not None else None  # noqa: E731
+    rows = [{"slide": e.get("headline"), "auto": e.get("auto"), "attempt": e.get("attempt"), "began_s": rel(e.get("began")), "start_s": rel(e.get("start")),
+             "drawn_s": rel(e.get("drawn")), "checked_s": rel(e.get("checked")), "fits": e.get("fits"), "unchecked": e.get("unchecked"),
+             "text": e.get("text")} for e in sorted(log_, key=lambda e: e.get("start") or 0)]
+    return {
+        "attempts": len(rows), "auto_attempts": maker.auto_used, "attempts_limit": maker.attempts, "limit_spent": maker.budget_hit,
+        "first_asked_s": rel(maker.first_asked),
+        "first_start_s": rows[0]["start_s"] if rows else None, "last_checked_s": max((r["checked_s"] or 0) for r in rows) if rows else None,
+        "deadline_s": rel(maker.deadline), "checks_end_s": rel(maker.checks_end), "tries": rows,
+    }
