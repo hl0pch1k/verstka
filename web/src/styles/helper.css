@@ -86,8 +86,9 @@
 .hp-k::before,.hp-k::after{visibility:hidden}
 .hp-kp{position:absolute;top:0;bottom:0;z-index:-1;display:block;box-sizing:border-box;pointer-events:none;will-change:transform}
 /* заготовка открытия (наведение): куски уже своими слоями, но невидимы — коробка до нажатия как всегда (своим слоем на
-   дробном месте обводка куска в Safari чуть тусклее) */
-.hp-kp.hp-kh{opacity:0}
+   дробном месте обводка куска в Safari чуть тусклее). Спрятаны срезом, а не прозрачностью: прозрачный слой Safari не
+   рисует, и все куски рисовались бы в кадре нажатия («Создать» 1920: первый кадр открытия до 45 мс → 17–26) */
+.hp-kp.hp-kh{clip-path:inset(0 0 0 100%) !important}
 .hp-go .hp-erase,.hp-go :is([data-hpm],[data-hps],[data-hpz],[data-hpr]){will-change:transform}
 /* ластик ленты миниатюр (helperMotion `eraserOf`): цвет плиты, едет с правым краем ленты; колонка полного вида — над ним */
 .hp-erase{position:absolute;z-index:0;display:block;pointer-events:none}
