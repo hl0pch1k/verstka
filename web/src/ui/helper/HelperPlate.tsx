@@ -18,7 +18,8 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { useSwap } from "../kit/useSwap";
 import { useStale } from "../shell/StaleLine";
-import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
+import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, linkOpen, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
+import type { SlideLink } from "../../types";
 import { useHelperChat } from "./useHelperChat";
 import { layerOpen } from "../shell/sheets";
 import { usePhone } from "../shell/tier";
@@ -44,6 +45,16 @@ function BotText({ text }: { text: string }) {
         ? <p key={i} style={{ margin: i ? "4px 0 0" : 0 }}>{typeset(b.text)}</p>
         : <ul key={i} className="gh-ul">{b.items.map((t, k) => <li key={k}>{typeset(t)}</li>)}</ul>)}
     </div>
+  );
+}
+
+/** «Показать слайд N» под ответом о правке: к изменённому слайду (его вариант, экран результата). */
+function ShowSlide({ link, onShow }: { link: SlideLink; onShow(l: SlideLink): void }) {
+  return (
+    <button type="button" className="p2-pill gh-show" onClick={() => onShow(link)} style={{ alignSelf: "flex-start", marginTop: 8, height: 32, padding: "0 12px", fontSize: 13 }}>
+      <Icon name="eye" size={14} />
+      <span style={{ marginLeft: 6 }}>Показать слайд {link.slide}</span>
+    </button>
   );
 }
 
@@ -114,7 +125,13 @@ function Chips({ chips, enter, off, onPick, style }: { chips: string[]; enter: b
 }
 
 export function HelperPlate() {
-  const { ui, dispatch, messages, generation, activeVariant, selectedSlide, templateId, building, healthError } = useApp();
+  const { ui, dispatch, messages, generation, activeVariant, activeStrategy, setActiveStrategy, selectedSlide, setSelectedSlide, templateId, building, healthError } = useApp();
+  // «Показать слайд N»: экран результата, вариант правки, её слайд
+  const showSlide = (l: SlideLink) => {
+    if (ui.screen !== "result") dispatch({ type: "go", screen: "result" });
+    if (l.strategy && l.strategy !== activeStrategy) setActiveStrategy(l.strategy);
+    setSelectedSlide(l.slide);
+  };
   const open = ui.helper;
   const chat = useHelperChat();
   const [text, setText] = useState("");
@@ -261,7 +278,11 @@ export function HelperPlate() {
                 <div key={id} className={cls("gh-item hp-st", user ? "gh-r" : "gh-l", fresh(ts) && "p2-in")} style={st(feedDelay(i + 1, n, true))}>
                   {it.kind === "job" ? <JobCard job={it.job} />
                     : it.kind === "note" ? <NoteLine note={it.note} latest={it.note.id === latestRefreshNote(chat.notes, it.note.refresh)} />
-                    : user ? <div className="gh-user">{it.msg.text}</div> : <BotText text={it.msg.text} />}
+                    : user ? <div className="gh-user">{it.msg.text}</div>
+                    : <>
+                      <BotText text={it.msg.text} />
+                      {linkOpen(it.msg.show, generation?.id ?? null) && <ShowSlide link={it.msg.show} onShow={showSlide} />}
+                    </>}
                 </div>
               );
             })}

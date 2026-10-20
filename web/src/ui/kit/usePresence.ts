@@ -3,18 +3,19 @@ import { presenceNext, presenceWaits, type Presence } from "./presence";
 
 /** Держит содержимое смонтированным, пока идёт уход (ms), и включает «показ» только после того, как закрытое состояние
  *  встало в DOM (и прошли ещё два кадра) — так CSS-переход входа всегда стартует из закрытого состояния. Шаги — чистая
- *  presenceNext (presence.ts). Показ ждёт отрисовки закрытого, а не просто двух кадров от клика: тяжёлое содержимое (лист
- *  «Подробнее», «Мои презентации», «Шаблоны») рисуется дольше кадра, и React сливал «смонтировать закрытым» и «показать»
- *  в одну отрисовку — слой вставал сразу на место, без подъёма.
- *  `warm` — смонтировать закрытым заранее (наведение на пункт шапки, layers/warm.ts): закрытое уже нарисовано, и показ —
- *  в том же кадре, что открытие (до отрисовки, useLayoutEffect), подъём начинается в кадре нажатия. */
-export function usePresence(open: boolean, ms: number, warm = false): Presence {
+ *  presenceNext (presence.ts). Показ ждёт отрисовки закрытого, а не просто двух кадров от клика: тяжёлое содержимое
+ *  рисуется дольше кадра, и React сливал «смонтировать закрытым» и «показать» в одну отрисовку — без подъёма.
+ *  `instant` (слои колоды) — показ в том же кадре: закрытое монтируется, его стиль пересчитывается принудительно (до
+ *  отрисовки, useLayoutEffect), и сразу ставится показ — переход стартует из закрытого в кадре нажатия.
+ *  `warm` — смонтировать закрытым заранее (наведение на пункт шапки, layers/warm.ts): тяжёлое содержимое монтируется не в
+ *  кадре нажатия. */
+export function usePresence(open: boolean, ms: number, warm = false, instant = false): Presence {
   const [state, setState] = useState<Presence>(() => ({ mounted: open || warm, shown: open }));
   // закрытое состояние нарисовано (смонтировано не в этом кадре)
   const painted = useRef(false);
   useEffect(() => {
     if (open) {
-      // смонтировать закрытым; показ — эффект ниже, когда закрытое уже в DOM
+      // смонтировать закрытым; показ — ниже (в этом же кадре или когда закрытое уже в DOM)
       setState((p) => (p.mounted ? p : presenceNext(p, true)));
       return;
     }
@@ -45,11 +46,21 @@ export function usePresence(open: boolean, ms: number, warm = false): Presence {
       cancelAnimationFrame(inner);
     };
   }, [state.mounted, state.shown]);
-  // открыли прогретое (закрытое уже нарисовано) — показ в этом же кадре
+  // открытие: смонтировать закрытым — в этом же кадре (instant); показ — в этом же кадре, если закрытое уже нарисовано
+  // (прогрев) или если стиль закрытого пересчитан принудительно (instant)
   useLayoutEffect(() => {
-    if (open && state.mounted && !state.shown && painted.current) setState({ mounted: true, shown: true });
-  }, [open, state]);
-  const waiting = presenceWaits(open, state);
+    if (!open || state.shown) return;
+    if (!state.mounted) {
+      if (instant) setState({ mounted: true, shown: false });
+      return;
+    }
+    if (painted.current || instant) {
+      // закрытое — в стиле: переход входа стартует из него
+      if (!painted.current) void document.body.offsetWidth;
+      setState({ mounted: true, shown: true });
+    }
+  }, [open, state, instant]);
+  const waiting = presenceWaits(open, state) && !instant;
   useEffect(() => {
     if (!waiting) return;
     let inner = 0;

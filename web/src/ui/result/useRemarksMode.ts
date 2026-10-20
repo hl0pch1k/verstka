@@ -10,7 +10,7 @@ import { usePresence } from "../kit/usePresence";
 import type { FilmMarks } from "./Film";
 import { useFixStage, type FxPhase } from "./FixSketch";
 import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, fixUnchangedText, lastEditIs, slideSketch, undoneIn } from "./fix";
-import { firstRemarkSlide, slideBadges, slideRemarks, stageMarks, type Frame, type OkPin, type Pin } from "./marks";
+import { firstRemarkSlide, jumpText, slideBadges, slideRemarks, stageMarks, type Frame, type OkPin, type Pin } from "./marks";
 import type { PanelLine, PanelRow, PanelView, RemarksPanelProps } from "./RemarksPanel";
 import { busyWhy, staleOf } from "./slideJob";
 import type { SlideJob } from "./useSlideJob";
@@ -77,6 +77,8 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const [wishAt, setWishAt] = useState({ k: "", t: "" });
   const wish = wishAt.k === slideKey ? wishAt.t : "";
   const badges = useMemo(() => slideBadges(v), [v]);
+  // включение перешло на другой слайд — панель говорит об этом, пока на нём и стоим (не уводит молча)
+  const [jump, setJump] = useState<{ strategy: string; from: number; to: number; fixing: boolean } | null>(null);
   // над вариантом идёт задача над всем вариантом, которую этот экран не запускал («Исправить всё», возврат из
   // «Агента»): переключатель и «Исправить слайд» выключены с её причиной. Работа над слайдом (своя или подхваченная —
   // начатая до возвращения сюда, помощником) режим не выключает: пока агент исправляет слайд, режим не закрывается, а
@@ -86,14 +88,23 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
 
   const toggle = () => {
     if (off) return;
-    if (ui.remarks) return dispatch({ type: "set", patch: { remarks: false } });
+    if (ui.remarks) {
+      setJump(null);
+      return dispatch({ type: "set", patch: { remarks: false } });
+    }
     setSince(Date.now());
+    setJump(null);
     // агент исправляет слайд — к нему (карточка хода); на открытом слайде замечаний нет (и нет итога исправления) — к
-    // первому слайду с ними
-    if (fixWork && fixWork.slide !== n) setSelectedSlide(fixWork.slide);
-    else if (!fixWork && !open.length && !fixDone) {
+    // первому слайду с ними; переход — строкой в панели
+    if (fixWork && fixWork.slide !== n) {
+      setSelectedSlide(fixWork.slide);
+      setJump({ strategy: v.strategy, from: n, to: fixWork.slide, fixing: true });
+    } else if (!fixWork && !open.length && !fixDone) {
       const to = firstRemarkSlide(v, n);
-      if (to !== null && to !== n) setSelectedSlide(to);
+      if (to !== null && to !== n) {
+        setSelectedSlide(to);
+        setJump({ strategy: v.strategy, from: n, to, fixing: false });
+      }
     }
     dispatch({ type: "set", patch: { remarks: true } });
   };
@@ -112,6 +123,8 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
       : fixRun.note ? { tone: "info", text: fixRun.note }
       : fixRun.fix && !fixRun.fix.applied ? { tone: "info", text: fixUnchangedText(fixRun.fix) } : null
     : null;
+  const jumpLine: PanelLine | null = jump && jump.strategy === v.strategy && jump.to === n
+    ? { tone: "info", text: jumpText(jump.from, jump.to, jump.fixing) } : null;
   const steps = fixRun ? fixSteps(job.live.events, fixRun.phase === "done") : null;
   const summary = fixDone ? fixSummary(fixRun!.fix!) : null;
   // «Вернуть как было» без итога на странице (перезагрузка): последнее изменение варианта — исправление этого слайда
@@ -135,7 +148,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
     panel: {
       shown: rm.shown, since, n, view, rows, sel, onSel: (i) => setSelAt({ k: viewKey, i }),
       wish, onWish: (t) => setWishAt({ k: slideKey, t }), onFix, fixBusy, fixOff: busyWhy(run) ?? other?.why ?? null, revert,
-      line: view === "rem" || view === "none" ? line : null,
+      line: view === "rem" || view === "none" ? line ?? jumpLine : null,
       elsewhere: badges.size > 0,
       progress: view === "fix" && fixRun && steps ? {
         clock: clock((fixRun.endedAt ?? now) - fixRun.startedAt), value: fixRun.phase === "work" ? job.live.progress : 1,

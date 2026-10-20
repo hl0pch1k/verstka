@@ -16,7 +16,7 @@ import { sessionId } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { ChatResponse, Generation, Job } from "../../types";
 import {
-  asEditResult, asFixResult, chatFailText, chatTarget, describeFixes, editFailText, feedProgress, planActions, reloadFailText, OTHER_DECK,
+  asEditResult, asFixResult, chatFailText, chatTarget, describeFixes, editFailText, editLink, feedProgress, planActions, reloadFailText, OTHER_DECK,
   type EditAction, type Edited, type FeedJob, type FeedNote, type FixOutcome,
 } from "./chat";
 
@@ -117,7 +117,8 @@ export function useHelperChat(): HelperChat {
             if (r.slide) latest.current.setSelectedSlide(r.slide);
           }
         }
-        latest.current.pushMessage("assistant", r?.reply ?? "Готово.");
+        // под ответом — «Показать слайд N», пока на экране та презентация
+        latest.current.pushMessage("assistant", r?.reply ?? "Готово.", after?.kind === "open" ? editLink(r, gid, a) : undefined);
         tellReload(after, gid);
       },
       onFailed: (job: Job) => {

@@ -4,7 +4,7 @@
 import { ApiError } from "../../api";
 import { hasCyrillic, humanError } from "../../lib/errors";
 import { plural } from "../../lib/utils";
-import type { ChatAction, ChatMessage, ChatResponse, EditResult, FixResult } from "../../types";
+import type { ChatAction, ChatMessage, ChatResponse, EditResult, FixResult, SlideLink } from "../../types";
 import type { Screen, SheetTab, UiAction } from "../deck/geometry";
 
 // ── open_tab: имена вкладок сервера (старый интерфейс) → шаги экрана «Слоёв»
@@ -279,6 +279,18 @@ export interface ChipCtx {
 
 /** Правка из чата изменила презентацию `gid` (её слайд; null — какой, неизвестно). */
 export interface Edited { gid: string; slide: number | null }
+
+/** Ссылка «Показать слайд N» под ответом о правке: только когда правка изменила слайд (не «верни как было») и он
+ *  известен. */
+export function editLink(r: { changed: boolean; slide?: number | null; strategy?: string; kind?: string } | null, gid: string,
+  fallback: { slide?: number | null; strategy?: string | null }): SlideLink | undefined {
+  if (!r?.changed || r.kind === "undo") return undefined;
+  const slide = r.slide ?? fallback.slide ?? null;
+  return slide ? { gid, strategy: r.strategy ?? fallback.strategy ?? null, slide } : undefined;
+}
+
+/** Ссылка видна, пока открыта та презентация, о которой ответ (на другой она вела бы не туда). */
+export const linkOpen = (link: SlideLink | undefined, open: string | null): link is SlideLink => !!link && link.gid === open;
 
 /** Подсказки под лентой (не больше двух): после правки — «Верни как было», пока на экране та презентация, которую
  *  изменили (на другой или без презентации они были бы о чужой); в пустой ленте — по месту. */

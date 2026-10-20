@@ -22,7 +22,7 @@ import { useKbState, type KbState } from "./ui/create/kbState";
 import { slideFailAfter, type SlideFail } from "./ui/result/slideJob";
 import { busyKeys } from "./ui/details/variantWork";
 import type {
-  BrandPriority, ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
+  BrandPriority, ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, SlideLink, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
@@ -169,7 +169,7 @@ export interface AppState {
    *  нечего (запрос неизвестен). `deck` — открытая презентация (результат): повторяется её запрос — свой запрос
    *  страницы, если это её сборка, иначе собранный из меты (`requestOf`), а не запрос последней сборки. */
   retryBuild(deck?: GenerationMeta | null): Promise<boolean>;
-  messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
+  messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string, show?: SlideLink): void; // ts = unix seconds (fmtDate-compatible); show — «Показать слайд N»
   /** Строки статуса по областям — показываются рядом с местом действия (всплывающих уведомлений в «Слоях» нет). */
   notices: Partial<Record<NoticeArea, Notice>>;
   /** Ставит строку статуса области (новая заменяет прежнюю). */
@@ -467,8 +467,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (ui.improve && improveSource) clearData();
   }, [ui.improve, improveSource, clearData]);
 
-  const pushMessage = useCallback((role: "user" | "assistant", text: string) => {
-    setMessages((list) => [...list, { id: uid("m"), role, text, ts: Date.now() / 1000 }]);
+  const pushMessage = useCallback((role: "user" | "assistant", text: string, show?: SlideLink) => {
+    setMessages((list) => [...list, { id: uid("m"), role, text, ts: Date.now() / 1000, ...(show && { show }) }]);
   }, []);
 
   // A new function identity whenever strategies arrive, so memoised consumers re-render with the real titles.

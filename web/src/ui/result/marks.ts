@@ -151,6 +151,13 @@ export function firstRemarkSlide(v: Variant | null | undefined, from: number): n
   return first ?? null;
 }
 
+/** Строка панели, когда включение «Замечаний» перешло с открытого слайда на другой (молча уводить нельзя): на открытом
+ *  замечаний не было — первый слайд с ними; агент исправляет другой слайд — его слайд. */
+export function jumpText(from: number, to: number, fixing = false): string {
+  return fixing ? `Открыт слайд ${to}: агент исправляет его (были на слайде ${from})`
+    : `Открыт слайд ${to} — на слайде ${from} замечаний нет`;
+}
+
 /** «3 замечания» в шапке панели; ни одного — «нет замечаний». */
 export const countText = (n: number) => (n > 0 ? plural(n, "замечание", "замечания", "замечаний") : "нет замечаний");
 

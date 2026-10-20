@@ -665,7 +665,9 @@ export type ChatAction =
 // what an edit job answers (verstka/api/app.py _edit_job): the agent's reply and the slide to show
 export interface EditResult { reply: string; changed: boolean; slide?: number | null; strategy?: string; score?: number | null; kind?: string }
 export interface ChatResponse { reply: string; intent: string; actions: ChatAction[]; template_id: string | null; generation_id: string | null }
-export interface ChatMessage { id: string; role: "user" | "assistant"; text: string; ts: number; pending?: boolean }
+/** Ссылка ответа помощника на слайд, который правка изменила («Показать слайд N»). */
+export interface SlideLink { gid: string; strategy: string | null; slide: number }
+export interface ChatMessage { id: string; role: "user" | "assistant"; text: string; ts: number; pending?: boolean; show?: SlideLink }
 
 // ---- данные (вторая ступень): verstka/schemas/data.py ---------------------------------
 export type SourceKind = "csv" | "tsv" | "xlsx" | "json" | "text";

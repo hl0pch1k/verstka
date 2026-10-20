@@ -1,8 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  clampBox, countText, firstRemarkSlide, orderRemarks, plainMessage, remarksSwitch, remarkTitle, remarkTone, slideBadges, slideRemarks, stageMarks, type Remark,
-} from "./marks";
+import { clampBox, countText, firstRemarkSlide, orderRemarks, plainMessage, remarksSwitch, remarkTitle, remarkTone, slideBadges, slideRemarks, stageMarks, type Remark, jumpText } from "./marks";
 import { CONTRAST, DENSE, GRID, MODEL, issue, titleOf, variant } from "./remarks.fixtures";
 
 test("рамка — в долях слайда и внутри него; мелкая или не дробная — не рамка (как сервер `_boxes`)", () => {
@@ -126,4 +124,9 @@ test("реестр проверок ещё не ответил: замечани
   assert.equal(remarkTitle("design_review", null, "note"), "Замечание модели");
   // ответил — название проверки
   assert.equal(slideRemarks(variant([MODEL]), 3, () => "Взгляд дизайнера (VLM)")[0].title, "Взгляд дизайнера");
+});
+
+test("«Замечания» перешли на другой слайд — строка панели говорит, откуда и почему", () => {
+  assert.equal(jumpText(1, 4), "Открыт слайд 4 — на слайде 1 замечаний нет");
+  assert.equal(jumpText(2, 6, true), "Открыт слайд 6: агент исправляет его (были на слайде 2)");
 });

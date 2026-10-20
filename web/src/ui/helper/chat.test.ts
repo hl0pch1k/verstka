@@ -1,9 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
-  latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
-} from "./chat";
+import { asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor, latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob, editLink, linkOpen } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
 
@@ -293,4 +290,18 @@ test("подсказка поля на телефоне: длинные — ко
   assert.equal(placeholderFor({ screen: "result", deck: true, slide: 12, short: true }), "Слайд 12: что поменять?");
   assert.equal(placeholderFor({ screen: "result", deck: true, slide: 12 }), "Что поменять на слайде 12?");
   assert.equal(placeholderFor({ screen: "build", deck: false, slide: 1, short: true }), "Вопрос о сборке");
+});
+
+test("ответ о правке: «Показать слайд N» — когда правка изменила слайд и он известен; не «верни как было»", () => {
+  assert.deepEqual(editLink({ changed: true, slide: 4, strategy: "visual" }, "g1", { slide: 2, strategy: "structured" }), { gid: "g1", strategy: "visual", slide: 4 });
+  // слайд и вариант из ответа нет — из запроса правки
+  assert.deepEqual(editLink({ changed: true }, "g1", { slide: 2, strategy: "structured" }), { gid: "g1", strategy: "structured", slide: 2 });
+  assert.equal(editLink({ changed: false, slide: 4 }, "g1", {}), undefined);
+  assert.equal(editLink({ changed: true, slide: 4, kind: "undo" }, "g1", {}), undefined);
+  assert.equal(editLink({ changed: true }, "g1", {}), undefined);
+  assert.equal(editLink(null, "g1", { slide: 3 }), undefined);
+  // видна, пока открыта та презентация
+  assert.equal(linkOpen({ gid: "g1", strategy: null, slide: 3 }, "g1"), true);
+  assert.equal(linkOpen({ gid: "g1", strategy: null, slide: 3 }, "g2"), false);
+  assert.equal(linkOpen(undefined, "g1"), false);
 });
