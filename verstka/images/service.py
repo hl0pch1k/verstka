@@ -177,8 +177,9 @@ class ImageMaker:
             path = self.folder / f"{name}.jpg"
             path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
             verdict = check_text(path, self.skills, self.providers, headline=ask.headline, subject=subject or ask.what, points=ask.slide_text) if attempts > 1 else None
-            seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None else verdict.text, "what": None if verdict is None else verdict.what,
-                         "fits": None if verdict is None else verdict.fits, "flaws": None if verdict is None else verdict.flaws})
+            unchecked = bool(verdict is not None and verdict.unchecked)
+            seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None or unchecked else verdict.text, "what": None if verdict is None else verdict.what,
+                         "fits": None if verdict is None or unchecked else verdict.fits, "flaws": None if verdict is None else verdict.flaws, "unchecked": unchecked})
             if verdict is None or verdict.clean:
                 fits = 10 if verdict is None else verdict.fits
                 if best is None or fits > best[0]:
@@ -207,6 +208,11 @@ class ImageMaker:
         if best is None:
             self._log_attempts(ask, aspect, seed, seen)
             raise PictureHasText(f"writing on every picture ({seen[-1]['what'] or 'text'}), {len(seen)} attempts")
+        if min_fit and ask.label == AUTO_LABEL and not ask.wish and seen and all(c.get("unchecked") for c in seen):
+            # a picture Verstka chose itself whose meaning nobody could check (the vision model did not answer — the
+            # generation's model time spent; the live lecture of 20.10 got a turbine for «скорость изменения»): left out
+            best[1].unlink(missing_ok=True)
+            raise PictureNotFitting("the picture's meaning was not checked (the vision model did not answer)")
         if min_fit and best[0] < min_fit:
             # the vision model saw the slide's meaning in none of them (a sail and a palm for «касательная» — jury 20.10,
             # round 4): the place goes, the slide is laid out without it

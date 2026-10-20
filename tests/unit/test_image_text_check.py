@@ -133,3 +133,28 @@ def test_the_grade_is_read_leniently():
     assert TextCheck.model_validate({"text": "none", "fits": "7/10"}).fits == 7
     assert TextCheck.model_validate({"text": "none", "fits": 12}).fits == 10 and TextCheck.model_validate({"text": "none", "fits": "?"}).fits == 10
     assert TextCheck.model_validate({"text": "none"}).fits == 10  # an answer without a grade never rejects a picture
+
+
+def test_a_picture_verstka_chose_is_never_placed_unchecked(tmp_path):
+    """The live lecture of 20.10: the generation's model time was spent, the vision model did not answer, and a turbine
+    went on «скорость изменения» unchecked. A picture Verstka chose itself goes on a slide only checked; the author's
+    picture is taken as before when the check cannot run."""
+    import pytest
+
+    from verstka.images.text_check import PictureNotFitting
+    from verstka.planning.pictures import AUTO_LABEL
+
+    def broken(messages):
+        raise RuntimeError("model time spent")
+
+    eyes = ProviderRegistry(roles={"vlm": MockProvider(broken, model="qwen/qwen3.8-27b")})
+    mock = IP.MockImages()
+    maker = ImageMaker(IP.ImageChain([mock]), None, tmp_path / "pics", deck_title="d", skills=SKILLS, providers=eyes)
+    ask = ImageAsk(hint="Сцена по смыслу слайда — Скорость изменения", label=AUTO_LABEL, headline="h", deck="d")
+    maker._subjects[ask.key()] = "A turbine in a factory hall"  # (the text model's description)
+    with pytest.raises(PictureNotFitting):
+        maker.make(ask, "1:1")
+    assert len(mock.calls) == 1  # no redraw for an unanswered check
+    made = maker.make(ImageAsk(hint="Вид теплицы", headline="h", deck="d"), "1:1")
+    maker.close()
+    assert made is not None

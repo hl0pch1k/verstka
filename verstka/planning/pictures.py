@@ -433,14 +433,28 @@ def concreteness(s: Any) -> int:
     return score
 
 
+def _fits_second(s: Any) -> bool:
+    """A content slide a picture may still stand beside: no table, chart, code, formula or quote, at most six cards or
+    steps (the renderer guards the rest)."""
+    c = s.content
+    if s.kind.value in _FRAMES or s.kind.value in ("table", "chart", "code", "quote", "agenda") or getattr(s, "continues", None) or c.photo_slot:
+        return False
+    if c.table is not None or c.chart is not None or c.chart2 is not None or c.code is not None or (c.formula or "").strip() or c.quote or c.image_hint:
+        return False
+    return len(c.items) <= 6 and len(c.columns) <= 2 and len(c.numbers) <= 4
+
+
 def second_chance(outline: Any, tried: set[str], want: int) -> list[tuple[int, str]]:
     """Up to `want` (position, description) pairs for pictures that replace rejected ones: short content slides still
     without a picture and not tried before, the most concrete first (`concreteness`), never next to a picture; each
     described as a scene of what the slide says."""
     slides = list(getattr(outline, "slides", None) or [])
     taken = {k for k, s in enumerate(slides) if s.content.photo_slot}
-    cands = [(k, s) for k, s in enumerate(slides) if s.id not in tried and k not in taken and _fits_picture(s)]
-    cands.sort(key=lambda ks: (-concreteness(ks[1]), ks[0]))
+    # any content slide that can stand beside a strip — not only the short ones of the first choice: a lecture's slides
+    # are long, and «Мгновенная скорость» (steps) was no candidate, so the deck kept no picture (live run of 20.10);
+    # the renderer narrows the strip or takes the place back where the text would not read (rendering/synth.py)
+    cands = [(k, s) for k, s in enumerate(slides) if s.id not in tried and k not in taken and _fits_second(s)]
+    cands.sort(key=lambda ks: (-concreteness(ks[1]) + (0 if _fits_picture(ks[1]) else 1), ks[0]))
     out: list[tuple[int, str]] = []
     apart = [ks for ks in cands if all(abs(ks[0] - t) > 1 for t in taken)]
     for k, s in apart + [ks for ks in cands if ks not in apart]:

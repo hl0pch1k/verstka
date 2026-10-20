@@ -750,8 +750,14 @@ def generate_variants(
                     applied.changed.extend(k for k in relaid if k not in applied.changed)
                     v["warnings"].append(f"pictures: slides {relaid} laid out again without the picture's place (no picture: {'; '.join(sorted(set(drop.values())))[:160]})")
                     _say_relaid(progress, v["name"], relaid, v["outline"], drop, said_pictures)
-                if maker is not None:
+            if maker is not None:
+                # (a picture the person asked for and the check rejected keeps its place with the reason; the deck's
+                # minimum is still reached on another slide)
+                try:
                     records = _second_chance(v, records, drop, maker, icfg, manifest, ws, brief.text if brief else None, writer_audit, second, progress, said_pictures, applied.changed)
+                except Exception as e:  # noqa: BLE001 - the deck keeps the pictures it has
+                    log.warning("second chance for pictures failed", exc_info=True)
+                    v["warnings"].append(f"pictures: no other slide tried ({str(e)[:120]})")
             write_records(v["vdir"], records)
         except Exception as e:  # noqa: BLE001
             log.warning("pictures not put in", exc_info=True)
@@ -962,48 +968,58 @@ def _second_chance(v: dict, records: list[dict], drop: dict[str, str], maker, ic
     from verstka.planning.pictures import SECOND_CHANCES, min_pictures, second_chance
 
     o: DeckOutline = v["outline"]
-    missed = [oid for oid, why in drop.items() if why == WHY_MISFIT]
+    # the rejected pictures: places Verstka added (gone with `drop`) and places the person asked for (they stay, with
+    # their reason) — both count against the minimum
+    missed = sorted({oid for oid, why in drop.items() if why == WHY_MISFIT} | {str(r["outline_id"]) for r in records if r.get("why") == WHY_MISFIT and r.get("outline_id")})
     have = sum(1 for r in records if r.get("status") == "generated")
     need = min_pictures(len(o.slides))
     if not missed or have >= need:
         return records
     tried: set = second.setdefault("tried", set())
     tried.update(missed)
-    picks: list = second.setdefault("picks", [])  # (spec_ref, position, hint) chosen on the first variant that needed them
-    if not picks and not second.get("chosen"):
+    if not second.get("chosen"):
+        # the candidates, ranked once for every variant (the same slides, the same descriptions: one picture each)
         second["chosen"] = True
-        for k, hint in second_chance(o, tried, min(need - have, SECOND_CHANCES)):
-            picks.append((o.slides[k].spec_ref, k, hint))
-    add: dict[str, str] = {}
-    for ref, k, hint in picks:
-        host = next((s for s in o.slides if ref is not None and s.spec_ref == ref), None) if ref is not None else (o.slides[k] if k < len(o.slides) else None)
-        if host is not None and host.id not in tried and not host.content.photo_slot:
-            add[host.id] = hint
-    if not add:
-        v["warnings"].append(f"pictures: the pictures of slides {[k for k, s in enumerate(o.slides, 1) if s.id in missed]} were rejected by the check of their meaning; no other slide takes them")
-        return records
-    relaid = relay_without_pictures(v, {}, manifest, ws, brief_text, writer_audit, add=add)
-    if not relaid:
-        return records
-    left = (maker.deadline - time.monotonic()) if maker.deadline is not None else 60.0
-    pend = plan_pictures(v["vdir"] / "deck.pptx", v["outline"], maker, slides=set(relaid))
-    got = apply_pictures(v["vdir"] / "deck.pptx", pend, wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
-    records = merged(records, got.records, set(relaid))
-    changed.extend(k for k in relaid if k not in changed)
-    still = free_added_places(got.records, v["outline"])
-    if still:
-        back = relay_without_pictures(v, still, manifest, ws, brief_text, writer_audit)
-        records = [r for r in records if str(r.get("outline_id") or "") not in still]
-        _say_relaid(progress, v["name"], back, v["outline"], still, said)
-    made = [k for k in relaid if any(r.get("slide") == k and r.get("status") == "generated" for r in records)]
-    nums = ", ".join(str(k) for k, s in enumerate(o.slides, 1) if s.id in missed)
+        second["picks"] = [(o.slides[k].spec_ref, k, hint) for k, hint in second_chance(o, tried, SECOND_CHANCES + 3)]
+    attempted: set = second.setdefault("attempted", set())
+    made: list[int] = []
+    for ref, k, hint in second.get("picks", []):
+        if have >= need:
+            break
+        if (ref, k) not in attempted and len(attempted) >= SECOND_CHANCES:
+            break  # at most SECOND_CHANCES more slides drawn per generation
+        host = next((s for s in o.slides if s.spec_ref == ref), None) if ref is not None else (o.slides[k] if k < len(o.slides) else None)
+        if host is None or host.id in tried or host.content.photo_slot:
+            continue
+        relaid = relay_without_pictures(v, {}, manifest, ws, brief_text, writer_audit, add={host.id: hint})
+        if not relaid:
+            continue
+        pend = plan_pictures(v["vdir"] / "deck.pptx", v["outline"], maker, slides=set(relaid))
+        changed.extend(j for j in relaid if j not in changed)
+        if not any(p.ask is not None for p in pend):
+            continue  # the renderer took the place back (the text beside it would not read): the next one, nothing paid
+        attempted.add((ref, k))
+        left = (maker.deadline - time.monotonic()) if maker.deadline is not None else 60.0
+        got = apply_pictures(v["vdir"] / "deck.pptx", pend, wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
+        records = merged(records, got.records, set(relaid))
+        still = free_added_places(got.records, v["outline"])
+        if still:
+            back = relay_without_pictures(v, still, manifest, ws, brief_text, writer_audit)
+            records = [r for r in records if str(r.get("outline_id") or "") not in still]
+            _say_relaid(progress, v["name"], back, v["outline"], still, said)
+            tried.update(still)
+        for j in relaid:
+            if any(r.get("slide") == j and r.get("status") == "generated" for r in records):
+                made.append(j)
+                have += 1
+    nums = ", ".join(str(j) for j, s in enumerate(o.slides, 1) if s.id in missed)
     key = ("second", nums, tuple(made))
     if key not in said:
         said.add(key)
         _event_sink(progress)({"type": "agent", "step": "compile", "variant": v["name"], "share": 0.855,
                                "message": f"Изображения: картинки к слайдам {nums} отвергнуты проверкой соответствия смыслу — "
                                + (f"картинка перенесена на слайд {', '.join(map(str, made))}." if made else "другой слайд подходящей картинки не получил.")})
-    v["warnings"].append(f"pictures: the pictures of slides {[k for k, s in enumerate(o.slides, 1) if s.id in missed]} were rejected by the check of their meaning; "
+    v["warnings"].append(f"pictures: the pictures of slides [{nums}] were rejected by the check of their meaning; "
                          + (f"slides {made} took their place" if made else "no other slide got a fitting picture"))
     return records
 

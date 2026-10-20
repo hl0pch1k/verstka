@@ -588,3 +588,67 @@ def test_a_build_moves_a_rejected_picture_to_another_slide(tmp_path, monkeypatch
     assert any(s.content.photo_slot == AUTO_LABEL for s in v.outline.slides)
     rm = json.loads((v.out_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert any("rejected by the check of their meaning" in w for w in rm.get("warnings", []))
+
+
+def test_a_second_chance_takes_long_slides_and_steps_too():
+    """The live lecture of 20.10: «касательная» rejected twice and «Мгновенная скорость» (steps, long points) was no
+    candidate — the deck kept no picture. The second chance takes any content slide a picture can stand beside (no
+    table, chart, formula), the most concrete first; the renderer guards the text beside it."""
+    from verstka.planning.pictures import second_chance
+    from verstka.schemas.common import PatternKind as K
+    from verstka.schemas.outline import SlideItem
+
+    long = ["Производная функции в точке — это предел отношения приращения функции к приращению аргумента, когда приращение аргумента стремится к нулю, если этот предел существует."] * 3
+    o = DeckOutline(title="Производная", slides=[
+        OutlineSlide(id="t", kind=K.title, headline="Производная"),
+        OutlineSlide(id="d", kind=K.bullets, headline="Определение производной", content=SlideContent(bullets=long)),
+        OutlineSlide(id="k", kind=K.bullets, headline="Производная равна угловому коэффициенту касательной", content=SlideContent(bullets=long)),
+        OutlineSlide(id="v", kind=K.process, headline="Мгновенная скорость — предел средней скорости",
+                     content=SlideContent(items=[SlideItem(title=f"Шаг {i}", text="Средняя скорость на малом отрезке времени") for i in range(4)])),
+        OutlineSlide(id="tb", kind=K.table, headline="Таблица производных", content=SlideContent(table={"columns": ["f", "f'"], "rows": [["x²", "2x"]]})),
+    ])
+    got = second_chance(o, {"k"}, 2)
+    assert got and got[0][0] == 3 and all(k != 4 for k, _ in got)
+
+
+def test_a_rejected_picture_the_person_asked_for_keeps_its_place_and_another_slide_gets_one(tmp_path, monkeypatch):
+    """(a) of the coordinator, 20.10: a place the author asked for whose picture the check rejected stays, with its
+    reason; the deck's minimum is still reached on another slide."""
+    import json
+
+    from pathlib import Path as _P
+
+    from verstka.images import providers as IP
+    from verstka.images.fill import read_records
+    from verstka.images.service import ImageMaker, Made
+    from verstka.images.text_check import WHY_MISFIT, PictureNotFitting
+    from verstka.pipeline.generate import generate_variants
+    from verstka.planning.brief import load_brief
+
+    tried: list = []
+
+    def fake(self, ask, aspect, seed):
+        tried.append(ask.hint)
+        if "касательн" in (ask.hint or "").lower():
+            raise PictureNotFitting("no picture fits the slide (3/10)")
+        self.folder.mkdir(parents=True, exist_ok=True)
+        path = self.folder / f"{ask.key()}-{aspect.replace(':', 'x')}.jpg"
+        Image.new("RGB", (300, 300), (90, 140, 200)).save(path)
+        return Made(key=ask.key(), aspect=aspect, path=str(path), prompt="p", style="illustration", subject_by="model", model="mock", model_label="Mock",
+                    seed=1, palette_match=1.0, seconds=0.0, fits=9)
+
+    monkeypatch.setattr(ImageMaker, "_make", fake)
+    tpl = _P(__file__).resolve().parents[1] / "fixtures" / "tpl_audit" / "templates" / "lo_focus.pptx"
+    p = tmp_path / "brief.md"
+    p.write_text("Слайд 1. Производная\n\nЛекция.\n\nСлайд 2. Касательная к графику\n\nНаклон касательной.\n\n[Место под изображение: касательная к параболе]\n\n"
+                 "Слайд 3. Правила\n\nСумма и разность.\n\nСлайд 4. Скорость автомобиля\n\nСпидометр показывает производную пути.\n\nСлайд 5. Итоги\n\nСкорость изменения.\n",
+                 encoding="utf-8")
+    g = generate_variants(tpl, brief=load_brief(p), strategies=["structured"], out_dir=tmp_path / "run", workspace_root=tmp_path / "ws",
+                          use_llm=False, use_vlm=False, audit=True, exports=[], image_provider=IP.ImageChain([IP.MockImages()]))
+    v = g.variants[0]
+    recs = read_records(v.out_dir)
+    asked = [r for r in recs if "касательн" in (r.get("hint") or "").lower()]
+    assert asked and asked[0]["status"] == "free" and asked[0]["why"] == WHY_MISFIT  # the person's place stays, its reason said
+    assert any(r.get("status") == "generated" for r in recs)  # and the deck still has its picture
+    rm = json.loads((v.out_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert any("rejected by the check of their meaning" in w and "took their place" in w for w in rm.get("warnings", []))

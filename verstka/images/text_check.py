@@ -41,6 +41,7 @@ class TextCheck(BaseModel):
     what: str = ""
     fits: int = 10  # an answer without a grade (an older model reply) never rejects a picture
     flaws: str = ""
+    unchecked: bool = False  # the vision model is there but did not answer (the generation's model time was spent)
 
     @field_validator("fits", mode="before")
     @classmethod
@@ -88,4 +89,4 @@ def check_text(path: Path, skills: Any, providers: Any, *, headline: str = "", s
         return res.parsed
     except Exception as e:  # noqa: BLE001 - one unchecked picture never stops the deck
         log.info("picture text check failed: %s", str(e)[:160])
-        return None
+        return TextCheck(text="none", fits=10, flaws="", unchecked=True)
