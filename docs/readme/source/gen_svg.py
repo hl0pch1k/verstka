@@ -164,16 +164,16 @@ def hero(c, dark):
 
 # ---------------------------------------------------------------- section plates
 SECTIONS = [
-    ("01", "interface", "Интерфейс и Помощник", "Создать, сборка, результат и правки словами в чате"),
-    ("02", "examples", "Примеры презентаций", "Настоящие колоды на шаблонах VK Tech, VK WorkSpace, VK Education и ЛЦТ"),
-    ("03", "video", "Видео", "Запись живого сервиса: первая ступень и скринкаст второй"),
-    ("04", "features", "Что умеет", "Данные, брендбук, база знаний, любой вход, картинки, правки"),
-    ("05", "how", "Как это работает", "Восемь шагов от файла до PPTX — на виду у человека"),
-    ("06", "quality", "Качество", "Проверки, время сборки, тесты"),
-    ("07", "start", "Быстрый старт", "Linux или macOS: установка, ключи, сервер и CLI"),
-    ("08", "models", "Модели и стоимость", "Открытые веса на инференсе VK, без закрытых API"),
-    ("09", "tz", "Соответствие ТЗ", "Обе ступени кейса — по пунктам"),
-    ("10", "docs", "Документация и ограничения", "Где читать подробно и что пока не умеет"),
+    ("01", "interface", "Интерфейс", ""),
+    ("02", "examples", "Примеры презентаций", ""),
+    ("03", "video", "Видео", ""),
+    ("04", "features", "Что умеет", ""),
+    ("05", "how", "Как это работает", ""),
+    ("06", "quality", "Качество", ""),
+    ("07", "start", "Быстрый старт", ""),
+    ("08", "models", "Модели и стоимость", ""),
+    ("09", "tz", "Соответствие ТЗ", ""),
+    ("10", "docs", "Документация и ограничения", ""),
 ]
 
 
@@ -190,7 +190,7 @@ def section(n, title, sub, c, dark):
         b.append(f'<rect x=".5" y="20.5" width="{Wd - 1}" height="{H - 21}" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".07"/>')
     pad, gap = 40, 32
     tcap, line = cap("U", 40), 34
-    block = tcap + line
+    block = tcap + (line if sub else 0)
     top = 20 + (H - 20 - block) / 2
     tb = top + tcap
     mid = top + block / 2
@@ -198,10 +198,11 @@ def section(n, title, sub, c, dark):
     b.append(T(n, "U", SEC_NUM, pad - nx0, mid + cap("U", SEC_NUM) / 2, c["ink"], opacity=.14, track=-0.04))
     tx = pad + SEC_COL + gap
     b.append(T(title, "U", 40, tx, tb, c["ink"], track=-0.03))
-    b.append(T(sub, "MR", 21, tx + 1, tb + line, c["muted"]))
+    if sub:
+        b.append(T(sub, "MR", 21, tx + 1, tb + line, c["muted"]))
     k = 2.0
     b.append(bars(Wd - pad - logo_width(20 * k), mid - 2 * k, k, c))
-    return svg(Wd, H, f"{n} · {title}", sub, "".join(b))
+    return svg(Wd, H, f"{n} · {title}", sub or title, "".join(b))
 
 
 # ---------------------------------------------------------------- pipeline
@@ -273,23 +274,29 @@ def pipeline(c, dark):
 
 # ---------------------------------------------------------------- video cards
 def video_card(c, dark, first):
-    """A video card: both stages are published recordings — the same dark card, number, title, length, date and link."""
+    """Video cards: the stage-2 screencast is the current solution (bright), the stage-1 video is the archive (muted)."""
     Wd, H = 580, 300
-    n, title, meta, link, desc = (
-        ("01", "Первая ступень", "8 мин 54 с · один дубль без монтажа", "29.09 · смотреть в браузере →",
-         "Запись живого сервиса, 8 минут 54 секунды, один дубль без монтажа, 29 сентября.") if first else
-        ("02", "Вторая ступень", "9 мин 44 с · без ускорений · «Слои»", "20.10 · смотреть в браузере →",
-         "Скринкаст второй ступени, 9 минут 44 секунды, без ускорений, интерфейс «Слои», 20 октября."))
+    if first:  # archive
+        tag, title, meta, link, play, tagc, desc = (
+            "АРХИВ · ПЕРВАЯ СТУПЕНЬ", "Прошлая версия", "29.09 · прежний интерфейс, 8 мин 54 с", "смотреть →",
+            "#5A6272", "#9AA3B2", "Архив: видео первой ступени, 29 сентября, прежний интерфейс, 8 минут 54 секунды.")
+    else:
+        tag, title, meta, link, play, tagc, desc = (
+            "АКТУАЛЬНАЯ ВЕРСИЯ · ВТОРАЯ СТУПЕНЬ", "Текущее решение", "20.10 · интерфейс «Слои», 9 мин 44 с",
+            "смотреть в браузере →", "url(#cta)", "#38BDF8",
+            "Актуальная версия: скринкаст второй ступени, 20 октября, интерфейс «Слои», 9 минут 44 секунды.")
     b = [f'<rect width="{Wd}" height="{H}" rx="28" fill="#0B1220"/>']
     if dark:
         b.append(f'<rect x=".5" y=".5" width="{Wd - 1}" height="{H - 1}" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".1"/>')
-    b.append(T(n, "U", 120, 30, 140, "#FFFFFF", opacity=.08, track=-0.04))
-    b.append(f'<circle cx="490" cy="84" r="44" fill="url(#cta)"/>')
-    b.append('<path d="M478 64 L510 84 L478 104 Z" fill="#FFFFFF"/>')
-    b.append(T(title, "U", 32, 36, 196, "#FFFFFF", track=-0.03))
+    if not first:
+        b.append(f'<rect x="1.5" y="1.5" width="{Wd - 3}" height="{H - 3}" rx="26.5" fill="none" stroke="#2563EB" stroke-width="3"/>')
+    b.append(T(tag, "M", 15, 36, 60, tagc, track=0.06))
+    b.append(f'<circle cx="490" cy="104" r="44" fill="{play}"/>')
+    b.append('<path d="M478 84 L510 104 L478 124 Z" fill="#FFFFFF"/>')
+    b.append(T(title, "U", 32, 36, 196, "#FFFFFF", opacity=(.72 if first else 1), track=-0.03))
     b.append(T(meta, "M", 19, 36, 232, "#FFFFFF", opacity=.72))
-    b.append(T(link, "M", 19, 36, 262, "#38BDF8"))
-    return svg(Wd, H, "Видео " + ("первой" if first else "второй") + " ступени", desc, "".join(b))
+    b.append(T(link, "M", 19, 36, 262, "#38BDF8" if not first else "#9AA3B2"))
+    return svg(Wd, H, ("Архив: видео первой ступени" if first else "Актуальная версия: скринкаст второй ступени"), desc, "".join(b))
 
 
 # ---------------------------------------------------------------- features board

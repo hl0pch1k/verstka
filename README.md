@@ -18,7 +18,7 @@
 
 | Содержание<br><img src="docs/readme/svg/spacer.svg" width="330" height="1" alt=""> | Что там<br><img src="docs/readme/svg/spacer.svg" width="470" height="1" alt=""> |
 |---|---|
-| 01 · [Интерфейс](#interface) и [Помощник](#helper) | экраны сервиса и правки презентации словами |
+| 01 · [Интерфейс](#interface) | экраны сервиса и [Помощник](#helper) — правки презентации словами |
 | 02 · [Примеры презентаций](#examples) | готовые колоды — PDF и PPTX |
 | 03 · [Видео](#video) | скринкаст второй ступени — он же в форме сдачи |
 | 04 · [Что умеет](#features) | данные, брендбук, база знаний, любой вход, картинки |
@@ -36,7 +36,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-01-interface-dark.svg">
-  <img src="docs/readme/svg/section-01-interface-light.svg" width="100%" alt="01 · Интерфейс и Помощник — создать, сборка, результат и правки словами в чате">
+  <img src="docs/readme/svg/section-01-interface-light.svg" width="100%" alt="01 · Интерфейс">
 </picture>
 
 Интерфейс «Слои» — веб-интерфейс сервиса: путь «Создать → Сборка → Результат → Правки» идёт на одном экране, плиты-слои сменяют друг друга.
@@ -123,7 +123,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-02-examples-dark.svg">
-  <img src="docs/readme/svg/section-02-examples-light.svg" width="100%" alt="02 · Примеры презентаций — настоящие колоды на шаблонах VK Tech, VK WorkSpace, VK Education и ЛЦТ">
+  <img src="docs/readme/svg/section-02-examples-light.svg" width="100%" alt="02 · Примеры презентаций">
 </picture>
 
 Колоды собраны 20.10 с моделью на инференсе VK, слайды — без правок руками. Нажмите на карточку, чтобы открыть PDF.
@@ -200,16 +200,16 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-03-video-dark.svg">
-  <img src="docs/readme/svg/section-03-video-light.svg" width="100%" alt="03 · Видео — запись живого сервиса: первая ступень и скринкаст второй">
+  <img src="docs/readme/svg/section-03-video-light.svg" width="100%" alt="03 · Видео">
 </picture>
 
 <p align="center">
-  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage1-dark.svg"><img src="docs/readme/svg/video-stage1-light.svg" width="49%" alt="Видео первой ступени: 8 минут 54 секунды, один дубль без монтажа, 29.09 — смотреть в браузере"></picture></a>
-  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage2-dark.svg"><img src="docs/readme/svg/video-stage2-light.svg" width="49%" alt="Скринкаст второй ступени: 9 минут 44 секунды, без ускорений, интерфейс «Слои», 20.10 — смотреть в браузере"></picture></a>
+  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage2-dark.svg"><img src="docs/readme/svg/video-stage2-light.svg" width="49%" alt="Актуальная версия, вторая ступень: текущее решение, 20.10, интерфейс «Слои», 9 минут 44 секунды — смотреть в браузере"></picture></a>
+  <a href="https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/video-stage1-dark.svg"><img src="docs/readme/svg/video-stage1-light.svg" width="49%" alt="Архив, первая ступень: прошлая версия, 29.09, прежний интерфейс, 8 минут 54 секунды"></picture></a>
 </p>
 
-- Первая ступень — запись живого сервиса одним дублем. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4) · [что в видео по минутам](docs/video/README.md)
-- Вторая ступень — скринкаст 9:44 без ускорений: шаблон VK Tech с брендбуком, данными и базой знаний, «Почему так», правки Помощником, сторонний шаблон. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4) · [что в видео по минутам](docs/video/README.md#вторая-ступень)
+- **Актуальная версия** — скринкаст второй ступени, это текущее решение: шаблон VK Tech с брендбуком, данными и базой знаний, «Почему так», правки Помощником, сторонний шаблон. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@c0aebe9/docs/video/verstka-stage2.mp4) · [что в видео по минутам](docs/video/README.md#вторая-ступень)
+- Архив — видео первой ступени (29.09): прошлая версия сервиса и прежний интерфейс. [Смотреть](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@21c4283/docs/video/verstka-demo.mp4) · [по минутам](docs/video/README.md#первая-ступень)
 
 <br>
 
@@ -226,7 +226,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-04-features-dark.svg">
-  <img src="docs/readme/svg/section-04-features-light.svg" width="100%" alt="04 · Что умеет — данные, брендбук, база знаний, любой вход, картинки, правки">
+  <img src="docs/readme/svg/section-04-features-light.svg" width="100%" alt="04 · Что умеет">
 </picture>
 
 <p align="center">
@@ -288,7 +288,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-05-how-dark.svg">
-  <img src="docs/readme/svg/section-05-how-light.svg" width="100%" alt="05 · Как это работает — восемь шагов от файла до PPTX">
+  <img src="docs/readme/svg/section-05-how-light.svg" width="100%" alt="05 · Как это работает">
 </picture>
 
 <p align="center">
@@ -310,7 +310,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-06-quality-dark.svg">
-  <img src="docs/readme/svg/section-06-quality-light.svg" width="100%" alt="06 · Качество — проверки, время сборки, тесты">
+  <img src="docs/readme/svg/section-06-quality-light.svg" width="100%" alt="06 · Качество">
 </picture>
 
 <p align="center">
@@ -331,7 +331,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-07-start-dark.svg">
-  <img src="docs/readme/svg/section-07-start-light.svg" width="100%" alt="07 · Быстрый старт — Linux или macOS: установка, ключи, сервер и CLI">
+  <img src="docs/readme/svg/section-07-start-light.svg" width="100%" alt="07 · Быстрый старт">
 </picture>
 
 Постоянного стенда нет: сервис запускается на своей машине примерно за 15 минут. GPU не нужен, на Windows — внутри WSL 2.
@@ -433,7 +433,7 @@ cd web && npm test           # интерфейс
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-08-models-dark.svg">
-  <img src="docs/readme/svg/section-08-models-light.svg" width="100%" alt="08 · Модели и стоимость — открытые веса на инференсе VK, без закрытых API">
+  <img src="docs/readme/svg/section-08-models-light.svg" width="100%" alt="08 · Модели и стоимость">
 </picture>
 
 - Текст и зрение — Qwen3.8-27B на инференсе VK; если VK не ответил, та же модель на Polza.
@@ -448,7 +448,7 @@ cd web && npm test           # интерфейс
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-09-tz-dark.svg">
-  <img src="docs/readme/svg/section-09-tz-light.svg" width="100%" alt="09 · Соответствие ТЗ — обе ступени кейса по пунктам">
+  <img src="docs/readme/svg/section-09-tz-light.svg" width="100%" alt="09 · Соответствие ТЗ">
 </picture>
 
 ✅ — сделано, ◐ — частично.
@@ -485,7 +485,7 @@ cd web && npm test           # интерфейс
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/section-10-docs-dark.svg">
-  <img src="docs/readme/svg/section-10-docs-light.svg" width="100%" alt="10 · Документация и ограничения — где читать подробно и что пока не умеет">
+  <img src="docs/readme/svg/section-10-docs-light.svg" width="100%" alt="10 · Документация и ограничения">
 </picture>
 
 Подробно: [ARCHITECTURE.md](ARCHITECTURE.md) — устройство · [MODELS.md](MODELS.md) — модели и расход · [AUDIT.md](AUDIT.md) — проверки и тесты · [видео первой ступени](docs/video/README.md) · [питч первой ступени](docs/presentation/verstka-pitch.pdf) · [исходники графики README](docs/readme/source).
