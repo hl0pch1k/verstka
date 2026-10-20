@@ -160,9 +160,7 @@ def test_chart_mixed_units_reads_a_chart_in_thousands_as_thousands():
     from verstka.schemas.outline import ChartSpec, DeckOutline, InlineSeries, OutlineSlide, SlideContent
     from verstka.schemas.template import SlideSize, TemplateManifest, Tokens
 
-    brief = (Path(__file__).resolve().parents[1] / "tests/fixtures/briefs/coffee_long.md")
-    if not brief.exists():
-        brief = Path("/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka-dev/tests/fixtures/briefs/coffee_long.md")
+    brief = Path(__file__).resolve().parents[2] / "tests/fixtures/briefs/coffee_long.md"
     cats = ["Витрина для десертов", "Настройка программы лояльности и учета", "Обновление меню, фотографии и оформление", "Обучение сотрудников", "Резерв"]
     s = OutlineSlide(id="s8", kind=K.chart, headline="Бюджет запуска — 180 000 ₽", content=SlideContent(chart=ChartSpec(type="bar", unit="тыс. ₽", categories=cats, series=[InlineSeries(name="Сумма", values=[70, 35, 25, 20, 30])])))
     o = DeckOutline(title="T", slides=[OutlineSlide(id="c", kind=K.title, headline="T"), s])

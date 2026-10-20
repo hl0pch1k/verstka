@@ -177,6 +177,8 @@ def generate(
         raise typer.BadParameter("--brand-priority: «brand» (важнее брендбук) или «template» (важнее шаблон)")
     if template is None or (brief is None and outline is None and not data):
         raise typer.BadParameter("нужны --template и что-то из --brief, --outline, --data (или --config run.yaml)")
+    if data:
+        _data_files(data)  # a missing data file is said at once, before the template's analysis and the font pick
     strategies = None if strategy in ("all", None) else [s.strip() for s in str(strategy).split(",")]
     exports = ["pdf", "html"] if export == "all" else [e.strip() for e in export.split(",") if e.strip() and e.strip() != "pptx"]
     use_models = not no_llm
@@ -322,7 +324,7 @@ def _data_files(items: list[str]) -> list[Path]:
             elif p.is_file():
                 out.append(p)
             else:
-                raise typer.BadParameter(f"--data: «{part}» не найден")
+                raise typer.BadParameter(f"--data: не найден файл или папка «{part}»")
     return list(dict.fromkeys(out))
 
 
@@ -406,7 +408,7 @@ def _knowledge_base(items: list[str], workspace: Optional[Path]) -> Optional[str
                 p = Path(part)
                 files = sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p] if p.is_file() else []
                 if not files:
-                    raise typer.BadParameter(f"--kb: «{part}» не найден")
+                    raise typer.BadParameter(f"--kb: не найден файл или папка «{part}»")
                 got = None
                 for f in files:
                     r = base.add_file(f.name, f.read_bytes())

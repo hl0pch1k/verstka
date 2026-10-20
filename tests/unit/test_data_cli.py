@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -42,8 +43,17 @@ def test_generate_builds_a_data_story_on_the_branded_template(tmp_path):
     assert (out / "data_story.json").is_file()
 
 
+def _said(output: str) -> str:
+    """The CLI's words without the error panel's frame, colours and line breaks: rich wraps the panel at the terminal's
+    width (and colours it on GitHub Actions), so a phrase may come split over two lines of the frame."""
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    return " ".join(re.sub(r"[│╭╮╰╯─]", " ", plain).split())
+
+
 def test_generate_needs_a_brief_an_outline_or_data(tmp_path):
     r = CliRunner().invoke(app, ["generate", "-t", str(UNSEEN), "--no-llm", "-o", str(tmp_path)])
     assert r.exit_code != 0
-    r = CliRunner().invoke(app, ["generate", "-t", str(UNSEEN), "--data", str(tmp_path / "nope.csv"), "--no-llm", "-o", str(tmp_path)])
-    assert r.exit_code != 0 and "не найден" in r.output
+    r = CliRunner().invoke(app, ["generate", "-t", str(UNSEEN), "--data", str(tmp_path / "nope.csv"), "--no-llm", "-o", str(tmp_path), "-w", str(tmp_path / "ws")])
+    assert r.exit_code != 0 and "не найден" in _said(r.output)
+    # said before the template's analysis and the font pick: nothing was read for a run that cannot start
+    assert "Шрифты:" not in r.output and not (tmp_path / "ws").exists()

@@ -1045,3 +1045,14 @@ def test_the_t2i_hint_names_polza_when_vk_has_no_image_model(monkeypatch):
     monkeypatch.setattr(IP, "_CACHE", {})
     monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")
     assert A._t2i_hint() == "POLZA_API_KEY in .env"
+
+
+def test_a_yes_no_form_field_left_out_keeps_its_default():
+    """FastAPI 0.15x reads a missing `bool = Form(True)` as False (a checkbox's habit): on a fresh install a brandbook
+    uploaded without `use_models` was read without the model (Linux CI, 20.10). The flags are read from their text."""
+    assert A._form_flag(None, True, "use_models") is True and A._form_flag("", True, "use_models") is True
+    assert A._form_flag(None, False, "improve") is False
+    assert A._form_flag("false", True, "use_models") is False and A._form_flag("0", True, "x") is False
+    assert A._form_flag("True", False, "improve") is True and A._form_flag("on", False, "x") is True
+    with pytest.raises(A.HTTPException):
+        A._form_flag("может быть", True, "use_models")

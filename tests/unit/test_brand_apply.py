@@ -1198,8 +1198,9 @@ def test_second_brand_conflicts_call_uses_caches(tmp_path, fonts_missing, monkey
     monkeypatch.setattr(pal, "Package", Counting)
     import time
 
+    brand = _vk_cloud()  # (the brandbook's own read — its PDF's text — is not the call measured: 0.59 s on Linux CI)
     t = time.time()
-    brand_conflicts(m, _vk_cloud(), source=src, brand_dir=BRAND_EXAMPLE)
+    brand_conflicts(m, brand, source=src, brand_dir=BRAND_EXAMPLE)
     assert made == [] and time.time() - t < 0.5
 
 

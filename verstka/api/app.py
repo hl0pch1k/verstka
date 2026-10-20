@@ -263,6 +263,26 @@ def skills() -> SkillsRegistry:
     return _skills
 
 
+_FORM_TRUE = {"1", "true", "on", "yes", "y", "t"}
+_FORM_FALSE = {"0", "false", "off", "no", "n", "f"}
+
+
+def _form_flag(value: Optional[str], default: bool, name: str) -> bool:
+    """A yes/no field of a multipart form, read from its text: a field the client did not send keeps its default.
+    (FastAPI 0.15x reads a missing `bool = Form(True)` as False — a checkbox's habit — so a brandbook or a template
+    uploaded without `use_models` was read without the model on a fresh install, Linux CI 20.10.)"""
+    if value is None:
+        return default
+    v = str(value).strip().lower()
+    if not v:
+        return default
+    if v in _FORM_TRUE:
+        return True
+    if v in _FORM_FALSE:
+        return False
+    raise HTTPException(422, f"{name}: {_RU_ERRORS['bool_parsing']}")  # (the words of FastAPI's own check, said in Russian)
+
+
 # ---------------------------------------------------------------------------- schemas
 
 
@@ -1182,12 +1202,14 @@ def list_templates() -> list[dict]:
 
 
 @app.post("/api/templates")
-async def upload_template(file: UploadFile = File(...), use_models: bool = Form(True), improve: bool = Form(False)) -> dict:
+async def upload_template(file: UploadFile = File(...), use_models: Optional[str] = Form(None, description="true | false (по умолчанию true)"),
+                          improve: Optional[str] = Form(None, description="true | false (по умолчанию false)")) -> dict:
     """A template in any presentation format (verstka/ingest/convert.py: .pptx, .potx, .pptm, .ppsx, .thmx, .ppt,
     .odp …): the file is checked by its bytes, converted to .pptx in the job, then analysed. Errors are said in Russian —
     the UI shows them as they are."""
     from verstka.ingest.convert import ACCEPTED_EXTS, ConvertError, check_upload, reason, sniff
 
+    use_models, improve = _form_flag(use_models, True, "use_models"), _form_flag(improve, False, "improve")
     name = file.filename or ""
     if not name:
         raise HTTPException(400, "Выберите файл шаблона: .pptx, .potx, .ppt или .odp")
@@ -2107,7 +2129,7 @@ def upload_brandbook(
     files: Optional[list[UploadFile]] = File(None),
     figma_url: Optional[str] = Form(None),
     template_id: Optional[str] = Form(None),
-    use_models: bool = Form(True),
+    use_models: Optional[str] = Form(None, description="true | false (по умолчанию true)"),
     brand_priority: BrandPriority = Form("brand"),
 ) -> dict:
     """Брендбук: файл (PDF-гайдлайн, токены JSON, архив .zip, тема .pptx, логотип), папка (`files`, имя части — путь в
@@ -2116,6 +2138,7 @@ def upload_brandbook(
     from verstka.brand.common import BrandReadError
     from verstka.brand.read import read_brandbook
 
+    use = _form_flag(use_models, True, "use_models")
     folder = [f for f in files or [] if f is not None]
     url = (figma_url or "").strip()
     given = (file is not None) + bool(folder) + bool(url)
@@ -2131,7 +2154,7 @@ def upload_brandbook(
     except BaseException:
         store.delete_brandbook(bid)
         raise
-    use_vlm = use_models and _vlm_configured()
+    use_vlm = use and _vlm_configured()
 
     def run(job: Job) -> dict:
         try:

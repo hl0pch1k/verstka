@@ -1720,6 +1720,7 @@ def photo_caption(slide: Slide, box: Bbox, kit, hint: Optional[str], fill: Optio
     if box.w < 0.12 * kit.W or box.h < 0.12 * kit.H:
         return
     ground = fill or _ground_at(slide, box) or "FFFFFF"
+    box = _caption_room(slide, box, kit.W, kit.H)
     colors = getattr(kit, "colors", None)
     cands = [c for c in (getattr(colors, "accent_text", None), getattr(colors, "muted", None), getattr(colors, "text", None)) if c]
     ink = next((c for c in cands if contrast_ratio(c, ground) >= 4.5), cands[-1] if cands else "000000")
@@ -1746,6 +1747,35 @@ def photo_caption(slide: Slide, box: Bbox, kit, hint: Optional[str], fill: Optio
                 y += ic_h + gap
             cv.text(Bbox(x=box.x + pad, y=y, w=w, h=hh), paras, name="Photo caption")
             return
+
+
+def _caption_room(slide: Slide, box: Bbox, W: int, H: int) -> Bbox:
+    """The part of a free place its caption and pictogram take: clear of the layout's and the master's drawing that
+    runs along the place's side under it (a sidebar under a strip at the slide's edge). The place hides that drawing
+    only until the picture comes in; a caption over it reads as laid on the template's art, and how far its words reach
+    depends on the machine's fonts (synth_sidebar43, compact, on Linux: 19 % of «Место под изображение» over the
+    sidebar, while on a Mac it kept under 15 %). The whole place when its clear part is under 60 % of it."""
+    from verstka.rendering.picture_layouts import _things
+
+    try:
+        things = _things(slide, W, H, set())
+    except Exception:  # noqa: BLE001 - the caption in the middle of the place, as before
+        return box
+    edge = int(0.01 * W)
+    x0, x1 = box.x, box.x2
+    for t in things:
+        tx, ty, tw, th = t.box
+        if t.el_id is not None or t.kind == "minor" or tw * th >= 0.85 * W * H:
+            continue  # the slide's own shapes, page numbers and footers, the slide's ground
+        if min(ty + th, box.y2) - max(ty, box.y) < 0.5 * box.h or tx + tw <= x0 or tx >= x1:
+            continue  # not a band along the place
+        if tx <= x0 + edge and tx + tw < x1:
+            x0 = tx + tw  # at the place's left side
+        elif tx + tw >= x1 - edge and tx > x0:
+            x1 = tx  # at its right side
+    if x1 - x0 < 0.6 * box.w or (x0, x1) == (box.x, box.x2):
+        return box
+    return Bbox(x=x0, y=box.y, w=x1 - x0, h=box.h)
 
 
 def _photo_pictogram(cv, box: Bbox, ink: str, ground: str) -> None:
