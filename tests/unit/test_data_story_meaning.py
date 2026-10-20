@@ -74,3 +74,27 @@ def test_an_exact_count_is_met_with_slides_of_their_own_or_said_plainly():
     assert any("Данных хватило на 7 осмысленных слайдов из 9 запрошенных" in x for x in st.outline.agent_log)
     small = _story(5)
     assert len(small.slides) <= 5 and all(";" not in s.headline for s in small.slides)
+
+
+def test_a_conclusion_over_two_files_is_taken_clause_by_clause():
+    """Жюри 5 (W-C): «Выручка выросла на 66% за 2025 год, Москва даёт 46% выручки» — два файла в одном выводе, и каждое
+    число — своего файла: не «смешивает данные разных файлов». Чужое число в части — отказ."""
+    from verstka.data.story import _Attribution
+
+    o = _story(6)
+    src = _Attribution([s for s in o.slides if s.data is not None])
+    s, why = src.of("Выручка выросла на 66% за 2025 год, Москва даёт 46% выручки")
+    assert s is not None and not why, why
+    s, why = src.of("Выручка выросла на 46% за 2025 год, Москва даёт 66% выручки")
+    assert s is None and why
+
+
+def test_no_context_slide_of_plan_items_and_notes():
+    """Жюри 5: «Контекст: Таблицы во вложении, цели — в регламенте» и пункты плана текстом — не слайд."""
+    brief = ("Итоги Q3 по поддержке VK Cloud — для директора. Таблица по месяцам и SLA во вложении, цели — в регламенте "
+             "(база знаний).\n\nО чём хочу рассказать:\n1. Нагрузка растёт — сколько обращений\n2. Справляемся ли\n")
+    tables: list[Table] = []
+    for f in sorted(S10.iterdir()):
+        tables += read_file(f)
+    o = build_data_story(Brief(text=brief), tables).outline
+    assert not any(s.id.startswith("context") for s in o.slides)

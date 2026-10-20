@@ -109,7 +109,7 @@ def test_the_summary_says_the_goals_conclusions(sales_story):
     # key figures' own — said once), the weak spot the brief asks about («где узкие места») said as one; the cards'
     # topics, never a file's name; the headline is the two strongest conclusions (qa4 NEW-S1, S3, NEW-S4)
     assert [it.title for it in summary.content.items] == ["Выручка и клиенты", "Выручка по регионам", "Каналы продаж", "Узкое место: время ответа поддержки"]
-    assert summary.headline.startswith("Главное в четырёх цифрах: итоги квартала, главный регион — Москва")
+    assert summary.headline.startswith("Итог в четырёх цифрах: итоги квартала, главный регион — Москва")
     heads = {s.headline for s in sales_story.outline.slides if s.data}
     assert all(it.text in heads for it in summary.content.items[:3])
 

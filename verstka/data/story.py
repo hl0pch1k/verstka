@@ -794,13 +794,20 @@ def _context_lines(brief: Optional[Brief], title_sentence: Optional[str]) -> lis
     """The brief's sentences that say something about the subject — not its title, its goals or instructions about
     the deck and its files («Данные — в приложенных файлах»)."""
     text = (brief.text if brief is not None else "") or ""
+    # a plan («О чём хочу рассказать: 1. …», «- …»): its items are the deck itself, its first line the cover — no
+    # «Контекст» of the plan's lines and the author's notes to the deck-maker (жюри 5: VKT-D, W-D, E-D, UI1 s2)
+    if re.search(r"(?m)^\s*(?:\d{1,2}[.)]|[-•*–])\s+\S", text) and len(re.findall(r"(?m)^\s*(?:\d{1,2}[.)]|[-•*–])\s+\S", text)) >= 2:
+        return []
     goals = goals_of(text)
     out = []
-    for s in _sentences(text):
+    sents = _sentences(text)
+    for s in sents:
         if title_sentence and s == title_sentence:
             continue
+        if s is sents[0] and len(s.split()) <= 14 and not re.search(r"[.!?…]\s*\S", s.strip()) and re.search(r"(?i)\bдля\b|—", s):
+            continue  # the brief's first line is its title and audience («Итоги Q3 по поддержке — для директора»)
         low = s.lower()
-        if any(g.phrase in low for g in goals) or _META_RE.search(s):
+        if any(g.phrase in low for g in goals) or _META_RE.search(s) or _NOTE_RE.search(s):
             continue
         if len(s) < 25:
             continue
@@ -810,6 +817,10 @@ def _context_lines(brief: Optional[Brief], title_sentence: Optional[str]) -> lis
         return []  # one short line is no context slide
     return out[: CONTEXT_LINES * MAX_CONTEXT_SLIDES]
 
+
+# the author's notes about the files, not the subject: «Таблица … во вложении», «цели — в регламенте (база знаний)»
+_NOTE_RE = re.compile(r"(?i)во\s+вложени|приложил|прилагаю|в\s+базе\s+знаний|база\s+знаний|в\s+регламент|выгрузк\w*\s+(?:из|в)|"
+                      r"таблиц\w*\s+(?:по|с|во)\b.{0,40}(?:вложени|приложен)")
 
 _WEAK_LABEL_WORDS = {"больше", "меньше", "всего", "более", "менее", "около", "почти", "только"}
 
@@ -857,7 +868,11 @@ def _metric_word(p: DatasetPlan) -> tuple[str, str]:
     from verstka.data.words import phrase
 
     w = re.split(r"\s+(?:по|за|в)\s+", p.plain_headline or "", maxsplit=1)[0].strip()
-    ph = phrase(w) if w and not re.search(r"\d", w) else None
+    ph = phrase(w) if w and not re.search(r"\d|[a-z]", w) else None
+    if (ph is None or not ph.sure) and p.task.task == "dynamics":
+        # (a transliterated file name «Zayavki» is no word: the headline's subject — «Заявки выросли…»)
+        w = (re.match(r"^([А-ЯЁ][а-яё]+)\s", p.headline or "") or [None, ""])[1]
+        ph = phrase(w) if w else None
     if ph is None or not ph.sure:
         return "", ""
     return ph.low.nom, ph.low.gen
@@ -902,7 +917,7 @@ def _subject(p: DatasetPlan) -> Optional[str]:
             who = f.text.split(" — ", 1)[0].strip()
             return f"{_ADJ_MAIN.get(dp.gender, 'главный')} {dp.low.nom} — {who}"
     topic = (p.plain_headline or "").strip()
-    return lower_first_soft(topic) if topic and not re.search(r"\.[a-z]{2,4}$", topic) else None
+    return lower_first_soft(topic) if topic and not re.search(r"\.[a-z]{2,4}$|^[A-Za-z_\s-]+$", topic) else None
 
 
 def general_head(plans: Sequence[DatasetPlan]) -> Optional[str]:
@@ -913,7 +928,7 @@ def general_head(plans: Sequence[DatasetPlan]) -> Optional[str]:
     if len(subs) < 2 or len(subs) not in _IN_FIGURES:
         return None
     years = {m.group(1) for p in plans for m in re.finditer(r"за (\d{4}) год", p.headline or "")}
-    lead = f"{years.pop()} год" if len(years) == 1 else "Главное"
+    lead = f"{years.pop()} год" if len(years) == 1 else "Итог"
     head = f"{lead} в {_IN_FIGURES[len(subs)]} цифрах: " + ", ".join(subs)
     # (a list of the files' topics is no generalisation: «итоги года, часы подготовки…» — the conclusions instead; a
     # growth or a leader named makes it one)
@@ -1780,6 +1795,32 @@ def _count_bounds(brief: Optional[Brief], slide_count: Optional[int], limit: Opt
 _NOT_A_MEASURE = re.compile(r"(?i)(?:^|[^а-яё])(?:цел[ьи]|план\w*|норматив\w*|target|прогноз\w*)(?:[^а-яё]|$)")
 
 
+def _peak_view(k: int, p: DatasetPlan, table: Table, said: str, heads: set) -> Optional[OutlineSlide]:
+    """Пик ряда внутри периода («Заявки: выше всего — август 2026, 5 600» при спаде в сентябре) — свой вывод, которого
+    нет у слайда роста от первого до последнего месяца. None — пик в конце ряда (его говорит рост) или его число уже
+    сказано."""
+    from verstka.data.goals import Goal
+
+    col = next((c.name for c in p.profile.columns if c.role == "metric"), None)
+    if col is None:
+        return None
+    g = Goal(phrase="когда был пик", task="dynamics", viz="line", to="", given=True, column=col, ask="period_max")
+    try:
+        q = plan_datasets([table], "", goals=[g])[0]
+    except Exception:  # noqa: BLE001 - no peak view
+        return None
+    last = next((f for f in p.headline_facts if f.id == "last"), None)
+    pick = next((f for f in q.headline_facts if f.id == "period_pick"), None)
+    if q.slides <= 0 or pick is None or "выше всего" not in (q.headline or "") or q.headline.strip().lower() in heads:
+        return None
+    if last is not None and abs(float(last.value) - float(pick.value)) < 1e-9:
+        return None  # the peak is the last period: the growth slide says it
+    if fmt_num(round(pick.value)) in said.replace("\u00a0", " "):
+        return None
+    sl = slide_for(q, table, 1, slide_id=f"data-{k + 1}-peak")
+    return sl if isinstance(sl, OutlineSlide) and sl.content.chart is not None else None
+
+
 def _more_views(story: "DataStory", tables: Sequence[Table]) -> list[tuple[int, OutlineSlide]]:
     """The data slides the deck can still say, by meaning (not a second form of the same figures): another measure of a
     file the deck shows — «Решено в первый день» beside «Обращения» by month, «Обращений в день на человека» beside
@@ -1791,7 +1832,7 @@ def _more_views(story: "DataStory", tables: Sequence[Table]) -> list[tuple[int, 
     heads = {(s.headline or "").strip().lower() for s in o.slides}
     out: list[tuple[int, OutlineSlide]] = []
     for k, p in enumerate(story.plans):
-        if k >= len(tables) or p.slides <= 0 or p.profile.table_id not in shown_ids or p.task.task not in ("dynamics", "comparison"):
+        if k >= len(tables) or p.slides <= 0 or p.profile.table_id not in shown_ids or p.task.task not in ("dynamics", "comparison", "shares"):
             continue
         mine = [s for s in o.slides if s.data is not None and s.data.dataset_id == p.profile.table_id]
         used: set[str] = set()
@@ -1825,10 +1866,16 @@ def _more_views(story: "DataStory", tables: Sequence[Table]) -> list[tuple[int, 
             if not isinstance(sl, OutlineSlide) or sl.content.chart is None:
                 continue
             series = [x.name for x in sl.content.chart.series]
-            if not series or not series[0].startswith(c.name.split(",")[0]):
-                continue
+            if not series or not (series[0].startswith(c.name.split(",")[0]) or
+                                  (p.task.task == "shares" and q.task.spec is not None and q.task.spec.column == c.name)):
+                continue  # (a pie names its series «Доля»: the plan's column says which one it shows)
             heads.add(q.headline.strip().lower())
             out.append((k, sl))
+        if p.task.task == "dynamics":
+            peak = _peak_view(k, p, tables[k], said, heads)
+            if peak is not None:
+                heads.add(peak.headline.strip().lower())
+                out.append((k, peak))
     # a measure over time first (a second trend of the same months says most), then the others, in the story's order
     return sorted(out, key=lambda x: (story.plans[x[0]].task.task != "dynamics", out.index(x)))
 
@@ -2489,10 +2536,10 @@ class _Attribution:
         if not speaks:
             return None, "не видно, о каких данных вывод" if not numbers_in(line, self.all_labels) else "вывод не называет, о каких данных его числа"
         if len(speaks) > 1:
-            return None, "вывод смешивает данные разных файлов"
+            return self._by_clauses(line, "вывод смешивает данные разных файлов")
         s = speaks[0]
         if not data_text_ok(line, s, values=self.values(s)):
-            return None, "числа не из фактов того файла, о котором говорит вывод"
+            return self._by_clauses(line, "числа не из фактов того файла, о котором говорит вывод")
         if self.wrong_category(line, s):
             return None, "число в данных относится к другой категории"
         # a number of a fact about one category, said of another («Казань выросла на 41%», where 41% is Moscow's)
@@ -2507,6 +2554,28 @@ class _Attribution:
                         and not any(_label_named(f.text or "", line) for f in hits):
                     return None, f"число {_num(n)} в данных относится к другой категории"
         return s, ""
+
+    def _by_clauses(self, line: str, why: str) -> tuple[Optional[OutlineSlide], str]:
+        """One conclusion about two files («Compute вырос на 31%, госсектор — 131 клиент», «Выручка выросла на 66%,
+        Москва даёт 46% выручки» — жюри 5, W-C): each clause speaks of one file — by its own words, else by its figures
+        — and its figures are that file's. (the first clause's slide, "") or (None, `why`)."""
+        parts = [x for x in re.split(r"[;,]\s+|\s+[—–]\s+(?=[А-ЯЁA-Z])|\s+и\s+(?=[А-ЯЁA-Z])", line) if x.strip()]
+        if len(parts) < 2:
+            return None, why
+        first = None
+        for part in parts:
+            sp = [x for x in self.slides if self._names(part, x)]
+            nums = numbers_in(part, self.all_labels)
+            if len(sp) != 1 and nums:
+                sp = [x for x in self.slides if data_text_ok(part, x, values=self.values(x))]
+            if len(sp) != 1:
+                if nums:
+                    return None, why
+                continue  # a clause without figures and names («и это рекорд») goes with its neighbour
+            if not data_text_ok(part, sp[0], values=self.values(sp[0])) or self.wrong_category(part, sp[0]):
+                return None, "числа не из фактов того файла, о котором говорит часть вывода"
+            first = first or sp[0]
+        return (first, "") if first is not None else (None, why)
 
     def values(self, s: OutlineSlide) -> list[float]:
         return list(self.extra.get(s.id, ((), {}, {}))[0])

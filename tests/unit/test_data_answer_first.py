@@ -107,7 +107,7 @@ def test_the_summary_headline_says_the_two_strongest_conclusions(sales, science)
     o = build_data_story(Brief(text=SALES_BRIEF), sales).outline
     head = _plain(_summary(o).headline)
     # a generalisation of the deck, not two slides' conclusions again (owner, 21.10)
-    assert head.startswith("Главное в четырёх цифрах: итоги квартала, главный регион — Москва")
+    assert head.startswith("Итог в четырёх цифрах: итоги квартала, главный регион — Москва")
     assert not topic_only(head) and "главных вывода" not in head
     q1 = build_data_story(Brief(text=Q1), sales).outline
     assert not any(same_headline(_summary(q1).headline, s.headline) for s in q1.slides if s.id != "summary")
@@ -133,7 +133,7 @@ def test_the_models_label_for_the_summary_is_refused_and_a_conclusion_taken(sale
         assert any(r["what"] == "summary_title" and not r["accepted"] for r in st.rephrased)
     st = _told(sales, SALES_BRIEF, {"summary_title": "Выручка растёт быстрее числа клиентов, Москва даёт 41% выручки"})
     # (accepted, then said by its slides already — the summary generalises instead: no repeat, owner 21.10)
-    assert _summary(st.outline).headline.startswith("Главное в четырёх цифрах")
+    assert _summary(st.outline).headline.startswith("Итог в четырёх цифрах")
 
 
 def test_the_models_topic_title_does_not_replace_the_answer(sales):
