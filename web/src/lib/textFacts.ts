@@ -25,6 +25,44 @@ const COUNT = new RegExp(
   ].join("|"),
   "i",
 );
+// a range of slides (planning/brief.py SLIDE_RANGE_RE): «6–8 слайдов», «слайдов 8–10», «8-10 slides», «Слайдов: от 6 до
+// 8» — the deck keeps within it, its size is the upper bound; «по 2–3 слайдам», «в 2–3 слайдах» are parts, not the deck
+const RANGE = new RegExp(
+  "(?<![\\d.,])(?<!по\\s)(?<!в\\s)(\\d{1,2})\\s*(?:[–—−-]|до)\\s*(\\d{1,2})\\s+(?:слайд(?:ов|а)?(?![а-яё])|slides?\\b)"
+    + "|(?<![а-яё])слайд(?:ов|а)?\\s*(?:[:—–-]\\s*)?(?:от\\s+)?(\\d{1,2})\\s*(?:[–—−-]|до)\\s*(\\d{1,2})(?!\\d|[.,]\\d)",
+  "i",
+);
+// the front matter's «slides: 8» / «slides: 6–8» (brief.py: a number as is, a range — its upper bound)
+const FRONT = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/;
+const FRONT_SLIDES = /^\s*(?:slides|slide_count)\s*:\s*(.+?)\s*$/im;
+
+/** (at least, at most) of a range of slides the text asks for, null without one (brief.py `slide_range`). */
+export function slideRange(text: string): [number, number] | null {
+  const m = RANGE.exec(text);
+  if (!m) return null;
+  const [a, b] = m.slice(1).filter((g) => g !== undefined).map(Number);
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  return lo >= 1 && hi <= 60 ? [lo, hi] : null;
+}
+
+/** The deck's size the text asks for (brief.py `slide_count_of`, with the front matter first): the upper bound of a
+ *  range, else «не более 10 слайдов» / «на 8 слайдов» / «Сделай 12 слайдов»; null — the text does not say. */
+export function slideCountOf(text: string): number | null {
+  const f = FRONT.exec(text);
+  const key = f ? FRONT_SLIDES.exec(f[1]) : null;
+  if (key) {
+    const raw = key[1].replace(/^["']|["']$/g, "").trim();
+    if (/^\d+$/.test(raw)) return Number(raw) || null;
+    const r = slideRange(`${raw} слайдов`);
+    if (r) return r[1];
+  }
+  const r = slideRange(text);
+  if (r) return r[1];
+  const c = COUNT.exec(text);
+  return c ? Number(c.slice(1).find((g) => g !== undefined)) || null : null;
+}
+
 // (faithful.py _COVER_WORDS_RE: «Discovery» holds the letters of «cover» and is no cover)
 const COVER = /титул|обложк|заглавн|\bcover\b|title\s+slide/i;
 const TITLE_LINE = /^\s*(?:[—–\-•*]\s*)?(?:название|подзаголовок|заголовок|title|subtitle)\s*[:—–]/im;
@@ -69,8 +107,7 @@ export function dictatedByHeadings(text: string): boolean {
 
 export function dictatedSlides(text: string): number | null {
   const lines = text.split("\n");
-  const c = COUNT.exec(text);
-  const hard = c ? Number(c.slice(1).find((g) => g !== undefined)) || null : null;
+  const hard = slideCountOf(text);
   const heads = specHeads(lines, text);
   if (heads.length === 0) return hard;
   // the first head is the cover when its title says so, or when it describes a title and a subtitle (not a table)

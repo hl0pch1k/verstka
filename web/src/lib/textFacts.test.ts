@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { briefBody, dictatedSlides, factsLine, textFacts } from "./textFacts";
+import { briefBody, dictatedSlides, factsLine, slideCountOf, slideRange, textFacts } from "./textFacts";
 
 test("slides dictated by headings get a cover in front", () => {
   const text = "Слайд 1. Проблема\nтекст\nСлайд 2. Решение\nтекст\nСлайд 3. Рынок\nтекст";
@@ -56,4 +56,20 @@ test("front matter is not material: the text's length counts the body", () => {
   assert.equal(briefBody("---\nslides: 5\n---\n").trim(), "");
   assert.equal(briefBody("---\nаудитория: инвесторы\n---\nТекст презентации").trim(), "Текст презентации");
   assert.equal(briefBody("Просто текст\n---\nещё"), "Просто текст\n---\nещё");
+});
+
+test("диапазон слайдов — как brief.py SLIDE_RANGE_RE: размер колоды — верхняя граница; части колоды — не размер", () => {
+  assert.equal(dictatedSlides("Сделай 6–8 слайдов про кофейню"), 8);
+  assert.equal(dictatedSlides("Слайдов 8–10, коротко"), 10);
+  assert.equal(dictatedSlides("Нужно 8-10 slides about the market"), 10);
+  assert.equal(dictatedSlides("Слайдов: от 6 до 8"), 8);
+  assert.equal(dictatedSlides("---\nslides: 6-8\n---\nТекст про продукт"), 8);
+  assert.equal(slideCountOf("---\nslides: 12\n---\nТекст"), 12);
+  assert.deepEqual(slideRange("6–8 слайдов"), [6, 8]);
+  // части колоды — не её размер
+  assert.equal(dictatedSlides("Расскажи о рынке по 2–3 слайдам на тему"), null);
+  assert.equal(dictatedSlides("Итоги — в 2–3 слайдах"), null);
+  assert.equal(slideRange("Выручка 1,6–8 слайдов"), null);
+  // без диапазона — прежнее правило
+  assert.equal(slideCountOf("Расскажи про продукт на 8 слайдов"), 8);
 });
