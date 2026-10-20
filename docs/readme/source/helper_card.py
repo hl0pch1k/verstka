@@ -2,6 +2,8 @@
 
 before/after:  helper_card.py pair  out.webp "просьба" before.pdf PAGE after.pdf PAGE
 chat panels:   helper_card.py chat  out.webp "Заголовок" shot1.png "подпись 1" shot2.png "подпись 2" ...
+screen:        helper_card.py screen out.webp WIDTH "подпись" shot.png   (interface screen on a plate, 1600 or 800 wide)
+phones:        helper_card.py phones out.webp "подпись" phone1.png "экран 1" phone2.png "экран 2" ...
 
 The request pill is drawn like a user message in the Помощник chat (blue bubble, white text) and its text is centred by
 the ink box of the glyphs (cap height for the vertical centre), as in the showcase cards (card.py)."""
@@ -80,9 +82,9 @@ def shot(img, im, X, Y, w, h, r=14):
     img.paste(im, (int(X), int(Y)), mask)
 
 
-def save(img, out):
+def save(img, out, scale=1.0):
     W, H = img.size
-    img = img.resize((W // S, H // S), Image.LANCZOS)
+    img = img.resize((round(W * scale / S), round(H * scale / S)), Image.LANCZOS)
     img.save(out, "WEBP", quality=84, method=6)
     print(out, os.path.getsize(out) // 1024, "KB", img.size)
 
@@ -136,9 +138,93 @@ def chat(out, title, items):
     save(img, out)
 
 
+# ---------------------------------------------------------------- interface screens
+def stack_box(im, bg=(243, 244, 241)):
+    """Bounds of the interface stack (the plates) in a 1920×1080 shot: everything below the header that differs from
+    the page background."""
+    import numpy as np
+    a = np.abs(np.asarray(im).astype(int) - np.array(bg)).sum(2) > 8
+    a[:60] = False
+    ys, xs = np.where(a)
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def screen(out, cw, caption, png, radius=48):
+    """One interface screen on a plate: dark caption pill + logo bars on top, the real screen below with its own
+    rounded corners and a soft shadow."""
+    global CW, PAD
+    CW, PAD = cw, (40 if cw >= 1200 else 24)
+    im = Image.open(png).convert("RGB")
+    im = im.crop(stack_box(im))
+    big = cw >= 1200
+    head = 116 if big else 104
+    sw = cw - 2 * PAD
+    sh_ = sw * im.height / im.width
+    H = int(20 + head + sh_ + PAD)
+    img, d = canvas(H)
+    mid = (20 + head / 2 + 2) * S
+    pill(d, PAD * S, mid, caption, 21 if big else 26, INK + (255,), (255, 255, 255, 255), padx=24 if big else 26,
+         h=50 if big else 60)
+    k = (2.5 if big else 2.4) * S
+    bx = CW * S - PAD * S - (28 + 3 + 20 + 3 + 12) * k
+    for wd, col in ((28, (191, 214, 255)), (20, BLUE), (12, INK)):
+        d.rounded_rectangle([bx, mid - 2 * k, bx + wd * k, mid + 2 * k], 2 * k, fill=col + (255,))
+        bx += (wd + 3) * k
+    shot(img, im, PAD * S, (20 + head) * S, sw * S, sh_ * S, r=radius * sw / im.width)
+    save(img, out, 1.0 if big else 1.5)  # small cards are shown half-width: 1.5× pixels stay sharp on HiDPI
+
+
+# ---------------------------------------------------------------- phone screens (design of the mobile version)
+def phones(out, caption, items):
+    """Three phone screens (390×844 renders of the «Слои» phone boards) in plain rounded frames — no maker marks —
+    with arrows between them and a caption pill under each."""
+    global CW, PAD
+    CW, PAD = 1600, 40
+    head, lab = 116, 70
+    sh_, bez, gap = 720, 9, 128
+    ims = [Image.open(p).convert("RGB") for p, _ in items]
+    sw = sh_ * ims[0].width / ims[0].height
+    fw, fh = sw + 2 * bez, sh_ + 2 * bez
+    total = len(ims) * fw + (len(ims) - 1) * gap
+    x0 = (CW - total) / 2
+    H = int(20 + head + fh + lab + PAD - 10)
+    img, d = canvas(H)
+    mid = (20 + head / 2 + 2) * S
+    pill(d, PAD * S, mid, caption, 21, INK + (255,), (255, 255, 255, 255), padx=24, h=50)
+    logo_bars(d, mid)
+    y = (20 + head) * S
+    for i, (im, (_, cap_)) in enumerate(zip(ims, items)):
+        X = (x0 + i * (fw + gap)) * S
+        # frame: soft shadow, thin dark bezel, the screen inside with matching corners
+        shadow = Image.new("RGBA", (int(fw * S) + 60 * S, int(fh * S) + 60 * S), (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).rounded_rectangle([30 * S, 38 * S, fw * S + 30 * S, fh * S + 38 * S], 54 * S,
+                                                 fill=INK + (46,))
+        img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(14 * S)), (int(X - 30 * S), int(y - 30 * S)))
+        d.rounded_rectangle([X, y, X + fw * S, y + fh * S], 54 * S, fill=INK + (255,))
+        scr = im.resize((int(sw * S), int(sh_ * S)), Image.LANCZOS)
+        mask = Image.new("L", scr.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, scr.size[0] - 1, scr.size[1] - 1], 46 * S, fill=255)
+        img.paste(scr, (int(X + bez * S), int(y + bez * S)), mask)
+        pill(d, 0, y + (fh + lab / 2 + 6) * S, cap_, 18, (255, 255, 255, 255), INK + (255,), padx=18, h=36,
+             center_x=X + fw * S / 2)
+        if i < len(ims) - 1:
+            cx, cy, r = X + (fw + gap / 2) * S, y + fh * S / 2, 30 * S
+            d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=BLUE + (255,))
+            a = 11 * S
+            d.line([cx - a, cy, cx + a, cy], fill=(255, 255, 255, 255), width=int(4 * S))
+            d.line([cx + a - 9 * S, cy - 9 * S, cx + a + 1 * S, cy, cx + a - 9 * S, cy + 9 * S],
+                   fill=(255, 255, 255, 255), width=int(4 * S), joint="curve")
+    save(img, out)
+
+
 if __name__ == "__main__":
     mode, out = sys.argv[1], sys.argv[2]
-    if mode == "pair":
+    if mode == "phones":
+        rest = sys.argv[4:]
+        phones(out, sys.argv[3], list(zip(rest[::2], rest[1::2])))
+    elif mode == "screen":
+        screen(out, int(sys.argv[3]), sys.argv[4], sys.argv[5])
+    elif mode == "pair":
         request, bp, bn, ap, an = sys.argv[3:8]
         pair(out, request, bp, int(bn), ap, int(an))
     else:
