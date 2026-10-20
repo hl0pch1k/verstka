@@ -90,7 +90,13 @@ function useTick(on: boolean): number {
     if (!on) return;
     setNow(Date.now());
     const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
+    // a background tab holds the timer back (up to a minute): back on the tab, the clock is right at once
+    const back = () => document.visibilityState === "visible" && setNow(Date.now());
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", back);
+    };
   }, [on]);
   return now;
 }

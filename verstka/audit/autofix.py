@@ -30,7 +30,7 @@ from verstka.skills_registry.registry import SkillsRegistry
 log = logging.getLogger(__name__)
 
 STRUCTURAL_ACTIONS = ("rematch", "synth")  # need a full re-render of the slide
-OUTLINE_ACTIONS = ("recount", "split_chart")  # an edit of the slide's plan, then its re-render
+OUTLINE_ACTIONS = ("recount", "split_chart", "unsay_note")  # an edit of the slide's plan, then its re-render
 RERENDER_ACTIONS = STRUCTURAL_ACTIONS + ("condense_text",) + OUTLINE_ACTIONS
 MIN_FONT_PT = 8.0  # body text below this is unreadable on a projector; footnote sizes of the scale are not shrink targets
 
@@ -229,6 +229,12 @@ def _edit_plan(outline: DeckOutline, oid: str, act: FixAction) -> str:
         was = osl.headline
         osl.headline = new
         return f"recount: «{was}» → «{new}»"
+    if act.action == "unsay_note":
+        # the author's words to the deck-maker printed on the slide («сделай 8 слайдов, без картинок»): taken out
+        from verstka.audit.checks.request import unsay
+
+        done = unsay(osl)
+        return "unsay_note: " + "; ".join(done)[:300] if done else "skip"
     if act.action == "split_chart":
         done = False
         for spec in (osl.content.chart, osl.content.chart2):

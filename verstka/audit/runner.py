@@ -70,7 +70,7 @@ def run_audit(
             log.warning("render failed: %s", e)
     elif images:
         render_ok = True
-    ctx = AuditContext(ir=ir, manifest=manifest, outline=outline, ws=ws, slide_images=images, render_ok=render_ok, opens_ok=opens_ok, brief_text=brief_text, writer=writer)
+    ctx = AuditContext(ir=ir, manifest=manifest, outline=outline, ws=ws, slide_images=images, render_ok=render_ok, opens_ok=opens_ok, brief_text=brief_text, writer=writer, pptx=pptx)
     if opens_ok:
         issues, ran = run_checks(ctx)
         report.issues.extend(issues)

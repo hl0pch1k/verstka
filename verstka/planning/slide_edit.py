@@ -748,8 +748,20 @@ def redesign_slide(
     redo = redo_request(request)
     picture = not photo and not drop_photo and picture_request(request)
     shorter = shorter_request(request)
+    # a slide made from a data file: what the data rules do themselves — another measure («итог Q3 к Q2 в процентах»,
+    # «к плану», «доли»), the fall or the leader highlighted, the chart turned, the headline and the caption said in the
+    # new measure, «короче» without a figure lost (jury 5, UI1: the designer's words kept «64% выручки» instead)
+    data_done = None
+    if old.data is not None and request.strip():
+        from verstka.planning import data_edit as DE
+
+        wish = DE.read_wish(request, old)
+        if wish.measure or wish.highlight or wish.chart in ("column", "bar"):
+            data_done = DE.apply_wish(old, wish)
+        if data_done is None and wish.shorter and not wish.measure:
+            data_done = DE.shorter(old)
     emphasis: Optional[tuple[str, int]] = None
-    if not fixing and emphasis_request(request):
+    if data_done is None and not fixing and emphasis_request(request):
         # «выдели Казань цветом»: the chart's own highlight on that category — a safe edit the rules make, no model; a
         # colour the slide cannot show this way is said so, never reported as done (N-E4)
         key, k, cats = emphasis_index(request, old)
@@ -760,7 +772,7 @@ def redesign_slide(
         if getattr(old.content, key).highlight_index == k:
             raise ValueError(f"«{cats[k]}» на слайде {index} уже выделена цветом")
         emphasis = (key, k)
-    if old.data is not None and emphasis is None:
+    if old.data is not None and emphasis is None and data_done is None:
         # a slide made from a data file changes its form only among the analysis's options («Пересобрать слайд так»);
         # its words — with the model only (the rules have nothing to say about the data)
         from verstka.data.rebuild import _form_phrase, option_for_request
@@ -780,7 +792,11 @@ def redesign_slide(
     refused_first: list[str] = []
     style_lost: list[str] = []  # the conclusions a look-only redesign would have lost (it is refused then)
     only_picture = False  # only a picture asked: the slide stays as it is, no model is needed for it
-    if emphasis is not None:
+    if data_done is not None:
+        new = data_done.slide.model_copy(deep=True)
+        how = "data"
+        tracker.emit("designer", f"Дизайнер: слайд {index} — {data_done.did[0] if data_done.did else 'по данным слайда'}.", slide=index)
+    elif emphasis is not None:
         new = old.model_copy(deep=True)
         getattr(new.content, emphasis[0]).highlight_index = emphasis[1]
         how = "rules"
@@ -883,7 +899,7 @@ def redesign_slide(
             if not fixing or form is not None:
                 tracker.emit("designer", "Дизайнер: модель не ответила — пробую сделать по правилам.", slide=index)
             how = f"model failed: {str(e)[:120]}"
-    if redo and new is not None and form is None and new.kind == old.kind:
+    if redo and new is not None and form is None and new.kind == old.kind and how != "data":
         # the model kept the form: «полностью» is another form all the same (the rules make it from the model's lines)
         alt = other_form(outline, new, old.kind.value)
         if alt is not None:
@@ -925,7 +941,7 @@ def redesign_slide(
             raise ValueError(f"содержимое слайда {index} не ложится в такую форму: для неё нет подходящих данных в тексте")
     new = keep_what_was_asked(old, new.model_copy(deep=True), request, outline)
     refused: list[str] = []
-    if old.data is not None:
+    if old.data is not None and how != "data":
         new = keep_data(old, new)
         if emphasis is not None:
             getattr(new.content, emphasis[0]).highlight_index = emphasis[1]  # (the data's chart, with the asked highlight)
@@ -939,6 +955,19 @@ def redesign_slide(
                 else:
                     why = "модель вернула прежний текст"
                 raise ValueError(f"модель ответила, но правку не применил: {why}")
+        from verstka.planning.data_edit import _length as _text_length
+
+        if shorter and not (redo or picture) and _text_length(new) >= _text_length(old):
+            # «короче» that came back no shorter (jury 5: the caption went back to the old one) is no edit at all
+            raise ValueError(f"слайд {index} и так короткий: заголовок и подпись — по одной мысли, а короче без потери чисел данных не выходит")
+    elif shorter and old.data is None and not (redo or picture or form) and how == "model":
+        from verstka.planning.data_edit import _length as _text_length
+
+        if _text_length(new) >= _text_length(old):
+            # the designer's «короче» came back no shorter: the rules cut each line to its first clause instead
+            cut = rules_shorter(old)
+            if _text_length(cut) < _text_length(old):
+                new, how = cut, "rules"
     new.id = old.id
     new.spec_ref = old.spec_ref
     new.content.photo_slot = photo or (ASKED_PICTURE if picture else (None if drop_photo else old.content.photo_slot))
@@ -988,7 +1017,9 @@ def redesign_slide(
     after = A.form_ru(result)
     what = describe_change(old, result)
     reply = f"Слайд {index} переделан: {what}."
-    if emphasis is not None:
+    if how == "data" and data_done is not None:
+        reply = f"Слайд {index} переделан по данным файла «{old.data.file}»: " + "; ".join(data_done.did or [what]) + "."
+    elif emphasis is not None:
         reply = f"Слайд {index}: выделил «{getattr(result.content, emphasis[0]).categories[emphasis[1]]}» цветом на диаграмме."
     elif only_picture:
         reply = f"Слайд {index}: текст и форма слайда прежние, рядом — место под картинку по смыслу слайда."

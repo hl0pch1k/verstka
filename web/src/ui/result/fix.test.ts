@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutlineSlide, SlideFixResult } from "../../types";
-import { asSlideFixResult, clock, fixRereads, fixUnchangedText, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, panelSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
+import { asSlideFixResult, clock, fixRereads, fixUnchangedText, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, liveNow, panelSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
 import { slideRemarks } from "./marks";
 import { CONTRAST, DENSE, MODEL, edit, ev, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -159,4 +159,11 @@ test("«Исправить слайд»: слайд прежний, а заме�
   // ответа нет — запасной текст «Слайд остался прежним: …»
   assert.equal(fixUnchangedText(old), "Слайд остался прежним: правила не нашли правки");
   assert.equal(fixUnchangedText({ ...old, why: null }), "Слайд остался прежним: замечания остались");
+});
+
+test("часы хода: фоновая вкладка придержала тик — перерисовка показывает текущее время (жюри 5: 45 с на часах 0:00)", () => {
+  const started = Date.now() - 45_000;
+  const staleTick = started + 500;
+  assert.equal(clock(liveNow(staleTick) - started), "0:45");
+  assert.ok(liveNow(Date.now() + 5_000) > Date.now()); // тик впереди часов (другой источник времени) — берётся он
 });

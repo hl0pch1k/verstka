@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import type { BboxFrac, SlidePicture, Variant } from "../../types";
 import { usePresence } from "../kit/usePresence";
-import { clock, lastEditIs, undoneIn } from "./fix";
+import { clock, lastEditIs, liveNow, undoneIn } from "./fix";
 import { pickedPicture, pictureView, slidePictures } from "./picture";
 import type { PictureCard, PictureRunView } from "./PictureCard";
 import { ownsKeys } from "./resultView";
@@ -82,7 +82,7 @@ export function usePictureSelect({ v, n, job, now, blocked, remarks, layered }: 
     action: picRun?.action ?? null,
     progress: picRun?.phase === "work" ? job.live.progress : 0,
     message: job.live.message,
-    clock: picRun ? clock((picRun.phase === "work" ? now : picRun.endedAt ?? now) - picRun.startedAt) : "0:00",
+    clock: picRun ? clock((picRun.phase === "work" ? liveNow(now) : picRun.endedAt ?? now) - picRun.startedAt) : "0:00",
     // изображение вернули как было в другом месте (лист «Подробнее», помощник) — итога больше нет
     done: picRun?.phase === "done" && picRun.picture?.applied && picRun.undo !== "work" && !undoneIn(v, picRun.picture.version) && !unread ? picRun.action : null,
     canUndo: !!picRun?.picture?.applied && lastEditIs(v, picRun.picture.version, "picture") && !unread,

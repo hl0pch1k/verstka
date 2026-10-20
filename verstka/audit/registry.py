@@ -37,6 +37,9 @@ class AuditContext:
     # writer mode (planning/writer.py): the writer's record of this generation — its summary() dict, the WriterResult or
     # its status («written», «failed», «refused», «private», «skipped»); None when the brief was not a topic
     writer: Optional[Any] = None
+    # the audited file: the request it was built for (generation.json beside its variant) is read from there when the
+    # caller has no brief text — a data deck's audit gets none (its figures are checked against the data)
+    pptx: Optional[Path] = None
     _issue_counter: int = 0
 
     def verbatim(self, slide) -> bool:
@@ -76,7 +79,7 @@ def load_builtin_checks() -> None:
     if _BUILTIN_LOADED:
         return
     _BUILTIN_LOADED = True
-    for mod in ("layout", "template", "density", "integrity", "facts", "writing", "data"):
+    for mod in ("layout", "template", "density", "integrity", "facts", "writing", "data", "request"):
         importlib.import_module(f"verstka.audit.checks.{mod}")
 
 

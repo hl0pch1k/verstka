@@ -32,6 +32,8 @@ const RANGE = new RegExp(
     + "|(?<![а-яё])слайд(?:ов|а)?\\s*(?:[:—–-]\\s*)?(?:от\\s+)?(\\d{1,2})\\s*(?:[–—−-]|до)\\s*(\\d{1,2})(?!\\d|[.,]\\d)",
   "i",
 );
+// the deck's size said on its own line or after the request's last sentence (brief.py slide_count_of)
+const ALONE = /(?:^|[.!?,;:—–]\s*)(\d{1,2})\s+слайд(?:ов|а)\s*[.!]?\s*$/im;
 // the front matter's «slides: 8» / «slides: 6–8» (brief.py: a number as is, a range — its upper bound)
 const FRONT = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/;
 const FRONT_SLIDES = /^\s*(?:slides|slide_count)\s*:\s*(.+?)\s*$/im;
@@ -60,7 +62,11 @@ export function slideCountOf(text: string): number | null {
   const r = slideRange(text);
   if (r) return r[1];
   const c = COUNT.exec(text);
-  return c ? Number(c.slice(1).find((g) => g !== undefined)) || null : null;
+  if (c) return Number(c.slice(1).find((g) => g !== undefined)) || null;
+  // «… модели обслуживания. 7 слайдов.», a plan ending with the line «5 слайдов» — the deck's size said on its own
+  // (brief.py slide_count_of, its last rule; jury 5 UI1: the stepper sent 12 and the server built 3)
+  const t = ALONE.exec(text.trim());
+  return t ? Number(t[1]) || null : null;
 }
 
 // (faithful.py _COVER_WORDS_RE: «Discovery» holds the letters of «cover» and is no cover)

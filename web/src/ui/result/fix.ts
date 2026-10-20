@@ -40,6 +40,11 @@ export function fixSteps(events: AgentEvent[], ended: boolean): { steps: FixStep
   return { steps, preview: ended ? "done" : previewing ? "act" : "wait" };
 }
 
+/** Время для часов хода: секундная стрелка или текущее время, что позже. Стрелка — таймер раз в секунду, а фоновая вкладка
+ *  его придерживает (Chromium — до раза в минуту): любая перерисовка (событие задачи, ход полосы) показывает верное время,
+ *  а не то, что было на последнем тике (жюри 5: «Агент исправляет слайд» 45 с показывал 0:00–0:01). */
+export const liveNow = (tick: number): number => Math.max(tick, Date.now());
+
 /** Часы хода: «0:14», «1:05». */
 export function clock(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));

@@ -9,7 +9,7 @@ import type { Variant } from "../../types";
 import { usePresence } from "../kit/usePresence";
 import type { FilmMarks } from "./Film";
 import { useFixStage, type FxPhase } from "./FixSketch";
-import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, fixUnchangedText, lastEditIs, slideSketch, undoneIn } from "./fix";
+import { clock, liveNow, fixedRows, fixSteps, fixSummary, fixToRevert, fixUnchangedText, lastEditIs, slideSketch, undoneIn } from "./fix";
 import { firstRemarkSlide, jumpText, slideBadges, slideRemarks, stageMarks, type Frame, type OkPin, type Pin } from "./marks";
 import type { PanelLine, PanelRow, PanelView, RemarksPanelProps } from "./RemarksPanel";
 import { busyWhy, staleOf } from "./slideJob";
@@ -151,7 +151,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
       line: view === "rem" || view === "none" ? line ?? jumpLine : null,
       elsewhere: badges.size > 0,
       progress: view === "fix" && fixRun && steps ? {
-        clock: clock((fixRun.endedAt ?? now) - fixRun.startedAt), value: fixRun.phase === "work" ? job.live.progress : 1,
+        clock: clock((fixRun.endedAt ?? liveNow(now)) - fixRun.startedAt), value: fixRun.phase === "work" ? job.live.progress : 1,
         steps: steps.steps, preview: steps.preview, wish: fixRun.wish,
       } : null,
       done: summary && fixRun ? {

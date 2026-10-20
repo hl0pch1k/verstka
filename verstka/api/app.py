@@ -2769,8 +2769,11 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
             if target is not None and target.data is not None:
                 from verstka.data.rebuild import option_for_request
 
+                from verstka.planning.data_edit import read_wish
+
                 k = option_for_request(req.text or body.message, target.data)
-                if k is not None:
+                # «покажи изменение в процентах столбцами»: another measure is the data rules' edit, not a rebuild
+                if k is not None and read_wish(req.text or body.message, target).measure is None:
                     # «на слайде 4 покажи таблицей» on a slide made from a data file: the analysis's own option, built
                     # from the file again («Пересобрать слайд так») — never the designer redrawing the figures
                     return _data_form_change(gid, strategy, vdir, meta, manifest, outline, i, k, body.message, job)
