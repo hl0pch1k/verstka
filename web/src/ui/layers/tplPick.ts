@@ -15,5 +15,6 @@ export function deckPick(d: { deckTpl: string; deckName: string; chosen: string 
   const other = d.chosen && d.chosen !== d.deckTpl ? d.chosen : null;
   const what = d.improved ? "для новой презентации" : "для новой презентации или пересборки этой";
   if (!other) return { line: `Эта презентация — на «${d.deckName}». Другой шаблон — ${what}.`, rebuild: null };
-  return { line: `Выбран «${d.chosenName ?? "шаблон"}» — ${what}. Эта — на «${d.deckName}».`, rebuild: d.improved ? null : other };
+  // шаблон открытой презентации — на полосе 01; строка короче места до «Пересобрать на нём» и в узкой колоде
+  return { line: `Выбран «${d.chosenName ?? "шаблон"}» — ${what}.`, rebuild: d.improved ? null : other };
 }
