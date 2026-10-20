@@ -544,7 +544,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshGenerations = useCallback(async () => {
     try {
       const list = await api.generations();
-      setGenerations(list);
+      // тот же список — не новость: ответ, пришедший посреди подъёма «Моих презентаций» (обновление при прогреве),
+      // не перерисовывает всё приложение (в Safari — кадр до 280 мс посреди хода)
+      setGenerations((prev) => (prev.length === list.length && JSON.stringify(prev) === JSON.stringify(list) ? prev : list));
       clearNotice("history"); // the list is fresh: an earlier «Не удалось обновить список презентаций» is stale
       const current = latest.current.generation?.id; // a loaded generation that was deleted meanwhile
       if (current && !list.some((g) => g.id === current)) clearGeneration();
