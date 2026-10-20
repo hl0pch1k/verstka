@@ -1307,6 +1307,11 @@ class Composer:
                     self._tight = 0
                 if self._coverage(n0, area) <= self.FILL_MAX:
                     break
+        if not self._dense and (comp == "process" or self.o.kind in (PatternKind.process, PatternKind.timeline)):
+            # a row of steps whose lines under it came out under the readable size (2.6 % of the slide: 10 pt on a
+            # 6.2-inch slide, Beehive and Vintage «Привлечение клиентов»): the steps one under the other and the lines
+            # beside them at a larger size, when that fits
+            self._steps_beside_readable(comp, area, n0, (o0, w0, notes0))
         boost_used = self._boost
         self._boost = 0
         if self._notes and self._notes[1] is not None and self._conclusion_spot(n0) is None:
@@ -2308,6 +2313,12 @@ class Composer:
     def _under_heading(self) -> float:
         """The largest size a callout (a statement, a quote) may take under the slide's heading: a clear step below it."""
         k = self.kit
+        head = (getattr(self.o, "headline", "") or "").strip()
+        if head and len(head) <= 28 and len(head.split()) <= 3 and not any(ch.isdigit() for ch in head):
+            # a heading that only names the slide («Проблема», «Предложение», «План») is a label: the slide's message is
+            # the statement under it, set as large as the label (a step under it left a short ask at body size on an
+            # empty slide — unseen templates, 20.10) — still a hair under the label: the heading stays the heading
+            return k.snap(k.head_size * 0.95, k.lead, max(k.lead, k.head_size - 0.5))
         return k.snap(k.head_size * 0.84, k.lead, max(k.lead, k.head_size * 0.9))
 
     def _figure_optics(self, para: Para, box_h: int) -> tuple[int, int]:
@@ -3048,7 +3059,12 @@ class Composer:
         sizes = list(dict.fromkeys(sizes[:1] + [x for x in reversed(k.sizes) if sizes[-1] - 0.05 <= x < sizes[0] - 0.05] + sizes))
         sizes.sort(reverse=True)
         if getattr(self, "_boost", 0) >= 1:
-            sizes = [x for x in k.sizes if sizes[0] + 0.05 < x <= k.h2 + 0.05][::-1] + sizes
+            # the fill pass: a short list climbs to the second heading size — and, under a heading that only names the
+            # slide, as large as that label (four short lines at 20 pt over half an empty slide, Midnightblue)
+            cap = k.h2
+            if n <= 4 and total <= 260 and k.head_size:
+                cap = max(cap, self._under_heading())
+            sizes = [x for x in k.sizes if sizes[0] + 0.05 < x <= cap + 0.05][::-1] + sizes
         for size in sizes:
             marker_w = _emu(size * 1.6)
             heights = [self.h([self.P(t, size, k.colors.text)], text_w - marker_w) for t in texts]
@@ -3333,6 +3349,36 @@ class Composer:
             paras = self._card_paras(it, ts, bs, tcolors)
             self.cv.text(Bbox(x=bx, y=ty, w=inner, h=max(text_h, y0 + block_h - pad - ty)), paras, name="Step")
 
+    READABLE = 0.026  # of the slide height: running text under it reads as small print from the back of the room
+
+    def _steps_beside_readable(self, comp: str, area: Bbox, n0: int, state: tuple) -> None:
+        c = self.o.content
+        floor = self.READABLE * self.kit.hpt
+        least0 = self._least_text(n0)
+        if not (c.items or c.columns) or not c.bullets or least0 >= floor - 0.05:
+            return
+        o0, w0, notes0 = state
+        keep = (list(self.warnings), self.o, getattr(self, "_notes", None))
+        first_els = list(self.cv.tree)[n0:]
+        first_added = [el for el in self.cv.added if any(el is d for d in first_els)]
+        self._beside_done = False
+        self._undo(n0)
+        self.o, self.warnings = o0, list(w0)
+        self._restore_notes(notes0)
+        self._beside = True
+        try:
+            self._compose_body(comp, area)
+        finally:
+            self._beside = False
+        if self._beside_done and not self._overflows(n0, area) and self._least_text(n0) >= least0 + 1.0:
+            self.warnings.append("steps one under the other, their lines beside them: the row set the lines under the readable size")
+            return
+        self._undo(n0)
+        for el in first_els:
+            self.cv.tree.append(el)
+        self.cv.added.extend(first_added)
+        self.warnings, self.o, self._notes = keep[0], keep[1], keep[2]
+
     def _dense_steps_beside(self, comp: str, area: Bbox, n0: int, state: tuple) -> None:
         """G4-20 (long visual s8 on Sidebar43, Focus, Nature, Handdrawn, Marketing): six steps in a row with the budget
         lines under them came out under 2 % of the slide height in the dense pass (the row is bound by its longest
@@ -3385,9 +3431,9 @@ class Composer:
                 if not it.title:
                     out.append(self._card_paras(it, bs, bs, colors))
                     continue
+                # (the text after the dash keeps its first letter as the plan writes it: «1684 — Лейбниц ввёл…» — a
+                # name, an abbreviation is never lowered; R27, 20.10)
                 text = it.text or ""
-                if text[:2] != text[:2].upper():
-                    text = text[:1].lower() + text[1:]
                 runs = [Run(typeset(it.title), bs, colors.heading, k.bold, k.font)] + ([Run(typeset(" — " + text), bs, colors.text, False, k.font)] if text else [])
                 out.append([Para(runs)] + [self.P(b, bs, colors.text, marker="•", marker_color=colors.accent) for b in it.bullets])
             return out
@@ -3398,7 +3444,10 @@ class Composer:
             paras = step_paras(bs)
             offs = [max(0, (d - _emu(ps[0].size * k.line)) // 2) if ps else 0 for ps in paras]  # the first line on the badge
             line_paras = [self.P(t, bs, colors.text, space_after=bs * 0.5, marker="•", marker_color=colors.accent) for t in lines]
-            for share in (0.58, 0.64, 0.7):
+            # short steps («1 000 обращений») over long lines beside them: the steps take a narrow column and the lines
+            # the width they need at a larger size (Beehive: four short steps in 58 % of the slide, the lines at 10 pt)
+            short = max((len(f"{i.title} {i.text}".strip()) for i in items), default=0) <= 40 and sum(len(t) for t in lines) > 120
+            for share in ((0.34, 0.42, 0.5, 0.58) if short else (0.58, 0.64, 0.7)):
                 left_w = int((area.w - gap) * share)
                 right_w = area.w - gap - left_w
                 inner = left_w - d - dgap
@@ -3410,6 +3459,12 @@ class Composer:
                 block_h = max(steps_h, lines_h)
                 if block_h > area.h:
                     continue
+                if n > 1 and lines_h > steps_h:
+                    # the steps spread along the lines beside them (never more than two badges apart): one block, not a
+                    # short column over an empty half
+                    between = int(between + min((lines_h - steps_h) / (n - 1), 2 * d))
+                    steps_h = sum(hs) + between * (n - 1)
+                    block_h = max(steps_h, lines_h)
                 y0 = self._place_v(area, block_h)
                 x = area.x
                 if n > 1:

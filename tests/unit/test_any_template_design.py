@@ -322,3 +322,55 @@ def test_an_empty_place_verstka_added_itself_is_a_warning():
     man = TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=12192000, h=6858000), tokens=Tokens(), patterns=[], n_slides=1)
     got = photo_place_empty(AuditContext(ir=DeckIR(source="x.pptx", slide_w=12192000, slide_h=6858000, slides=[IRSlide(index=1, elements=[place], outline_id="a")]), manifest=man, outline=o))
     assert [i.severity for i in got] == ["warn"] and "картинки нет" in got[0].message
+
+
+# ------------------------------------------------------------------------------- unseen templates: readable, filled
+
+
+def test_a_statement_under_a_label_heading_is_as_large_as_the_label(env):
+    """«Предложение» only names the slide: the statement under it is set as large as that heading, not a step under it
+    (a short ask at body size over an empty slide — unseen templates, 20.10); under a heading that says the conclusion
+    the statement stays a step below."""
+    from verstka.schemas.common import PatternKind
+
+    o = OutlineSlide(id="a", kind=PatternKind.bullets, headline="Предложение", content=SlideContent(bullets=["Перенести хранилище в облако"]))
+    c, W, H = _composer(env, o)
+    assert c._under_heading() >= 0.95 * c.kit.head_size - 0.05
+    o2 = OutlineSlide(id="b", kind=PatternKind.bullets, headline="Перенос в облако окупится за семь месяцев", content=SlideContent(bullets=["Перенести хранилище"]))
+    c2, _, _ = _composer(env, o2)
+    assert c2._under_heading() <= 0.9 * c2.kit.head_size + 0.05
+
+
+def test_short_steps_beside_long_lines_leave_the_lines_the_width(env):
+    """Four short steps («1 000 обращений») with long lines: the steps take a narrow column, the lines read at a larger
+    size than in a row of steps with the lines under it (Beehive, Vintage «Привлечение клиентов»: 10 pt notes)."""
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import SlideItem
+
+    items = [SlideItem(title=t) for t in ("1 000 обращений", "500 записей", "350 посещений", "175 покупателей")]
+    lines = ["На первые три месяца продвижения выделяется 240 000 рублей.",
+             "План на этот период — получить 1 000 обращений, записать 500 человек на пробное занятие и продать 175 абонементов.",
+             "Из них 90 000 рублей направят на рекламу в социальных сетях, 60 000 рублей — на районные сообщества, 40 000 — на партнёрства.",
+             "Средняя стоимость привлечения покупателя составит около 1 371 рубля."]
+    o = OutlineSlide(id="p", kind=PatternKind.process, headline="Привлечение клиентов", content=SlideContent(items=items, bullets=lines))
+    c, W, H = _composer(env, o)
+    n0 = len(c.cv.tree)
+    c.compose("process", Bbox(x=int(0.06 * W), y=int(0.22 * H), w=int(0.88 * W), h=int(0.62 * H)))
+    names = _names(c, n0)
+    sizes = [int(r.get("sz")) / 100 for el in list(c.cv.tree)[n0:] if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith("Note") for r in el.iter(q("a:rPr")) if r.get("sz")]
+    assert any(n.startswith("Note") for n in names) and sizes and min(sizes) >= 0.026 * H / 12700 - 0.05, (names, sizes)
+
+
+def test_a_step_beside_its_year_keeps_the_names_capital(env):
+    """A timeline set as steps beside the slide's lines: «1684 — Лейбниц ввёл…», never «лейбниц» (R27, 20.10)."""
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import SlideItem
+
+    items = [SlideItem(title="1684", text="Лейбниц ввёл обозначение производной"), SlideItem(title="1736", text="Вышел «Метод флюксий» Ньютона")]
+    lines = ["Оба подхода сошлись в одном понятии производной, которым пользуются до сих пор в анализе и физике.",
+             "Обозначения Лейбница прижились в учебниках, точки Ньютона — в механике."]
+    o = OutlineSlide(id="t", kind=PatternKind.timeline, headline="История производной", content=SlideContent(items=items, bullets=lines))
+    c, W, H = _composer(env, o)
+    assert c._steps_beside(Bbox(x=int(0.06 * W), y=int(0.22 * H), w=int(0.88 * W), h=int(0.62 * H)), items, lines)
+    text = " ".join("".join(t.text or "" for t in el.iter(q("a:t"))) for el in c.cv.tree)
+    assert "Лейбниц" in text and "лейбниц" not in text

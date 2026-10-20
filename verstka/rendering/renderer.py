@@ -492,7 +492,7 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
 
                 n_fix = unreadable_text_pass(builder.created[-1], manifest)
                 if n_fix:
-                    rendered.warnings.append(f"{n_fix} text run(s) all but invisible on their ground recoloured")
+                    rendered.warnings.append(f"{n_fix} text run(s) recoloured to read on their ground")
             except Exception:  # noqa: BLE001 - a guard, never a failure
                 log.debug("unreadable text pass failed on slide %d", i, exc_info=True)
             from verstka.rendering.decor import clear_small_decor

@@ -2047,10 +2047,18 @@ def unreadable_text_pass(slide: Slide, manifest: TemplateManifest) -> int:
         def low(c: str) -> float:
             return min(contrast_ratio(c, g) for g in grounds)
 
+        # running text (a sentence or two at a reading size) reads at 4.5:1 as the audit asks — a sample's pale grey for
+        # its sub-lines (VK Tech #8F8F8F on its white cards, 3:1) made the slide's message the faintest thing on it
+        # (jury, round 4); short marks and large type keep the template's colours down to the unreadable floor
+        running = sum(len(r.findtext(q("a:t")) or "") for r in runs) >= 25
         for r in runs:
             rpr = r.find(q("a:rPr"))
             clr = rpr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if rpr is not None else None
-            if clr is None or not clr.get("val") or low(clr.get("val")) >= UNREADABLE:
+            if clr is None or not clr.get("val"):
+                continue
+            size = int(rpr.get("sz")) / 100 if rpr is not None and (rpr.get("sz") or "").isdigit() else 0.0
+            floor = 4.5 if running and 0 < size < 18.0 and rpr.get("b") != "1" else UNREADABLE
+            if low(clr.get("val")) >= floor:
                 continue
             new = next((c for c in inks if low(c) >= 4.5), max(inks, key=low))
             if low(new) > low(clr.get("val")):

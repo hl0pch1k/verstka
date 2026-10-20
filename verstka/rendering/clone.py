@@ -2149,7 +2149,10 @@ def _text_cap(ctx: _SlideCtx, wide: bool = True) -> float:
         h1 = head
     # (16 pt on a slide 540 pt high — 3 % of it: a slide larger than that reads its text in proportion — VK Tech's
     # 810 pt slide set card texts at 11 pt in cards a third of the slide wide, qa6)
-    comfort = 16.0 * max(1.0, (getattr(ctx, "H", 0) or 0) / EMU_PER_PT / 540.0)
+    # (and on a smaller slide in proportion too: VK Tech's 405 pt slide kept its card texts at 9.9 pt — 2.4 % of the
+    # slide — in cards two thirds of the slide high; 3 % of the slide's height reads from the back of the room)
+    hpt = (getattr(ctx, "H", 0) or 0) / EMU_PER_PT
+    comfort = max(16.0 * max(1.0, hpt / 540.0), 0.03 * hpt)
     return max(body, min(max(body * 1.4, comfort), h1 * 0.8))
 
 
@@ -2190,10 +2193,30 @@ def _readable_size(ctx: "_SlideCtx", size: float, chars: int) -> float:
     return up[0] if up and up[0] <= floor * 1.25 else round(floor * 2) / 2
 
 
+def _plate_floor(e: etree._Element, b: tuple[int, int, int, int], W: int, H: int) -> int:
+    """The foot of the filled shape under a text box (the plate it is printed on), less a padding; the slide's foot
+    when it stands on none."""
+    tree = e.getparent()
+    floor = H
+    if tree is None:
+        return floor
+    cx, cy = b[0] + b[2] // 2, b[1] + b[3] // 2
+    for other in tree:
+        if other is e or etree.QName(other).localname != "sp" or not _has_fill(other):
+            continue
+        ob = element_bbox(other)
+        if not ob or ob[2] * ob[3] >= 0.5 * W * H:
+            continue
+        if ob[0] <= cx <= ob[0] + ob[2] and ob[1] <= cy <= ob[1] + ob[3]:
+            floor = min(floor, ob[1] + ob[3] - int(0.012 * H))
+    return floor
+
+
 def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]], cap: Optional[float], min_ratio: float = 0.6, record: bool = True) -> None:
     if len(pairs) < 2 and cap is None:
         return
     sizes: list[float] = []
+    grown: dict[int, tuple] = {}  # boxes that grow down to take their text at the common size
     for e, slot in pairs:
         b = element_bbox(e)
         texts = [t for t in shape_text(e).split("\n")]
@@ -2211,7 +2234,26 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
         res = fit_size(running, room, family, base, bold, ctx.grow_scale, insets_emu=ins, line_spacing=ctx.line_height_of(e), min_ratio=min_ratio)
         size = res.size_pt
         if cap is not None and res.fits:
-            size = grow_size(running, room, family, size, bold, ctx.grow_scale, cap, insets_emu=ins, line_spacing=ctx.line_height_of(e))
+            # (the text may take 82 % of its box: at 70 % a template with a sparse scale — VK Tech's 9.9 → 13.2 pt — kept
+            # three lines of a card at 9.9 pt in a box that holds four at 13.2, 2.4 % of the slide's height)
+            size = grow_size(running, room, family, size, bold, ctx.grow_scale, cap, insets_emu=ins, line_spacing=ctx.line_height_of(e), fill=0.82)
+            # a box set one line tall in the sample (a step's caption on VK Tech's timeline, 9.9 pt beside a free band)
+            # grows down into the free room under it, as far as the next shape: the text grows with it
+            # (a box that paints its own plate keeps its height: its fill is the card the text must stay in)
+            # (nor a figure's label: it stands under its figure in a row of figures, the row's rhythm is the sample's)
+            # (running text only — a sentence, not a figure's caption: «участников пилота» under its figure stays put)
+            label = slot is None or slot.role not in _BODY_ROLES or sum(len(t) for t in running) < 25
+            lim = ctx._room_below(e, b) if not is_nested(e) and not _has_fill(e) and not label else None
+            if lim is not None:
+                # (never off the plate the text stands on: VK Tech's timeline captions sit on plates of one line — grown
+                # past them, the sample read as «text runs out of its plate» and was dropped)
+                lim = min(lim, _plate_floor(e, b, ctx.W, ctx.H))
+            if lim is not None and lim - b[1] > room.h:
+                tall = Bbox(x=room.x, y=room.y, w=int(room.w * 0.92), h=room.h + (lim - b[1] - b[3]))
+                size2 = grow_size(running, tall, family, size, bold, ctx.grow_scale, cap, insets_emu=ins, line_spacing=ctx.line_height_of(e), fill=0.82)
+                if size2 > size + 0.05:
+                    size = size2
+                    grown[id(e)] = (e, lim - b[1], running, family, bold, ins)
         sizes.append(size)
     if sizes:
         common = min(sizes)
@@ -2221,6 +2263,17 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
         heads = [h for h in (_lead_emphasis(e) for e, _ in pairs) if h]
         for e, _ in pairs:
             _scale_text(e, common, ctx.grow_scale)
+        for e, max_h, running, family, bold, ins in grown.values():
+            # the box as tall as its lines at the common size need (never past the room it had under it)
+            b = element_bbox(e)
+            if not b:
+                continue
+            # (measured a little narrower than the box: the gate measures the ink in the template's face and wraps a line
+            # earlier than the fitting did — the grown box must hold that wrap too)
+            need = fit_size(running, Bbox(x=b[0], y=b[1], w=int(b[2] * 0.92), h=max_h), family, common, bold, [common], insets_emu=ins, line_spacing=ctx.line_height_of(e), min_ratio=1.0)
+            want = int(getattr(need, "height_pt", 0) * EMU_PER_PT) + ins[1] + ins[3] + int(0.01 * ctx.H)
+            if want > b[3]:
+                set_element_pos(e, h=min(max_h, want))
         if len(heads) >= 2 and min(heads) > common * 100 + 5:
             lead = min(heads)
             for e, _ in pairs:
@@ -3205,11 +3258,12 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
                 raise (SampleRefused if "не помещаются" in err else RuntimeError)(err)
         elif c.table is not None:
             ncols = max(len(c.table.columns), max((len(r) for r in c.table.rows), default=0))
-            if ncols >= 3 and box.w < 0.45 * ctx.W:
+            need_w = 0.6 if ncols >= 4 else 0.45  # (four columns in a white window half the slide wide over the ЛЦТ photo: jury, round 4)
+            if ncols >= 3 and box.w < need_w * ctx.W:
                 # a table of three columns and more in a sample's narrow frame (a third of the slide beside the
                 # template's timeline dots) reads at a caption's size: another sample, or the composer's full-width
                 # table (owner's template, jury 20.10 — the third round in a row)
-                raise SampleRefused(f"таблице из {ncols} колонок нужна ширина от 45% слайда, в образце {box.w / ctx.W:.0%}: образец не подходит")
+                raise SampleRefused(f"таблице из {ncols} колонок нужна ширина от {need_w:.0%} слайда, в образце {box.w / ctx.W:.0%}: образец не подходит")
             before = set(ctx.slide._element.cSld.find(q("p:spTree")))
             comp.table(box, c.table)
             _table_to_width(ctx, before, box)
