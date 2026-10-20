@@ -84,3 +84,36 @@ def test_a_big_figure_stays_under_its_heading(analysed, tmp_path):
                             use_llm=False, use_vlm=False, render_images=False, audit=True, autofix=False, exports=[], pictures=False, eyes=False)
     for v in res.variants:
         assert not [i for i in v.audit.issues if i.slide == 2 and i.check_id == "overlap"], v.strategy
+
+
+def test_every_card_of_an_icon_row_has_its_icon(analysed):
+    """VK Education p26/p27: three icons in the sample, four scenarios on the slide — the fourth card took no icon. The
+    card the row gained gets an icon of the sample's own set, not the one beside it."""
+    from lxml import etree
+
+    from verstka.analysis.xmlns import q
+    from verstka.ingest.workspace import TemplateWorkspace
+    from verstka.rendering.clone import render_clone
+    from verstka.rendering.deck import DeckBuilder, element_bbox
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.layout import LayoutSlide
+    from verstka.schemas.outline import OutlineSlide, SlideContent, SlideItem
+    from verstka.schemas.template import TemplateManifest
+
+    root, tids = analysed
+    if "education" not in tids:
+        pytest.skip("the VK Education template is not available (VERSTKA_FIXTURES_DIR)")
+    ws = TemplateWorkspace.open(tids["education"], root)
+    m = TemplateManifest.model_validate_json((root / "templates" / tids["education"] / "manifest.json").read_text(encoding="utf-8"))
+    items = [SlideItem(title=t, text=x) for t, x in [("Напоминание из чата", "Одно касание превращает сообщение в задачу"), ("Умный срок", "Модель предлагает дату"),
+                                                     ("Эскалация", "Просроченная задача уходит руководителю"), ("Дайджест", "Утренняя сводка по задачам")]]
+    for pid in ("p26", "p27"):
+        p = next(x for x in m.patterns if x.id == pid)
+        o = OutlineSlide(id="s", kind=PatternKind.cards, headline="Четыре сценария", content=SlideContent(items=items))
+        slide, _ = render_clone(DeckBuilder(root / "templates" / tids["education"] / "source.pptx"), LayoutSlide(outline_id="s", mode="clone", pattern_id=pid), o, p, m, ws, DeckOutline(title="T", slides=[o]))
+        H = slide.part.package.presentation_part.presentation.slide_height
+        # (a tile is a picture or a plain shape — p26 draws its first one as a shape)
+        shapes = [e for e in slide.shapes._spTree if etree.QName(e).localname in ("pic", "sp") and not "".join(e.itertext()).strip()]
+        boxes = [element_bbox(e) for e in shapes]
+        tiles = {round(b[0] / 1e5) for b in boxes if b and 0.3 * H < b[1] < 0.55 * H and 0.1 * H < b[3] < 0.2 * H}
+        assert len(tiles) == 4, (pid, sorted(tiles))

@@ -1658,6 +1658,12 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
             ctx.fill_slot(slot, [ParagraphSpec(item.number)], min_ratio=0.35)
     if overflow:
         _fill_standalone_items(ctx, overflow)
+    if not text_only and not ctx.verbatim and not getattr(ctx, "data_deck", False):
+        # (the author's text and a data deck keep only the icons that say what their cards say: no copies there)
+        try:
+            _icons_per_cell(ctx, [list(c) + list(extra[i]) for i, c in enumerate(cells)])
+        except Exception:  # noqa: BLE001 - the row stays as the sample drew it
+            log.debug("icons per card not settled", exc_info=True)
     if not text_only:
         _cards_not_empty(ctx, cells)
     return True
@@ -1769,6 +1775,140 @@ def _number_empty_markers(ctx: _SlideCtx) -> int:
         etree.SubElement(r, q("a:t")).text = str(k)
     ctx.warnings.append(f"{len(pairs)} empty marker(s) beside the lines numbered 1–{len(pairs)}")
     return len(pairs)
+
+
+def _icon_sig(els: list) -> tuple:
+    """What an icon looks like: its pictures' images and its shapes' geometry and fill — two icons of one signature are
+    the same icon."""
+    out = []
+    for e in els:
+        for blip in e.iter(q("a:blip")):
+            out.append(("pic", blip.get(q("r:embed")) or ""))
+        for geom in e.iter(q("a:prstGeom")):
+            out.append(("geom", geom.get("prst") or ""))
+        for clr in e.iter(q("a:srgbClr")):
+            out.append(("clr", (clr.get("val") or "").upper()))
+    return tuple(sorted(out))
+
+
+def _icons_per_cell(ctx: _SlideCtx, cells: list) -> int:
+    """One icon over every card of a row of icon cards. The cells a sample's row gained (VK Education p26: three icons,
+    four scenarios) get a copy of an icon of the sample itself — another one of its set when it has several, never the
+    same as the one beside it; an icon left over a card the row lost (five icons, three cards) goes. Returns how many
+    icons were added or removed. An icon here: the pictures and plain shapes without text standing just over a card's
+    text, at most an eighth of the slide wide (a tile and the glyph on it are one icon)."""
+    W, H = ctx.W, ctx.H
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    if tree is None or len(cells) < 2:
+        return 0
+    boxes = []
+    member = set()
+    for c in cells:
+        els = [e for e in (c or []) if e.getparent() is not None]
+        member.update(id(e) for e in els)
+        texts = [element_bbox(e) for e in els if etree.QName(e).localname == "sp" and shape_text(e).strip()]
+        texts = [b for b in texts if b and b[2] > 0 and b[3] > 0]
+        boxes.append(Bbox(x=min(b[0] for b in texts), y=min(b[1] for b in texts), w=max(b[0] + b[2] for b in texts) - min(b[0] for b in texts), h=1) if texts else None)
+    if any(b is None for b in boxes):
+        return 0
+    if max(b.y for b in boxes) - min(b.y for b in boxes) > 0.05 * H:
+        return 0  # cards in rows: a grid, not a row of icons
+    top = min(b.y for b in boxes)
+    protected = {sl.shape_id for sl in ctx.pattern.slots if sl.role in (SlotRole.title, SlotRole.subtitle)}
+    cand = []
+    for el in tree:
+        tag = etree.QName(el).localname
+        if id(el) in member or tag not in ("sp", "pic", "grpSp") or (ctx.id_of(el) or "") in protected:
+            continue
+        if tag == "sp" and shape_text(el).strip():
+            continue
+        if _logo_mark(ctx, el):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] > W / 8 or b[3] > 0.25 * H:
+            continue
+        if not (top - 0.3 * H <= b[1] and b[1] + b[3] <= top + 0.02 * H):
+            continue
+        cand.append((el, Bbox(x=b[0], y=b[1], w=b[2], h=b[3])))
+    # icons: the candidates that overlap, one unit each
+    units: list[list] = []
+    for el, b in cand:
+        hit = [u for u in units if any(b.intersection(ub) > 0 for _, ub in u)]
+        merged = [(el, b)] + [x for u in hit for x in u]
+        units = [u for u in units if all(u is not h for h in hit)] + [merged]
+    if len(units) < 1:
+        return 0
+    def ubox(u):
+        x0, y0 = min(b.x for _, b in u), min(b.y for _, b in u)
+        return Bbox(x=x0, y=y0, w=max(b.x2 for _, b in u) - x0, h=max(b.y2 for _, b in u) - y0)
+    owner: dict[int, list] = {}
+    stray = []
+    for u in units:
+        ub = ubox(u)
+        cx = ub.x + ub.w / 2
+        hits = [i for i, b in enumerate(boxes) if b.x - 0.02 * W <= cx <= b.x2 + 0.02 * W or b.x - 0.01 * W <= ub.x <= b.x + 0.06 * W]
+        if hits and hits[0] not in owner:
+            owner[hits[0]] = u
+        else:
+            stray.append(u)
+    if not owner or len(owner) + len(stray) < 2:
+        return 0  # a single picture over the row is no row of icons
+    # icons with a caption beside them (VK WorkSpace p13: an icon and a heading in a row over the cards) are a row of
+    # their own: a bare icon added there would stand without its caption
+    labels = []
+    for el in tree:
+        if id(el) in member or etree.QName(el).localname != "sp" or not shape_text(el).strip():
+            continue
+        lb = element_bbox(el)
+        if lb and lb[2] > 0 and lb[3] > 0:
+            labels.append(Bbox(x=lb[0], y=lb[1], w=lb[2], h=lb[3]))
+    for u in list(owner.values()) + stray:
+        ub = ubox(u)
+        if any(lb.y < ub.y2 and ub.y < lb.y2 and ub.x2 - 0.01 * W <= lb.x <= ub.x2 + 0.15 * W for lb in labels):
+            return 0
+    # the row's icons are the same size: a stray of another size is something else (a logo, a mark)
+    ref_h = sorted(ubox(u).h for u in owner.values())[len(owner) // 2]
+    stray = [u for u in stray if abs(ubox(u).h - ref_h) <= 0.25 * ref_h]
+    changed = 0
+    for u in stray:
+        for el, _ in u:
+            ctx.remove_el(el)
+        changed += 1
+    missing = [i for i in range(len(boxes)) if i not in owner]
+    if not missing:
+        if changed:
+            ctx.warnings.append(f"{changed} icon(s) over no card left out")
+        return changed
+    donors = sorted(owner)
+    sigs = {i: _icon_sig([e for e, _ in owner[i]]) for i in donors}
+    for i in missing:
+        near = {sigs.get(i - 1), sigs.get(i + 1)}
+        used = {}
+        for j in sigs:
+            used[sigs[j]] = used.get(sigs[j], 0) + 1
+        order = sorted(donors, key=lambda j: (sigs[j] in near, used.get(sigs[j], 0), abs(j - i)))
+        j = order[0]
+        src, sb, db = owner[j], boxes[j], boxes[i]
+        dx, dy = db.x - sb.x, db.y - sb.y
+        anchor = src[-1][0]
+        copies = []
+        for el, _ in sorted(src, key=lambda x: list(tree).index(x[0])):
+            ne = copy.deepcopy(el)
+            ctx.next_id = renumber_ids(ne, ctx.next_id)
+            anchor.addnext(ne)
+            anchor = ne
+            shift_element(ne, int(dx), int(dy))
+            for a_, b_ in zip(el.iter(q("p:cNvPr")), ne.iter(q("p:cNvPr"))):
+                ctx.origin[b_.get("id")] = ctx.origin.get(a_.get("id"), a_.get("id"))
+            nid = ctx.id_of(ne)
+            if nid:
+                ctx.els[nid] = ne
+            copies.append((ne, None))
+        owner[i] = copies
+        sigs[i] = sigs[j]
+        changed += 1
+    ctx.warnings.append(f"{len(missing)} card(s) the row gained took an icon of the sample's set")
+    return changed
 
 
 def _cards_not_empty(ctx: _SlideCtx, cells: list) -> None:
