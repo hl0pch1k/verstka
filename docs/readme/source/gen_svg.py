@@ -2,7 +2,7 @@
 README SVG set in the «Слои» style: hero, section plates, pipeline, video cards, badges (light + dark)."""
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
-from svgtext import path as T, width as W, flush
+from svgtext import path as T, width as W, flush, ink, cap, centered
 
 OUT = sys.argv[1]
 os.makedirs(OUT, exist_ok=True)
@@ -29,15 +29,41 @@ def save(name, s):
     open(f"{OUT}/{name}", "w", encoding="utf-8").write(s)
 
 
-def bars(x, y, k, c, h=None):
-    """The logo's three layer bars (28/20/12, 4 tall, gap 3 at 20 px type) scaled by k."""
-    hh = h or 4 * k
-    gap = 3 * k
-    out = []
-    for i, (wd, col, op) in enumerate(((28, c["bar1"], c["bar1o"]), (20, c["blue"], 1), (12, c["bar3"], c["bar3o"]))):
-        out.append(f'<rect x="{x:.1f}" y="{y + i * (hh + gap):.1f}" width="{wd * k:.1f}" height="{hh:.1f}" rx="{hh / 2:.1f}" '
+# The logo of the interface (web/src/ui/shell/Brand.tsx, styles base.css + offline.css), at 20 px type:
+# «Verstka» Unbounded 700 20/24, letter-spacing −0.03em; under it one row of three bars 28 / 20 / 12 px wide, 4 px tall,
+# fully rounded, 3 px apart, row 1 px right of the word box (.of-brand .p2-bars translateX(1px)) and 1 px up into it
+# (margin-top −1px) — i.e. the bars start 23 px below the top of the 24 px line box. Colours: #BFD6FF / #2563EB / #0B1220
+# (on dark: white .24 / #2563EB / white).
+LOGO_BARS = ((28, "bar1"), (20, None), (12, "bar3"))
+
+
+def _baseline_in_line(size=20, line=24):
+    """Baseline offset from the top of a CSS line box (Unbounded hhea 995/−245 per 1000)."""
+    content = (995 + 245) / 1000 * size
+    return (line - content) / 2 + 995 / 1000 * size
+
+
+def bars(x, top, k, c):
+    """The logo's bar row scaled by k (k = font size / 20), top-left at (x, top)."""
+    out, cx = [], x
+    for wd, role in LOGO_BARS:
+        col, op = (c[role], c[role + "o"]) if role else ("#2563EB", 1)
+        out.append(f'<rect x="{cx:.2f}" y="{top:.2f}" width="{wd * k:.2f}" height="{4 * k:.2f}" rx="{2 * k:.2f}" '
                    f'fill="{col}" fill-opacity="{op}"/>')
+        cx += (wd + 3) * k
     return "".join(out)
+
+
+def logo(x, baseline, size, c, fill):
+    """«Verstka» + bars exactly in the interface proportions; x is the left of the word box, baseline of the word."""
+    k = size / 20
+    top_line = baseline - _baseline_in_line() * k
+    return (T("Verstka", "U", size, x, baseline, fill, track=-0.03)
+            + bars(x + 1 * k, top_line + 23 * k, k, c))
+
+
+def logo_width(size):
+    return (28 + 3 + 20 + 3 + 12) * size / 20
 
 
 def slide_sketch(x, y, w, h, kind, c):
@@ -74,31 +100,49 @@ def hero(c, dark):
         b.append(f'<rect x=".5" y=".5" width="{Wd - 1}" height="{H - 1}" rx="31.5" fill="none" stroke="#FFFFFF" stroke-opacity=".08"/>')
     x = 64
     b.append(T("ЛЦТ 2026 · КЕЙС VK TECH № 4 · ВТОРАЯ СТУПЕНЬ", "M", 17, x, 92, c["muted"], track=0.06))
-    b.append(T("Verstka", "U", 104, x - 4, 204, c["ink"], track=-0.03))
-    b.append(bars(x, 232, 5.0, c, h=13))
-    b.append(T("Шаблон, текст и данные —", "M", 31, x, 340, c["ink"], track=-0.01))
-    b.append(T("три готовые презентации PowerPoint", "M", 31, x, 380, c["ink"], track=-0.01))
-    b.append(T("Модель понимает и пишет, код считает и проверяет", "MR", 21, x, 424, c["muted"]))
-    # stacked plates, as on the «Создать» screen
-    px, pw = 690, 446
-    plates = [(48, c["p1"], "01", "Шаблон", "любой файл PowerPoint · брендбук", c["ink"], c["muted"]),
-              (132, c["p2"], "02", "Текст и данные", "план, документ, таблицы, база знаний", c["ink"], c["muted"])]
-    for y, fill, n, t, m, tc, mc in plates:
-        b.append(f'<rect x="{px}" y="{y}" width="{pw}" height="130" rx="28" fill="{fill}"/>')
-        b.append(T(n, "U", 54, px + 22, y + 66, tc, opacity=.14, track=-0.04))
-        b.append(T(t, "U", 24, px + 112, y + 40, tc, track=-0.03))
-        b.append(T(m, "M", 17, px + 112, y + 66, mc))
-    y3 = 216
-    b.append(f'<rect x="{px}" y="{y3}" width="{pw}" height="{444 - y3}" rx="28" fill="{c["p3"]}"/>')
-    b.append(T("03", "U", 54, px + 22, y3 + 66, c["p3t"], opacity=.22, track=-0.04))
-    b.append(T("Три варианта", "U", 24, px + 112, y3 + 40, c["p3t"], track=-0.03))
-    b.append(T("с оценкой качества и «Почему так»", "M", 17, px + 112, y3 + 66, c["p3m"], opacity=.6))
-    sw, sh, gap = 126, 71, 14
-    sx = px + (pw - 3 * sw - 2 * gap) / 2
+    # the word box starts where the ink of «V» would start minus its side bearing: align the ink with the text column
+    wx = x - ink("Verstka", "U", 104, -0.03)[0]
+    b.append(logo(wx, 204, 104, c, c["ink"]))
+    b.append(T("Шаблон, текст и данные —", "M", 31, x, 322, c["ink"], track=-0.01))
+    b.append(T("три готовые презентации PowerPoint", "M", 31, x, 362, c["ink"], track=-0.01))
+    b.append(T("Модель понимает и пишет, код считает и проверяет", "MR", 21, x, 410, c["muted"]))
+    # stacked plates, as on the «Создать» screen: one column of numbers, equal gap number → text, equal paddings
+    px, pw, pad, band = 664, 472, 24, 84
+    nsize, gap = 40, 20
+    col = max(ink(n, "U", nsize, -0.04)[1] - ink(n, "U", nsize, -0.04)[0] for n in ("01", "02", "03"))
+    tx = px + pad + col + gap
+    tcap, msize = cap("U", 24), 17
+    line = 26  # title baseline → meta baseline
+    block = tcap + line  # cap top of the title → baseline of the meta line
+
+    def plate_head(y, n, t, m, tc, mc, nop, mop):
+        top = y + (band - block) / 2
+        tb = top + tcap
+        mid = top + block / 2
+        nx0 = ink(n, "U", nsize, -0.04)[0]
+        out = [T(n, "U", nsize, px + pad - nx0, mid + cap("U", nsize) / 2, tc, opacity=nop, track=-0.04),
+               T(t, "U", 24, tx, tb, tc, track=-0.03),
+               T(m, "M", msize, tx, tb + line, mc, opacity=mop)]
+        assert tx + W(m, "M", msize) <= px + pw - pad, m
+        return "".join(out)
+
+    plates = [(48, c["p1"], "01", "Шаблон", "любой файл PowerPoint · брендбук"),
+              (48 + band, c["p2"], "02", "Текст и данные", "план, документ, таблицы, база знаний")]
+    for y, fill, n, t, m in plates:
+        b.append(f'<rect x="{px}" y="{y}" width="{pw}" height="{band + 46}" rx="28" fill="{fill}"/>')
+        b.append(plate_head(y, n, t, m, c["ink"], c["muted"], .16, None))
+    y3 = 48 + 2 * band
+    sw, sh, sgap = 126, 71, 14
+    sy = y3 + band + 4
+    lab_base = sy + sh + 24
+    bottom = lab_base + pad
+    b.append(f'<rect x="{px}" y="{y3}" width="{pw}" height="{bottom - y3}" rx="28" fill="{c["p3"]}"/>')
+    b.append(plate_head(y3, "03", "Три варианта", "с оценкой качества и «Почему так»", c["p3t"], c["p3m"], .24, .6))
+    sx = px + (pw - 3 * sw - 2 * sgap) / 2
     for i, (k, lab) in enumerate((("s", "Структурный"), ("v", "Визуальный"), ("c", "Компактный"))):
-        xx = sx + i * (sw + gap)
-        b.append(slide_sketch(round(xx), y3 + 92, sw, sh, k, c))
-        b.append(T(lab, "M", 16, xx + sw / 2, y3 + 92 + sh + 24, c["p3t"], anchor="middle", opacity=.62))
+        xx = sx + i * (sw + sgap)
+        b.append(slide_sketch(round(xx), sy, sw, sh, k, c))
+        b.append(centered(lab, "M", 16, xx + sw / 2, lab_base - cap("M", 16) / 2, c["p3t"], opacity=.62))
     return svg(Wd, H, "Verstka — цифровой дизайнер презентаций",
                "Шаблон, текст и данные превращаются в три готовые редактируемые презентации PowerPoint. "
                "Справа — три плиты интерфейса «Слои»: 01 Шаблон, 02 Текст и данные, 03 Три варианта.", "".join(b))
@@ -118,6 +162,10 @@ SECTIONS = [
 ]
 
 
+SEC_NUM = 88
+SEC_COL = max(ink(n, "U", SEC_NUM, -0.04)[1] - ink(n, "U", SEC_NUM, -0.04)[0] for n, *_ in SECTIONS)
+
+
 def section(n, title, sub, c, dark):
     Wd, H = 1200, 150
     b = [f'<rect x="56" y="0" width="{Wd - 112}" height="60" rx="28" fill="{c["strip1"]}" fill-opacity="{.55 if dark else 1}"/>',
@@ -125,10 +173,19 @@ def section(n, title, sub, c, dark):
          f'<rect x="0" y="20" width="{Wd}" height="{H - 20}" rx="28" fill="{c["plate"]}"/>']
     if dark:
         b.append(f'<rect x=".5" y="20.5" width="{Wd - 1}" height="{H - 21}" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".07"/>')
-    b.append(T(n, "U", 92, 40, 128, c["ink"], opacity=.14, track=-0.04))
-    b.append(T(title, "U", 40, 212, 90, c["ink"], track=-0.03))
-    b.append(T(sub, "MR", 21, 214, 124, c["muted"]))
-    b.append(bars(1092, 66, 2.2, c, h=8))
+    pad, gap = 40, 32
+    tcap, line = cap("U", 40), 34
+    block = tcap + line
+    top = 20 + (H - 20 - block) / 2
+    tb = top + tcap
+    mid = top + block / 2
+    nx0 = ink(n, "U", SEC_NUM, -0.04)[0]
+    b.append(T(n, "U", SEC_NUM, pad - nx0, mid + cap("U", SEC_NUM) / 2, c["ink"], opacity=.14, track=-0.04))
+    tx = pad + SEC_COL + gap
+    b.append(T(title, "U", 40, tx, tb, c["ink"], track=-0.03))
+    b.append(T(sub, "MR", 21, tx + 1, tb + line, c["muted"]))
+    k = 2.0
+    b.append(bars(Wd - pad - logo_width(20 * k), mid - 2 * k, k, c))
     return svg(Wd, H, f"{n} · {title}", sub, "".join(b))
 
 
@@ -340,14 +397,18 @@ BADGES = [("python", "Python", "3.11 · 3.12"), ("web", "Интерфейс", "R
 
 def badge(label, value):
     h, fs, pad = 30, 14, 13
-    wl = W(label, "M", fs) + 2 * pad
-    wv = W(value, "M", fs) + 2 * pad
+    def inkw(t):
+        x0, x1, _, _ = ink(t, "M", fs)
+        return x1 - x0
+    wl = inkw(label) + 2 * pad
+    wv = inkw(value) + 2 * pad
     Wd = wl + wv
-    b = [f'<rect width="{Wd:.0f}" height="{h}" rx="15" fill="#0B1220"/>',
-         f'<path d="M{wl:.1f} 0 H{Wd - 15:.1f} a15 15 0 0 1 0 30 H{wl:.1f} Z" fill="url(#cta)"/>',
-         T(label, "M", fs, pad, 20, "#FFFFFF", opacity=.72), T(value, "M", fs, wl + pad, 20, "#FFFFFF"),
-         f'<rect x=".5" y=".5" width="{Wd - 1:.0f}" height="{h - 1}" rx="14.5" fill="none" stroke="#FFFFFF" stroke-opacity=".16"/>']
-    return svg(round(Wd), h, f"{label}: {value}", f"{label}: {value}", "".join(b))
+    b = [f'<rect width="{Wd:.2f}" height="{h}" rx="15" fill="#0B1220"/>',
+         f'<path d="M{wl:.2f} 0 H{Wd - 15:.2f} a15 15 0 0 1 0 30 H{wl:.2f} Z" fill="url(#cta)"/>',
+         centered(label, "M", fs, wl / 2, h / 2, "#FFFFFF", opacity=.72),
+         centered(value, "M", fs, wl + wv / 2, h / 2, "#FFFFFF"),
+         f'<rect x=".5" y=".5" width="{Wd - 1:.2f}" height="{h - 1}" rx="14.5" fill="none" stroke="#FFFFFF" stroke-opacity=".16"/>']
+    return svg(f"{Wd:.2f}", h, f"{label}: {value}", f"{label}: {value}", "".join(b))
 
 
 for theme, c, dark in (("light", L, False), ("dark", D, True)):

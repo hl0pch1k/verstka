@@ -28,26 +28,60 @@ d = ImageDraw.Draw(img)
 d.rounded_rectangle([56 * S, 0, (CW - 56) * S, 70 * S], 30 * S, fill=(191, 214, 255, 255))
 d.rounded_rectangle([28 * S, 10 * S, (CW - 28) * S, 80 * S], 30 * S, fill=(233, 241, 255, 255))
 d.rounded_rectangle([0, 20 * S, CW * S, H * S], 32 * S, fill=(243, 244, 241, 255))
+from fontTools.ttLib import TTFont
+
+
+def _os2(path):
+    t = TTFont(path)
+    return t["OS/2"].sCapHeight / t["head"].unitsPerEm, t["OS/2"].sxHeight / t["head"].unitsPerEm
+
+
+CAP_U, _ = _os2(U)
+CAP_M, X_M = _os2(M)
 fU = ImageFont.truetype(U, 34 * S)
 fN = ImageFont.truetype(U, 80 * S)
 fM = ImageFont.truetype(M, 19 * S)
-d.text((PAD * S - 4 * S, 34 * S), num, font=fN, fill=(212, 214, 214, 255))
-tx = PAD * S - 4 * S + d.textlength(num, font=fN) + 24 * S
-d.text((tx, 42 * S), title, font=fU, fill=(11, 18, 32, 255))
-# chips
+
+
+def ink(text, font):
+    """Ink box of `text` drawn with its baseline-left at (0, 0) (anchor «ls»)."""
+    return d.textbbox((0, 0), text, font=font, anchor="ls")
+
+
+def optical(text, size):
+    """Height used to centre a label like an interface button: caps/digits → cap height, lowercase → x-height."""
+    return (CAP_M if any(ch.isupper() or ch.isdigit() for ch in text) else X_M) * size
+
+
+# header block: title (cap top → baseline), 16 px, a row of chips 34 px tall; the number is centred on the block
+NUM_COL = max(ink(f"{i:02d}", fN)[2] - ink(f"{i:02d}", fN)[0] for i in range(1, 10))
+cap_t = CAP_U * 34 * S
+chip_h, chip_pad, chip_gap = 34 * S, 16 * S, 10 * S
+block = cap_t + 16 * S + chip_h
+mid = 86 * S
+top = mid - block / 2
+nx0 = ink(num, fN)[0]
+d.text((PAD * S - nx0, mid + CAP_U * 80 * S / 2), num, font=fN, fill=(212, 214, 214, 255), anchor="ls")
+tx = PAD * S + NUM_COL + 28 * S
+d.text((tx - ink(title, fU)[0], top + cap_t), title, font=fU, fill=(11, 18, 32, 255), anchor="ls")
+# chips: text centred on the chip by its drawn outlines
 x = tx
-y = 92 * S
+y = top + cap_t + 16 * S
 for i, c in enumerate(chips.split("|")):
-    w = d.textlength(c, font=fM) + 32 * S
+    x0, _, x1, _ = ink(c, fM)
+    w = (x1 - x0) + 2 * chip_pad
     fill = (11, 18, 32, 255) if i == 0 else (255, 255, 255, 255)
     col = (255, 255, 255, 255) if i == 0 else (11, 18, 32, 255)
-    d.rounded_rectangle([x, y, x + w, y + 34 * S], 17 * S, fill=fill)
-    d.text((x + 16 * S, y + 6 * S), c, font=fM, fill=col)
-    x += w + 10 * S
-# logo bars at the right
-bx = (CW - PAD - 56) * S
-for i, (wd, col) in enumerate(((56, (191, 214, 255)), (40, (37, 99, 235)), (24, (11, 18, 32)))):
-    d.rounded_rectangle([bx, (52 + i * 14) * S, bx + wd * S, (60 + i * 14) * S], 4 * S, fill=col + (255,))
+    d.rounded_rectangle([x, y, x + w, y + chip_h], chip_h / 2, fill=fill)
+    cx, cy = x + w / 2, y + chip_h / 2
+    d.text((cx - (x0 + x1) / 2, cy + optical(c, 19 * S) / 2), c, font=fM, fill=col, anchor="ls")
+    x += w + chip_gap
+# the interface logo's bar row (28 / 20 / 12 wide, 4 tall, 3 apart at 20 px type), right-aligned, centred on the block
+k = 2.5 * S
+bx = CW * S - PAD * S - (28 + 3 + 20 + 3 + 12) * k
+for wd, col in ((28, (191, 214, 255)), (20, (37, 99, 235)), (12, (11, 18, 32))):
+    d.rounded_rectangle([bx, mid - 2 * k, bx + wd * k, mid + 2 * k], 2 * k, fill=col + (255,))
+    bx += (wd + 3) * k
 # slides
 for i, s in enumerate(slides):
     r, c = divmod(i, 2)
