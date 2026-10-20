@@ -299,6 +299,25 @@ def video_card(c, dark, first):
     return svg(Wd, H, ("Архив: видео первой ступени" if first else "Актуальная версия: скринкаст второй ступени"), desc, "".join(b))
 
 
+def pitch_card(c, dark):
+    """The solution pitch as a long card under the two video cards: same dark style, blue frame, slide icon."""
+    Wd, H = 1180, 300
+    b = [f'<rect width="{Wd}" height="{H}" rx="28" fill="#0B1220"/>',
+         f'<rect x="1.5" y="1.5" width="{Wd - 3}" height="{H - 3}" rx="26.5" fill="none" stroke="#2563EB" stroke-width="3"/>']
+    b.append(T("PDF", "U", 120, 30, 140, "#FFFFFF", opacity=.08, track=-0.04))
+    cx, cy = Wd - 90, 84
+    b.append(f'<circle cx="{cx}" cy="{cy}" r="44" fill="url(#cta)"/>')
+    # a slide: frame, title bar and three lines
+    b.append(f'<rect x="{cx - 22}" y="{cy - 16}" width="44" height="32" rx="5" fill="none" stroke="#FFFFFF" stroke-width="3.5"/>')
+    b.append(f'<rect x="{cx - 14}" y="{cy - 8}" width="20" height="4" rx="2" fill="#FFFFFF"/>')
+    b.append(f'<rect x="{cx - 14}" y="{cy}" width="28" height="3" rx="1.5" fill="#FFFFFF" fill-opacity=".8"/>')
+    b.append(f'<rect x="{cx - 14}" y="{cy + 6}" width="22" height="3" rx="1.5" fill="#FFFFFF" fill-opacity=".8"/>')
+    b.append(T("Презентация решения", "U", 32, 36, 196, "#FFFFFF", track=-0.03))
+    b.append(T("20.10 · 19 слайдов на шаблоне ЛЦТ", "M", 19, 36, 232, "#FFFFFF", opacity=.72))
+    b.append(T("Смотреть →", "M", 19, 36, 262, "#38BDF8"))
+    return svg(Wd, H, "Презентация решения", "Презентация решения: 20 октября, 19 слайдов на шаблоне ЛЦТ — смотреть.", "".join(b))
+
+
 # ---------------------------------------------------------------- features board
 FEATS = [
     ("Данные → выводы", ["профиль, задача, 2–3 вида", "с причинами, заголовок с числом"], "data"),
@@ -433,6 +452,7 @@ for theme, c, dark in (("light", L, False), ("dark", D, True)):
     save(f"quality-{theme}.svg", stats(c, dark))
     save(f"video-stage1-{theme}.svg", video_card(c, dark, True))
     save(f"video-stage2-{theme}.svg", video_card(c, dark, False))
+    save(f"pitch-{theme}.svg", pitch_card(c, dark))
     for n, slug, t, s in SECTIONS:
         save(f"section-{n}-{slug}-{theme}.svg", section(n, t, s, c, dark))
 for slug, lab, val in BADGES:

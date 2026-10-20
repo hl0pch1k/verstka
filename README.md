@@ -216,7 +216,7 @@
 <a id="presentation"></a>
 
 <p align="center">
-  <a href="docs/presentation/verstka-pitch-stage2.pdf"><img src="docs/readme/showcase/pitch.webp" width="100%" alt="Презентация решения, 19 слайдов: титул команды «Рекрут 2», проблема — слайд должен объяснять данные, как Verstka собирает презентацию за 8 шагов, одни данные — один и тот же график на любом шаблоне"></a>
+  <a href="docs/presentation/verstka-pitch-stage2.pdf"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/svg/pitch-dark.svg"><img src="docs/readme/svg/pitch-light.svg" width="99%" alt="Презентация решения: 20.10, 19 слайдов на шаблоне ЛЦТ — смотреть"></picture></a>
 </p>
 
 **Презентация решения** — 19 слайдов на шаблоне ЛЦТ: команда, проблема, как работает Verstka, данные и графики, брендбук, правки, качество, планы. [PDF](docs/presentation/verstka-pitch-stage2.pdf) · [PPTX](docs/presentation/verstka-pitch-stage2.pptx)
